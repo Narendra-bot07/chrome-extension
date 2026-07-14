@@ -1,0 +1,3 @@
+- [x] Update JD-extraction flow trigger: after resume review “Looks good”, route to `/tailor` (JobExtractPage) so JD extraction starts automatically.
+- [ ] (Manual) Critical-path verify: logged-in user with resume uploaded → ResumeReviewPage “Looks good” → JD extraction loader starts → job analysis result renders.
+- [ ] (Optional) If resume not uploaded or user not logged in: prompt user to complete profile/resume first.

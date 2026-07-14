@@ -1,0 +1,69 @@
+# Environments
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+yarn.lock
+
+# Build
+frontend/dist/
+frontend/build/
+
+# TeX & PDF Outputs
+*.pdf
+*.log
+*.aux
+*.out
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+*.toc
+*.xdv
+*.bbl
+*.blg
+
+# Local Uploads/Scratch
+backend/local_uploads/
+backend/scratch/
+scratch/
+
+# OS/Editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo

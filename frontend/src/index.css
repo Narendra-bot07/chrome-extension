@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply antialiased;
+  }
+}
+
+/* Custom Scrollbar for a cleaner look */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.5);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(107, 114, 128, 0.8);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@media print {
+  @page {
+    margin: 0;
+    size: letter portrait;
+  }
+  body {
+    margin: 0;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    background: white !important;
+  }
+  
+  body * {
+    visibility: hidden;
+  }
+
+  #resume-print-container, #resume-print-container * {
+    visibility: visible;
+  }
+  
+  #resume-print-container {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 8.5in !important;
+    height: 11in !important;
+    transform: none !important;
+    box-shadow: none !important;
+    border: none !important;
+    ring: none !important;
+  }
+}
+
+/* Print Compression Engine Styles */
+.print-compression-level-0 {
+  font-size: 16px;
+}
+
+.print-compression-level-1 {
+  font-size: 14.5px;
+}
+
+.print-compression-level-2 {
+  font-size: 13.5px;
+}
+
+.print-compression-level-3,
+.print-compression-level-4,
+.print-compression-level-5 {
+  font-size: 12.5px;
+}
