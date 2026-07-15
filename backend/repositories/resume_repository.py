@@ -52,3 +52,15 @@ class ResumeRepository:
                 success = bool(cur.fetchone())
             self.conn.commit()
             return bool(success)
+
+    def update_parsed_content(self, resume_id: str, user_id: str, parsed_content: Dict[str, Any]) -> bool:
+        query = """
+            UPDATE public.resumes 
+            SET parsed_content = %s 
+            WHERE id = %s AND user_id = %s AND deleted_at IS NULL
+            RETURNING id
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(query, (json.dumps(parsed_content), resume_id, user_id))
+            self.conn.commit()
+            return bool(cur.fetchone())

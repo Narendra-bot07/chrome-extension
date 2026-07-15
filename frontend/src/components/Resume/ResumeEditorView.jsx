@@ -1,28 +1,55 @@
 import React, { useState } from 'react';
-import { Check, RefreshCw, GripVertical, ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
+import { 
+  Check, RefreshCw, GripVertical, ChevronDown, ChevronRight, Plus, Trash2, Download, Sparkles, Eye, 
+  User, FileText, GraduationCap, Wrench, Briefcase, FolderGit2, Award, Trophy, Languages, Heart, 
+  BookOpen, CheckCircle2, Circle 
+} from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 
 const CORE_SECTIONS = ['personal_info', 'summary', 'education', 'skills', 'experience', 'projects'];
 const OPTIONAL_SECTIONS = ['certifications', 'achievements', 'awards', 'languages', 'volunteer_experience', 'publications'];
+
+// Map section to premium Lucide icons
+const getSectionIcon = (section) => {
+  switch (section) {
+    case 'personal_info': return <User size={14} className="text-indigo-500" />;
+    case 'summary': return <FileText size={14} className="text-emerald-500" />;
+    case 'education': return <GraduationCap size={14} className="text-sky-500" />;
+    case 'skills': return <Wrench size={14} className="text-violet-500" />;
+    case 'experience': return <Briefcase size={14} className="text-amber-500" />;
+    case 'projects': return <FolderGit2 size={14} className="text-rose-500" />;
+    case 'certifications': return <Award size={14} className="text-teal-500" />;
+    case 'achievements': case 'awards': return <Trophy size={14} className="text-orange-500" />;
+    case 'languages': return <Languages size={14} className="text-cyan-500" />;
+    case 'volunteer_experience': return <Heart size={14} className="text-pink-500" />;
+    case 'publications': return <BookOpen size={14} className="text-purple-500" />;
+    default: return <Sparkles size={14} className="text-indigo-500" />;
+  }
+};
 
 export default function ResumeEditorView({
   parsedResume,
   setParsedResume,
   onLooksGood,
   onUploadDifferent,
-  loading
+  loading,
+  reorderOnly = false,
+  onPreview
 }) {
   const [expandedSections, setExpandedSections] = useState(
-    [...CORE_SECTIONS, ...OPTIONAL_SECTIONS].reduce((acc, sec) => ({ ...acc, [sec]: true }), {})
+    [...CORE_SECTIONS, ...OPTIONAL_SECTIONS].reduce((acc, sec) => ({ ...acc, [sec]: false }), {})
   );
   
   const [showAddMenu, setShowAddMenu] = useState(false);
 
-  // Initialize active sections (Core + any optional that have data)
+  // Initialize active sections (Core + any optional that have data, or loaded from section_order)
   const [activeSections, setActiveSections] = useState(() => {
+    if (parsedResume?.section_order && parsedResume.section_order.length > 0) {
+      return parsedResume.section_order;
+    }
     const active = [...CORE_SECTIONS];
     OPTIONAL_SECTIONS.forEach(sec => {
-      if (parsedResume[sec] && parsedResume[sec].length > 0) {
+      if (parsedResume && parsedResume[sec] && parsedResume[sec].length > 0) {
         if (!active.includes(sec)) active.push(sec);
       }
     });
@@ -30,7 +57,43 @@ export default function ResumeEditorView({
   });
 
   const toggleSection = (section) => {
+    if (reorderOnly) return;
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
+  };
+
+  // Section strength metric calculator (0-100%)
+  const getSectionStrength = (section) => {
+    if (!parsedResume) return 0;
+    const data = parsedResume[section];
+    
+    if (section === 'personal_info') {
+      const info = data || {};
+      let score = 0;
+      if (info.name) score += 25;
+      if (info.email) score += 25;
+      if (info.phone) score += 25;
+      if (info.location) score += 25;
+      return score;
+    }
+    if (section === 'summary') {
+      const len = (data || '').length;
+      return Math.min(100, Math.round((len / 180) * 100));
+    }
+    if (section === 'skills') {
+      const len = Array.isArray(data) ? data.length : 0;
+      return Math.min(100, Math.round((len / 10) * 100));
+    }
+    if (Array.isArray(data)) {
+      if (data.length === 0) return 0;
+      let filledItems = 0;
+      data.forEach(item => {
+        if (item && Object.values(item).some(v => v !== '')) {
+          filledItems++;
+        }
+      });
+      return Math.round((filledItems / data.length) * 100);
+    }
+    return data ? 100 : 0;
   };
 
   const handleUpdateField = (section, index, field, value) => {
@@ -47,12 +110,6 @@ export default function ResumeEditorView({
     setParsedResume(updated);
   };
 
-  const handleUpdateArrayString = (section, index, value) => {
-    const updated = { ...parsedResume };
-    updated[section][index] = value;
-    setParsedResume(updated);
-  };
-
   const onDragEnd = (result) => {
     if (!result.destination) return;
     const { source, destination, type } = result;
@@ -62,8 +119,8 @@ export default function ResumeEditorView({
       const [removed] = newActive.splice(source.index, 1);
       newActive.splice(destination.index, 0, removed);
       setActiveSections(newActive);
+      setParsedResume({ ...parsedResume, section_order: newActive });
     } else {
-      // Nested items like experience or education
       const section = type;
       const items = Array.from(parsedResume[section] || []);
       const [removed] = items.splice(source.index, 1);
@@ -79,7 +136,10 @@ export default function ResumeEditorView({
     else if (section === 'education') updated[section].push({ institution: '', degree: '', field_of_study: '', location: '', start_date: '', end_date: '', gpa: '' });
     else if (section === 'projects') updated[section].push({ name: '', role: '', link: '', description: [''] });
     else if (section === 'skills') updated[section].push('');
-    else updated[section].push({}); // Fallback
+    else updated[section].push({});
+    const newActive = [...activeSections, section];
+    setActiveSections(newActive);
+    updated.section_order = newActive;
     setParsedResume(updated);
   };
 
@@ -90,47 +150,69 @@ export default function ResumeEditorView({
   };
 
   const removeSection = (section) => {
-    setActiveSections(activeSections.filter(s => s !== section));
+    const newActive = activeSections.filter(s => s !== section);
+    setActiveSections(newActive);
     const updated = { ...parsedResume };
     delete updated[section];
+    updated.section_order = newActive;
     setParsedResume(updated);
   };
 
   const renderSectionContent = (section) => {
     if (section === 'personal_info') {
-      const info = parsedResume.personal_info || {};
+      const info = parsedResume?.personal_info || {};
       return (
-        <div className="space-y-2 p-3">
-          <input className="w-full p-2 border rounded text-xs bg-slate-50" value={info.name || ''} onChange={e => handleUpdateField(section, null, 'name', e.target.value)} placeholder="Full Name" />
-          <div className="grid grid-cols-2 gap-2">
-            <input className="w-full p-2 border rounded text-xs bg-slate-50" value={info.email || ''} onChange={e => handleUpdateField(section, null, 'email', e.target.value)} placeholder="Email" />
-            <input className="w-full p-2 border rounded text-xs bg-slate-50" value={info.phone || ''} onChange={e => handleUpdateField(section, null, 'phone', e.target.value)} placeholder="Phone" />
-            <input className="w-full p-2 border rounded text-xs bg-slate-50" value={info.location || ''} onChange={e => handleUpdateField(section, null, 'location', e.target.value)} placeholder="Location" />
-            <input className="w-full p-2 border rounded text-xs bg-slate-50" value={info.linkedin || ''} onChange={e => handleUpdateField(section, null, 'linkedin', e.target.value)} placeholder="LinkedIn" />
+        <div className="space-y-3 p-4 bg-slate-50/30">
+          <div>
+            <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-1">Full Name</label>
+            <input className="w-full p-2.5 border rounded-lg text-xs bg-white focus:ring-1 focus:ring-indigo-500 outline-none" value={info.name || ''} onChange={e => handleUpdateField(section, null, 'name', e.target.value)} placeholder="Full Name" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-1">Email</label>
+              <input className="w-full p-2.5 border rounded-lg text-xs bg-white focus:ring-1 focus:ring-indigo-500 outline-none" value={info.email || ''} onChange={e => handleUpdateField(section, null, 'email', e.target.value)} placeholder="Email" />
+            </div>
+            <div>
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-1">Phone</label>
+              <input className="w-full p-2.5 border rounded-lg text-xs bg-white focus:ring-1 focus:ring-indigo-500 outline-none" value={info.phone || ''} onChange={e => handleUpdateField(section, null, 'phone', e.target.value)} placeholder="Phone" />
+            </div>
+            <div>
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-1">Location</label>
+              <input className="w-full p-2.5 border rounded-lg text-xs bg-white focus:ring-1 focus:ring-indigo-500 outline-none" value={info.location || ''} onChange={e => handleUpdateField(section, null, 'location', e.target.value)} placeholder="Location" />
+            </div>
+            <div>
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-1">LinkedIn</label>
+              <input className="w-full p-2.5 border rounded-lg text-xs bg-white focus:ring-1 focus:ring-indigo-500 outline-none" value={info.linkedin || ''} onChange={e => handleUpdateField(section, null, 'linkedin', e.target.value)} placeholder="LinkedIn" />
+            </div>
           </div>
         </div>
       );
     }
     
     if (section === 'summary') {
+      const charCount = (parsedResume?.summary || '').length;
       return (
-        <div className="p-3">
+        <div className="p-4 bg-slate-50/30 space-y-2">
           <textarea 
-            className="w-full p-2 border rounded text-xs bg-slate-50 min-h-[80px]" 
-            value={parsedResume.summary || ''} 
+            className="w-full p-3 border rounded-lg text-xs bg-white focus:ring-1 focus:ring-indigo-500 outline-none min-h-[90px]" 
+            value={parsedResume?.summary || ''} 
             onChange={e => handleUpdateField(section, null, 'summary', e.target.value)} 
             placeholder="Professional Summary" 
           />
+          <div className="flex justify-between items-center text-[9px] font-black text-slate-400 uppercase tracking-wider">
+            <span>Progress Indicator: {charCount > 150 ? 'Strong' : 'Short'}</span>
+            <span>{charCount} Characters</span>
+          </div>
         </div>
       );
     }
 
     if (section === 'skills') {
-      const skills = parsedResume.skills || [];
+      const skills = parsedResume?.skills || [];
       return (
-        <div className="p-3">
+        <div className="p-4 bg-slate-50/30 space-y-2">
           <textarea 
-            className="w-full p-2 border rounded text-xs bg-slate-50 min-h-[60px]" 
+            className="w-full p-3 border rounded-lg text-xs bg-white focus:ring-1 focus:ring-indigo-500 outline-none min-h-[70px]" 
             value={Array.isArray(skills) ? skills.join(', ') : (typeof skills === 'object' ? JSON.stringify(skills) : skills)} 
             onChange={e => {
               const val = e.target.value.split(',').map(s => s.trim());
@@ -138,14 +220,17 @@ export default function ResumeEditorView({
             }}
             placeholder="Comma separated skills..." 
           />
+          <div className="flex justify-between items-center text-[9px] font-black text-slate-400 uppercase tracking-wider">
+            <span>Separate using commas</span>
+            <span>{skills.length} Skills Registered</span>
+          </div>
         </div>
       );
     }
 
-    // List based sections (Experience, Projects, Education, etc)
-    const items = parsedResume[section] || [];
+    const items = parsedResume?.[section] || [];
     return (
-      <div className="p-3">
+      <div className="p-4 bg-slate-50/30">
         <Droppable droppableId={section} type={section}>
           {(provided) => (
             <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-3">
@@ -155,43 +240,43 @@ export default function ResumeEditorView({
                     <div 
                       ref={provided.innerRef} 
                       {...provided.draggableProps} 
-                      className="border border-slate-200 rounded-lg p-3 bg-slate-50 relative group"
+                      className="border border-slate-200 rounded-xl p-3 bg-white relative group shadow-sm hover:shadow transition-shadow"
                     >
                       <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 flex items-center gap-1">
-                         <div {...provided.dragHandleProps} className="text-slate-400 hover:text-slate-600 cursor-grab"><GripVertical size={14} /></div>
-                         <button onClick={() => removeItem(section, index)} className="text-rose-400 hover:text-rose-600"><Trash2 size={14} /></button>
+                         <div {...provided.dragHandleProps} className="text-slate-400 hover:text-slate-600 cursor-grab p-1"><GripVertical size={14} /></div>
+                         <button onClick={() => removeItem(section, index)} className="text-rose-400 hover:text-rose-600 border-none bg-transparent cursor-pointer p-1"><Trash2 size={14} /></button>
                       </div>
 
                       {section === 'experience' && (
-                        <div className="space-y-2 mt-2">
-                          <input className="w-full p-2 border border-slate-200 rounded text-xs bg-white font-bold" value={item.role || ''} onChange={e => handleUpdateField(section, index, 'role', e.target.value)} placeholder="Role" />
+                        <div className="space-y-2 mt-1">
+                          <input className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-slate-50/50 font-bold focus:bg-white outline-none" value={item.role || ''} onChange={e => handleUpdateField(section, index, 'role', e.target.value)} placeholder="Role" />
                           <div className="grid grid-cols-2 gap-2">
-                            <input className="w-full p-2 border border-slate-200 rounded text-xs bg-white" value={item.company || ''} onChange={e => handleUpdateField(section, index, 'company', e.target.value)} placeholder="Company" />
-                            <input className="w-full p-2 border border-slate-200 rounded text-xs bg-white" value={item.start_date || ''} onChange={e => handleUpdateField(section, index, 'start_date', e.target.value)} placeholder="Start Date" />
+                            <input className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-slate-50/50 focus:bg-white outline-none" value={item.company || ''} onChange={e => handleUpdateField(section, index, 'company', e.target.value)} placeholder="Company" />
+                            <input className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-slate-50/50 focus:bg-white outline-none" value={item.start_date || ''} onChange={e => handleUpdateField(section, index, 'start_date', e.target.value)} placeholder="Start Date" />
                           </div>
                         </div>
                       )}
                       
                       {section === 'education' && (
-                        <div className="space-y-2 mt-2">
-                          <input className="w-full p-2 border border-slate-200 rounded text-xs bg-white font-bold" value={item.institution || ''} onChange={e => handleUpdateField(section, index, 'institution', e.target.value)} placeholder="Institution" />
+                        <div className="space-y-2 mt-1">
+                          <input className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-slate-50/50 font-bold focus:bg-white outline-none" value={item.institution || ''} onChange={e => handleUpdateField(section, index, 'institution', e.target.value)} placeholder="Institution" />
                           <div className="grid grid-cols-2 gap-2">
-                            <input className="w-full p-2 border border-slate-200 rounded text-xs bg-white" value={item.degree || ''} onChange={e => handleUpdateField(section, index, 'degree', e.target.value)} placeholder="Degree" />
-                            <input className="w-full p-2 border border-slate-200 rounded text-xs bg-white" value={item.field_of_study || ''} onChange={e => handleUpdateField(section, index, 'field_of_study', e.target.value)} placeholder="Field of Study" />
+                            <input className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-slate-50/50 focus:bg-white outline-none" value={item.degree || ''} onChange={e => handleUpdateField(section, index, 'degree', e.target.value)} placeholder="Degree" />
+                            <input className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-slate-50/50 focus:bg-white outline-none" value={item.field_of_study || ''} onChange={e => handleUpdateField(section, index, 'field_of_study', e.target.value)} placeholder="Field of Study" />
                           </div>
                         </div>
                       )}
                       
                       {section === 'projects' && (
-                        <div className="space-y-2 mt-2">
-                          <input className="w-full p-2 border border-slate-200 rounded text-xs bg-white font-bold" value={item.name || ''} onChange={e => handleUpdateField(section, index, 'name', e.target.value)} placeholder="Project Name" />
-                          <input className="w-full p-2 border border-slate-200 rounded text-xs bg-white" value={item.role || ''} onChange={e => handleUpdateField(section, index, 'role', e.target.value)} placeholder="Role / Tech Stack" />
+                        <div className="space-y-2 mt-1">
+                          <input className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-slate-50/50 font-bold focus:bg-white outline-none" value={item.name || ''} onChange={e => handleUpdateField(section, index, 'name', e.target.value)} placeholder="Project Name" />
+                          <input className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-slate-50/50 focus:bg-white outline-none" value={item.role || ''} onChange={e => handleUpdateField(section, index, 'role', e.target.value)} placeholder="Role / Tech Stack" />
                         </div>
                       )}
                       
                       {(section === 'certifications' || section === 'awards') && (
-                        <div className="space-y-2 mt-2">
-                          <input className="w-full p-2 border border-slate-200 rounded text-xs bg-white font-bold" value={item.name || item.title || ''} onChange={e => handleUpdateField(section, index, section === 'awards' ? 'title' : 'name', e.target.value)} placeholder="Name/Title" />
+                        <div className="space-y-2 mt-1">
+                          <input className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-slate-50/50 font-bold focus:bg-white outline-none" value={item.name || item.title || ''} onChange={e => handleUpdateField(section, index, section === 'awards' ? 'title' : 'name', e.target.value)} placeholder="Name/Title" />
                         </div>
                       )}
 
@@ -202,7 +287,7 @@ export default function ResumeEditorView({
               {provided.placeholder}
               <button 
                 onClick={() => addItem(section)} 
-                className="w-full py-2 border-2 border-dashed border-slate-200 text-slate-500 rounded-lg text-xs font-bold hover:border-brand hover:text-brand transition flex items-center justify-center gap-1"
+                className="w-full py-2.5 border border-dashed border-slate-200 text-slate-500 rounded-xl text-xs font-bold hover:border-indigo-500 hover:text-indigo-600 hover:bg-slate-50/40 transition flex items-center justify-center gap-1.5 cursor-pointer bg-white"
               >
                 <Plus size={14} /> Add Item
               </button>
@@ -214,127 +299,181 @@ export default function ResumeEditorView({
   };
 
   return (
-    <div className="flex-1 flex flex-col justify-between h-full select-none text-slate-800 font-sans">
-      
-      {/* Title */}
-      <div className="space-y-1 shrink-0 p-4 pb-2">
-        <h2 className="text-lg font-black tracking-tight text-slate-800">Dynamic Resume Editor</h2>
-        <p className="text-xs text-slate-500">Edit, reorder, or add custom sections Notion-style.</p>
-      </div>
+    <div className="h-full flex flex-col justify-between bg-white text-slate-800 font-sans">
+      <div className="flex-1 overflow-y-auto px-5 pt-5 pb-24 custom-scrollbar">
+        {!reorderOnly && (
+          <div className="mb-5 p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 flex items-start gap-2.5 shadow-sm">
+            <Sparkles className="text-indigo-600 mt-0.5 shrink-0" size={16} />
+            <div className="text-[11px] text-zinc-550 leading-relaxed font-bold">
+              Confirm your parsed resume fields. Drag categories to change A4 section layout order.
+            </div>
+          </div>
+        )}
 
-      {/* Editor Scroll */}
-      <div className="flex-1 overflow-y-auto p-4 scrollbar-thin">
         <DragDropContext onDragEnd={onDragEnd}>
-          <Droppable droppableId="ROOT" type="SECTIONS">
+          <Droppable droppableId="SECTIONS" type="SECTIONS">
             {(provided) => (
-              <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-3 pb-20">
-                {activeSections.map((section, index) => (
-                  <Draggable key={section} draggableId={section} index={index}>
-                    {(provided) => (
-                      <div 
-                        ref={provided.innerRef} 
-                        {...provided.draggableProps} 
-                        className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden group"
-                      >
-                        {/* Section Header */}
-                        <div className="flex items-center justify-between p-3 bg-slate-50/50 border-b border-slate-100">
-                          <div className="flex items-center gap-2 cursor-pointer" onClick={() => toggleSection(section)}>
-                            <button className="text-slate-400 hover:text-slate-800 transition">
-                              {expandedSections[section] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                            </button>
-                            <span className="text-xs font-black uppercase tracking-wider text-slate-700">
-                              {section.replace('_', ' ')}
-                            </span>
-                          </div>
-                          
-                          <div className="flex items-center gap-2">
-                            {/* Only allow deleting Optional sections */}
-                            {!CORE_SECTIONS.includes(section) && (
-                              <button onClick={() => removeSection(section)} className="opacity-0 group-hover:opacity-100 text-rose-400 hover:text-rose-600 transition p-1">
-                                <Trash2 size={14} />
-                              </button>
-                            )}
-                            <div {...provided.dragHandleProps} className="text-slate-400 hover:text-slate-600 transition p-1 cursor-grab">
-                              <GripVertical size={16} />
+              <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-3.5">
+                {activeSections.map((section, index) => {
+                  const isExpanded = expandedSections[section];
+                  const strength = getSectionStrength(section);
+                  const isComplete = strength === 100;
+                  
+                  return (
+                    <Draggable key={section} draggableId={section} index={index}>
+                      {(provided) => (
+                        <div 
+                          ref={provided.innerRef} 
+                          {...provided.draggableProps} 
+                          className={`bg-white border rounded-2xl overflow-hidden transition-all duration-300 group shadow-sm ${
+                            isExpanded 
+                              ? 'border-indigo-500 ring-4 ring-indigo-50/40 shadow-md' 
+                              : 'border-slate-200 hover:border-slate-350 hover:shadow'
+                          }`}
+                        >
+                          {/* Premium Redesigned Section Header */}
+                          <div className="flex items-center justify-between py-4 px-5 bg-slate-50/30 hover:bg-slate-50/70 transition-colors">
+                            <div className="flex items-center gap-3">
+                              {/* Section Drag handle */}
+                              <div {...provided.dragHandleProps} className="text-slate-400 hover:text-slate-600 cursor-grab active:cursor-grabbing p-0.5">
+                                <GripVertical size={15} />
+                              </div>
+
+                              {/* Section Collapse button */}
+                              <div className={`flex items-center gap-2.5 ${reorderOnly ? 'cursor-default' : 'cursor-pointer'}`} onClick={() => toggleSection(section)}>
+                                {!reorderOnly && (
+                                  <button className="text-slate-400 hover:text-slate-800 transition border-none bg-transparent cursor-pointer p-0.5">
+                                    {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                  </button>
+                                )}
+                                
+                                {/* Section icon indicator */}
+                                <div className="p-1.5 bg-slate-100 rounded-lg shrink-0">
+                                  {getSectionIcon(section)}
+                                </div>
+
+                                <span className="text-xs font-black uppercase tracking-wider text-slate-800">
+                                  {section.replace('_', ' ')}
+                                </span>
+
+                                {/* Quality Strength Badge */}
+                                {!reorderOnly && (
+                                  <span className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded-md border shrink-0 ${
+                                    isComplete 
+                                      ? 'bg-green-50 border-green-150 text-green-700' 
+                                      : strength > 50 
+                                      ? 'bg-amber-50 border-amber-150 text-amber-700' 
+                                      : 'bg-rose-50 border-rose-150 text-rose-700'
+                                  }`}>
+                                    {strength}% {isComplete ? 'Complete' : 'Filled'}
+                                  </span>
+                                )}
+
+                                {/* AI Tailored Badge */}
+                                {!reorderOnly && section === 'summary' && (
+                                  <span className="px-1.5 py-0.5 bg-indigo-50 border border-indigo-150 text-indigo-700 text-[8px] font-extrabold rounded-md flex items-center gap-0.5 shrink-0">
+                                    <Sparkles size={8} /> AI TAILORED
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            
+                            <div className="flex items-center gap-3">
+                              {/* Completion checkmark */}
+                              {!reorderOnly && (
+                                <div className="shrink-0">
+                                  {isComplete ? (
+                                    <CheckCircle2 size={15} className="text-green-500" />
+                                  ) : (
+                                    <Circle size={15} className="text-slate-300" />
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Only allow deleting Optional sections */}
+                              {!CORE_SECTIONS.includes(section) && !reorderOnly && (
+                                <button onClick={() => removeSection(section)} className="opacity-0 group-hover:opacity-100 text-rose-400 hover:text-rose-600 transition p-1 border-none bg-transparent cursor-pointer">
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
                             </div>
                           </div>
-                        </div>
 
-                        {/* Section Content (Collapsible) */}
-                        {expandedSections[section] && renderSectionContent(section)}
-                      </div>
-                    )}
-                  </Draggable>
-                ))}
+                          {/* Section Content (Collapsible) */}
+                          {isExpanded && renderSectionContent(section)}
+                        </div>
+                      )}
+                    </Draggable>
+                  );
+                })}
                 {provided.placeholder}
               </div>
             )}
           </Droppable>
         </DragDropContext>
-
-        {/* Notion-style Add Section Button */}
-        <div className="mt-4 relative">
-          <button 
-            onClick={() => setShowAddMenu(!showAddMenu)}
-            className="w-full py-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-slate-600 text-xs font-bold transition flex items-center justify-center gap-2 shadow-sm"
-          >
-            <Plus size={16} /> Add Optional Section
-          </button>
-          
-          {showAddMenu && (
-            <div className="absolute bottom-full left-0 w-full mb-2 bg-white border border-slate-200 shadow-lg rounded-xl overflow-hidden z-50">
-              <div className="p-2 bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Available Sections</div>
-              <div className="max-h-48 overflow-y-auto">
-                {OPTIONAL_SECTIONS.filter(s => !activeSections.includes(s)).map(sec => (
-                  <button 
-                    key={sec}
-                    onClick={() => {
-                      setActiveSections([...activeSections, sec]);
-                      setExpandedSections({ ...expandedSections, [sec]: true });
-                      setShowAddMenu(false);
-                      // Initialize empty array for this section if needed
-                      if (!parsedResume[sec]) setParsedResume({ ...parsedResume, [sec]: [] });
-                    }}
-                    className="w-full text-left p-3 text-xs font-bold text-slate-700 hover:bg-slate-50 hover:text-brand transition capitalize"
-                  >
-                    + {sec.replace('_', ' ')}
-                  </button>
-                ))}
-                {OPTIONAL_SECTIONS.filter(s => !activeSections.includes(s)).length === 0 && (
-                  <div className="p-3 text-xs text-slate-500 italic text-center">All sections added!</div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Actions Bar */}
       <div className="p-4 border-t border-slate-200 bg-white shrink-0 flex gap-3 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.02)]">
-        <button 
-          onClick={onUploadDifferent}
-          disabled={loading}
-          className="flex-1 py-3 border border-slate-250 text-slate-600 font-extrabold text-xs uppercase tracking-wider rounded-xl hover:bg-slate-50 transition flex items-center justify-center gap-1.5 cursor-pointer"
-        >
-          <RefreshCw size={13} /> Upload New
-        </button>
-        <button 
-          onClick={() => {
-             // Clean up empty sections before proceeding
-             const cleaned = { ...parsedResume };
-             Object.keys(cleaned).forEach(key => {
-               if (Array.isArray(cleaned[key]) && cleaned[key].length === 0) {
-                 delete cleaned[key];
-               }
-             });
-             setParsedResume(cleaned);
-             onLooksGood();
-          }}
-          disabled={loading}
-          className="flex-2 py-3 bg-[#00bda5] hover:bg-[#00a894] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-1.5 shadow-md hover:shadow-[#00bda5]/30 cursor-pointer"
-        >
-          <Check size={13} /> Looks Good
-        </button>
+        {reorderOnly ? (
+          <button 
+            onClick={() => {
+               const cleaned = { ...parsedResume };
+               Object.keys(cleaned).forEach(key => {
+                 if (Array.isArray(cleaned[key]) && cleaned[key].length === 0) {
+                   delete cleaned[key];
+                 }
+               });
+               setParsedResume(cleaned);
+               onLooksGood();
+            }}
+            disabled={loading}
+            className={`w-full py-3.5 relative overflow-hidden font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer border-none shadow-md ${
+              loading 
+                ? 'bg-zinc-800 text-zinc-400 cursor-not-allowed' 
+                : 'bg-zinc-950 hover:bg-zinc-900 text-white shadow-zinc-950/20'
+            }`}
+          >
+            {loading ? (
+              <>
+                <div className="absolute bottom-0 left-0 h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-indigo-500 animate-pulse w-full" />
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-zinc-500 border-t-zinc-200" />
+                <span>Compiling A4 PDF...</span>
+              </>
+            ) : (
+              <>
+                <Download size={14} className="animate-bounce" />
+                <span>Download Tailored Resume</span>
+              </>
+            )}
+          </button>
+        ) : (
+          <>
+            <button 
+              onClick={onUploadDifferent}
+              disabled={loading}
+              className="flex-1 py-3 border border-slate-250 text-slate-600 font-extrabold text-xs uppercase tracking-wider rounded-xl hover:bg-slate-50 transition flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <RefreshCw size={13} /> Upload New
+            </button>
+            <button 
+              onClick={() => {
+                 const cleaned = { ...parsedResume };
+                 Object.keys(cleaned).forEach(key => {
+                   if (Array.isArray(cleaned[key]) && cleaned[key].length === 0) {
+                     delete cleaned[key];
+                   }
+                 });
+                 setParsedResume(cleaned);
+                 onLooksGood();
+              }}
+              disabled={loading}
+              className="flex-2 py-3 bg-[#00bda5] hover:bg-[#00a894] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-1.5 shadow-md hover:shadow-[#00bda5]/30 cursor-pointer"
+            >
+              <Check size={13} /> Looks Good
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

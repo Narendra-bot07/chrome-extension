@@ -19,18 +19,7 @@ function TemplatesPage() {
 
   return (
     <TemplateSelectionView
-      tailoredResume={tailoredResume}
-      selectedTemplate={selectedTemplate}
-      setSelectedTemplate={setSelectedTemplate}
-      companyName={companyName}
-      setCompanyName={setCompanyName}
-      onDownloadPDF={handleDownloadFinalPDF}
-      onGenerateCoverLetter={handleGenerateCoverLetter}
       onBack={() => navigate('/review-changes')}
-      loading={loading}
-      loadingMessage={loadingMessage}
-      apiUrl={apiUrl}
-      isExtension={isExtension}
     />
   );
 }

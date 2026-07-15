@@ -123,7 +123,10 @@ export default function PrintLayout() {
       style={{ margin: 0, padding: 0, background: 'white', minHeight: '100vh', width: '100%', display: 'flex', justifyContent: 'center' }} 
       ref={containerRef}
     >
-      <TemplateComponent resume={activeResumeData} />
+      <TemplateComponent 
+        resume={activeResumeData} 
+        layoutLevel={activeResumeData.layout_level !== undefined ? activeResumeData.layout_level : 5}
+      />
       {/* Invisible div to signal Playwright that Auto-Fit is done */}
       {fittingComplete && <div id="resume-print-ready" style={{ display: 'none' }}></div>}
     </div>

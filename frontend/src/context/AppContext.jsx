@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { compressResumeData } from '../utils/resumeCompression';
 
 const AppContext = createContext();
 
@@ -41,16 +42,13 @@ export function AppProvider({ children }) {
           setUser(data.user);
           setSession({ access_token: storedToken });
 
-          // Fetch resumes to check if any exist and load the latest one if not already set
-          try {
-            const resumeRes = await fetch('http://localhost:8000/api/v1/resumes/', {
-              headers: { 'Authorization': `Bearer ${storedToken}` }
-            });
-            if (resumeRes.ok) {
-              const resumes = await resumeRes.json();
+            // Fetch resumes to check if any exist and load the latest one if not already set
+            try {
+              const resumes = await fetchResumesList(storedToken);
               if (resumes && resumes.length > 0) {
                  const latestResume = {
                   ...(resumes[0].parsed_content || resumes[0]),
+                  id: resumes[0].id,
                   file_name: resumes[0].file_name,
                   file_size: resumes[0].file_size,
                   file_type: resumes[0].file_type,
@@ -64,12 +62,11 @@ export function AppProvider({ children }) {
                   localStorage.setItem('parsed_resume', JSON.stringify(latestResume));
                 }
               }
+            } catch (rErr) {
+              console.error("Failed to fetch resumes on startup:", rErr);
+            } finally {
+              setLoadingResume(false);
             }
-          } catch (rErr) {
-            console.error("Failed to fetch resumes on startup:", rErr);
-          } finally {
-            setLoadingResume(false);
-          }
         } else {
           localStorage.removeItem('access_token');
           setLoadingResume(false);
@@ -133,6 +130,7 @@ export function AppProvider({ children }) {
 
   // Data states
   const [parsedResume, setParsedResume] = useState(null);
+  const [resumesList, setResumesList] = useState([]);
   const [jobAnalysis, setJobAnalysis] = useState(null);
   const [comparison, setComparison] = useState(null);
   const [tailoredResume, setTailoredResume] = useState(null);
@@ -151,7 +149,7 @@ export function AppProvider({ children }) {
   ]);
   const [tailoringIntensity, setTailoringIntensity] = useState('balanced');
   const [reviewSuggestions, setReviewSuggestions] = useState([]);
-  const [selectedTemplate, setSelectedTemplate] = useState('modern');
+  const [selectedTemplate, setSelectedTemplate] = useState('ExecutiveATS');
 
   // Loading states
   const [loadingProgress, setLoadingProgress] = useState(0);
@@ -165,15 +163,19 @@ export function AppProvider({ children }) {
   // Load configs & saved resume
   useEffect(() => {
     if (isExtension) {
-      chrome.storage.local.get(['groqApiKey', 'apiUrl', 'parsedResume'], (result) => {
+      chrome.storage.local.get(['groqApiKey', 'apiUrl', 'parsedResume', 'tailoredResume', 'selectedTemplate'], (result) => {
         if (result.groqApiKey) setApiKey(result.groqApiKey);
         if (result.apiUrl) setApiUrl(result.apiUrl);
         if (result.parsedResume) setParsedResume(result.parsedResume);
+        if (result.tailoredResume) setTailoredResume(result.tailoredResume);
+        if (result.selectedTemplate) setSelectedTemplate(result.selectedTemplate);
       });
     } else {
       const savedKey = localStorage.getItem('groq_api_key');
       const savedUrl = localStorage.getItem('fastapi_api_url');
       const savedResume = localStorage.getItem('parsed_resume');
+      const savedTailored = localStorage.getItem('tailored_resume');
+      const savedTemplate = localStorage.getItem('selected_template');
       if (savedKey) setApiKey(savedKey);
       if (savedUrl) setApiUrl(savedUrl);
       if (savedResume) {
@@ -182,6 +184,16 @@ export function AppProvider({ children }) {
         } catch (e) {
           console.error("Error loading resume:", e);
         }
+      }
+      if (savedTailored) {
+        try {
+          setTailoredResume(JSON.parse(savedTailored));
+        } catch (e) {
+          console.error("Error loading tailored resume:", e);
+        }
+      }
+      if (savedTemplate) {
+        setSelectedTemplate(savedTemplate);
       }
     }
   }, []);
@@ -202,6 +214,92 @@ export function AppProvider({ children }) {
       }
     }
   }, [parsedResume]);
+
+  // Save/Remove tailored resume context storage
+  useEffect(() => {
+    if (tailoredResume) {
+      if (isExtension) {
+        chrome.storage.local.set({ tailoredResume });
+      } else {
+        localStorage.setItem('tailored_resume', JSON.stringify(tailoredResume));
+      }
+    } else {
+      if (isExtension) {
+        chrome.storage.local.remove('tailoredResume');
+      } else {
+        localStorage.removeItem('tailored_resume');
+      }
+    }
+  }, [tailoredResume]);
+
+  // Save/Remove selected template context storage
+  useEffect(() => {
+    if (selectedTemplate) {
+      if (isExtension) {
+        chrome.storage.local.set({ selectedTemplate });
+      } else {
+        localStorage.setItem('selected_template', selectedTemplate);
+      }
+    } else {
+      if (isExtension) {
+        chrome.storage.local.remove('selectedTemplate');
+      } else {
+        localStorage.removeItem('selected_template');
+      }
+    }
+  }, [selectedTemplate]);
+
+  const fetchResumesList = async (tokenOverride) => {
+    const token = tokenOverride || session?.access_token || localStorage.getItem('access_token');
+    if (!token) return;
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/resumes/`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setResumesList(data);
+        return data;
+      }
+    } catch (err) {
+      console.error("Failed to fetch resumes:", err);
+    }
+  };
+
+  const handleDeleteResume = async (resumeId) => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token) return;
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/resumes/${resumeId}`, {
+        method: "DELETE",
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const updatedList = await fetchResumesList();
+        if (parsedResume && parsedResume.id === resumeId) {
+          if (updatedList && updatedList.length > 0) {
+            const nextResume = {
+              ...(updatedList[0].parsed_content || updatedList[0]),
+              id: updatedList[0].id,
+              file_name: updatedList[0].file_name,
+              file_size: updatedList[0].file_size,
+              file_type: updatedList[0].file_type,
+              created_at: updatedList[0].created_at
+            };
+            setParsedResume(nextResume);
+            if (isExtension) chrome.storage.local.set({ parsedResume: nextResume });
+            else localStorage.setItem('parsed_resume', JSON.stringify(nextResume));
+          } else {
+            setParsedResume(null);
+            if (isExtension) chrome.storage.local.remove('parsedResume');
+            else localStorage.removeItem('parsed_resume');
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Failed to delete resume:", err);
+    }
+  };
 
   // Scan Active Page content
   const handleScanPage = async (isManual = false) => {
@@ -240,12 +338,13 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
           let company = '';
           let text = '';
 
+          // 1. Domain-specific Extraction
           if (window.location.host.includes('linkedin.com')) {
-            const titleEl = document.querySelector('.job-details-jobs-unified-top-card__job-title, .jobs-unified-top-card__job-title, .p5, h1');
+            const titleEl = document.querySelector('.job-details-jobs-unified-top-card__job-title, .jobs-unified-top-card__job-title, .p5, h1, [class*="job-title"], [class*="jobTitle"]');
             if (titleEl) title = titleEl.innerText.trim();
-            const companyEl = document.querySelector('.job-details-jobs-unified-top-card__company-name, .jobs-unified-top-card__company-name, .jobs-unified-top-card__primary-description a');
+            const companyEl = document.querySelector('.job-details-jobs-unified-top-card__company-name, .jobs-unified-top-card__company-name, .jobs-unified-top-card__primary-description a, [class*="company-name"], [class*="companyName"], a[href*="/company/"]');
             if (companyEl) company = companyEl.innerText.trim();
-            const descEl = document.querySelector('.jobs-description__content, .jobs-description-content__text, .jobs-box__html-content, .jobs-description, #job-details');
+            const descEl = document.querySelector('.jobs-description__content, .jobs-description-content__text, .jobs-box__html-content, .jobs-description, #job-details, .job-details, [class*="job-description"], [class*="jobDescription"]');
             if (descEl) text = descEl.innerText.trim();
           } else if (window.location.host.includes('indeed.com')) {
             const titleEl = document.querySelector('.jobsearch-JobInfoHeader-title, h1');
@@ -286,7 +385,8 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
             const descEl = document.querySelector('[data-automation-id="jobPostingDescription"], .job-description');
             if (descEl) text = descEl.innerText.trim();
           }
-          
+
+          // 2. Global fallback for title & company
           if (!title) {
             const mainHeading = document.querySelector('h1, h2.job-title, .job-title, [class*="jobTitle"], [class*="job-title"], .app-title');
             if (mainHeading) title = mainHeading.innerText.trim();
@@ -304,6 +404,7 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
             }
           }
 
+          // Fallback parsing of document title for LinkedIn
           if ((!title || title === 'Software Engineer' || !company || company === 'Target Company') && document.title && document.title.includes('| LinkedIn')) {
             const parts = document.title.split('|')[0].trim();
             if (parts.includes(' hiring at ')) {
@@ -314,6 +415,36 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
               const [t, c] = parts.split(' at ');
               title = t.trim();
               company = c.trim();
+            }
+          }
+
+          // 3. Robust fallbacks for Job Description Text
+          if (!text || text.length < 150) {
+            // Check standard container tags
+            const candidates = document.querySelectorAll('article, section, main, [class*="description"], [class*="jobDetail"], [id*="description"], [id*="details"]');
+            let bestEl = null;
+            let maxLen = 0;
+            for (const el of candidates) {
+              const innerText = el.innerText || '';
+              if (innerText.length > maxLen && innerText.length < 35000) {
+                const tagName = el.tagName.toLowerCase();
+                if (tagName !== 'script' && tagName !== 'style' && tagName !== 'noscript') {
+                  maxLen = innerText.length;
+                  bestEl = el;
+                }
+              }
+            }
+            if (bestEl) {
+              text = bestEl.innerText.trim();
+            }
+          }
+
+          if (!text || text.length < 150) {
+            // Scrape the entire body text as absolute fallback
+            const bodyEl = document.body;
+            if (bodyEl) {
+              const bodyText = bodyEl.innerText || '';
+              text = bodyText.trim();
             }
           }
 
@@ -502,29 +633,31 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
         body: formData
       });
       
-      if (!parseRes.ok) {
-        throw new Error("Resume parse error: " + (await parseRes.json()).detail);
-      }
-      const resumeRecord = await parseRes.json();
-      const currentResume = {
-        ...(resumeRecord.parsed_content || resumeRecord),
-        file_name: resumeRecord.file_name,
-        file_size: resumeRecord.file_size,
-        file_type: resumeRecord.file_type,
-        created_at: resumeRecord.created_at
-      };
-      setParsedResume(currentResume);
-
-      if (isExtension) {
-        chrome.storage.local.set({ parsedResume: currentResume });
-      }
-
-      clearInterval(progressInterval);
-      setLoadingProgress(100);
-      setLoadingMessage("Parsing Complete!");
-      setTimeout(() => {
-        navigate('/resume-review');
-      }, 300);
+        if (!parseRes.ok) {
+          throw new Error("Resume parse error: " + (await parseRes.json()).detail);
+        }
+        const resumeRecord = await parseRes.json();
+        await fetchResumesList();
+        const currentResume = {
+          ...(resumeRecord.parsed_content || resumeRecord),
+          id: resumeRecord.id,
+          file_name: resumeRecord.file_name,
+          file_size: resumeRecord.file_size,
+          file_type: resumeRecord.file_type,
+          created_at: resumeRecord.created_at
+        };
+        setParsedResume(currentResume);
+  
+        if (isExtension) {
+          chrome.storage.local.set({ parsedResume: currentResume });
+        }
+  
+        clearInterval(progressInterval);
+        setLoadingProgress(100);
+        setLoadingMessage("Parsing Complete!");
+        setTimeout(() => {
+          navigate('/resume-review');
+        }, 300);
 
     } catch (error) {
       clearInterval(progressInterval);
@@ -559,7 +692,48 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
       });
     }, 200);
 
+    let activeParsed = parsedResume;
+
     try {
+      // Lazy parse if resume experience is empty and raw_text is present
+      if (parsedResume.id && (!parsedResume.experience || parsedResume.experience.length === 0) && parsedResume.raw_text) {
+        setLoadingMessage("Parsing Resume with AI for Tailoring...");
+        setLoadingProgress(15);
+        
+        const token = session?.access_token || localStorage.getItem('access_token');
+        const parseHeaders = {};
+        if (token) parseHeaders["Authorization"] = `Bearer ${token}`;
+        if (apiKey) parseHeaders["x-groq-key"] = apiKey;
+
+        const parseRes = await fetch(`${apiUrl}/api/v1/resumes/${parsedResume.id}/parse`, {
+          method: "POST",
+          headers: parseHeaders
+        });
+        
+        if (!parseRes.ok) {
+          throw new Error("AI parsing on-demand failed: " + (await parseRes.json()).detail);
+        }
+        
+        const updatedRecord = await parseRes.json();
+        activeParsed = {
+          ...(updatedRecord.parsed_content || updatedRecord),
+          id: updatedRecord.id,
+          file_name: updatedRecord.file_name,
+          file_size: updatedRecord.file_size,
+          file_type: updatedRecord.file_type,
+          created_at: updatedRecord.created_at
+        };
+        setParsedResume(activeParsed);
+        if (isExtension) {
+          chrome.storage.local.set({ parsedResume: activeParsed });
+        } else {
+          localStorage.setItem('parsed_resume', JSON.stringify(activeParsed));
+        }
+        
+        setLoadingMessage("AI Parsing Complete! Starting Gap Analysis...");
+        setLoadingProgress(35);
+      }
+
       const headers = {};
       if (apiKey) headers["x-groq-key"] = apiKey;
 
@@ -570,7 +744,7 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
           ...headers
         },
         body: JSON.stringify({
-          resume: parsedResume,
+          resume: activeParsed,
           job: jobAnalysis
         })
       });
@@ -591,7 +765,7 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
           id: `change-${idCounter++}`,
           category: 'Professional Summary',
           status: 'pending',
-          original: parsedResume.summary || '',
+          original: activeParsed.summary || '',
           suggested: patch.summary,
           reason: 'Aligns summary with job keywords and targets core requirements.',
           atsImpact: 3,
@@ -609,7 +783,7 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
           Object.keys(bulletsPatch).forEach(bulletIdxStr => {
             const bulletIdx = parseInt(bulletIdxStr, 10);
             const suggested = bulletsPatch[bulletIdxStr];
-            const originalText = parsedResume.experience[itemIdx]?.description[bulletIdx] || '';
+            const originalText = activeParsed.experience[itemIdx]?.description[bulletIdx] || '';
             list.push({
               id: `change-${idCounter++}`,
               category: 'Work Experience',
@@ -634,7 +808,7 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
           Object.keys(bulletsPatch).forEach(bulletIdxStr => {
             const bulletIdx = parseInt(bulletIdxStr, 10);
             const suggested = bulletsPatch[bulletIdxStr];
-            const originalText = parsedResume.projects[itemIdx]?.description[bulletIdx] || '';
+            const originalText = activeParsed.projects[itemIdx]?.description[bulletIdx] || '';
             list.push({
               id: `change-${idCounter++}`,
               category: 'Projects',
@@ -740,8 +914,16 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
     }
   };
 
-  const handleDownloadFinalPDF = async () => {
-    if (!tailoredResume) return;
+  const handleDownloadFinalPDF = async (layoutLevel) => {
+    const activeRes = tailoredResume || parsedResume;
+    if (!activeRes) return;
+    
+    let finalRes = { ...activeRes };
+    if (layoutLevel !== undefined) {
+      const pruneLevel = Math.max(0, 5 - Math.floor(layoutLevel / 2));
+      finalRes = compressResumeData(activeRes, pruneLevel);
+      finalRes.layout_level = layoutLevel;
+    }
     
     setLoading(true);
     setLoadingProgress(50);
@@ -754,8 +936,8 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          resume: tailoredResume,
-          template_name: selectedTemplate || 'ats-classic'
+          resume: finalRes,
+          template_name: selectedTemplate || 'ExecutiveATS'
         })
       });
 
@@ -764,7 +946,7 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
       }
 
       const blob = await response.blob();
-      const rawName = tailoredResume.personal_info?.name || 'User';
+      const rawName = activeRes.personal_info?.name || 'User';
       const cleanUser = rawName.replace(/\s+/g, '_');
       const cleanCompany = (companyName || 'Company').replace(/\s+/g, '_');
       const filename = `${cleanUser}_${cleanCompany}_Resume.pdf`;
@@ -928,6 +1110,9 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
       loadingResume,
       hasRedirectedOnStartup,
       setHasRedirectedOnStartup,
+      resumesList, setResumesList,
+      fetchResumesList,
+      handleDeleteResume,
       handleScanPage,
       handleExtractJob,
       handleParseResume,

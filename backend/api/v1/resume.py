@@ -34,14 +34,17 @@ async def upload_and_parse(
     # Text extraction
     raw_text = ResumeParser.extract_text(content, file.filename)
 
-    # Parse structure
-    ai = GroqService()
-    parsed_res = ai.parse_resume(raw_text)
-
     # Save to storage
     import uuid
     unique_path = f"{user['id']}/{uuid.uuid4()}_{file.filename}"
     storage.upload_file("original-resumes", unique_path, content, file.content_type)
+
+    # Store filename and raw_text inside parsed_content for lazy compilation
+    parsed_res = {
+        "personal_info": {"name": file.filename.split(".")[0].replace("_", " ")},
+        "summary": "This resume is uploaded and ready for tailoring.",
+        "raw_text": raw_text
+    }
 
     # Save to database
     record = resume_repo.create(
@@ -50,7 +53,7 @@ async def upload_and_parse(
         file_name=file.filename,
         file_size=len(content),
         file_type=ext,
-        parsed_content=parsed_res.dict()
+        parsed_content=parsed_res
     )
     return record
 
@@ -74,3 +77,43 @@ async def delete_resume(
             detail="Resume not found or already deleted."
         )
     return {"status": "success", "message": "Resume soft-deleted."}
+
+@router.post("/{resume_id}/parse")
+async def parse_existing_resume(
+    resume_id: str,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository)
+):
+    record = repo.get_by_id(resume_id, user["id"])
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Resume not found."
+        )
+    
+    parsed_content = record.get("parsed_content") or {}
+    raw_text = parsed_content.get("raw_text")
+    if not raw_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No raw text found in this resume to parse."
+        )
+        
+    # Run Groq AI parse on-demand
+    ai = GroqService()
+    parsed_res = ai.parse_resume(raw_text)
+    
+    # Save back to database
+    updated_content = parsed_res.dict()
+    updated_content["raw_text"] = raw_text
+    
+    success = repo.update_parsed_content(resume_id, user["id"], updated_content)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update parsed resume content in database."
+        )
+        
+    # Return updated record format
+    record["parsed_content"] = updated_content
+    return record

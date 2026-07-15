@@ -60,3 +60,6 @@ class ResumeStructure(BaseModel):
     interests: List[str] = []
     portfolio: str = ""
     links: Dict[str, str] = {}
+    section_order: Optional[List[str]] = None
+    layout_level: Optional[int] = None
+    raw_text: Optional[str] = ""

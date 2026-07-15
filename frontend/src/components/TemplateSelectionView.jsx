@@ -1,134 +1,105 @@
 import React, { useState } from 'react';
-import { Download, Sparkles, CheckCircle2, ShieldCheck, ChevronRight, ArrowUp, ArrowDown, ListOrdered, Layers } from 'lucide-react';
+import { Download, Sparkles, CheckCircle2, ShieldCheck, ChevronRight, X, ZoomIn, Eye, ArrowLeft, Layers, Image, Minimize2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import ResumePreview from './Resume/ResumePreview';
+import TailorRender from './Resume/TailorRender';
 
-const TEMPLATES = [
+const TEMPLATES_LIST = [
   { 
-    id: 'ModernProATS', 
-    name: 'Modern Pro', 
-    description: 'Clean and professional two-column layout with a left sidebar.',
+    id: 'ExecutiveATS', 
+    name: 'Executive ATS', 
+    description: 'Elegant top-header alignment with deep royal blue accents.',
+    atsScore: 98,
+    recommendedFor: 'Senior Engineers, Engineering Managers, Architects, Staff Engineers',
+    layout: 'Single Column',
+    photo: 'No Photo',
     recommended: true
   },
   { 
-    id: 'MinimalATS', 
-    name: 'Minimal', 
-    description: 'Highly condensed minimal template for quick scanning.' 
+    id: 'TwoColumnATS', 
+    name: 'Two-Column ATS', 
+    description: 'Maximum information density without reducing parsing structure compatibility.',
+    atsScore: 92,
+    recommendedFor: 'Software Engineers, AI Specialists, Data Engineers, Cybersecurity Analysts',
+    layout: 'Two Column',
+    photo: 'No Photo',
+    recommended: false
   },
   { 
-    id: 'ProfessionalATS', 
-    name: 'Professional', 
-    description: 'Ideal for experienced professionals and traditional roles.' 
+    id: 'EuropeanPhotoATS', 
+    name: 'European Executive', 
+    description: 'European market friendly layout with a left sidebar and elegant photo slot.',
+    atsScore: 91,
+    recommendedFor: 'International Applicants, Managers, Management Consultants',
+    layout: 'Sidebar Layout',
+    photo: 'With Photo',
+    recommended: false
+  },
+
+  { 
+    id: 'PortfolioPhotoATS', 
+    name: 'Premium Portfolio', 
+    description: 'Creative tech-oriented layout highlighting github, portfolios, and details.',
+    atsScore: 92,
+    recommendedFor: 'Frontend Developers, Product Designers, Creative Developers',
+    layout: 'Single Column',
+    photo: 'With Photo',
+    recommended: false
   },
   { 
-    id: 'ExecutiveATS', 
-    name: 'Executive', 
-    description: 'Elegant top-header center alignment for executive roles.' 
+    id: 'MarissaATS', 
+    name: 'Marissa Executive', 
+    description: 'Two-column elite layout with right-aligned circular photo and solid headers.',
+    atsScore: 95,
+    recommendedFor: 'Executives, Product Managers, Senior Engineers, Directors',
+    layout: 'Two Column (R)',
+    photo: 'With Photo',
+    recommended: true
   },
   { 
-    id: 'CorporateATS', 
-    name: 'Corporate', 
-    description: 'Clean sans-serif design with custom accent headers.' 
-  },
-  { 
-    id: 'ModernATS', 
-    name: 'Modern One-Column', 
-    description: 'Sleek single-column modern layout.' 
-  },
-  { 
-    id: 'TechnicalATS', 
-    name: 'Technical', 
-    description: 'Mono-spaced clean hierarchy ideal for software developers.' 
-  },
-  { 
-    id: 'CompactATS', 
-    name: 'Compact', 
-    description: 'Densely spaced resume optimized for single-page fitting.' 
-  },
-  { 
-    id: 'SidebarATS', 
-    name: 'Sidebar Layout', 
-    description: 'Dedicated sidebar for skills, education, and credentials.' 
+    id: 'AltaATS', 
+    name: 'Nico Executive', 
+    description: 'High-contrast header banner template with a shaded left sidebar and details.',
+    atsScore: 94,
+    recommendedFor: 'Researchers, Engineers, Academics, Developers',
+    layout: 'Sidebar Banner',
+    photo: 'With Photo',
+    recommended: false
   }
 ];
 
-// Mini CSS Thumbnails
-const TemplateThumbnail = ({ id }) => {
-  if (id === 'ModernProATS' || id === 'SidebarATS') {
-    return (
-      <div className="w-12 h-16 bg-white border border-zinc-200 rounded-sm shadow-sm flex overflow-hidden shrink-0">
-        <div className="w-[35%] bg-indigo-50/50 border-r border-indigo-100 p-1 flex flex-col gap-0.5">
-          <div className="w-full h-1 bg-indigo-200 rounded-full mb-1"></div>
-          <div className="w-2/3 h-0.5 bg-indigo-100 rounded-full"></div>
-          <div className="w-full h-0.5 bg-indigo-100 rounded-full"></div>
-          <div className="w-4/5 h-0.5 bg-indigo-100 rounded-full"></div>
-          <div className="w-full h-1 bg-indigo-200 rounded-full mt-1 mb-0.5"></div>
-          <div className="w-full h-2 bg-indigo-100 rounded-sm"></div>
-        </div>
-        <div className="flex-1 p-1 flex flex-col gap-0.5">
-          <div className="w-4/5 h-1.5 bg-zinc-300 rounded-full mb-1"></div>
-          <div className="w-1/3 h-0.5 bg-zinc-200 rounded-full mb-1"></div>
-          <div className="w-full h-0.5 bg-zinc-200 rounded-full"></div>
-          <div className="w-full h-0.5 bg-zinc-200 rounded-full"></div>
-          <div className="w-5/6 h-0.5 bg-zinc-200 rounded-full mb-1"></div>
-          <div className="w-1/2 h-0.5 bg-zinc-300 rounded-full mb-0.5"></div>
-          <div className="w-full h-2 bg-zinc-100 rounded-sm"></div>
-        </div>
-      </div>
-    );
-  }
-  
-  // Default 1-column layout
+// Miniature Live A4 preview renderer card
+const MiniPreview = ({ resume, templateId }) => {
   return (
-    <div className="w-12 h-16 bg-white border border-zinc-200 rounded-sm shadow-sm flex flex-col overflow-hidden shrink-0 p-1.5 gap-0.5">
-      <div className="w-1/2 h-1.5 bg-zinc-300 rounded-full mx-auto mb-0.5"></div>
-      <div className="w-1/3 h-0.5 bg-zinc-200 rounded-full mx-auto mb-1.5"></div>
-      <div className="w-1/3 h-1 bg-zinc-200 rounded-full mb-0.5"></div>
-      <div className="w-full h-0.5 bg-zinc-100 rounded-full"></div>
-      <div className="w-full h-0.5 bg-zinc-100 rounded-full"></div>
-      <div className="w-5/6 h-0.5 bg-zinc-100 rounded-full mb-1"></div>
-      <div className="w-1/3 h-1 bg-zinc-200 rounded-full mb-0.5"></div>
-      <div className="w-full h-2 bg-zinc-50 rounded-sm"></div>
+    <div className="w-full h-[260px] bg-white border-b border-zinc-200 overflow-hidden relative shadow-inner flex justify-center items-start group-hover:shadow-md transition-all">
+      <div 
+        className="absolute top-0 left-1/2 -translate-x-1/2 w-[816px] h-[1056px] bg-white origin-top scale-[0.24] pointer-events-none select-none"
+        style={{ width: '816px', height: '1056px' }}
+      >
+        <TailorRender resume={resume} templateName={templateId} />
+      </div>
+      <div className="absolute inset-0 bg-black/[0.02] group-hover:bg-black/[0.04] transition-colors pointer-events-none" />
     </div>
   );
 };
 
-export default function TemplateSelectionView() {
+export default function TemplateSelectionView({ onBack }) {
+  const navigate = useNavigate();
   const { tailoredResume, parsedResume, selectedTemplate, setSelectedTemplate } = useApp();
   const displayResume = tailoredResume || parsedResume;
   const [isDownloading, setIsDownloading] = useState(false);
-  const [activeTab, setActiveTab] = useState('layouts'); // 'layouts' | 'ordering'
-  const [sectionOrder, setSectionOrder] = useState([
-    'summary',
-    'education',
-    'experience',
-    'skills',
-    'projects',
-    'certifications',
-    'achievements',
-    'volunteer',
-    'publications',
-    'languages',
-    'awards',
-    'interests'
-  ]);
+  const [filter, setFilter] = useState('all'); // 'all' | 'no-photo' | 'with-photo'
+  const [zoomModalTemplate, setZoomModalTemplate] = useState(null); // active zoomed template object
 
-  // Default to ModernProATS if none selected
-  const activeTemplate = selectedTemplate || 'ModernProATS';
+  const activeTemplate = selectedTemplate || 'ExecutiveATS';
 
-  const moveSection = (index, direction) => {
-    const newOrder = [...sectionOrder];
-    const targetIndex = index + direction;
-    if (targetIndex < 0 || targetIndex >= newOrder.length) return;
-    
-    const temp = newOrder[index];
-    newOrder[index] = newOrder[targetIndex];
-    newOrder[targetIndex] = temp;
-    
-    setSectionOrder(newOrder);
+  const handleUseTemplate = (id) => {
+    setSelectedTemplate(id);
+    navigate('/download');
   };
 
-  const handleDownload = async () => {
+  const handleDownload = async (templateId) => {
+    const targetTemplate = templateId || activeTemplate;
     try {
       setIsDownloading(true);
       const res = await fetch('http://localhost:8000/api/download-pdf?company_name=Company', {
@@ -136,7 +107,7 @@ export default function TemplateSelectionView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           resume: displayResume,
-          template_name: activeTemplate
+          template_name: targetTemplate
         })
       });
 
@@ -146,7 +117,7 @@ export default function TemplateSelectionView() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Resume.pdf`;
+      a.download = `${displayResume.personal_info?.name || 'Resume'}_${targetTemplate}.pdf`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -159,140 +130,228 @@ export default function TemplateSelectionView() {
     }
   };
 
-  return (
-    <div className="flex flex-col lg:flex-row h-full overflow-hidden bg-zinc-50">
-      {/* Sidebar */}
-      <div className="w-full lg:w-[340px] bg-white border-b lg:border-b-0 lg:border-r border-zinc-200 flex flex-col shrink-0 lg:h-full shadow-sm z-10">
-        <div className="p-5 lg:p-6 pb-4">
-          <h2 className="text-[17px] font-bold text-zinc-900 flex items-center gap-2 tracking-tight">
-            <Sparkles className="text-indigo-600" size={18} />
-            Resume Tailor Options
-          </h2>
-          <p className="text-[13px] text-zinc-500 mt-1.5 leading-relaxed">
-            Customize layout styles and drag sections dynamically to optimize page fit.
-          </p>
-        </div>
+  const filteredTemplates = TEMPLATES_LIST.filter(t => {
+    if (filter === 'no-photo') return t.photo === 'No Photo';
+    if (filter === 'with-photo') return t.photo === 'With Photo';
+    return true;
+  });
 
-        {/* Navigation Tabs */}
-        <div className="flex border-b border-zinc-250">
-          <button 
-            onClick={() => setActiveTab('layouts')}
-            className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 border-b-2 transition-all ${
-              activeTab === 'layouts'
-                ? 'border-indigo-600 text-indigo-600 bg-indigo-50/10'
-                : 'border-transparent text-zinc-400 hover:text-zinc-650'
-            }`}
-          >
-            <Layers size={14} />
-            Layouts
-          </button>
-          <button 
-            onClick={() => setActiveTab('ordering')}
-            className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 border-b-2 transition-all ${
-              activeTab === 'ordering'
-                ? 'border-indigo-600 text-indigo-600 bg-indigo-50/10'
-                : 'border-transparent text-zinc-400 hover:text-zinc-655'
-            }`}
-          >
-            <ListOrdered size={14} />
-            Section Order
-          </button>
+  return (
+    <div className="min-h-screen bg-zinc-50 flex flex-col font-sans select-none pb-12">
+      {/* Top Header */}
+      <header className="bg-white border-b border-zinc-200 sticky top-0 z-20 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={onBack}
+              className="p-2 hover:bg-zinc-100 rounded-lg text-zinc-500 hover:text-zinc-800 transition-colors border-none bg-transparent cursor-pointer"
+            >
+              <ArrowLeft size={18} />
+            </button>
+            <div>
+              <h1 className="text-md font-black text-zinc-950 flex items-center gap-2 uppercase tracking-tight">
+                <Sparkles size={16} className="text-indigo-600" />
+                Select Premium Layout Style
+              </h1>
+              <p className="text-[10px] text-zinc-400 font-bold uppercase mt-0.5">
+                6 Config-Driven ATS Optimized Templates (90%+ Score)
+              </p>
+            </div>
+          </div>
+
+          {/* Quick Filters */}
+          <div className="flex bg-zinc-100 p-1.5 rounded-xl border border-zinc-200">
+            <button 
+              onClick={() => setFilter('all')}
+              className={`px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider rounded-lg transition-all border-none cursor-pointer ${
+                filter === 'all'
+                  ? 'bg-white text-zinc-900 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-800 bg-transparent'
+              }`}
+            >
+              All Layouts ({TEMPLATES_LIST.length})
+            </button>
+            <button 
+              onClick={() => setFilter('no-photo')}
+              className={`px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider rounded-lg transition-all border-none cursor-pointer ${
+                filter === 'no-photo'
+                  ? 'bg-white text-zinc-900 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-800 bg-transparent'
+              }`}
+            >
+              Without Photo (2)
+            </button>
+            <button 
+              onClick={() => setFilter('with-photo')}
+              className={`px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider rounded-lg transition-all border-none cursor-pointer ${
+                filter === 'with-photo'
+                  ? 'bg-white text-zinc-900 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-800 bg-transparent'
+              }`}
+            >
+              With Photo (4)
+            </button>
+          </div>
         </div>
-        
-        {activeTab === 'layouts' ? (
-          <div className="flex-1 overflow-x-auto lg:overflow-y-auto px-5 lg:px-6 py-4 flex lg:flex-col gap-3 custom-scrollbar">
-            {TEMPLATES.map(t => {
-              const isSelected = activeTemplate === t.id;
-              return (
-                <div 
-                  key={t.id}
-                  onClick={() => setSelectedTemplate(t.id)}
-                  className={`p-3 lg:p-3.5 rounded-xl border-[1.5px] transition-all cursor-pointer flex gap-3 relative min-w-[280px] lg:min-w-0 ${
-                    isSelected 
-                      ? 'border-indigo-500 bg-indigo-50/40 shadow-sm ring-1 ring-indigo-500/20' 
-                      : 'border-zinc-200 hover:border-indigo-300 hover:bg-zinc-50'
-                  }`}
-                >
-                  <TemplateThumbnail id={t.id} />
-                  <div className="flex-1 pr-6">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <h3 className="text-sm font-bold text-zinc-900">{t.name}</h3>
+      </header>
+
+      {/* Grid Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 flex-1 w-full">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
+          {filteredTemplates.map(t => {
+            const isSelected = activeTemplate === t.id;
+            return (
+              <div 
+                key={t.id}
+                className={`group flex flex-col bg-white border rounded-xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 ${
+                  isSelected 
+                    ? 'border-indigo-500 ring-2 ring-indigo-550/20' 
+                    : 'border-zinc-200 hover:border-zinc-300'
+                }`}
+              >
+                {/* Live Miniature Page Preview wrapper */}
+                <MiniPreview resume={displayResume} templateId={t.id} />
+
+                {/* Details Footer */}
+                <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-extrabold text-zinc-900 group-hover:text-indigo-600 transition-colors uppercase tracking-tight">
+                        {t.name}
+                      </h3>
+                      <span className="text-[10px] font-extrabold px-1.5 py-0.5 bg-green-650 text-white rounded text-center">
+                        ATS {t.atsScore}%
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-zinc-500 mt-1.5 leading-relaxed line-clamp-2">
+                      {t.description}
+                    </p>
+
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      <span className="text-[9px] font-bold px-2 py-0.5 bg-zinc-50 border border-zinc-200 text-zinc-600 rounded flex items-center gap-1">
+                        <Layers size={10} /> {t.layout}
+                      </span>
+                      <span className="text-[9px] font-bold px-2 py-0.5 bg-zinc-50 border border-zinc-200 text-zinc-600 rounded flex items-center gap-1">
+                        <Image size={10} /> {t.photo}
+                      </span>
                       {t.recommended && (
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded text-center">
-                          Recommended
+                        <span className="text-[9px] font-extrabold px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded">
+                          Recommended Choice
                         </span>
                       )}
                     </div>
-                    <p className="text-[11px] text-zinc-500 leading-snug pr-2">{t.description}</p>
                   </div>
-                  {isSelected && (
-                    <div className="absolute top-3 right-3 text-indigo-600">
-                      <CheckCircle2 size={18} className="fill-indigo-600 text-white" />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="flex-1 overflow-y-auto px-5 lg:px-6 py-4 flex flex-col gap-2 custom-scrollbar">
-            <p className="text-[11px] text-zinc-400 mb-2 leading-relaxed">
-              Order sections to balance single-page constraints. Sections without content are ignored automatically.
-            </p>
-            {sectionOrder.map((sectionId, idx) => {
-              const label = sectionId.toUpperCase().replace('_', ' ');
-              return (
-                <div key={sectionId} className="flex items-center justify-between p-2.5 bg-zinc-50 border border-zinc-200 rounded-lg text-xs font-semibold text-zinc-700">
-                  <span className="capitalize">{label}</span>
-                  <div className="flex items-center gap-1">
-                    <button 
-                      disabled={idx === 0} 
-                      onClick={() => moveSection(idx, -1)}
-                      className="p-1 hover:bg-zinc-200 rounded transition-colors disabled:opacity-30"
-                    >
-                      <ArrowUp size={14} />
-                    </button>
-                    <button 
-                      disabled={idx === sectionOrder.length - 1} 
-                      onClick={() => moveSection(idx, 1)}
-                      className="p-1 hover:bg-zinc-200 rounded transition-colors disabled:opacity-30"
-                    >
-                      <ArrowDown size={14} />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        
-        <div className="p-5 lg:p-6 pt-4 border-t border-zinc-200 bg-white space-y-3">
-          <button className="w-full py-2.5 px-3 bg-white border border-indigo-100 hover:bg-indigo-50/50 text-indigo-700 rounded-lg flex items-center justify-between transition-colors shadow-sm">
-            <div className="flex items-center gap-2">
-              <ShieldCheck size={16} />
-              <span className="text-xs font-bold">Preview ATS Score Guide</span>
-            </div>
-            <ChevronRight size={14} className="text-indigo-400" />
-          </button>
-          <button 
-            onClick={handleDownload}
-            disabled={isDownloading}
-            className="download-trigger w-full py-3 bg-[#1e1b4b] text-white rounded-lg flex items-center justify-center gap-2 hover:bg-[#2e2a6b] transition-colors disabled:opacity-50 font-medium shadow-md"
-          >
-            <Download size={18} />
-            {isDownloading ? 'Generating PDF...' : 'Download PDF'}
-          </button>
-        </div>
-      </div>
 
-      {/* Main Preview Area */}
-      <div className="flex-1 h-full relative">
-        <ResumePreview 
-          resumeData={displayResume} 
-          selectedTemplate={activeTemplate} 
-          sectionOrder={sectionOrder}
-        />
-      </div>
+                  <div className="space-y-4 pt-1 border-t border-zinc-100">
+                    <div className="text-[10px] text-zinc-400 font-medium">
+                      <span className="font-extrabold text-zinc-500 uppercase tracking-widest block text-[8px] mb-0.5">Recommended For</span>
+                      {t.recommendedFor}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button 
+                        onClick={() => setZoomModalTemplate(t)}
+                        className="py-2 text-[10px] font-extrabold text-zinc-700 hover:text-zinc-900 bg-zinc-50 hover:bg-zinc-100 rounded-lg border border-zinc-200 transition-colors uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Eye size={12} /> Preview
+                      </button>
+                      <button 
+                        onClick={() => handleUseTemplate(t.id)}
+                        className="py-2 text-[10px] font-extrabold text-white bg-[#1e1b4b] hover:bg-[#2c2770] rounded-lg shadow-sm hover:shadow transition-all uppercase tracking-wider flex items-center justify-center gap-1 border-none cursor-pointer"
+                      >
+                        Use Style
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </main>
+
+      {/* Canva-Grade Live Overlay Modal */}
+      {zoomModalTemplate && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 lg:p-6">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-6xl h-[90vh] flex flex-col lg:flex-row overflow-hidden shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
+            
+            {/* Modal Body: A4 live replica preview */}
+            <div className="flex-1 h-full bg-zinc-950 overflow-auto flex justify-center items-start p-6 custom-scrollbar">
+              <div 
+                className="w-[816px] bg-white shadow-2xl ring-1 ring-zinc-200/50 my-auto shrink-0 select-none"
+                style={{ width: '816px' }}
+              >
+                <TailorRender resume={displayResume} templateName={zoomModalTemplate.id} />
+              </div>
+            </div>
+
+            {/* Sidebar Inspector Panel */}
+            <div className="w-full lg:w-[320px] bg-zinc-900 border-t lg:border-t-0 lg:border-l border-zinc-850 flex flex-col justify-between p-6 shrink-0 text-white">
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block">Template Details</span>
+                  <button 
+                    onClick={() => setZoomModalTemplate(null)}
+                    className="p-1 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors border-none bg-transparent cursor-pointer"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-black tracking-tight uppercase">{zoomModalTemplate.name}</h2>
+                    <span className="text-[10px] font-black px-1.5 py-0.5 bg-green-650 text-white rounded">
+                      ATS {zoomModalTemplate.atsScore}%
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    {zoomModalTemplate.description}
+                  </p>
+                </div>
+
+                <div className="border-t border-zinc-800 pt-4 space-y-3 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500 font-bold">Layout Grid:</span>
+                    <span className="font-extrabold text-zinc-300">{zoomModalTemplate.layout}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500 font-bold">Photo Support:</span>
+                    <span className="font-extrabold text-zinc-300">{zoomModalTemplate.photo}</span>
+                  </div>
+                </div>
+
+                <div className="border-t border-zinc-800 pt-4 space-y-2">
+                  <span className="text-[9.5px] font-black text-zinc-500 uppercase tracking-widest block">Ideal for positions</span>
+                  <p className="text-xs text-zinc-300 leading-relaxed font-semibold">
+                    {zoomModalTemplate.recommendedFor}
+                  </p>
+                </div>
+              </div>
+
+              {/* Sidebar Action Buttons */}
+              <div className="space-y-3 pt-6 border-t border-zinc-800">
+                <button 
+                  onClick={() => {
+                    handleUseTemplate(zoomModalTemplate.id);
+                    setZoomModalTemplate(null);
+                  }}
+                  className="w-full py-3 bg-[#00bda5] hover:bg-[#00a894] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 border-none cursor-pointer shadow-md"
+                >
+                  <CheckCircle2 size={16} /> Use Style
+                </button>
+                <button 
+                  onClick={() => setZoomModalTemplate(null)}
+                  className="w-full py-3 bg-zinc-800 hover:bg-zinc-755 text-zinc-300 hover:text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 border border-zinc-700 cursor-pointer"
+                >
+                  <Minimize2 size={14} /> Back to Gallery
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
     </div>
   );
 }

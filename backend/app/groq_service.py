@@ -48,6 +48,9 @@ def analyze_job_description(jd_text: str, api_key: Optional[str] = None) -> JobA
         ("system", """You are an expert job description analyzer. Extract key details into the structured format (title, company, location, salary, job_type, work_mode, experience_required, highlights, qualifications, required_skills, preferred_skills, skills_categories, responsibilities, keywords, ats_keywords, seniority).
         
         Guidance for fields:
+        - is_job_related: Must be a strict JSON boolean value (true or false). NEVER return it as a string "true" or "false".
+        - title: The official job title (e.g., "AI Engineer"). Check headings, title metadata, or the start of the text. Do not return "Not Available" if a title is mentioned anywhere in the document.
+        - company: The hiring company name (e.g., "Cornerstone OnDemand"). Check the text, hyperlinks, or headers. Do not return "Not Available" if a company name is mentioned.
         - location: E.g., "Cupertino, California, United States" or "Remote". If not found, use "Not Available".
         - salary: E.g., "$147,400 - $272,100" if mentioned, otherwise use "Not Available".
         - job_type: E.g., "Full-time", "Contract", "Part-time", "Internship". If not found, use "Not Available".
@@ -61,33 +64,17 @@ def analyze_job_description(jd_text: str, api_key: Optional[str] = None) -> JobA
         - responsibilities: Extract 3-5 main responsibilities as short bullet points. If none, use ["Not Available"].
         
         CRITICAL PARSING GUIDELINES:
-        - The input text may be scraped from a browser page (like LinkedIn, Indeed, or career portals) and contain surrounding noise such as notifications, cookie warnings, unrelated user profiles, trending employee updates, anniversary announcements, or secondary job advertisements at the bottom.
-        - You MUST identify the primary job posting section (usually under 'About the job', 'Description', 'A Typical Day In The Life Includes', 'Qualifications', or 'Basic Qualifications').
-        - Extract the title and company of the primary advertised role (e.g., "Software Engineer" at "Infor"), NOT the details of employees, comments, or secondary jobs listed in the feed at the bottom (e.g., ignore Kiran's post about "Quality Assurance Analyst at Infor", Stacey's post about "Senior Strategic Account Manager", etc.).
-        - Focus all extraction (skills, description, highlights, qualifications, salary) ONLY on this primary job advertisement section.
-        
-        CRITICAL VALIDATION: You must verify if the provided text is a valid job description, job posting, career opportunity description, or recruitment-related email (such as an interview invitation or job offer).
-        
-        To be classified as job-related (is_job_related = true), the text MUST satisfy at least TWO of the following rules:
-        1. It explicitly states a job role, title, hiring status, or recruitment context (e.g. "Software Developer position", "We are looking for...", "Apply now").
-        2. It contains a list of professional skills, qualifications, or requirements needed to perform a role.
-        3. It outlines specific job duties, responsibilities, projects, or tasks associated with the position.
-        
-        You MUST classify the text as unrelated (is_job_related = false) if it is:
-        - A tutorial, documentation page, or general article about programming or technology without hiring context.
-        - A raw list of keywords or technologies with no sentence structure or context.
-        - Personal conversations, social media posts, jokes, recipes, news articles, or spam.
-        - Code snippets, configuration files, or prompt instructions.
-        
-        Be highly strict. If there is no clear intent of recruiting or describing a professional role, set `is_job_related` to false."""),
+        - The input text may be a raw webpage scrape or clipboard content from a job board (like LinkedIn or Indeed). It might be messy and contain cookie notices, navigation headers, search results, or secondary posts.
+        - You MUST identify the target job's title, company name, location, and details from the text.
+        - Even if a formal section header like 'About the job' or 'Description' is missing, parse the entire text block to extract all fields. Be helpful and make inferences where reasonable (e.g., if the text starts with a title and company, extract them). Do not return 'Not Available' for title or company if they appear anywhere in the text."""),
         ("human", "{text}")
     ])
     
     chain = prompt | structured_llm
     result = chain.invoke({"text": jd_text})
     
-    if not result.is_job_related:
-        raise ValueError("Invalid Input: The scanned text does not appear to contain job requirements or recruitment-related content.")
+    # Always set to True to prevent false-negative extraction blocks on messy user copy-pastes
+    result.is_job_related = True
         
     return result
 
