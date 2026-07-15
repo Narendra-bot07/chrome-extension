@@ -3,6 +3,7 @@ import { Download, Sparkles, CheckCircle2, ShieldCheck, ChevronRight, X, ZoomIn,
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import TailorRender from './Resume/TailorRender';
+import DownloadPage from '../pages/DownloadPage';
 
 const TEMPLATES_LIST = [
   { 
@@ -85,17 +86,27 @@ const MiniPreview = ({ resume, templateId }) => {
 
 export default function TemplateSelectionView({ onBack }) {
   const navigate = useNavigate();
-  const { tailoredResume, parsedResume, selectedTemplate, setSelectedTemplate } = useApp();
+  const { 
+    tailoredResume, 
+    parsedResume, 
+    selectedTemplate, 
+    setSelectedTemplate,
+    customFileName,
+    setCustomFileName,
+    companyName
+  } = useApp();
   const displayResume = tailoredResume || parsedResume;
   const [isDownloading, setIsDownloading] = useState(false);
   const [filter, setFilter] = useState('all'); // 'all' | 'no-photo' | 'with-photo'
   const [zoomModalTemplate, setZoomModalTemplate] = useState(null); // active zoomed template object
+  const [selectedTemplateId, setSelectedTemplateId] = useState(null);
+  const [editingFileName, setEditingFileName] = useState('');
 
   const activeTemplate = selectedTemplate || 'ExecutiveATS';
 
   const handleUseTemplate = (id) => {
     setSelectedTemplate(id);
-    navigate('/download');
+    setSelectedTemplateId(id);
   };
 
   const handleDownload = async (templateId) => {
@@ -350,6 +361,12 @@ export default function TemplateSelectionView({ onBack }) {
             </div>
 
           </div>
+        </div>
+      )}
+      {/* Full Screen Download & Reorder Overlay Pop-up Modal */}
+      {selectedTemplateId && (
+        <div className="fixed inset-0 z-50 bg-zinc-950 flex flex-col animate-in fade-in duration-200">
+          <DownloadPage onClose={() => setSelectedTemplateId(null)} />
         </div>
       )}
     </div>

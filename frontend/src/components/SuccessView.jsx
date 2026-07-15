@@ -1,5 +1,8 @@
-import React from 'react';
-import { Check, Download, RotateCcw, Cpu, Target, FileCheck, Clock, PlusCircle, ArrowUpRight, ShieldCheck } from 'lucide-react';
+import React, { useState } from 'react';
+import { 
+  Check, Download, RotateCcw, Cpu, Target, FileCheck, Clock, 
+  PlusCircle, ArrowUpRight, ShieldCheck, ClipboardCheck, ArrowRight, X 
+} from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 function SuccessView({
@@ -8,49 +11,88 @@ function SuccessView({
   onDownloadPDF,
   onReset
 }) {
-  const { isExtension } = useApp();
+  const { 
+    isExtension, 
+    activeApplicationId, 
+    updateApplicationStage, 
+    fetchApplications, 
+    session,
+    apiUrl 
+  } = useApp();
+
+  const [appliedStatus, setAppliedStatus] = useState('Ready To Apply');
+  const [quickNotes, setQuickNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+
   const premiumMetrics = [
     { label: "AI Confidence", value: "98%", icon: Cpu },
     { label: "ATS Match Score", value: "96/100", icon: Target },
     { label: "Resume Quality", value: "Excellent", icon: FileCheck },
-    { label: "Recruiter Read Time", value: "6s", icon: Clock },
-    { label: "Keywords Added", value: "14 keywords", icon: PlusCircle },
-    { label: "Sections Improved", value: "3 sections", icon: ArrowUpRight },
-    { label: "Tailoring Duration", value: "4.2s", icon: ShieldCheck },
-    { label: "Resume Version", value: "v2.4.0", icon: FileCheck }
+    { label: "Recruiter Read Time", value: "6s", icon: Clock }
   ];
+
+  const handleSaveAndConfirm = async () => {
+    setSaving(true);
+    try {
+      const token = session?.access_token || localStorage.getItem('access_token');
+      if (token && activeApplicationId) {
+        // First update stage
+        await updateApplicationStage(activeApplicationId, appliedStatus);
+        
+        // Then update notes if present
+        if (quickNotes.trim()) {
+          await fetch(`${apiUrl}/api/v1/applications/${activeApplicationId}`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              notes: quickNotes
+            })
+          });
+        }
+        
+        // Refresh application state
+        await fetchApplications();
+      }
+    } catch (e) {
+      console.error("Failed to update application tracker status:", e);
+    } finally {
+      setSaving(false);
+      onReset(); // Closes modal and navigates to /job-tracker
+    }
+  };
 
   return (
     <div className={`flex-1 flex flex-col justify-between py-6 select-none text-zinc-650 dark:text-zinc-350 font-sans mx-auto w-full ${
-      isExtension ? 'max-w-md' : 'max-w-4xl'
+      isExtension ? 'max-w-md' : 'max-w-xl'
     }`}>
-      <div className="flex-1 flex flex-col items-center justify-center space-y-6">
+      <div className="flex-1 flex flex-col items-center justify-center space-y-5">
         
         {/* Glowing Success Ring */}
-        <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-500 shadow-sm animate-fadeIn">
-          <Check size={20} className="stroke-[3]" />
+        <div className="w-11 h-11 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-500 shadow-sm animate-fadeIn">
+          <Check size={18} className="stroke-[3]" />
         </div>
         
         <div className="text-center space-y-1 px-4">
           <h3 className="text-xs font-black uppercase tracking-widest text-zinc-950 dark:text-zinc-50">Export Successful</h3>
-          <p className="text-[11px] text-zinc-500 dark:text-zinc-450 leading-relaxed font-bold">
-            Your optimized resume has been compiled into a professional LaTeX-style vector PDF.
+          <p className="text-[10px] text-zinc-550 dark:text-zinc-400 font-bold">
+            LaTeX-style vector PDF downloaded successfully.
           </p>
         </div>
 
         {/* Premium Details Grid */}
-        <div className={`w-full grid gap-3.5 p-4 bg-zinc-50 dark:bg-zinc-900/30 border border-zinc-200/50 dark:border-zinc-850 rounded-2xl ${
-          isExtension ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-4'
-        }`}>
+        <div className="w-full grid grid-cols-2 gap-2.5 p-3.5 bg-zinc-50 dark:bg-zinc-900/30 border border-zinc-200/50 dark:border-zinc-850 rounded-2xl">
           {premiumMetrics.map((metric, idx) => {
             const Icon = metric.icon;
             return (
-              <div key={idx} className="flex flex-col gap-1 p-2 bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800/80 rounded-xl">
-                <span className="text-[8px] font-black text-zinc-400 dark:text-zinc-550 uppercase tracking-widest flex items-center gap-1.5">
-                  <Icon size={10} className="text-zinc-400 dark:text-zinc-500" />
+              <div key={idx} className="flex flex-col gap-0.5 p-2 bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800/80 rounded-xl">
+                <span className="text-[7.5px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest flex items-center gap-1">
+                  <Icon size={9} />
                   {metric.label}
                 </span>
-                <span className="text-xs font-extrabold text-zinc-850 dark:text-zinc-100">
+                <span className="text-xs font-extrabold text-zinc-800 dark:text-zinc-200">
                   {metric.value}
                 </span>
               </div>
@@ -58,28 +100,72 @@ function SuccessView({
           })}
         </div>
 
-        <div className="p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl max-w-full text-center">
-          <span className="text-[9px] font-mono text-zinc-500 dark:text-zinc-450 font-bold">
-            {(tailoredResume?.personal_info?.name || 'User').replace(/\s+/g, '_')}_{companyName.replace(/\s+/g, '_')}_Resume.pdf
-          </span>
+        {/* INTERACTIVE TRACKING FORM */}
+        <div className="w-full p-4 bg-zinc-50 dark:bg-zinc-900/30 border border-zinc-250/60 dark:border-zinc-805 rounded-2xl space-y-3.5 shadow-2xs">
+          <div className="space-y-1">
+            <span className="text-[8.5px] font-black text-zinc-450 dark:text-zinc-500 uppercase tracking-widest flex items-center gap-1.5">
+              <ClipboardCheck size={11} className="text-[#00bda5]" /> Application Status Tracker
+            </span>
+            <p className="text-[9.5px] text-zinc-500 font-bold uppercase">
+              Select current stage for {companyName || 'Employer'}:
+            </p>
+          </div>
+
+          {/* Status option chips */}
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { id: 'Ready To Apply', label: 'Not Submitted' },
+              { id: 'Applied', label: 'Applied' },
+              { id: 'Interview', label: 'Interview' }
+            ].map(opt => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setAppliedStatus(opt.id)}
+                className={`py-2 px-2 border rounded-xl text-[10px] font-extrabold uppercase tracking-wider transition cursor-pointer select-none ${
+                  appliedStatus === opt.id
+                    ? 'bg-brand/10 border-brand text-brand font-black'
+                    : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-650 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-850'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Quick Notes Input */}
+          <div className="space-y-1">
+            <label className="text-[8.5px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest block">Quick notes</label>
+            <input
+              type="text"
+              value={quickNotes}
+              onChange={(e) => setQuickNotes(e.target.value)}
+              placeholder="Referral name, job URL, comments..."
+              className="w-full text-xs px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl focus:outline-hidden focus:border-[#00bda5] font-semibold"
+            />
+          </div>
         </div>
+
       </div>
 
       {/* Options CTA */}
-      <div className="space-y-2 pt-6">
+      <div className="space-y-2 pt-5 shrink-0">
         <button 
-          onClick={onDownloadPDF}
-          className="w-full py-3 bg-white hover:bg-zinc-50 dark:bg-zinc-900 dark:hover:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+          type="button"
+          onClick={handleSaveAndConfirm}
+          disabled={saving}
+          className="w-full py-3 bg-[#00bda5] hover:bg-[#00a894] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-1 cursor-pointer border-none shadow-md"
         >
-          <Download size={13} />
-          Download PDF Copy
+          {saving ? "Updating..." : "Save & Sync Dashboard"}
+          <ArrowRight size={13} className="ml-1" />
         </button>
+        
         <button 
-          onClick={onReset}
-          className="w-full py-3 bg-[#00bda5] hover:bg-[#00a894] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 cursor-pointer border-none"
+          type="button"
+          onClick={onDownloadPDF}
+          className="w-full py-2 bg-transparent hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-550 dark:text-zinc-400 font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer border-none"
         >
-          <RotateCcw size={13} />
-          Analyze Another Job
+          <Download size={11} /> Download Another Copy
         </button>
       </div>
     </div>

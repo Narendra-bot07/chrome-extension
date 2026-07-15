@@ -6,6 +6,7 @@ from api.v1.tailoring import router as tailoring_router
 from api.v1.analytics import router as analytics_router
 from api.v1.profile import router as profile_router
 from api.v1.health import router as health_router
+from api.v1.applications import router as applications_router
 
 api_router = APIRouter()
 
@@ -17,3 +18,4 @@ api_router.include_router(tailoring_router)
 api_router.include_router(analytics_router)
 api_router.include_router(profile_router)
 api_router.include_router(health_router)
+api_router.include_router(applications_router)

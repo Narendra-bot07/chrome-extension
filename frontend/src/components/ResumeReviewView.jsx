@@ -12,7 +12,149 @@ function ResumeReviewView({
   onBack,
   loading
 }) {
-  const { darkMode } = useApp();
+  const { darkMode, apiUrl, apiKey, jobAnalysis, setReviewSuggestions, comparison } = useApp();
+  const [activeEditSection, setActiveEditSection] = useState(null);
+  const [customPrompt, setCustomPrompt] = useState("");
+  const [refining, setRefining] = useState(false);
+
+  const handleRefineSection = async (sectionType) => {
+    if (!customPrompt.trim()) return;
+    setRefining(true);
+    try {
+      const targetSuggestions = suggestions.filter(s => s.sectionType === sectionType);
+      
+      let sectionData;
+      if (sectionType === 'summary') {
+        const summarySuggest = targetSuggestions[0];
+        sectionData = {
+          original: parsedResume.summary || "",
+          current_suggested: summarySuggest ? summarySuggest.suggested : (parsedResume.summary || "")
+        };
+      } else if (sectionType === 'skills') {
+        sectionData = targetSuggestions.map(s => s.skillName);
+      } else {
+        sectionData = targetSuggestions.map(s => s.suggested);
+      }
+
+      const headers = {};
+      if (apiKey) headers["x-groq-key"] = apiKey;
+
+      const res = await fetch(`${apiUrl}/api/refine-section`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...headers
+        },
+        body: JSON.stringify({
+          section_type: sectionType,
+          section_data: sectionData,
+          prompt: customPrompt,
+          job: jobAnalysis
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error("Section refinement failed on backend.");
+      }
+
+      const data = await res.json();
+      const refined = data.refined;
+
+      if (sectionType === 'summary') {
+        const updated = suggestions.map(s => {
+          if (s.sectionType === 'summary') {
+            return { ...s, suggested: refined, status: 'pending' };
+          }
+          return s;
+        });
+        setReviewSuggestions(updated);
+      } else if (sectionType === 'skills') {
+        const updated = suggestions.map(s => {
+          if (s.sectionType === 'skills') {
+            const idx = targetSuggestions.findIndex(ts => ts.id === s.id);
+            if (idx !== -1 && refined[idx]) {
+              return { ...s, skillName: refined[idx], suggested: refined[idx], status: 'pending' };
+            }
+          }
+          return s;
+        });
+        setReviewSuggestions(updated);
+      } else {
+        const updated = suggestions.map(s => {
+          if (s.sectionType === sectionType) {
+            const idx = targetSuggestions.findIndex(ts => ts.id === s.id);
+            if (idx !== -1 && refined[idx]) {
+              return { ...s, suggested: refined[idx], status: 'pending' };
+            }
+          }
+          return s;
+        });
+        setReviewSuggestions(updated);
+      }
+
+      setActiveEditSection(null);
+      setCustomPrompt("");
+    } catch (e) {
+      console.error(e);
+      alert("Error refining section: " + e.message);
+    } finally {
+      setRefining(false);
+    }
+  };
+
+  const renderRefinePanel = (sectionType) => {
+    return (
+      <div className="p-4 bg-emerald-550/[0.04] dark:bg-emerald-950/10 border border-emerald-500/20 dark:border-emerald-900/30 rounded-xl space-y-3 mt-3 select-none text-left font-sans">
+        <div className="flex justify-between items-center text-[#00bda5] dark:text-emerald-400">
+          <div className="flex items-center gap-1.5 font-sans font-black text-[10px] uppercase tracking-wider">
+            <Sparkles size={12} />
+            <span>Edit with AI</span>
+          </div>
+          <button 
+            onClick={() => setActiveEditSection(null)}
+            className="text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-200 cursor-pointer border-none bg-transparent p-0 flex items-center justify-center"
+          >
+            <span className="text-sm font-bold">×</span>
+          </button>
+        </div>
+        
+        <input
+          type="text"
+          value={customPrompt}
+          onChange={(e) => setCustomPrompt(e.target.value)}
+          placeholder={`Describe how you want this ${sectionType} refined...`}
+          className="w-full text-[11px] px-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 rounded-lg text-zinc-700 dark:text-zinc-300 focus:outline-hidden focus:border-[#00bda5] font-sans"
+        />
+        
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              "Tighten each bullet to one line",
+              "Stronger action verbs",
+              "Lead with the most job-relevant work"
+            ].map((preset, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => setCustomPrompt(preset)}
+                className="px-2.5 py-1 bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 text-zinc-650 dark:text-zinc-350 hover:bg-zinc-50 hover:text-zinc-850 dark:hover:bg-zinc-850 dark:hover:text-white rounded-full text-[9px] font-semibold cursor-pointer transition"
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+          
+          <button
+            onClick={() => handleRefineSection(sectionType)}
+            disabled={refining}
+            className="px-4 py-1.5 bg-[#00bda5] hover:bg-[#00a894] disabled:bg-zinc-300 disabled:dark:bg-zinc-800 text-white rounded-lg text-[9px] font-extrabold uppercase tracking-wider transition cursor-pointer border-none flex items-center gap-1 shadow-xs ml-auto"
+          >
+            {refining ? "Refining..." : "Edit with AI"}
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   // Statistics
   const stats = useMemo(() => {
@@ -111,6 +253,18 @@ function ResumeReviewView({
           </div>
         </div>
 
+        {/* ATS Match Score */}
+        {comparison && (
+          <div className="hidden xs:flex items-center gap-2 border-l border-zinc-200/60 dark:border-zinc-800 pl-3 mr-auto select-none">
+            <div className="text-left">
+              <p className="text-[7px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest leading-none">ATS Score</p>
+              <p className="text-[11px] font-black text-[#00bda5] dark:text-[#00bda5] leading-none mt-1">
+                {comparison.ats_score_before}% → {comparison.ats_score_after}%
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Bulk Controls */}
         <div className="flex gap-1.5">
           <button
@@ -153,20 +307,44 @@ function ResumeReviewView({
 
           {/* Professional Summary */}
           <div className="space-y-1.5">
-            <h2 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest font-sans border-b border-zinc-150 dark:border-zinc-850 pb-1">
-              Professional Summary
-            </h2>
+            <div className="flex justify-between items-center border-b border-zinc-150 dark:border-zinc-850 pb-1">
+              <h2 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest font-sans">
+                Professional Summary
+              </h2>
+              <button
+                onClick={() => {
+                  setActiveEditSection(activeEditSection === 'summary' ? null : 'summary');
+                  setCustomPrompt('');
+                }}
+                className="flex items-center gap-1 text-[8px] bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 text-[#00bda5] px-2 py-0.5 rounded font-extrabold uppercase tracking-wider transition cursor-pointer border-none"
+              >
+                <Sparkles size={8} /> Edit with AI
+              </button>
+            </div>
             <div className="text-[11px] leading-relaxed text-justify text-zinc-600 dark:text-zinc-350">
               {renderInlineDiff('summary', parsedResume.summary, 0, 0)}
             </div>
+            {activeEditSection === 'summary' && renderRefinePanel('summary')}
           </div>
 
           {/* Work Experience */}
           {parsedResume.experience?.length > 0 && (
             <div className="space-y-4">
-              <h2 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest font-sans border-b border-zinc-150 dark:border-zinc-850 pb-1">
-                Work Experience
-              </h2>
+              <div className="flex justify-between items-center border-b border-zinc-150 dark:border-zinc-850 pb-1">
+                <h2 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest font-sans">
+                  Work Experience
+                </h2>
+                <button
+                  onClick={() => {
+                    setActiveEditSection(activeEditSection === 'experience' ? null : 'experience');
+                    setCustomPrompt('');
+                  }}
+                  className="flex items-center gap-1 text-[8px] bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 text-[#00bda5] px-2 py-0.5 rounded font-extrabold uppercase tracking-wider transition cursor-pointer border-none"
+                >
+                  <Sparkles size={8} /> Edit with AI
+                </button>
+              </div>
+              {activeEditSection === 'experience' && renderRefinePanel('experience')}
               {parsedResume.experience.map((exp, idx) => (
                 <div key={idx} className="space-y-1">
                   <div className="flex justify-between font-extrabold text-[11px] text-zinc-850 dark:text-zinc-200 font-sans">
@@ -188,9 +366,21 @@ function ResumeReviewView({
           {/* Projects */}
           {parsedResume.projects?.length > 0 && (
             <div className="space-y-4">
-              <h2 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest font-sans border-b border-zinc-150 dark:border-zinc-850 pb-1">
-                Projects
-              </h2>
+              <div className="flex justify-between items-center border-b border-zinc-150 dark:border-zinc-850 pb-1">
+                <h2 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest font-sans">
+                  Projects
+                </h2>
+                <button
+                  onClick={() => {
+                    setActiveEditSection(activeEditSection === 'projects' ? null : 'projects');
+                    setCustomPrompt('');
+                  }}
+                  className="flex items-center gap-1 text-[8px] bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 text-[#00bda5] px-2 py-0.5 rounded font-extrabold uppercase tracking-wider transition cursor-pointer border-none"
+                >
+                  <Sparkles size={8} /> Edit with AI
+                </button>
+              </div>
+              {activeEditSection === 'projects' && renderRefinePanel('projects')}
               {parsedResume.projects.map((proj, idx) => (
                 <div key={idx} className="space-y-1">
                   <div className="flex justify-between font-extrabold text-[11px] text-zinc-850 dark:text-zinc-200 font-sans">
@@ -211,9 +401,21 @@ function ResumeReviewView({
           {/* Skills */}
           {parsedResume.skills?.length > 0 && (
             <div className="space-y-2">
-              <h2 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest font-sans border-b border-zinc-150 dark:border-zinc-850 pb-1">
-                Skills
-              </h2>
+              <div className="flex justify-between items-center border-b border-zinc-150 dark:border-zinc-850 pb-1">
+                <h2 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest font-sans">
+                  Skills
+                </h2>
+                <button
+                  onClick={() => {
+                    setActiveEditSection(activeEditSection === 'skills' ? null : 'skills');
+                    setCustomPrompt('');
+                  }}
+                  className="flex items-center gap-1 text-[8px] bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 text-[#00bda5] px-2 py-0.5 rounded font-extrabold uppercase tracking-wider transition cursor-pointer border-none"
+                >
+                  <Sparkles size={8} /> Edit with AI
+                </button>
+              </div>
+              {activeEditSection === 'skills' && renderRefinePanel('skills')}
               <div className="flex flex-wrap gap-1.5 leading-relaxed text-[11px] font-sans text-zinc-650 dark:text-zinc-350">
                 {parsedResume.skills.join(', ')}
                 

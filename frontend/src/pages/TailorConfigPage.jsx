@@ -19,14 +19,25 @@ function TailorConfigPage() {
     }
   };
 
+  const handleSelectIntensity = (intensityId) => {
+    setTailoringIntensity(intensityId);
+    if (intensityId === 'minimal') {
+      setSelectedSections(['summary', 'skills']);
+    } else if (intensityId === 'balanced') {
+      setSelectedSections(['summary', 'skills', 'experience', 'projects']);
+    } else if (intensityId === 'aggressive') {
+      setSelectedSections(['summary', 'skills', 'experience', 'projects', 'education', 'certifications', 'achievements']);
+    }
+  };
+
   return (
     <ResumeTailoringConfigView
       selectedSections={selectedSections}
       onToggleSection={handleToggleSection}
       tailoringIntensity={tailoringIntensity}
-      onSelectIntensity={(intensityId) => setTailoringIntensity(intensityId)}
+      onSelectIntensity={handleSelectIntensity}
       onStartTailoring={handleRunGapAnalysis}
-      onBack={() => navigate('/resume-review')}
+      onBack={() => navigate('/tailor')}
       loading={loading}
       validationMessage={selectedSections.length === 0 ? "Select at least one resume section to continue." : ""}
     />

@@ -26,5 +26,16 @@
   },
   "side_panel": {
     "default_path": "index.html"
-  }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.linkedin.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
 }

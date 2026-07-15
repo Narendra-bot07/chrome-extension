@@ -15,7 +15,7 @@ from app.schemas import (
     TailoringReport
 )
 from app.parser import extract_text
-from app.groq_service import parse_resume, analyze_job_description, generate_tailoring_patch, apply_tailoring_patch, generate_cover_letter
+from app.groq_service import parse_resume, analyze_job_description, generate_tailoring_patch, apply_tailoring_patch, generate_cover_letter, refine_section_with_ai
 
 
 from app.template_engine import template_engine
@@ -181,4 +181,31 @@ async def api_download_cover_letter_pdf(request: CoverLetterResult):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate cover letter PDF: {str(e)}"
+        )
+
+from typing import Any
+class RefineSectionRequest(BaseModel):
+    section_type: str
+    section_data: Any
+    prompt: str
+    job: JobAnalysis
+
+@router.post("/refine-section")
+async def api_refine_section(
+    request: RefineSectionRequest,
+    x_groq_key: Optional[str] = Header(None)
+):
+    try:
+        refined_content = refine_section_with_ai(
+            section_type=request.section_type,
+            section_data=request.section_data,
+            prompt=request.prompt,
+            job=request.job,
+            api_key=x_groq_key
+        )
+        return {"refined": refined_content}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Refinement failed: {str(e)}"
         )

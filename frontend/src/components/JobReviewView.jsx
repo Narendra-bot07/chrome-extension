@@ -176,28 +176,6 @@ function JobReviewView({
       {/* 3. Bottom controls and actions footer */}
       <div className="border-t border-zinc-200 dark:border-zinc-800 pt-4 flex flex-col gap-3 mt-auto bg-transparent flex-shrink-0">
         
-        {/* Applied & Favorite Checkboxes */}
-        <div className="flex justify-center items-center gap-6">
-          <label className="flex items-center gap-2 text-xs font-bold text-zinc-600 dark:text-zinc-400 cursor-pointer p-1.5 border border-zinc-200 dark:border-zinc-800 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition">
-            <input 
-              type="checkbox" 
-              checked={applied} 
-              onChange={(e) => setApplied(e.target.checked)}
-              className="accent-[#00bda5] w-3.5 h-3.5"
-            />
-            <span>Applied</span>
-          </label>
-          <button 
-            onClick={() => setFavourite(!favourite)}
-            className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 border border-zinc-200 dark:border-zinc-800 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition cursor-pointer ${
-              favourite ? 'text-red-500 border-red-200 dark:border-red-900/40 bg-red-50/30' : 'text-zinc-600 dark:text-zinc-400'
-            }`}
-          >
-            <Heart size={14} className={favourite ? 'fill-red-500 text-red-500' : 'text-zinc-400'} />
-            <span>Favourite</span>
-          </button>
-        </div>
-
         {/* Resume & Cover Letter Buttons Row */}
         <div className="grid grid-cols-2 gap-3">
           <button 

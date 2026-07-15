@@ -42,31 +42,31 @@ export function AppProvider({ children }) {
           setUser(data.user);
           setSession({ access_token: storedToken });
 
-            // Fetch resumes to check if any exist and load the latest one if not already set
-            try {
-              const resumes = await fetchResumesList(storedToken);
-              if (resumes && resumes.length > 0) {
-                 const latestResume = {
-                  ...(resumes[0].parsed_content || resumes[0]),
-                  id: resumes[0].id,
-                  file_name: resumes[0].file_name,
-                  file_size: resumes[0].file_size,
-                  file_type: resumes[0].file_type,
-                  created_at: resumes[0].created_at
-                };
-                setParsedResume(latestResume);
-                const isExt = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local;
-                if (isExt) {
-                  chrome.storage.local.set({ parsedResume: latestResume });
-                } else {
-                  localStorage.setItem('parsed_resume', JSON.stringify(latestResume));
-                }
+          // Fetch resumes to check if any exist and load the latest one if not already set
+          try {
+            const resumes = await fetchResumesList(storedToken);
+            if (resumes && resumes.length > 0) {
+              const latestResume = {
+                ...(resumes[0].parsed_content || resumes[0]),
+                id: resumes[0].id,
+                file_name: resumes[0].file_name,
+                file_size: resumes[0].file_size,
+                file_type: resumes[0].file_type,
+                created_at: resumes[0].created_at
+              };
+              setParsedResume(latestResume);
+              const isExt = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local;
+              if (isExt) {
+                chrome.storage.local.set({ parsedResume: latestResume });
+              } else {
+                localStorage.setItem('parsed_resume', JSON.stringify(latestResume));
               }
-            } catch (rErr) {
-              console.error("Failed to fetch resumes on startup:", rErr);
-            } finally {
-              setLoadingResume(false);
             }
+          } catch (rErr) {
+            console.error("Failed to fetch resumes on startup:", rErr);
+          } finally {
+            setLoadingResume(false);
+          }
         } else {
           localStorage.removeItem('access_token');
           setLoadingResume(false);
@@ -137,19 +137,22 @@ export function AppProvider({ children }) {
   const [coverLetter, setCoverLetter] = useState(null);
 
   // Summarization & Checklist states
-  const [isApplied, setIsApplied] = useState(false);
-  const [isFavourite, setIsFavourite] = useState(false);
+  const [applications, setApplications] = useState([]);
+  const [activeApplicationId, setActiveApplicationId] = useState(null);
+  const [pendingApplicationSubmitted, setPendingApplicationSubmitted] = useState(null);
   const [selectedSkills, setSelectedSkills] = useState([]);
   const [selectedRewrites, setSelectedRewrites] = useState([]);
   const [acceptSummary, setAcceptSummary] = useState(false);
 
   // Config states
   const [selectedSections, setSelectedSections] = useState([
-    'summary', 'skills', 'experience', 'projects', 'education', 'certifications', 'achievements'
+    'summary', 'skills', 'experience', 'projects'
   ]);
   const [tailoringIntensity, setTailoringIntensity] = useState('balanced');
+  const [jobDetectionStatus, setJobDetectionStatus] = useState("idle");
   const [reviewSuggestions, setReviewSuggestions] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState('ExecutiveATS');
+  const [customFileName, setCustomFileName] = useState('');
 
   // Loading states
   const [loadingProgress, setLoadingProgress] = useState(0);
@@ -163,12 +166,67 @@ export function AppProvider({ children }) {
   // Load configs & saved resume
   useEffect(() => {
     if (isExtension) {
-      chrome.storage.local.get(['groqApiKey', 'apiUrl', 'parsedResume', 'tailoredResume', 'selectedTemplate'], (result) => {
+      chrome.storage.local.get(['groqApiKey', 'apiUrl', 'parsedResume', 'tailoredResume', 'selectedTemplate', 'lastExtractedJob'], (result) => {
         if (result.groqApiKey) setApiKey(result.groqApiKey);
         if (result.apiUrl) setApiUrl(result.apiUrl);
         if (result.parsedResume) setParsedResume(result.parsedResume);
         if (result.tailoredResume) setTailoredResume(result.tailoredResume);
         if (result.selectedTemplate) setSelectedTemplate(result.selectedTemplate);
+        if (result.lastExtractedJob) {
+          const { title, company, text, url } = result.lastExtractedJob;
+          const cleanedTitle = title
+            .replace(/\(verified job\)/i, '')
+            .replace(/\(remote\)/i, '')
+            .replace(/\(hybrid\)/i, '')
+            .replace(/\(on-site\)/i, '')
+            .split('•')[0]
+            .split('-')[0]
+            .split('–')[0]
+            .trim();
+
+          const cleanedCompany = company
+            .replace(/•.*$/g, '')
+            .split('-')[0]
+            .split('–')[0]
+            .trim();
+
+          let cleanedText = text;
+          const noiseDividers = [
+            "About the company",
+            "Trending employee content",
+            "Put your best foot forward",
+            "Fraud Awareness",
+            "E-Verify",
+            "US Only",
+            "Illinois: Click here",
+            "Equal Opportunity Employer",
+            "Fraud Privacy Policy",
+            "We value your privacy",
+            "Interested in working with us",
+            "Members who share that",
+            "Hire a resume writer",
+            "Get a resume review",
+            "Job search faster with Premium",
+            "Access company insights",
+            "Set alert for similar jobs"
+          ];
+
+          for (const divider of noiseDividers) {
+            const matchIdx = cleanedText.toLowerCase().indexOf(divider.toLowerCase());
+            if (matchIdx !== -1 && matchIdx > 200) {
+              cleanedText = cleanedText.substring(0, matchIdx);
+            }
+          }
+
+          cleanedText = cleanedText
+            .replace(/At \w+, we strive for an environment[\s\S]*$/gi, '')
+            .trim();
+
+          setJobText(cleanedText);
+          setCompanyName(cleanedCompany);
+          setJobTitle(cleanedTitle);
+          setLastAnalyzedUrl(url);
+        }
       });
     } else {
       const savedKey = localStorage.getItem('groq_api_key');
@@ -196,6 +254,181 @@ export function AppProvider({ children }) {
         setSelectedTemplate(savedTemplate);
       }
     }
+  }, []);
+
+  const fetchApplications = async () => {
+    try {
+      const token = session?.access_token || localStorage.getItem('access_token');
+      if (!token) return;
+
+      const res = await fetch(`${apiUrl}/api/v1/applications/`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setApplications(data || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch applications:", err);
+    }
+  };
+
+  const updateApplicationStage = async (appId, newStage) => {
+    try {
+      const token = session?.access_token || localStorage.getItem('access_token');
+      if (!token || !appId) return;
+
+      const app = applications.find(a => a.id === appId);
+      if (!app) return;
+
+      const updatedTimeline = [...(app.timeline || [])];
+      updatedTimeline.push({
+        event: `Moved to ${newStage}`,
+        timestamp: new Date().toISOString()
+      });
+
+      const res = await fetch(`${apiUrl}/api/v1/applications/${appId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          current_stage: newStage,
+          timeline: updatedTimeline
+        })
+      });
+      if (res.ok) {
+        await fetchApplications();
+      }
+    } catch (err) {
+      console.error("Failed to update application stage:", err);
+    }
+  };
+
+  // Fetch applications when session is loaded or changed
+  useEffect(() => {
+    if (session) {
+      fetchApplications();
+    }
+  }, [session]);
+
+  // Listen for real-time job description extraction events from Content/Background Scripts
+  useEffect(() => {
+    if (!isExtension) return;
+
+    const handleRuntimeMessage = (message) => {
+      if (message.type === "APPLICATION_SUBMITTED" && message.data) {
+        console.log("[AppContext] Application submission event received:", message.data);
+        setPendingApplicationSubmitted(message.data);
+        return;
+      }
+
+      if (jobAnalysis) {
+        console.log("[AppContext] Ignoring background job change message because a job is already being tailored.");
+        return;
+      }
+
+      if (message.type === "JOB_CHANGE_DETECTED") {
+        console.log("[AppContext] Navigation observed. Transitioning to loading...");
+        setJobAnalysis(null);
+        setJobText("");
+        setJobDetectionStatus("loading");
+      } else if (message.type === "JOB_EXTRACTED" && message.data) {
+        console.log("[AppContext] Real-time job extraction message received in side panel:", message.data.title);
+        setJobDetectionStatus("extracting");
+        const { title, company, text, url } = message.data;
+
+        const cleanedTitle = title
+          .replace(/\(verified job\)/i, '')
+          .replace(/\(remote\)/i, '')
+          .replace(/\(hybrid\)/i, '')
+          .replace(/\(on-site\)/i, '')
+          .split('•')[0]
+          .split('-')[0]
+          .split('–')[0]
+          .trim();
+
+        const cleanedCompany = company
+          .replace(/•.*$/g, '')
+          .split('-')[0]
+          .split('–')[0]
+          .trim();
+
+        let cleanedText = text;
+        const noiseDividers = [
+          "About the company",
+          "Trending employee content",
+          "Put your best foot forward",
+          "Fraud Awareness",
+          "E-Verify",
+          "US Only",
+          "Illinois: Click here",
+          "Equal Opportunity Employer",
+          "Fraud Privacy Policy",
+          "We value your privacy",
+          "Interested in working with us",
+          "Members who share that",
+          "Hire a resume writer",
+          "Get a resume review",
+          "Job search faster with Premium",
+          "Access company insights",
+          "Set alert for similar jobs"
+        ];
+
+        for (const divider of noiseDividers) {
+          const matchIdx = cleanedText.toLowerCase().indexOf(divider.toLowerCase());
+          if (matchIdx !== -1 && matchIdx > 200) {
+            cleanedText = cleanedText.substring(0, matchIdx);
+          }
+        }
+
+        cleanedText = cleanedText
+          .replace(/At \w+, we strive for an environment[\s\S]*$/gi, '')
+          .trim();
+
+        setJobText(cleanedText);
+        setCompanyName(cleanedCompany);
+        setJobTitle(cleanedTitle);
+        setLastAnalyzedUrl(url);
+      }
+    };
+
+    chrome.runtime.onMessage.addListener(handleRuntimeMessage);
+    return () => chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
+  }, [isExtension]);
+
+  // Check for job details injected from extension side panel
+  useEffect(() => {
+    const checkInjectedJob = () => {
+      const text = localStorage.getItem('scraped_job_text');
+      const company = localStorage.getItem('scraped_company');
+      const title = localStorage.getItem('scraped_title');
+      const analysis = localStorage.getItem('scraped_analysis');
+
+      if (text) {
+        setJobText(text);
+        if (company) setCompanyName(company);
+        if (title) setJobTitle(title);
+        if (analysis) {
+          try {
+            setJobAnalysis(JSON.parse(analysis));
+          } catch (e) {
+            console.error("Error parsing injected job analysis:", e);
+          }
+        }
+
+        // Clean up
+        localStorage.removeItem('scraped_job_text');
+        localStorage.removeItem('scraped_company');
+        localStorage.removeItem('scraped_title');
+        localStorage.removeItem('scraped_analysis');
+      }
+    };
+
+    checkInjectedJob();
+    window.addEventListener('scrapedJobLoaded', checkInjectedJob);
+    return () => window.removeEventListener('scrapedJobLoaded', checkInjectedJob);
   }, []);
 
   // Save/Remove resume context storage
@@ -303,6 +536,11 @@ export function AppProvider({ children }) {
 
   // Scan Active Page content
   const handleScanPage = async (isManual = false) => {
+    if (!isManual && jobAnalysis) {
+      console.log("[AppContext] Ignoring auto-scan because a job is already being tailored.");
+      return;
+    }
+
     if (isManual) {
       setLastAnalyzedUrl('');
     }
@@ -321,16 +559,84 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tab) throw new Error("No active browser window or tab found.");
-      
+
       const url = tab.url || '';
-      if (url.includes('linkedin.com/in/') || 
-          url.includes('linkedin.com/feed/') || 
-          url.includes('linkedin.com/messaging/') || 
-          url.includes('linkedin.com/mynetwork/')) {
+
+      // If it's a LinkedIn page, first check if we have the job cached in storage
+      if (url.includes('linkedin.com')) {
+        const cached = await new Promise((resolve) => {
+          chrome.storage.local.get(['lastExtractedJob'], (result) => {
+            resolve(result.lastExtractedJob);
+          });
+        });
+
+        if (cached && cached.url === url && cached.text) {
+          console.log("[AppContext] Loading active LinkedIn job description from storage cache.");
+
+          const cleanedTitle = cached.title
+            .replace(/\(verified job\)/i, '')
+            .replace(/\(remote\)/i, '')
+            .replace(/\(hybrid\)/i, '')
+            .replace(/\(on-site\)/i, '')
+            .split('•')[0]
+            .split('-')[0]
+            .split('–')[0]
+            .trim();
+
+          const cleanedCompany = cached.company
+            .replace(/•.*$/g, '')
+            .split('-')[0]
+            .split('–')[0]
+            .trim();
+
+          let cleanedText = cached.text;
+          const noiseDividers = [
+            "About the company",
+            "Trending employee content",
+            "Put your best foot forward",
+            "Fraud Awareness",
+            "E-Verify",
+            "US Only",
+            "Illinois: Click here",
+            "Equal Opportunity Employer",
+            "Fraud Privacy Policy",
+            "We value your privacy",
+            "Interested in working with us",
+            "Members who share that",
+            "Hire a resume writer",
+            "Get a resume review",
+            "Job search faster with Premium",
+            "Access company insights",
+            "Set alert for similar jobs"
+          ];
+
+          for (const divider of noiseDividers) {
+            const matchIdx = cleanedText.toLowerCase().indexOf(divider.toLowerCase());
+            if (matchIdx !== -1 && matchIdx > 200) {
+              cleanedText = cleanedText.substring(0, matchIdx);
+            }
+          }
+
+          cleanedText = cleanedText
+            .replace(/At \w+, we strive for an environment[\s\S]*$/gi, '')
+            .trim();
+
+          setJobText(cleanedText);
+          setCompanyName(cleanedCompany);
+          setJobTitle(cleanedTitle);
+          setLastAnalyzedUrl(url);
+          return;
+        }
+      }
+
+      if (url.includes('linkedin.com/in/') ||
+        url.includes('linkedin.com/feed/') ||
+        url.includes('linkedin.com/messaging/') ||
+        url.includes('linkedin.com/mynetwork/')) {
         console.log("Auto-scan bypassed: Active tab is a profile, feed, network, or message page.");
         return;
       }
-      
+
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: () => {
@@ -391,7 +697,7 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
             const mainHeading = document.querySelector('h1, h2.job-title, .job-title, [class*="jobTitle"], [class*="job-title"], .app-title');
             if (mainHeading) title = mainHeading.innerText.trim();
           }
-          
+
           if (!company || company === 'Target Company') {
             const ogSiteEl = document.querySelector('meta[property="og:site_name"]');
             if (ogSiteEl && ogSiteEl.getAttribute('content')) {
@@ -455,13 +761,13 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
           };
         }
       });
-      
+
       let activeResult = null;
       if (results && results.length > 0) {
         const validFrames = results
           .map(r => r.result)
           .filter(r => r && r.text && r.text.length > 100);
-          
+
         if (validFrames.length > 0) {
           validFrames.sort((a, b) => b.text.length - a.text.length);
           activeResult = validFrames[0];
@@ -481,13 +787,13 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
           .split('-')[0]
           .split('–')[0]
           .trim();
-          
+
         const cleanedCompany = company
           .replace(/•.*$/g, '')
           .split('-')[0]
           .split('–')[0]
           .trim();
-          
+
         let cleanedText = text;
         const noiseDividers = [
           "About the company",
@@ -508,14 +814,14 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
           "Access company insights",
           "Set alert for similar jobs"
         ];
-        
+
         for (const divider of noiseDividers) {
           const matchIdx = cleanedText.toLowerCase().indexOf(divider.toLowerCase());
           if (matchIdx !== -1 && matchIdx > 200) {
             cleanedText = cleanedText.substring(0, matchIdx);
           }
         }
-        
+
         cleanedText = cleanedText
           .replace(/At \w+, we strive for an environment[\s\S]*$/gi, '')
           .trim();
@@ -546,13 +852,13 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
         if (prev >= 90) return 90;
         const stepSize = prev < 25 ? 10 : (prev < 50 ? 8 : (prev < 75 ? 5 : 2));
         const nextVal = prev + stepSize;
-        
+
         if (nextVal < 20) setLoadingMessage("Reading Job Description...");
         else if (nextVal < 40) setLoadingMessage("Extracting Company Information...");
         else if (nextVal < 60) setLoadingMessage("Analyzing Required Skills...");
         else if (nextVal < 80) setLoadingMessage("Finding ATS Keywords...");
         else setLoadingMessage("Understanding Responsibilities...");
-        
+
         return nextVal;
       });
     }, 200);
@@ -569,7 +875,7 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
         },
         body: JSON.stringify({ jd_text: jobText })
       });
-      
+
       if (!jobRes.ok) {
         throw new Error("Job analysis error: " + (await jobRes.json()).detail);
       }
@@ -580,11 +886,38 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
 
       clearInterval(progressInterval);
       setLoadingProgress(0);
+      setJobDetectionStatus("ready");
+
+      if (isExtension) {
+        const webAppUrl = "http://localhost:5173";
+        chrome.tabs.create({ url: `${webAppUrl}/#/tailor` }, (newTab) => {
+          if (!newTab) return;
+
+          const listener = (tabId, info) => {
+            if (tabId === newTab.id && info.status === 'complete') {
+              chrome.tabs.onUpdated.removeListener(listener);
+              chrome.scripting.executeScript({
+                target: { tabId: newTab.id },
+                func: (text, company, title, analysis) => {
+                  localStorage.setItem('scraped_job_text', text);
+                  localStorage.setItem('scraped_company', company);
+                  localStorage.setItem('scraped_title', title);
+                  localStorage.setItem('scraped_analysis', JSON.stringify(analysis));
+                  window.dispatchEvent(new Event('scrapedJobLoaded'));
+                },
+                args: [jobText, analyzedJob.company || companyName, analyzedJob.title || jobTitle, analyzedJob]
+              });
+            }
+          };
+          chrome.tabs.onUpdated.addListener(listener);
+        });
+      }
     } catch (error) {
       clearInterval(progressInterval);
       console.error(error);
       setApiError(error.message || "Failed to extract job description.");
       setLoadingProgress(0);
+      setJobDetectionStatus("idle");
     }
   };
 
@@ -626,38 +959,38 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
 
       const formData = new FormData();
       formData.append("file", resumeFile);
-      
+
       const parseRes = await fetch(`${apiUrl}/api/v1/resumes/upload`, {
         method: "POST",
         headers,
         body: formData
       });
-      
-        if (!parseRes.ok) {
-          throw new Error("Resume parse error: " + (await parseRes.json()).detail);
-        }
-        const resumeRecord = await parseRes.json();
-        await fetchResumesList();
-        const currentResume = {
-          ...(resumeRecord.parsed_content || resumeRecord),
-          id: resumeRecord.id,
-          file_name: resumeRecord.file_name,
-          file_size: resumeRecord.file_size,
-          file_type: resumeRecord.file_type,
-          created_at: resumeRecord.created_at
-        };
-        setParsedResume(currentResume);
-  
-        if (isExtension) {
-          chrome.storage.local.set({ parsedResume: currentResume });
-        }
-  
-        clearInterval(progressInterval);
-        setLoadingProgress(100);
-        setLoadingMessage("Parsing Complete!");
-        setTimeout(() => {
-          navigate('/resume-review');
-        }, 300);
+
+      if (!parseRes.ok) {
+        throw new Error("Resume parse error: " + (await parseRes.json()).detail);
+      }
+      const resumeRecord = await parseRes.json();
+      await fetchResumesList();
+      const currentResume = {
+        ...(resumeRecord.parsed_content || resumeRecord),
+        id: resumeRecord.id,
+        file_name: resumeRecord.file_name,
+        file_size: resumeRecord.file_size,
+        file_type: resumeRecord.file_type,
+        created_at: resumeRecord.created_at
+      };
+      setParsedResume(currentResume);
+
+      if (isExtension) {
+        chrome.storage.local.set({ parsedResume: currentResume });
+      }
+
+      clearInterval(progressInterval);
+      setLoadingProgress(100);
+      setLoadingMessage("Parsing Complete!");
+      setTimeout(() => {
+        navigate('/resume-review');
+      }, 300);
 
     } catch (error) {
       clearInterval(progressInterval);
@@ -699,7 +1032,7 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
       if (parsedResume.id && (!parsedResume.experience || parsedResume.experience.length === 0) && parsedResume.raw_text) {
         setLoadingMessage("Parsing Resume with AI for Tailoring...");
         setLoadingProgress(15);
-        
+
         const token = session?.access_token || localStorage.getItem('access_token');
         const parseHeaders = {};
         if (token) parseHeaders["Authorization"] = `Bearer ${token}`;
@@ -709,11 +1042,11 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
           method: "POST",
           headers: parseHeaders
         });
-        
+
         if (!parseRes.ok) {
           throw new Error("AI parsing on-demand failed: " + (await parseRes.json()).detail);
         }
-        
+
         const updatedRecord = await parseRes.json();
         activeParsed = {
           ...(updatedRecord.parsed_content || updatedRecord),
@@ -729,7 +1062,7 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
         } else {
           localStorage.setItem('parsed_resume', JSON.stringify(activeParsed));
         }
-        
+
         setLoadingMessage("AI Parsing Complete! Starting Gap Analysis...");
         setLoadingProgress(35);
       }
@@ -748,11 +1081,11 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
           job: jobAnalysis
         })
       });
-      
+
       if (!compareRes.ok) {
         throw new Error("Comparison error: " + (await compareRes.json()).detail);
       }
-      
+
       const compResult = await compareRes.json();
       setComparison(compResult);
 
@@ -760,7 +1093,7 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
       let idCounter = 1;
       const patch = compResult.patch;
 
-      if (patch.summary) {
+      if (selectedSections.includes('summary') && patch.summary) {
         list.push({
           id: `change-${idCounter++}`,
           category: 'Professional Summary',
@@ -776,7 +1109,7 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
         });
       }
 
-      if (patch.experience) {
+      if (selectedSections.includes('experience') && patch.experience) {
         Object.keys(patch.experience).forEach(itemIdxStr => {
           const itemIdx = parseInt(itemIdxStr, 10);
           const bulletsPatch = patch.experience[itemIdxStr];
@@ -801,7 +1134,7 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
         });
       }
 
-      if (patch.projects) {
+      if (selectedSections.includes('projects') && patch.projects) {
         Object.keys(patch.projects).forEach(itemIdxStr => {
           const itemIdx = parseInt(itemIdxStr, 10);
           const bulletsPatch = patch.projects[itemIdxStr];
@@ -826,7 +1159,7 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
         });
       }
 
-      if (patch.skills_append && patch.skills_append.length > 0) {
+      if (selectedSections.includes('skills') && patch.skills_append && patch.skills_append.length > 0) {
         patch.skills_append.forEach(skill => {
           list.push({
             id: `change-${idCounter++}`,
@@ -906,8 +1239,52 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
       const tailoredResult = await tailorResponse.json();
       setTailoredResume(tailoredResult);
       setLoading(false);
+
+      // Auto-create application session
+      try {
+        const appData = {
+          company_name: companyName || "Target Company",
+          job_title: jobTitle || "Software Engineer",
+          location: jobAnalysis?.location || "Remote",
+          job_url: lastAnalyzedUrl || "",
+          resume_version: "v1 (Tailored)",
+          cover_letter_version: null,
+          ats_score: comparison?.ats_score || (comparison?.score ? parseFloat(comparison.score) : 85),
+          resume_match_score: comparison?.match_score || (comparison?.score ? parseFloat(comparison.score) : 80),
+          current_stage: "Ready To Apply",
+          timeline: [
+            { event: "JD Extracted", timestamp: new Date().toISOString() },
+            { event: "Resume Tailored", timestamp: new Date().toISOString() }
+          ]
+        };
+        const token = session?.access_token || localStorage.getItem('access_token');
+        if (token) {
+          const res = await fetch(`${apiUrl}/api/v1/applications/`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify(appData)
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setActiveApplicationId(data.id);
+            // Refresh list
+            const freshRes = await fetch(`${apiUrl}/api/v1/applications/`, {
+              headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (freshRes.ok) {
+              setApplications(await freshRes.json());
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Failed to automatically create application session:", err);
+      }
+
       navigate('/templates');
-    } catch(err) {
+    } catch (err) {
       console.error(err);
       setApiError(err.message || "Failed to apply changes.");
       setLoading(false);
@@ -917,18 +1294,18 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
   const handleDownloadFinalPDF = async (layoutLevel) => {
     const activeRes = tailoredResume || parsedResume;
     if (!activeRes) return;
-    
+
     let finalRes = { ...activeRes };
     if (layoutLevel !== undefined) {
       const pruneLevel = Math.max(0, 5 - Math.floor(layoutLevel / 2));
       finalRes = compressResumeData(activeRes, pruneLevel);
       finalRes.layout_level = layoutLevel;
     }
-    
+
     setLoading(true);
     setLoadingProgress(50);
     setLoadingMessage("Generating high-quality PDF...");
-    
+
     try {
       const response = await fetch(`${apiUrl}/api/download-pdf?company_name=${encodeURIComponent(companyName || 'Company')}`, {
         method: "POST",
@@ -949,8 +1326,9 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
       const rawName = activeRes.personal_info?.name || 'User';
       const cleanUser = rawName.replace(/\s+/g, '_');
       const cleanCompany = (companyName || 'Company').replace(/\s+/g, '_');
-      const filename = `${cleanUser}_${cleanCompany}_Resume.pdf`;
-      
+      const defaultFilename = `${cleanUser}_${cleanCompany}_Resume.pdf`;
+      const filename = customFileName.trim() ? (customFileName.endsWith('.pdf') ? customFileName : `${customFileName}.pdf`) : defaultFilename;
+
       const objectUrl = window.URL.createObjectURL(blob);
       if (isExtension && chrome.downloads) {
         chrome.downloads.download({
@@ -966,8 +1344,41 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
         link.click();
         document.body.removeChild(link);
       }
-      
-      navigate('/download');
+
+      if (activeApplicationId) {
+        try {
+          const token = session?.access_token || localStorage.getItem('access_token');
+          if (token) {
+            const matchedAppRes = await fetch(`${apiUrl}/api/v1/applications/`, {
+              headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (matchedAppRes.ok) {
+              const appList = await matchedAppRes.json();
+              setApplications(appList);
+              const currentApp = appList.find(a => a.id === activeApplicationId);
+              if (currentApp) {
+                const updatedTimeline = [...(currentApp.timeline || [])];
+                updatedTimeline.push({
+                  event: "Resume Downloaded",
+                  timestamp: new Date().toISOString()
+                });
+                await fetch(`${apiUrl}/api/v1/applications/${activeApplicationId}`, {
+                  method: "PUT",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                  },
+                  body: JSON.stringify({
+                    timeline: updatedTimeline
+                  })
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Failed to update timeline with download:", err);
+        }
+      }
     } catch (e) {
       console.error(e);
       alert("Error generating PDF: " + e.message);
@@ -997,7 +1408,7 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
       const blob = await response.blob();
       const cleanCompany = (companyName || 'Company').replace(/\s+/g, '_');
       const filename = `${cleanCompany}_Cover_Letter.pdf`;
-      
+
       const objectUrl = window.URL.createObjectURL(blob);
       if (isExtension && chrome.downloads) {
         chrome.downloads.download({
@@ -1013,7 +1424,7 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
         link.click();
         document.body.removeChild(link);
       }
-      
+
       setLoadingProgress(100);
       setLoading(false);
     } catch (error) {
@@ -1024,15 +1435,65 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
   };
 
   const handleGenerateCoverLetter = async () => {
+    if (!parsedResume) {
+      alert("Please select or upload a resume before drafting a cover letter.");
+      return;
+    }
+    if (!jobAnalysis) {
+      alert("Please analyze a job description first.");
+      return;
+    }
+
     setLoading(true);
     setLoadingProgress(10);
     setLoadingMessage("Drafting tailored cover letter...");
-    
+
     const clInterval = setInterval(() => {
       setLoadingProgress((prev) => (prev >= 90 ? 90 : prev + 15));
     }, 200);
 
+    let activeParsed = parsedResume;
+
     try {
+      // Lazy parse if resume experience is empty and raw_text is present
+      if (parsedResume.id && (!parsedResume.experience || parsedResume.experience.length === 0) && parsedResume.raw_text) {
+        setLoadingMessage("Parsing Resume with AI for Cover Letter...");
+        setLoadingProgress(15);
+
+        const token = session?.access_token || localStorage.getItem('access_token');
+        const parseHeaders = {};
+        if (token) parseHeaders["Authorization"] = `Bearer ${token}`;
+        if (apiKey) parseHeaders["x-groq-key"] = apiKey;
+
+        const parseRes = await fetch(`${apiUrl}/api/v1/resumes/${parsedResume.id}/parse`, {
+          method: "POST",
+          headers: parseHeaders
+        });
+
+        if (!parseRes.ok) {
+          throw new Error("AI parsing on-demand failed: " + (await parseRes.json()).detail);
+        }
+
+        const updatedRecord = await parseRes.json();
+        activeParsed = {
+          ...(updatedRecord.parsed_content || updatedRecord),
+          id: updatedRecord.id,
+          file_name: updatedRecord.file_name,
+          file_size: updatedRecord.file_size,
+          file_type: updatedRecord.file_type,
+          created_at: updatedRecord.created_at
+        };
+        setParsedResume(activeParsed);
+        if (isExtension) {
+          chrome.storage.local.set({ parsedResume: activeParsed });
+        } else {
+          localStorage.setItem('parsed_resume', JSON.stringify(activeParsed));
+        }
+
+        setLoadingMessage("AI Parsing Complete! Drafting Cover Letter...");
+        setLoadingProgress(35);
+      }
+
       const headers = {};
       if (apiKey) headers["x-groq-key"] = apiKey;
 
@@ -1043,7 +1504,7 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
           ...headers
         },
         body: JSON.stringify({
-          resume: parsedResume,
+          resume: activeParsed,
           job: jobAnalysis
         })
       });
@@ -1054,7 +1515,44 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
 
       const clResult = await response.json();
       setCoverLetter(clResult);
-      
+
+      // Auto-update cover letter in current application session
+      if (activeApplicationId) {
+        try {
+          const token = session?.access_token || localStorage.getItem('access_token');
+          if (token) {
+            const matchedAppRes = await fetch(`${apiUrl}/api/v1/applications/`, {
+              headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (matchedAppRes.ok) {
+              const appList = await matchedAppRes.json();
+              setApplications(appList);
+              const currentApp = appList.find(a => a.id === activeApplicationId);
+              if (currentApp) {
+                const updatedTimeline = [...(currentApp.timeline || [])];
+                updatedTimeline.push({
+                  event: "Cover Letter Generated",
+                  timestamp: new Date().toISOString()
+                });
+                await fetch(`${apiUrl}/api/v1/applications/${activeApplicationId}`, {
+                  method: "PUT",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                  },
+                  body: JSON.stringify({
+                    cover_letter_version: "v1",
+                    timeline: updatedTimeline
+                  })
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Failed to update application session with cover letter:", err);
+        }
+      }
+
       clearInterval(clInterval);
       setLoadingProgress(100);
       setLoading(false);
@@ -1092,8 +1590,10 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
       comparison, setComparison,
       tailoredResume, setTailoredResume,
       coverLetter, setCoverLetter,
-      isApplied, setIsApplied,
-      isFavourite, setIsFavourite,
+      applications, setApplications,
+      activeApplicationId, setActiveApplicationId,
+      pendingApplicationSubmitted, setPendingApplicationSubmitted,
+      fetchApplications, updateApplicationStage,
       selectedSkills, setSelectedSkills,
       selectedRewrites, setSelectedRewrites,
       acceptSummary, setAcceptSummary,
@@ -1101,6 +1601,8 @@ Perks: Employee stock programs, Comprehensive medical and dental coverage, Reloc
       tailoringIntensity, setTailoringIntensity,
       reviewSuggestions, setReviewSuggestions,
       selectedTemplate, setSelectedTemplate,
+      customFileName, setCustomFileName,
+      jobDetectionStatus, setJobDetectionStatus,
       loadingProgress, setLoadingProgress,
       loadingMessage, setLoadingMessage,
       loadingType, setLoadingType,

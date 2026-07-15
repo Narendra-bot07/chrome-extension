@@ -16,6 +16,7 @@ import CoverLetterPage from './pages/CoverLetterPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import PrintLayout from './components/Resume/PrintLayout';
+import PrintCoverLetterLayout from './pages/PrintCoverLetterLayout';
 import DashboardPage from './pages/DashboardPage';
 import ProfilePage from './pages/ProfilePage';
 import JobTrackerPage from './pages/JobTrackerPage';
@@ -89,6 +90,7 @@ function AppRoutes() {
         <Route path="/cover-letter" element={<CoverLetterPage />} />
       </Route>
       <Route path="/print" element={<PrintLayout />} />
+      <Route path="/print-cover-letter" element={<PrintCoverLetterLayout />} />
     </Routes>
   );
 }

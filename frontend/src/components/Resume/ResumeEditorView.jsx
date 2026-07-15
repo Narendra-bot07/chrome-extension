@@ -5,6 +5,7 @@ import {
   BookOpen, CheckCircle2, Circle 
 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
+import { useApp } from '../../context/AppContext';
 
 const CORE_SECTIONS = ['personal_info', 'summary', 'education', 'skills', 'experience', 'projects'];
 const OPTIONAL_SECTIONS = ['certifications', 'achievements', 'awards', 'languages', 'volunteer_experience', 'publications'];
@@ -36,6 +37,9 @@ export default function ResumeEditorView({
   reorderOnly = false,
   onPreview
 }) {
+  const { darkMode, selectedTemplate } = useApp();
+  const isTwoColumn = ['CreativeTwoColumn', 'ModernTwoColumn', 'SidebarATS'].includes(selectedTemplate);
+
   const [expandedSections, setExpandedSections] = useState(
     [...CORE_SECTIONS, ...OPTIONAL_SECTIONS].reduce((acc, sec) => ({ ...acc, [sec]: false }), {})
   );
@@ -55,6 +59,12 @@ export default function ResumeEditorView({
     });
     return active;
   });
+
+  const leftAllowed = ['skills', 'education', 'certifications', 'languages', 'interests'];
+  const rightAllowed = ['summary', 'experience', 'projects', 'achievements', 'volunteer_experience', 'publications'];
+
+  const leftSections = activeSections.filter(s => leftAllowed.includes(s) && s !== 'personal_info');
+  const rightSections = activeSections.filter(s => rightAllowed.includes(s) && s !== 'personal_info');
 
   const toggleSection = (section) => {
     if (reorderOnly) return;
@@ -115,11 +125,32 @@ export default function ResumeEditorView({
     const { source, destination, type } = result;
 
     if (type === 'SECTIONS') {
-      const newActive = Array.from(activeSections);
-      const [removed] = newActive.splice(source.index, 1);
-      newActive.splice(destination.index, 0, removed);
-      setActiveSections(newActive);
-      setParsedResume({ ...parsedResume, section_order: newActive });
+      if (source.droppableId !== destination.droppableId) {
+        return; // Fixed template layout: prevent dragging between columns
+      }
+      
+      if (source.droppableId === 'LEFT_COLUMN') {
+        const newLeft = Array.from(leftSections);
+        const [removed] = newLeft.splice(source.index, 1);
+        newLeft.splice(destination.index, 0, removed);
+        const merged = ['personal_info', ...newLeft, ...rightSections];
+        setActiveSections(merged);
+        setParsedResume({ ...parsedResume, section_order: merged });
+      } else if (source.droppableId === 'RIGHT_COLUMN') {
+        const newRight = Array.from(rightSections);
+        const [removed] = newRight.splice(source.index, 1);
+        newRight.splice(destination.index, 0, removed);
+        const merged = ['personal_info', ...leftSections, ...newRight];
+        setActiveSections(merged);
+        setParsedResume({ ...parsedResume, section_order: merged });
+      } else {
+        const newActive = Array.from(activeSections.filter(s => s !== 'personal_info'));
+        const [removed] = newActive.splice(source.index, 1);
+        newActive.splice(destination.index, 0, removed);
+        const merged = ['personal_info', ...newActive];
+        setActiveSections(merged);
+        setParsedResume({ ...parsedResume, section_order: merged });
+      }
     } else {
       const section = type;
       const items = Array.from(parsedResume[section] || []);
@@ -298,6 +329,99 @@ export default function ResumeEditorView({
     );
   };
 
+  const renderDraggableSection = (section, index) => {
+    const isExpanded = expandedSections[section];
+    const strength = getSectionStrength(section);
+    const isComplete = strength === 100;
+    
+    return (
+      <Draggable key={section} draggableId={section} index={index}>
+        {(provided) => (
+          <div 
+            ref={provided.innerRef} 
+            {...provided.draggableProps} 
+            className={`bg-white border rounded-2xl overflow-hidden transition-all duration-300 group shadow-sm ${
+              isExpanded 
+                ? 'border-indigo-500 ring-4 ring-indigo-50/40 shadow-md' 
+                : 'border-slate-200 hover:border-slate-350 hover:shadow'
+            }`}
+          >
+            {/* Premium Redesigned Section Header */}
+            <div className="flex items-center justify-between py-4 px-5 bg-slate-50/30 hover:bg-slate-50/70 transition-colors">
+              <div className="flex items-center gap-3">
+                {/* Section Drag handle */}
+                <div {...provided.dragHandleProps} className="text-slate-400 hover:text-slate-600 cursor-grab active:cursor-grabbing p-0.5">
+                  <GripVertical size={15} />
+                </div>
+
+                {/* Section Collapse button */}
+                <div className={`flex items-center gap-2.5 ${reorderOnly ? 'cursor-default' : 'cursor-pointer'}`} onClick={() => toggleSection(section)}>
+                  {!reorderOnly && (
+                    <button className="text-slate-400 hover:text-slate-800 transition border-none bg-transparent cursor-pointer p-0.5">
+                      {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    </button>
+                  )}
+                  
+                  {/* Section icon indicator */}
+                  <div className="p-1.5 bg-slate-100 rounded-lg shrink-0">
+                    {getSectionIcon(section)}
+                  </div>
+
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-800">
+                    {section.replace('_', ' ')}
+                  </span>
+
+                  {/* Quality Strength Badge */}
+                  {!reorderOnly && (
+                    <span className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded-md border shrink-0 ${
+                      isComplete 
+                        ? 'bg-green-50 border-green-150 text-green-700' 
+                        : strength > 50 
+                        ? 'bg-amber-50 border-amber-150 text-amber-700' 
+                        : 'bg-rose-50 border-rose-150 text-rose-700'
+                    }`}>
+                      {strength}% {isComplete ? 'Complete' : 'Filled'}
+                    </span>
+                  )}
+
+                  {/* AI Tailored Badge */}
+                  {!reorderOnly && section === 'summary' && (
+                    <span className="px-1.5 py-0.5 bg-indigo-50 border border-indigo-150 text-indigo-700 text-[8px] font-extrabold rounded-md flex items-center gap-0.5 shrink-0">
+                      <Sparkles size={8} /> AI TAILORED
+                    </span>
+                  )}
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-3">
+                {/* Completion checkmark */}
+                {!reorderOnly && (
+                  <div className="shrink-0">
+                    {isComplete ? (
+                      <CheckCircle2 size={15} className="text-green-500" />
+                    ) : (
+                      <Circle size={15} className="text-slate-300" />
+                    )}
+                  </div>
+                )}
+
+                {/* Only allow deleting Optional sections */}
+                {!CORE_SECTIONS.includes(section) && !reorderOnly && (
+                  <button onClick={() => removeSection(section)} className="opacity-0 group-hover:opacity-100 text-rose-400 hover:text-rose-600 transition p-1 border-none bg-transparent cursor-pointer">
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Section Content (Collapsible) */}
+            {isExpanded && renderSectionContent(section)}
+          </div>
+        )}
+      </Draggable>
+    );
+  };
+
   return (
     <div className="h-full flex flex-col justify-between bg-white text-slate-800 font-sans">
       <div className="flex-1 overflow-y-auto px-5 pt-5 pb-24 custom-scrollbar">
@@ -310,106 +434,74 @@ export default function ResumeEditorView({
           </div>
         )}
 
-        <DragDropContext onDragEnd={onDragEnd}>
-          <Droppable droppableId="SECTIONS" type="SECTIONS">
-            {(provided) => (
-              <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-3.5">
-                {activeSections.map((section, index) => {
-                  const isExpanded = expandedSections[section];
-                  const strength = getSectionStrength(section);
-                  const isComplete = strength === 100;
-                  
-                  return (
-                    <Draggable key={section} draggableId={section} index={index}>
-                      {(provided) => (
-                        <div 
-                          ref={provided.innerRef} 
-                          {...provided.draggableProps} 
-                          className={`bg-white border rounded-2xl overflow-hidden transition-all duration-300 group shadow-sm ${
-                            isExpanded 
-                              ? 'border-indigo-500 ring-4 ring-indigo-50/40 shadow-md' 
-                              : 'border-slate-200 hover:border-slate-350 hover:shadow'
-                          }`}
-                        >
-                          {/* Premium Redesigned Section Header */}
-                          <div className="flex items-center justify-between py-4 px-5 bg-slate-50/30 hover:bg-slate-50/70 transition-colors">
-                            <div className="flex items-center gap-3">
-                              {/* Section Drag handle */}
-                              <div {...provided.dragHandleProps} className="text-slate-400 hover:text-slate-600 cursor-grab active:cursor-grabbing p-0.5">
-                                <GripVertical size={15} />
-                              </div>
-
-                              {/* Section Collapse button */}
-                              <div className={`flex items-center gap-2.5 ${reorderOnly ? 'cursor-default' : 'cursor-pointer'}`} onClick={() => toggleSection(section)}>
-                                {!reorderOnly && (
-                                  <button className="text-slate-400 hover:text-slate-800 transition border-none bg-transparent cursor-pointer p-0.5">
-                                    {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                                  </button>
-                                )}
-                                
-                                {/* Section icon indicator */}
-                                <div className="p-1.5 bg-slate-100 rounded-lg shrink-0">
-                                  {getSectionIcon(section)}
-                                </div>
-
-                                <span className="text-xs font-black uppercase tracking-wider text-slate-800">
-                                  {section.replace('_', ' ')}
-                                </span>
-
-                                {/* Quality Strength Badge */}
-                                {!reorderOnly && (
-                                  <span className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded-md border shrink-0 ${
-                                    isComplete 
-                                      ? 'bg-green-50 border-green-150 text-green-700' 
-                                      : strength > 50 
-                                      ? 'bg-amber-50 border-amber-150 text-amber-700' 
-                                      : 'bg-rose-50 border-rose-150 text-rose-700'
-                                  }`}>
-                                    {strength}% {isComplete ? 'Complete' : 'Filled'}
-                                  </span>
-                                )}
-
-                                {/* AI Tailored Badge */}
-                                {!reorderOnly && section === 'summary' && (
-                                  <span className="px-1.5 py-0.5 bg-indigo-50 border border-indigo-150 text-indigo-700 text-[8px] font-extrabold rounded-md flex items-center gap-0.5 shrink-0">
-                                    <Sparkles size={8} /> AI TAILORED
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            
-                            <div className="flex items-center gap-3">
-                              {/* Completion checkmark */}
-                              {!reorderOnly && (
-                                <div className="shrink-0">
-                                  {isComplete ? (
-                                    <CheckCircle2 size={15} className="text-green-500" />
-                                  ) : (
-                                    <Circle size={15} className="text-slate-300" />
-                                  )}
-                                </div>
-                              )}
-
-                              {/* Only allow deleting Optional sections */}
-                              {!CORE_SECTIONS.includes(section) && !reorderOnly && (
-                                <button onClick={() => removeSection(section)} className="opacity-0 group-hover:opacity-100 text-rose-400 hover:text-rose-600 transition p-1 border-none bg-transparent cursor-pointer">
-                                  <Trash2 size={14} />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Section Content (Collapsible) */}
-                          {isExpanded && renderSectionContent(section)}
-                        </div>
-                      )}
-                    </Draggable>
-                  );
-                })}
-                {provided.placeholder}
+        {/* Personal Info Header */}
+        {activeSections.includes('personal_info') && (
+          <div className="mb-4 bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+            <div 
+              className="flex items-center justify-between py-4 px-5 bg-slate-50/30 hover:bg-slate-50/70 transition-colors cursor-pointer"
+              onClick={() => toggleSection('personal_info')}
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-1.5 bg-slate-100 rounded-lg shrink-0">
+                  {getSectionIcon('personal_info')}
+                </div>
+                <span className="text-xs font-black uppercase tracking-wider text-slate-800">Personal Info</span>
               </div>
-            )}
-          </Droppable>
+              <button className="text-slate-400 hover:text-slate-800 transition border-none bg-transparent cursor-pointer">
+                {expandedSections['personal_info'] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+              </button>
+            </div>
+            {expandedSections['personal_info'] && renderSectionContent('personal_info')}
+          </div>
+        )}
+
+        <DragDropContext onDragEnd={onDragEnd}>
+          {isTwoColumn ? (
+            <div className="grid grid-cols-5 gap-4">
+              {/* Left Column (Skills, Education etc.) */}
+              <div className="col-span-2 space-y-3.5">
+                <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest pb-1 border-b border-slate-100 flex justify-between items-center">
+                  <span>Left Column</span>
+                  <span className="text-[8px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold">{leftSections.length}</span>
+                </div>
+                <Droppable droppableId="LEFT_COLUMN" type="SECTIONS">
+                  {(provided) => (
+                    <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-3.5 min-h-[100px]">
+                      {leftSections.map((section, index) => renderDraggableSection(section, index))}
+                      {provided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+              </div>
+              
+              {/* Right Column (Summary, Experience, Projects) */}
+              <div className="col-span-3 space-y-3.5">
+                <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest pb-1 border-b border-slate-100 flex justify-between items-center">
+                  <span>Right Column</span>
+                  <span className="text-[8px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold">{rightSections.length}</span>
+                </div>
+                <Droppable droppableId="RIGHT_COLUMN" type="SECTIONS">
+                  {(provided) => (
+                    <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-3.5 min-h-[100px]">
+                      {rightSections.map((section, index) => renderDraggableSection(section, index))}
+                      {provided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+              </div>
+            </div>
+          ) : (
+            <Droppable droppableId="SECTIONS" type="SECTIONS">
+              {(provided) => (
+                <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-3.5">
+                  {activeSections
+                    .filter(s => s !== 'personal_info')
+                    .map((section, index) => renderDraggableSection(section, index))}
+                  {provided.placeholder}
+                </div>
+              )}
+            </Droppable>
+          )}
         </DragDropContext>
       </div>
 

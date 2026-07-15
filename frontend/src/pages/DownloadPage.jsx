@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { compressResumeData } from '../utils/resumeCompression';
 
-function DownloadPage() {
+function DownloadPage({ onClose }) {
   const navigate = useNavigate();
   const {
     companyName,
@@ -19,11 +19,23 @@ function DownloadPage() {
     parsedResume,
     selectedTemplate,
     handleDownloadFinalPDF,
-    loading
+    loading,
+    customFileName,
+    setCustomFileName
   } = useApp();
 
   const [downloadSuccess, setDownloadSuccess] = useState(false);
   const activeResume = tailoredResume || parsedResume;
+
+  // Initialize output file name on mount
+  useEffect(() => {
+    if (!customFileName && activeResume) {
+      const rawName = activeResume.personal_info?.name || 'User';
+      const cleanUser = rawName.replace(/\s+/g, '_');
+      const cleanCompany = (companyName || 'Company').replace(/\s+/g, '_');
+      setCustomFileName(`${cleanUser}_${cleanCompany}_Resume.pdf`);
+    }
+  }, [activeResume, companyName, customFileName]);
 
   // Typesetting Optimization Solver States
   const [layoutLevel, setLayoutLevel] = useState(7); // Default baseline
@@ -101,6 +113,17 @@ function DownloadPage() {
     setZoom(Math.max(0.3, Math.min(2.5, targetScale)));
     setPanOffset({ x: 0, y: 0 });
   };
+
+  // Auto-fit page to container once layout solver stabilizes or mounts
+  useEffect(() => {
+    if (!solving && lastStabilizedHeight && outerWrapperRef.current) {
+      // Small timeout to ensure DOM container sizes are correctly painted
+      const timer = setTimeout(() => {
+        handleFitPage();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [solving, lastStabilizedHeight]);
 
   // Reset View helper
   const handleResetView = () => {
@@ -186,7 +209,10 @@ function DownloadPage() {
         companyName={companyName}
         tailoredResume={activeResume}
         onDownloadPDF={() => handleDownloadFinalPDF(layoutLevel)}
-        onReset={() => navigate('/')}
+        onReset={() => {
+          if (onClose) onClose();
+          navigate('/job-tracker');
+        }}
       />
     );
   }
@@ -203,18 +229,42 @@ function DownloadPage() {
   const pruneLevel = Math.max(0, 5 - Math.floor(layoutLevel / 2));
   const compressedResume = compressResumeData(activeResume, pruneLevel);
 
+  const isTwoColumn = ['CreativeTwoColumn', 'ModernTwoColumn', 'SidebarATS'].includes(selectedTemplate);
+
   return (
     <div className="flex-1 flex h-full bg-zinc-950 overflow-hidden relative">
       
-      {/* LEFT SIDE: Editor Panel (42% width) */}
-      <div className="w-[42%] min-w-[380px] border-r border-zinc-800 flex flex-col h-full bg-white shrink-0 z-10 shadow-lg">
+      {/* LEFT SIDE: Editor Panel */}
+      <div className={`${isTwoColumn ? 'w-[48%] min-w-[500px]' : 'w-[42%] min-w-[380px]'} border-r border-zinc-200 dark:border-zinc-800 flex flex-col h-full bg-white shrink-0 z-10 shadow-lg`}>
         <div className="p-4 bg-white border-b border-zinc-200 shrink-0">
-          <h1 className="text-sm font-black text-zinc-950 uppercase tracking-tight">
-            Adjust Tailored Details
-          </h1>
-          <p className="text-[9px] text-zinc-400 font-bold uppercase mt-0.5">
-            Modify details & drag sections on the left
-          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-sm font-black text-zinc-950 uppercase tracking-tight">
+                Adjust Tailored Details
+              </h1>
+              <p className="text-[9px] text-zinc-400 font-bold uppercase mt-0.5">
+                Modify details & drag sections on the left
+              </p>
+            </div>
+            <button
+              onClick={onClose || (() => navigate('/templates'))}
+              className="flex items-center gap-1.5 text-[9px] border border-zinc-250 hover:border-zinc-350 text-zinc-550 hover:text-zinc-800 hover:bg-zinc-50 px-2.5 py-1.5 rounded-lg font-extrabold uppercase tracking-wider bg-white transition active:scale-95 shadow-2xs cursor-pointer"
+            >
+              ← Back to Templates
+            </button>
+          </div>
+          
+          {/* Output Filename Customizer Input */}
+          <div className="mt-3.5 pt-3 border-t border-zinc-100 flex items-center gap-2 select-none">
+            <span className="text-[8px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest shrink-0">File Name:</span>
+            <input
+              type="text"
+              value={customFileName || ''}
+              onChange={(e) => setCustomFileName(e.target.value)}
+              placeholder="e.g. Narendra_Bandi_Resume.pdf"
+              className="flex-1 text-[10px] px-2.5 py-1.5 bg-zinc-50 border border-zinc-200 rounded-lg text-zinc-800 focus:outline-hidden focus:border-[#00bda5] font-semibold"
+            />
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto">
           <ResumeEditorView
@@ -233,7 +283,7 @@ function DownloadPage() {
       </div>
 
       {/* RIGHT SIDE: Redesigned Premium Dark Document Workspace (58% width) */}
-      <div className="flex-1 flex flex-col h-full relative">
+      <div className="flex-1 flex flex-col h-full relative min-w-0">
         
         {/* Workspace Document Control Toolbar */}
         <div className="h-14 bg-zinc-900 border-b border-zinc-850 px-6 flex items-center justify-between text-zinc-300 shrink-0 z-20 shadow-md">

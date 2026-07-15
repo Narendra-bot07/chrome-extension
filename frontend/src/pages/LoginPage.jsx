@@ -1,31 +1,51 @@
-import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { Mail, Lock, LogIn, ChevronRight, Eye, EyeOff } from 'lucide-react';
-import { Button } from '../components/ui/Button';
-import { Input, Label } from '../components/ui/Input';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
+import { Mail, Lock, User, ChevronRight, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [isMagicLink, setIsMagicLink] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [errorMsg, setErrorMsg] = useState(null);
-  const [successMsg, setSuccessMsg] = useState(null);
-  
   const navigate = useNavigate();
+  const location = useLocation();
+  const isRegisterPath = location.pathname === '/register';
 
-  const handleEmailAuth = async (e) => {
+  // Auth Mode State (triggered by route change)
+  const [isFlipped, setIsFlipped] = useState(isRegisterPath);
+
+  useEffect(() => {
+    setIsFlipped(location.pathname === '/register');
+  }, [location.pathname]);
+
+  // --- LOGIN STATES ---
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [isMagicLink, setIsMagicLink] = useState(false);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [loginError, setLoginError] = useState(null);
+  const [loginSuccess, setLoginSuccess] = useState(null);
+
+  // --- REGISTER STATES ---
+  const [regFullName, setRegFullName] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regConfirmPassword, setRegConfirmPassword] = useState('');
+  const [regLoading, setRegLoading] = useState(false);
+  const [showRegPassword, setShowRegPassword] = useState(false);
+  const [showRegConfirmPassword, setShowRegConfirmPassword] = useState(false);
+  const [regError, setRegError] = useState(null);
+  const [regSuccess, setRegSuccess] = useState(null);
+
+  // --- LOGIN SUBMIT ---
+  const handleLogin = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
+    setLoginLoading(true);
+    setLoginError(null);
+    setLoginSuccess(null);
 
     try {
       const res = await fetch('http://localhost:8000/api/v1/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email: loginEmail, password: loginPassword })
       });
       
       if (!res.ok) {
@@ -38,17 +58,57 @@ export default function LoginPage() {
       window.location.href = '#/';
       window.location.reload();
     } catch (err) {
-      setErrorMsg(err.message || 'Authentication failed. Please check your credentials.');
+      setLoginError(err.message || 'Authentication failed. Please check your credentials.');
     } finally {
-      setLoading(false);
+      setLoginLoading(false);
     }
   };
 
-  const handleOAuthLogin = async (provider) => {
-    setLoading(true);
-    setErrorMsg(null);
+  // --- REGISTER SUBMIT ---
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    setRegLoading(true);
+    setRegError(null);
+    setRegSuccess(null);
+
+    if (regPassword !== regConfirmPassword) {
+      setRegError("Passwords do not match.");
+      setRegLoading(false);
+      return;
+    }
+
     try {
-      // Direct local developer bypass login for convenience
+      const res = await fetch('http://localhost:8000/api/v1/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: regEmail,
+          password: regPassword,
+          full_name: regFullName
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || 'Sign up failed.');
+      }
+      
+      setRegSuccess("Registration successful! Flipping to Login...");
+      setTimeout(() => {
+        navigate('/login');
+      }, 1500);
+    } catch (err) {
+      setRegError(err.message || "Sign up failed. Please try again.");
+    } finally {
+      setRegLoading(false);
+    }
+  };
+
+  // --- OAUTH BYPASS ---
+  const handleOAuthLogin = async (provider) => {
+    setLoginLoading(true);
+    setLoginError(null);
+    try {
       const res = await fetch('http://localhost:8000/api/v1/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -60,138 +120,421 @@ export default function LoginPage() {
       window.location.href = '#/';
       window.location.reload();
     } catch (err) {
-      setErrorMsg(err.message || `Login with ${provider} failed.`);
+      setLoginError(err.message || `Login with ${provider} failed.`);
     } finally {
-      setLoading(false);
+      setLoginLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 p-6 relative overflow-hidden">
-      {/* Visual background glows */}
-      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-zinc-200 dark:bg-zinc-800/20 rounded-full blur-[120px]" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-zinc-200 dark:bg-zinc-800/20 rounded-full blur-[120px]" />
+    <div className="min-h-screen flex bg-white text-zinc-800 font-sans select-none overflow-hidden relative">
+      
+      {/* Dynamic hardware flip transitions styles */}
+      <style dangerouslySetInnerHTML={{__html: `
+        .perspective-container {
+          perspective: 1500px;
+        }
+        .flip-card-inner {
+          position: relative;
+          width: 100%;
+          height: 640px;
+          transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+          transform-style: preserve-3d;
+        }
+        .flip-card-inner.flipped {
+          transform: rotateY(180deg);
+        }
+        .flip-card-front, .flip-card-back {
+          position: absolute;
+          width: 100%;
+          height: 100%;
+          backface-visibility: hidden;
+          -webkit-backface-visibility: hidden;
+          top: 0;
+          left: 0;
+          background: white;
+          border: 1px solid #e4e4e7;
+          border-radius: 24px;
+          padding: 36px;
+          box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.03), 0 2px 4px -2px rgb(0 0 0 / 0.03);
+          display: flex;
+          flex-col: true;
+          flex-direction: column;
+          justify-content: center;
+        }
+        .flip-card-back {
+          transform: rotateY(180deg);
+        }
+      `}} />
 
-      <div className="w-full max-w-md bg-white dark:bg-zinc-900/60 backdrop-blur-xl border border-zinc-200 dark:border-zinc-800 rounded-3xl p-8 shadow-sm dark:shadow-2xl relative z-10 transition-all duration-300">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-zinc-900 dark:bg-zinc-100 text-zinc-50 dark:text-zinc-900 font-bold text-xl shadow-sm mb-4">
+      {/* LEFT COLUMN: Premium Enterprise Showcase (Static left panel) */}
+      <div 
+        className="hidden lg:flex lg:w-[50%] border-r border-zinc-200 flex-col justify-between p-12 relative overflow-hidden shrink-0"
+        style={{ background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)' }}
+      >
+        {/* Subtle grid pattern background */}
+        <div className="absolute inset-0 opacity-5 bg-[linear-gradient(to_right,#808080_1px,transparent_1px),linear-gradient(to_bottom,#808080_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none" />
+        
+        {/* Soft background glow */}
+        <div className="absolute top-[-10%] left-[-10%] w-[60%] h-[60%] bg-[#00bda5]/5 rounded-full blur-[100px] pointer-events-none" />
+        
+        {/* Brand logo header */}
+        <div className="flex items-center gap-2.5 relative z-10">
+          <div className="w-10 h-10 rounded-xl bg-zinc-955 text-white flex items-center justify-center font-black text-base shadow-xs">
             A
           </div>
-          <h1 className="text-2xl font-extrabold text-zinc-900 dark:text-white tracking-tight">Welcome Back</h1>
-          <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">Tailor your resumes instantly with AI</p>
+          <span className="text-base font-black tracking-tight text-zinc-955 uppercase">
+            Apply<span className="text-[#00bda5]">Flow</span>
+          </span>
         </div>
 
-        {errorMsg && (
-          <div className="mb-6 p-4 rounded-2xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 text-sm">
-            {errorMsg}
-          </div>
-        )}
-
-        {successMsg && (
-          <div className="mb-6 p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/50 text-emerald-600 dark:text-emerald-400 text-sm">
-            {successMsg}
-          </div>
-        )}
-
-        <form onSubmit={handleEmailAuth} className="space-y-4">
-          <div>
-            <Label>Email Address</Label>
-            <Input
-              icon={Mail}
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              className="py-3.5 h-auto"
-            />
+        {/* Dynamic feature showcase items */}
+        <div className="space-y-8 my-auto relative z-10 max-w-md select-none">
+          <div className="space-y-3">
+            <span className="inline-block px-3 py-1 bg-[#00bda5]/10 border border-[#00bda5]/20 text-[#00bda5] text-[9.5px] font-black uppercase tracking-widest rounded-full">
+              Enterprise Orchestration
+            </span>
+            <h2 className="text-3xl font-black tracking-tight text-zinc-955 leading-tight">
+              Orchestrate your application pipeline with AI.
+            </h2>
+            <p className="text-zinc-500 font-bold uppercase tracking-wider text-[11px] leading-relaxed">
+              Dynamically tailor your resumes for ATS benchmarks, monitor interviews in real time, and negotiate job offers with a modern Kanban dashboard.
+            </p>
           </div>
 
-          {!isMagicLink && (
-            <div>
-              <Label>Password</Label>
-              <div className="relative">
-                <Input
-                  icon={Lock}
-                  type={showPassword ? "text" : "password"}
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="py-3.5 h-auto pr-12"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
+          {/* Stepper display */}
+          <div className="space-y-4 pt-5 border-t border-zinc-150">
+            <div className="flex items-start gap-4">
+              <div className="w-6 h-6 rounded-lg bg-[#00bda5]/15 text-[#00bda5] flex items-center justify-center text-[11.5px] font-black shrink-0 border border-[#00bda5]/20">
+                1
+              </div>
+              <div>
+                <h4 className="text-xs font-black text-zinc-955 uppercase tracking-wider leading-none">Upload Master Resume</h4>
+                <p className="text-[10px] text-zinc-400 font-bold mt-1 uppercase tracking-wide">Sync your background details instantly</p>
               </div>
             </div>
-          )}
 
-          <Button
-            type="submit"
-            isLoading={loading}
-            variant="primary"
-            className="w-full py-3.5 h-auto mt-2"
-          >
-            {!loading && (
-              <>
-                {isMagicLink ? 'Send Magic Link' : 'Sign In'}
-                <ChevronRight className="w-4 h-4 ml-2" />
-              </>
-            )}
-          </Button>
-        </form>
+            <div className="flex items-start gap-4">
+              <div className="w-6 h-6 rounded-lg bg-zinc-100 text-zinc-800 flex items-center justify-center text-[11.5px] font-black shrink-0 border border-zinc-200">
+                2
+              </div>
+              <div>
+                <h4 className="text-xs font-black text-zinc-955 uppercase tracking-wider leading-none">AI Tailoring Scan</h4>
+                <p className="text-[10px] text-zinc-400 font-bold mt-1 uppercase tracking-wide">Generate optimized keyword alignments for JD benchmarks</p>
+              </div>
+            </div>
 
-        <div className="relative my-8 text-center">
-          <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-zinc-200 dark:border-zinc-800" /></div>
-          <span className="relative bg-white dark:bg-zinc-900 px-4 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Or continue with</span>
+            <div className="flex items-start gap-4">
+              <div className="w-6 h-6 rounded-lg bg-zinc-100 text-zinc-800 flex items-center justify-center text-[11.5px] font-black shrink-0 border border-zinc-200">
+                3
+              </div>
+              <div>
+                <h4 className="text-xs font-black text-zinc-955 uppercase tracking-wider leading-none">Active Pipeline Board</h4>
+                <p className="text-[10px] text-zinc-400 font-bold mt-1 uppercase tracking-wide">Drag, drop, log status and track offer transitions</p>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => handleOAuthLogin('google')}
-            className="py-3"
-          >
-            Google
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => handleOAuthLogin('github')}
-            className="py-3"
-          >
-            GitHub
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => handleOAuthLogin('azure')}
-            className="py-3"
-          >
-            Microsoft
-          </Button>
+        {/* Footer info copy */}
+        <div className="text-[9.5px] text-zinc-405 font-extrabold uppercase tracking-widest relative z-10">
+          © {new Date().getFullYear()} ApplyFlow AI Corp. All rights reserved.
         </div>
+      </div>
 
-        <div className="mt-8 text-center flex flex-col gap-2">
-          <button
-            type="button"
-            onClick={() => setIsMagicLink(!isMagicLink)}
-            className="text-xs text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-300 font-medium transition-colors"
-          >
-            {isMagicLink ? 'Sign in with Password instead' : 'Request a Magic Link'}
-          </button>
-          <span className="text-xs text-zinc-500 dark:text-zinc-400 mt-2">
-            Don't have an account?{' '}
-            <Link to="/register" className="text-zinc-900 hover:text-zinc-700 dark:text-zinc-50 dark:hover:text-zinc-300 font-semibold transition-colors">
-              Sign Up
-            </Link>
-          </span>
+      {/* RIGHT COLUMN: The Form Workspace (With Perspective Flip Card) */}
+      <div 
+        className="w-full lg:w-[50%] flex items-center justify-center p-6 sm:p-12 relative z-10 min-h-screen"
+        style={{ background: 'radial-gradient(circle at center, #ffffff 0%, #f1f5f9 100%)' }}
+      >
+        <div className="w-full max-w-md perspective-container">
+          
+          <div className={`flip-card-inner ${isFlipped ? 'flipped' : ''}`}>
+            
+            {/* FRONT SIDE CARD: Login Workspace */}
+            <div className="flip-card-front">
+              
+              <div className="text-center mb-6 select-none">
+                {/* Mobile-only brand logo header */}
+                <div className="lg:hidden flex items-center justify-center gap-2 mb-4">
+                  <div className="w-9 h-9 rounded-xl bg-zinc-955 text-white flex items-center justify-center font-black text-sm">
+                    A
+                  </div>
+                  <span className="text-sm font-black tracking-tight text-zinc-955 uppercase">
+                    Apply<span className="text-[#00bda5]">Flow</span>
+                  </span>
+                </div>
+                <h1 className="text-2xl font-black text-zinc-955 tracking-tight uppercase">Welcome Back</h1>
+                <p className="text-zinc-500 text-xs mt-1 font-medium">Tailor your resumes instantly with AI</p>
+              </div>
+
+              {loginError && (
+                <div className="mb-4 p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-650 text-xs font-bold select-text flex items-center gap-2 animate-fadeIn">
+                  <AlertCircle size={14} className="shrink-0" />
+                  <span>{loginError}</span>
+                </div>
+              )}
+
+              {loginSuccess && (
+                <div className="mb-4 p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-655 text-xs font-bold select-text flex items-center gap-2 animate-fadeIn">
+                  <CheckCircle2 size={14} className="shrink-0" />
+                  <span>{loginSuccess}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleLogin} className="space-y-4 text-left">
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-black text-zinc-700 uppercase tracking-wider">Email Address</label>
+                  <input
+                    type="email"
+                    required
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className="w-full px-4 py-3 bg-white border border-zinc-200 rounded-2xl text-zinc-900 placeholder-zinc-400 text-sm focus:outline-hidden focus:border-zinc-955 transition-colors font-semibold"
+                  />
+                </div>
+
+                {!isMagicLink && (
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-black text-zinc-700 uppercase tracking-wider">Password</label>
+                    <div className="relative">
+                      <input
+                        type={showLoginPassword ? "text" : "password"}
+                        required
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full pl-4 pr-12 py-3 bg-white border border-zinc-200 rounded-2xl text-zinc-900 placeholder-zinc-400 text-sm focus:outline-hidden focus:border-zinc-955 transition-colors font-semibold"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowLoginPassword(!showLoginPassword)}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-450 hover:text-zinc-650 transition-colors border-none bg-transparent cursor-pointer"
+                      >
+                        {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loginLoading}
+                  className="w-full py-3 bg-zinc-950 hover:bg-zinc-900 text-white font-extrabold rounded-2xl text-sm transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer border-none shadow-xs mt-4 disabled:opacity-50"
+                >
+                  {loginLoading ? 'Processing...' : (isMagicLink ? 'Send Magic Link' : 'Sign In')}
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </form>
+
+              {/* Divider continue with */}
+              <div className="relative my-6 text-center select-none">
+                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-zinc-150" /></div>
+                <span className="relative bg-white px-3 text-[9px] font-black text-zinc-405 uppercase tracking-widest">Or continue with</span>
+              </div>
+
+              {/* Social OAuth Buttons */}
+              <div className="grid grid-cols-3 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => handleOAuthLogin('google')}
+                  className="py-2.5 bg-white border border-zinc-200 hover:bg-zinc-55 text-zinc-800 font-bold text-xs rounded-xl transition cursor-pointer"
+                >
+                  Google
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOAuthLogin('github')}
+                  className="py-2.5 bg-white border border-zinc-200 hover:bg-zinc-55 text-zinc-800 font-bold text-xs rounded-xl transition cursor-pointer"
+                >
+                  GitHub
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOAuthLogin('azure')}
+                  className="py-2.5 bg-white border border-zinc-200 hover:bg-zinc-55 text-zinc-800 font-bold text-xs rounded-xl transition cursor-pointer"
+                >
+                  Microsoft
+                </button>
+              </div>
+
+              {/* Action Link Footer */}
+              <div className="mt-6 text-center flex flex-col gap-2 select-none text-xs text-zinc-555 font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setIsMagicLink(!isMagicLink)}
+                  className="text-xs text-zinc-500 hover:text-zinc-955 font-bold transition-colors border-none bg-transparent cursor-pointer"
+                >
+                  {isMagicLink ? 'Sign in with Password instead' : 'Request a Magic Link'}
+                </button>
+                <span className="text-zinc-400 font-medium">
+                  Don't have an account?{' '}
+                  <button 
+                    onClick={() => navigate('/register')}
+                    className="text-zinc-955 hover:text-zinc-800 font-bold transition-colors border-none bg-transparent cursor-pointer ml-1"
+                  >
+                    Sign Up
+                  </button>
+                </span>
+              </div>
+
+            </div>
+
+            {/* BACK SIDE CARD: Register Workspace */}
+            <div className="flip-card-back">
+              
+              <div className="text-center mb-4 select-none">
+                {/* Mobile brand header block */}
+                <div className="lg:hidden flex items-center justify-center gap-2 mb-4">
+                  <div className="w-9 h-9 rounded-xl bg-zinc-955 text-white flex items-center justify-center font-black text-sm">
+                    A
+                  </div>
+                  <span className="text-sm font-black tracking-tight text-zinc-955 uppercase">
+                    Apply<span className="text-[#00bda5]">Flow</span>
+                  </span>
+                </div>
+                <h1 className="text-2xl font-black text-zinc-955 tracking-tight uppercase">Create Account</h1>
+                <p className="text-zinc-500 text-xs mt-1 font-medium">Get started tailoring your resumes with AI</p>
+              </div>
+
+              {regError && (
+                <div className="mb-3 p-2.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-655 text-xs font-bold select-text flex items-center gap-2 animate-fadeIn">
+                  <AlertCircle size={14} className="shrink-0" />
+                  <span>{regError}</span>
+                </div>
+              )}
+
+              {regSuccess && (
+                <div className="mb-3 p-2.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-650 text-xs font-bold select-text flex items-center gap-2 animate-fadeIn">
+                  <CheckCircle2 size={14} className="shrink-0" />
+                  <span>{regSuccess}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleRegister} className="space-y-2.5 text-left">
+                <div className="space-y-0.5">
+                  <label className="block text-[9.5px] font-black text-zinc-705 uppercase tracking-wider">Full Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={regFullName}
+                    onChange={(e) => setRegFullName(e.target.value)}
+                    placeholder="John Doe"
+                    className="w-full px-4 py-2.5 bg-white border border-zinc-200 rounded-2xl text-zinc-900 placeholder-zinc-400 text-xs font-semibold focus:outline-hidden focus:border-zinc-950 transition-colors font-semibold"
+                  />
+                </div>
+
+                <div className="space-y-0.5">
+                  <label className="block text-[9.5px] font-black text-zinc-705 uppercase tracking-wider">Email Address</label>
+                  <input
+                    type="email"
+                    required
+                    value={regEmail}
+                    onChange={(e) => setRegEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className="w-full px-4 py-2.5 bg-white border border-zinc-200 rounded-2xl text-zinc-900 placeholder-zinc-400 text-xs font-semibold focus:outline-hidden focus:border-zinc-955 transition-colors font-semibold"
+                  />
+                </div>
+
+                <div className="space-y-0.5">
+                  <label className="block text-[9.5px] font-black text-zinc-705 uppercase tracking-wider">Password</label>
+                  <div className="relative">
+                    <input
+                      type={showRegPassword ? "text" : "password"}
+                      required
+                      value={regPassword}
+                      onChange={(e) => setRegPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full pl-4 pr-12 py-2.5 bg-white border border-zinc-200 rounded-2xl text-zinc-900 placeholder-zinc-400 text-xs font-semibold focus:outline-hidden focus:border-zinc-955 transition-colors font-semibold"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowRegPassword(!showRegPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-650 transition-colors border-none bg-transparent cursor-pointer"
+                    >
+                      {showRegPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-0.5">
+                  <label className="block text-[9.5px] font-black text-zinc-705 uppercase tracking-wider">Confirm Password</label>
+                  <div className="relative">
+                    <input
+                      type={showRegConfirmPassword ? "text" : "password"}
+                      required
+                      value={regConfirmPassword}
+                      onChange={(e) => setRegConfirmPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full pl-4 pr-12 py-2.5 bg-white border border-zinc-200 rounded-2xl text-zinc-900 placeholder-zinc-400 text-xs font-semibold focus:outline-hidden focus:border-zinc-955 transition-colors font-semibold"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowRegConfirmPassword(!showRegConfirmPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-655 transition-colors border-none bg-transparent cursor-pointer"
+                    >
+                      {showRegConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={regLoading}
+                  className="w-full py-2.5 bg-zinc-950 hover:bg-zinc-900 text-white font-extrabold rounded-2xl text-xs transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer border-none shadow-xs mt-3.5 disabled:opacity-50"
+                >
+                  {regLoading ? 'Registering...' : 'Create Account'}
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </form>
+
+              {/* Divider continue with */}
+              <div className="relative my-4 text-center select-none">
+                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-zinc-150" /></div>
+                <span className="relative bg-white px-3 text-[9px] font-black text-zinc-405 uppercase tracking-widest">Or continue with</span>
+              </div>
+
+              {/* Social OAuth Buttons */}
+              <div className="grid grid-cols-3 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => handleOAuthLogin('google')}
+                  className="py-2.5 bg-white border border-zinc-200 hover:bg-zinc-55 text-zinc-800 font-bold text-xs rounded-xl transition cursor-pointer"
+                >
+                  Google
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOAuthLogin('github')}
+                  className="py-2.5 bg-white border border-zinc-200 hover:bg-zinc-55 text-zinc-800 font-bold text-xs rounded-xl transition cursor-pointer"
+                >
+                  GitHub
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOAuthLogin('azure')}
+                  className="py-2.5 bg-white border border-zinc-200 hover:bg-zinc-55 text-zinc-800 font-bold text-xs rounded-xl transition cursor-pointer"
+                >
+                  Microsoft
+                </button>
+              </div>
+
+              {/* Already have account toggler */}
+              <div className="mt-4 text-center text-xs text-zinc-400 font-semibold select-none">
+                Already have an account?{' '}
+                <button
+                  onClick={() => navigate('/login')}
+                  className="text-zinc-955 hover:text-zinc-850 font-bold transition-colors border-none bg-transparent cursor-pointer ml-1"
+                >
+                  Sign In
+                </button>
+              </div>
+
+            </div>
+
+          </div>
+          
         </div>
       </div>
     </div>

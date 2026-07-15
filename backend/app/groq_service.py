@@ -250,3 +250,76 @@ def generate_cover_letter(resume: ResumeStructure, job: JobAnalysis, api_key: Op
     job_json = json.dumps(job.model_dump(), indent=2)
     
     return chain.invoke({"resume_json": resume_json, "job_json": job_json})
+
+from pydantic import BaseModel
+class RefinedSkills(BaseModel):
+    skills: List[str]
+
+class RefinedBullets(BaseModel):
+    bullets: List[str]
+
+def refine_section_with_ai(
+    section_type: str,
+    section_data: Any,
+    prompt: str,
+    job: JobAnalysis,
+    api_key: Optional[str] = None
+) -> Any:
+    llm = get_llm(api_key, temperature=0.2)
+    
+    if section_type == "summary":
+        sys_prompt = (
+            "You are an expert resume writer. Refine the professional summary of the candidate "
+            "based on the user's instruction and the target Job Description. "
+            "Maintain the core truth of the candidate's background. Do not invent facts.\n"
+            "Target Job:\n"
+            f"- Title: {job.title}\n"
+            f"- Company: {job.company}\n"
+            f"- Required Skills: {', '.join(job.required_skills)}\n"
+            "\n"
+            f"User Instruction: {prompt}\n"
+            "Return ONLY the refined summary text. Do not include any tags, notes, markdown formatting, or intros."
+        )
+        messages = [
+            ("system", sys_prompt),
+            ("human", f"Original: {section_data.get('original')}\nCurrent Suggested: {section_data.get('current_suggested')}")
+        ]
+        res = llm.invoke(messages)
+        return res.content.strip().replace('"', '')
+        
+    elif section_type == "skills":
+        structured_llm = llm.with_structured_output(RefinedSkills)
+        sys_prompt = (
+            "You are an expert technical resume editor. Refine the candidate's skills list "
+            "based on the user's instruction and the target Job Description.\n"
+            f"User Instruction: {prompt}\n"
+            "Return the list of skills as a JSON array matching the structure."
+        )
+        messages = [
+            ("system", sys_prompt),
+            ("human", f"Current Skills List: {', '.join(section_data)}")
+        ]
+        res = structured_llm.invoke(messages)
+        return res.skills
+
+    elif section_type in ("experience", "projects"):
+        structured_llm = llm.with_structured_output(RefinedBullets)
+        sys_prompt = (
+            "You are an expert resume writer. Refine the following list of bullet points for a "
+            f"resume section ({section_type}) based on the user's instruction and target Job Description. "
+            "IMPORTANT Rules:\n"
+            "1. You must return exactly the same number of bullet points as the input.\n"
+            "2. Preserve metrics, numbers, and technologies. Never invent false achievements.\n"
+            "3. Apply the user's refinement instruction to every bullet point where applicable.\n"
+            "\n"
+            f"User Instruction: {prompt}\n"
+            f"Target Job: {job.title} at {job.company}"
+        )
+        bullets_input = "\n".join([f"- {b}" for b in section_data])
+        messages = [
+            ("system", sys_prompt),
+            ("human", f"Bullets to refine:\n{bullets_input}")
+        ]
+        res = structured_llm.invoke(messages)
+        return res.bullets
+

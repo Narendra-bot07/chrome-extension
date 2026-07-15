@@ -27,7 +27,12 @@ function Layout() {
     logout,
     isExtension,
     user,
-    session
+    session,
+    pendingApplicationSubmitted,
+    setPendingApplicationSubmitted,
+    activeApplicationId,
+    updateApplicationStage,
+    applications
   } = useApp();
 
   const [profile, setProfile] = useState({
@@ -243,10 +248,6 @@ function Layout() {
           <div className="flex items-center gap-4">
             <span className="hidden md:inline text-xs text-zinc-500 font-semibold cursor-pointer hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors">How it works</span>
             <span className="hidden md:inline text-xs text-zinc-500 font-semibold cursor-pointer hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors">Upgrade</span>
-            
-            <Button variant="primary" size="sm" className="hidden sm:inline-flex">
-              Install Extension
-            </Button>
 
             {/* Discord support */}
             <Button variant="outline" size="sm" className="hidden sm:inline-flex">
@@ -332,6 +333,44 @@ function Layout() {
             </div>
           </div>
         </header>
+
+        {/* APPLICATION SUBMISSION CONFIRMATION TOAST */}
+        {pendingApplicationSubmitted && (
+          <div className="px-6 py-4 bg-emerald-50 dark:bg-emerald-950/20 border-b border-emerald-200/50 text-emerald-850 dark:text-emerald-400 text-xs flex justify-between items-center gap-3 flex-shrink-0 animate-fadeIn select-none">
+            <div className="flex items-center gap-2.5">
+              <Zap size={14} className="text-[#00bda5] animate-pulse" />
+              <p className="font-semibold text-zinc-700 dark:text-zinc-300">
+                It looks like you completed this application at <span className="font-black underline">{pendingApplicationSubmitted.company}</span>. Mark as Applied?
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={async () => {
+                  if (activeApplicationId) {
+                    await updateApplicationStage(activeApplicationId, 'Applied');
+                  } else {
+                    const match = applications.find(
+                      a => a.company_name?.toLowerCase() === pendingApplicationSubmitted.company?.toLowerCase()
+                    );
+                    if (match) {
+                      await updateApplicationStage(match.id, 'Applied');
+                    }
+                  }
+                  setPendingApplicationSubmitted(null);
+                }}
+                className="bg-[#00bda5] hover:bg-[#00a894] text-white font-extrabold px-3 py-1.5 rounded-lg border-none cursor-pointer transition uppercase text-[9px] tracking-wider shadow-sm"
+              >
+                Mark as Applied
+              </button>
+              <button
+                onClick={() => setPendingApplicationSubmitted(null)}
+                className="bg-transparent hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-500 p-1.5 rounded-lg border-none cursor-pointer transition flex items-center justify-center"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ERROR TOAST */}
         {apiError && !isInvalidJdError && (

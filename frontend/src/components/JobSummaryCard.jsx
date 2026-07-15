@@ -5,10 +5,6 @@ function JobSummaryCard({
   jobAnalysis,
   jobTitle,
   companyName,
-  isApplied,
-  setIsApplied,
-  isFavourite,
-  setIsFavourite,
   setStep,
   handleGenerateCoverLetter,
   handleScanPage
@@ -92,32 +88,6 @@ function JobSummaryCard({
 
       {/* Fixed Footer Operations Section */}
       <div className="border-t border-slate-200 dark:border-slate-900 pt-4 mt-auto space-y-3 bg-transparent flex-shrink-0">
-        
-        {/* Applied & Favourite Controls Row (2 Column Grid) */}
-        <div className="grid grid-cols-2 gap-3">
-          <label className="flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-850 rounded-xl py-2 px-3 bg-white dark:bg-slate-900 shadow-xs cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-850 transition-all select-none">
-            <input 
-              type="checkbox" 
-              checked={isApplied}
-              onChange={(e) => setIsApplied(e.target.checked)}
-              className="w-4 h-4 rounded text-brand focus:ring-brand border-slate-350 dark:border-slate-850 dark:bg-[#09090b]"
-            />
-            <span className="text-xs font-bold text-slate-600 dark:text-slate-400">Applied</span>
-          </label>
-          
-          <button 
-            type="button"
-            onClick={() => setIsFavourite(!isFavourite)}
-            className={`flex items-center justify-center gap-2 border rounded-xl py-2 px-3 text-xs font-bold transition-all shadow-xs cursor-pointer ${
-              isFavourite 
-                ? 'bg-rose-50 border-rose-200 text-rose-600 dark:bg-rose-950/20 dark:border-rose-900 dark:text-rose-500' 
-                : 'bg-white border-slate-200 text-slate-650 hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-850 dark:text-slate-400 dark:hover:bg-slate-850'
-            }`}
-          >
-            <Heart size={14} className={isFavourite ? "fill-rose-500 stroke-rose-500" : "text-slate-400"} />
-            Favourite
-          </button>
-        </div>
 
         {/* Main Resume & Cover Letter CTA Buttons */}
         <div className="flex gap-3">

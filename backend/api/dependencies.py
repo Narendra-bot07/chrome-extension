@@ -5,6 +5,7 @@ from repositories.resume_repository import ResumeRepository
 from repositories.job_repository import JobRepository
 from repositories.tailoring_repository import TailoringRepository
 from repositories.audit_repository import AuditRepository
+from repositories.application_repository import ApplicationRepository
 from services.ai.groq_service import GroqService
 from services.storage.file_service import FileService
 from services.resume.tailoring_service import TailoringService
@@ -35,6 +36,9 @@ def get_tailoring_repository(db = Depends(get_user_db_connection)) -> TailoringR
 
 def get_audit_repository(db = Depends(get_user_db_connection)) -> AuditRepository:
     return AuditRepository(db)
+
+def get_application_repository(db = Depends(get_user_db_connection)) -> ApplicationRepository:
+    return ApplicationRepository(db)
 
 def get_ai_service() -> GroqService:
     return GroqService()
