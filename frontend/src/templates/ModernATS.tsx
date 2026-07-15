@@ -23,15 +23,21 @@ export default function ModernATS({ resume }) {
   const categorizedSkills = categorizeSkills(skills, skills_categories);
 
   return (
-    <div className="font-sans p-10 max-w-4xl mx-auto bg-white text-gray-800" style={{ width: '8.5in' }}>
+    <div className="font-sans p-10 max-w-4xl mx-auto bg-white text-gray-800" style={{ width: '8.5in', minHeight: '11in' }}>
       <header className="mb-8 border-l-4 border-indigo-600 pl-4">
         <h1 className="text-4xl font-light text-indigo-900 tracking-tight">{personal_info.name}</h1>
+        {(personal_info.job_title || personal_info.title) && (
+          <div className="text-lg font-medium text-indigo-700 mt-1">
+            {personal_info.job_title || personal_info.title}
+          </div>
+        )}
         <div className="text-sm mt-3 flex flex-wrap gap-4 text-gray-600 font-medium">
-          {personal_info.email && <span>{personal_info.email}</span>}
           {personal_info.phone && <span>{personal_info.phone}</span>}
-          {personal_info.location && <span>{personal_info.location}</span>}
+          {personal_info.email && <span>{personal_info.email}</span>}
           {personal_info.linkedin && <span>{personal_info.linkedin}</span>}
+          {personal_info.github && <span>{personal_info.github}</span>}
           {personal_info.website && <span>{personal_info.website}</span>}
+          {personal_info.location && <span>{personal_info.location}</span>}
         </div>
       </header>
 
@@ -42,14 +48,21 @@ export default function ModernATS({ resume }) {
         </section>
       )}
 
-      {categorizedSkills && Object.keys(categorizedSkills).length > 0 && (
-        <section className="mb-8" data-section="skills">
-          <h2 className="text-xl font-semibold text-indigo-900 mb-3">Core Competencies</h2>
-          <div className="space-y-2">
-            {Object.entries(categorizedSkills).map(([cat, items], i) => (
-              <div key={i} className="text-sm">
-                <span className="font-bold text-indigo-800">{cat}: </span>
-                <span className="text-gray-700">{Array.isArray(items) ? items.join(', ') : items}</span>
+      {education && education.length > 0 && (
+        <section className="mb-8" data-section="education">
+          <h2 className="text-xl font-semibold text-indigo-900 mb-4 border-b-2 border-indigo-100 pb-2">Education</h2>
+          <div className="space-y-4">
+            {education.map((edu, i) => (
+              <div key={i}>
+                <div className="flex justify-between items-baseline mb-1">
+                  <h3 className="font-bold text-gray-900">{edu.institution}</h3>
+                  <span className="text-sm text-indigo-600 font-semibold">{edu.start_date} - {edu.end_date || 'Present'}</span>
+                </div>
+                <div className="flex justify-between items-baseline">
+                  <span className="font-medium text-gray-700">{edu.degree} in {edu.field_of_study}</span>
+                  <span className="text-sm text-gray-500">{edu.location}</span>
+                </div>
+                {edu.gpa && <p className="text-sm text-gray-600 mt-1">GPA: {edu.gpa}</p>}
               </div>
             ))}
           </div>
@@ -89,6 +102,20 @@ export default function ModernATS({ resume }) {
         </section>
       )}
 
+      {categorizedSkills && Object.keys(categorizedSkills).length > 0 && (
+        <section className="mb-8" data-section="skills">
+          <h2 className="text-xl font-semibold text-indigo-900 mb-3">Core Competencies</h2>
+          <div className="space-y-2">
+            {Object.entries(categorizedSkills).map(([cat, items], i) => (
+              <div key={i} className="text-sm">
+                <span className="font-bold text-indigo-800">{cat}: </span>
+                <span className="text-gray-700">{Array.isArray(items) ? items.join(', ') : items}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {projects && projects.length > 0 && (
         <section className="mb-8" data-section="projects">
           <h2 className="text-xl font-semibold text-indigo-900 mb-4 border-b-2 border-indigo-100 pb-2">Projects</h2>
@@ -121,27 +148,6 @@ export default function ModernATS({ resume }) {
         </section>
       )}
 
-      {education && education.length > 0 && (
-        <section className="mb-8" data-section="education">
-          <h2 className="text-xl font-semibold text-indigo-900 mb-4 border-b-2 border-indigo-100 pb-2">Education</h2>
-          <div className="space-y-4">
-            {education.map((edu, i) => (
-              <div key={i}>
-                <div className="flex justify-between items-baseline mb-1">
-                  <h3 className="font-bold text-gray-900">{edu.institution}</h3>
-                  <span className="text-sm text-indigo-600 font-semibold">{edu.start_date} - {edu.end_date || 'Present'}</span>
-                </div>
-                <div className="flex justify-between items-baseline">
-                  <span className="font-medium text-gray-700">{edu.degree} in {edu.field_of_study}</span>
-                  <span className="text-sm text-gray-500">{edu.location}</span>
-                </div>
-                {edu.gpa && <p className="text-sm text-gray-600 mt-1">GPA: {edu.gpa}</p>}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
       {certifications && certifications.length > 0 && (
         <section className="mb-8" data-section="certifications">
           <h2 className="text-xl font-semibold text-indigo-900 mb-4 border-b-2 border-indigo-100 pb-2">Certifications</h2>
@@ -160,47 +166,29 @@ export default function ModernATS({ resume }) {
 
       {achievements && achievements.length > 0 && (
         <section className="mb-8" data-section="achievements">
-          <h2 className="text-xl font-semibold text-indigo-900 mb-4 border-b-2 border-indigo-100 pb-2">Achievements</h2>
-          <ul className="list-disc list-inside text-sm space-y-1.5 text-gray-700">
+          <h2 className="text-xl font-semibold text-indigo-900 mb-4 border-b-2 border-indigo-100 pb-2">Achievements / Awards</h2>
+          <ul className="list-disc list-inside text-sm space-y-1.5 text-gray-700 mb-4">
             {achievements.map((ach, i) => (
               <li key={i} className="leading-relaxed">{ach}</li>
             ))}
           </ul>
-        </section>
-      )}
-      
-      {languages && languages.length > 0 && (
-        <section className="mb-8" data-section="languages">
-          <h2 className="text-xl font-semibold text-indigo-900 mb-4 border-b-2 border-indigo-100 pb-2">Languages</h2>
-          <div className="text-sm flex flex-wrap gap-4 text-gray-700">
-            {languages.map((lang, i) => (
-              <span key={i}>
-                <span className="font-bold">{lang.name}</span>
-                {lang.proficiency && <span className="text-gray-500"> ({lang.proficiency})</span>}
-              </span>
-            ))}
-          </div>
+          {awards && awards.length > 0 && (
+            <div className="space-y-3">
+              {awards.map((award, i) => (
+                <div key={i} className="text-sm">
+                  <span className="font-bold text-gray-800">{award.title}</span> {award.date && <span className="text-gray-500">({award.date})</span>}
+                  {award.issuer && <span className="text-gray-600 block">Issued by {award.issuer}</span>}
+                  {award.description && <p className="mt-1 text-gray-700">{award.description}</p>}
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
 
-      {awards && awards.length > 0 && (
-        <section className="mb-8" data-section="awards">
-          <h2 className="text-xl font-semibold text-indigo-900 mb-4 border-b-2 border-indigo-100 pb-2">Awards</h2>
-          <div className="space-y-3">
-            {awards.map((award, i) => (
-              <div key={i} className="text-sm">
-                <span className="font-bold text-gray-800">{award.title}</span> {award.date && <span className="text-gray-500">({award.date})</span>}
-                {award.issuer && <span className="text-gray-600 block">Issued by {award.issuer}</span>}
-                {award.description && <p className="mt-1 text-gray-700">{award.description}</p>}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-      
       {volunteer_experience && volunteer_experience.length > 0 && (
         <section className="mb-8" data-section="volunteer">
-          <h2 className="text-xl font-semibold text-indigo-900 mb-4 border-b-2 border-indigo-100 pb-2">Volunteer Experience</h2>
+          <h2 className="text-xl font-semibold text-indigo-900 mb-4 border-b-2 border-indigo-100 pb-2">Leadership / Volunteering</h2>
           <div className="space-y-6">
             {volunteer_experience.map((vol, i) => (
               <div key={i}>
@@ -226,7 +214,7 @@ export default function ModernATS({ resume }) {
 
       {publications && publications.length > 0 && (
         <section className="mb-8" data-section="publications">
-          <h2 className="text-xl font-semibold text-indigo-900 mb-4 border-b-2 border-indigo-100 pb-2">Publications</h2>
+          <h2 className="text-xl font-semibold text-indigo-900 mb-4 border-b-2 border-indigo-100 pb-2">Publications / Research</h2>
           <div className="space-y-6">
             {publications.map((pub, i) => (
               <div key={i}>
@@ -239,6 +227,20 @@ export default function ModernATS({ resume }) {
                 {pub.publisher && <div className="text-sm text-gray-600 mb-1">{pub.publisher}</div>}
                 {pub.description && <p className="text-sm text-gray-700">{pub.description}</p>}
               </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {languages && languages.length > 0 && (
+        <section className="mb-8" data-section="languages">
+          <h2 className="text-xl font-semibold text-indigo-900 mb-4 border-b-2 border-indigo-100 pb-2">Languages</h2>
+          <div className="text-sm flex flex-wrap gap-4 text-gray-700">
+            {languages.map((lang, i) => (
+              <span key={i}>
+                <span className="font-bold">{lang.name}</span>
+                {lang.proficiency && <span className="text-gray-500"> ({lang.proficiency})</span>}
+              </span>
             ))}
           </div>
         </section>

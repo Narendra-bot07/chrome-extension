@@ -17,14 +17,5 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-
-  latex:
-    image: texlive/texlive:latest
-    container_name: resume-tailor-latex
-    working_dir: /workspace
-    volumes:
-      - ./backend/latex:/workspace
-    command: tail -f /dev/null
-
 volumes:
   pgdata:

@@ -12,10 +12,13 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
     """
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+            )
             page = browser.new_page()
             
-            url = f"{FRONTEND_URL}/#/print?template={template_name}"
+            url = f"{FRONTEND_URL}/#/print?template={template_name}&format=a4"
             
             # Handle Vite dev server 504 by reloading if necessary
             response = page.goto(url, wait_until="domcontentloaded")
@@ -23,8 +26,8 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
                 page.wait_for_timeout(1000)
                 page.reload(wait_until="domcontentloaded")
             
-            # Inject JSON
-            page.evaluate(f"window.__INJECTED_RESUME_DATA__ = {resume_json_str};")
+            # Inject JSON safely
+            page.evaluate("data => { window.__INJECTED_RESUME_DATA__ = JSON.parse(data); }", resume_json_str)
             page.evaluate("window.dispatchEvent(new Event('resumeDataReady'));")
             
             # Wait for React to mount, run the Auto-Fit engine, and finish compression
@@ -75,11 +78,22 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
             if not val_result.get("valid"):
                 raise ValueError(f"Rendering Validation Failed: {val_result.get('error')}")
             
-            pdf_bytes = page.pdf(
-                format="A4",
-                print_background=True,
-                margin={"top": "0", "right": "0", "bottom": "0", "left": "0"}
-            )
+            # Get the exact height of the resume container in pixels to enforce exact A4 scaling
+            resume_height = page.evaluate("document.querySelector('#resume-print-container') ? document.querySelector('#resume-print-container').offsetHeight : 0")
+            print(f"Playwright measured resume height: {resume_height}px")
+            
+            pdf_args = {
+                "format": "A4",
+                "print_background": True,
+                "margin": {"top": "0", "right": "0", "bottom": "0", "left": "0"}
+            }
+            
+            # If the content fits within one A4 page, generate EXACTLY page 1 to prevent extra blank pages
+            # At 96 DPI, A4 is 1122px tall.
+            if resume_height > 0 and resume_height <= 1130:
+                pdf_args["page_ranges"] = "1"
+                
+            pdf_bytes = page.pdf(**pdf_args)
             
             browser.close()
             return pdf_bytes
@@ -91,23 +105,33 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
 def generate_cover_letter_pdf_via_playwright(cover_letter_json_str: str) -> Optional[bytes]:
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+            )
             page = browser.new_page()
             
             url = f"{FRONTEND_URL}/#/print-cover-letter"
             page.goto(url, wait_until="networkidle")
             
-            page.evaluate(f"window.__INJECTED_COVER_LETTER_DATA__ = {cover_letter_json_str};")
+            page.evaluate("data => { window.__INJECTED_COVER_LETTER_DATA__ = JSON.parse(data); }", cover_letter_json_str)
             page.evaluate("window.dispatchEvent(new Event('coverLetterDataReady'));")
             
             page.wait_for_timeout(500)
             page.evaluate("document.fonts.ready")
             
-            pdf_bytes = page.pdf(
-                format="A4",
-                print_background=True,
-                margin={"top": "0", "right": "0", "bottom": "0", "left": "0"}
-            )
+            # If the cover letter fits in 1 page, enforce exactly page 1
+            cl_height = page.evaluate("document.querySelector('#resume-print-container') ? document.querySelector('#resume-print-container').offsetHeight : 0")
+            
+            pdf_args = {
+                "format": "A4",
+                "print_background": True,
+                "margin": {"top": "0", "right": "0", "bottom": "0", "left": "0"}
+            }
+            if cl_height > 0 and cl_height <= 1130:
+                pdf_args["page_ranges"] = "1"
+                
+            pdf_bytes = page.pdf(**pdf_args)
             
             browser.close()
             return pdf_bytes

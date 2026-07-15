@@ -20,29 +20,23 @@ export default function ModernProATS({ resume }) {
   const categorizedSkills = categorizeSkills(skills, skills_categories);
 
   return (
-    <div className="font-sans bg-white text-zinc-900" style={{ width: '8.5in' }}>
-      <div className="flex h-full">
+    <div className="font-sans bg-white text-zinc-900 flex" style={{ width: '8.5in', minHeight: '11in' }}>
+        
         
         {/* LEFT COLUMN */}
         <div className="w-[32%] bg-zinc-50/60 p-8 border-r border-zinc-200">
           
           <div className="flex flex-col space-y-3 mb-10 text-xs font-medium text-zinc-700">
-            {personal_info.email && (
-              <div className="flex items-center gap-3">
-                <span className="text-indigo-900"><Mail size={14} /></span>
-                <span>{personal_info.email}</span>
-              </div>
-            )}
             {personal_info.phone && (
               <div className="flex items-center gap-3">
                 <span className="text-indigo-900"><Phone size={14} /></span>
                 <span>{personal_info.phone}</span>
               </div>
             )}
-            {personal_info.location && (
+            {personal_info.email && (
               <div className="flex items-center gap-3">
-                <span className="text-indigo-900"><MapPin size={14} /></span>
-                <span>{personal_info.location}</span>
+                <span className="text-indigo-900"><Mail size={14} /></span>
+                <span>{personal_info.email}</span>
               </div>
             )}
             {personal_info.linkedin && (
@@ -51,13 +45,42 @@ export default function ModernProATS({ resume }) {
                 <span>{personal_info.linkedin.replace(/^(https?:\/\/)?(www\.)?/, '')}</span>
               </div>
             )}
+            {personal_info.github && (
+              <div className="flex items-center gap-3">
+                <span className="text-indigo-900"><Github size={14} /></span>
+                <span>{personal_info.github.replace(/^(https?:\/\/)?(www\.)?/, '')}</span>
+              </div>
+            )}
             {personal_info.website && (
               <div className="flex items-center gap-3">
                 <span className="text-indigo-900"><Globe size={14} /></span>
                 <span>{personal_info.website.replace(/^(https?:\/\/)?(www\.)?/, '')}</span>
               </div>
             )}
+            {personal_info.location && (
+              <div className="flex items-center gap-3">
+                <span className="text-indigo-900"><MapPin size={14} /></span>
+                <span>{personal_info.location}</span>
+              </div>
+            )}
           </div>
+
+          {education && education.length > 0 && (
+            <div className="mb-10" data-section="education">
+              <h2 className="text-sm font-bold text-indigo-700 uppercase tracking-wider mb-4 border-b border-indigo-100 pb-2">Education</h2>
+              <div className="space-y-5">
+                {education.map((edu, i) => (
+                  <div key={i}>
+                    <h3 className="font-bold text-sm text-zinc-900">{edu.degree} {edu.field_of_study ? `in ${edu.field_of_study}` : ''}</h3>
+                    <div className="text-xs text-zinc-700 font-medium mt-1">{edu.institution}</div>
+                    <div className="text-xs text-zinc-500 mt-1">{edu.start_date} - {edu.end_date || 'Present'}</div>
+                    {edu.location && <div className="text-xs text-zinc-500 mt-0.5">{edu.location}</div>}
+                    {edu.gpa && <div className="text-xs text-zinc-700 mt-1 font-medium">GPA: {edu.gpa}</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {categorizedSkills && Object.keys(categorizedSkills).length > 0 && (
             <div className="mb-10" data-section="skills">
@@ -73,23 +96,6 @@ export default function ModernProATS({ resume }) {
                         </span>
                       ))}
                     </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {education && education.length > 0 && (
-            <div className="mb-10" data-section="education">
-              <h2 className="text-sm font-bold text-indigo-700 uppercase tracking-wider mb-4 border-b border-indigo-100 pb-2">Education</h2>
-              <div className="space-y-5">
-                {education.map((edu, i) => (
-                  <div key={i}>
-                    <h3 className="font-bold text-sm text-zinc-900">{edu.degree} {edu.field_of_study ? `in ${edu.field_of_study}` : ''}</h3>
-                    <div className="text-xs text-zinc-700 font-medium mt-1">{edu.institution}</div>
-                    <div className="text-xs text-zinc-500 mt-1">{edu.start_date} - {edu.end_date || 'Present'}</div>
-                    {edu.location && <div className="text-xs text-zinc-500 mt-0.5">{edu.location}</div>}
-                    {edu.gpa && <div className="text-xs text-zinc-700 mt-1 font-medium">GPA: {edu.gpa}</div>}
                   </div>
                 ))}
               </div>
@@ -132,6 +138,11 @@ export default function ModernProATS({ resume }) {
           
           <header className="mb-8 border-b-2 border-indigo-900 pb-6">
             <h1 className="text-4xl font-extrabold text-zinc-900 tracking-tight uppercase" style={{fontFamily: 'Georgia, serif'}}>{personal_info.name}</h1>
+            {(personal_info.job_title || personal_info.title) && (
+              <div className="text-sm font-semibold text-indigo-700 uppercase tracking-wider mt-2">
+                {personal_info.job_title || personal_info.title}
+              </div>
+            )}
           </header>
 
           {summary && (
@@ -204,33 +215,29 @@ export default function ModernProATS({ resume }) {
           
           {achievements && achievements.length > 0 && (
             <section className="mb-8" data-section="achievements">
-              <h2 className="text-sm font-bold text-indigo-700 uppercase tracking-wider mb-4">Achievements</h2>
-              <ul className="list-disc list-inside text-xs space-y-1.5 text-zinc-800">
+              <h2 className="text-sm font-bold text-indigo-700 uppercase tracking-wider mb-4">Achievements / Awards</h2>
+              <ul className="list-disc list-inside text-xs space-y-1.5 text-zinc-800 mb-4">
                 {achievements.map((ach, i) => (
                   <li key={i} className="leading-relaxed pl-1"><span className="relative -left-1">{ach}</span></li>
                 ))}
               </ul>
-            </section>
-          )}
-
-          {awards && awards.length > 0 && (
-            <section className="mb-8" data-section="awards">
-              <h2 className="text-sm font-bold text-indigo-700 uppercase tracking-wider mb-4">Awards</h2>
-              <div className="space-y-3">
-                {awards.map((award, i) => (
-                  <div key={i} className="text-xs">
-                    <span className="font-bold text-zinc-900">{award.title}</span> {award.date && <span className="text-zinc-500 ml-2">{award.date}</span>}
-                    {award.issuer && <span className="text-zinc-700 block mt-0.5">Issued by {award.issuer}</span>}
-                    {award.description && <p className="mt-1 text-zinc-600">{award.description}</p>}
-                  </div>
-                ))}
-              </div>
+              {awards && awards.length > 0 && (
+                <div className="space-y-3">
+                  {awards.map((award, i) => (
+                    <div key={i} className="text-xs">
+                      <span className="font-bold text-zinc-900">{award.title}</span> {award.date && <span className="text-zinc-500 ml-2">{award.date}</span>}
+                      {award.issuer && <span className="text-zinc-700 block mt-0.5">Issued by {award.issuer}</span>}
+                      {award.description && <p className="mt-1 text-zinc-600">{award.description}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
           )}
 
           {volunteer_experience && volunteer_experience.length > 0 && (
             <section className="mb-8" data-section="volunteer">
-              <h2 className="text-sm font-bold text-indigo-700 uppercase tracking-wider mb-4">Volunteer Experience</h2>
+              <h2 className="text-sm font-bold text-indigo-700 uppercase tracking-wider mb-4">Leadership / Volunteering</h2>
               <div className="space-y-6">
                 {volunteer_experience.map((vol, i) => (
                   <div key={i}>
@@ -253,7 +260,7 @@ export default function ModernProATS({ resume }) {
 
           {publications && publications.length > 0 && (
             <section className="mb-8" data-section="publications">
-              <h2 className="text-sm font-bold text-indigo-700 uppercase tracking-wider mb-4">Publications</h2>
+              <h2 className="text-sm font-bold text-indigo-700 uppercase tracking-wider mb-4">Publications / Research</h2>
               <div className="space-y-4">
                 {publications.map((pub, i) => (
                   <div key={i}>
@@ -272,7 +279,6 @@ export default function ModernProATS({ resume }) {
           )}
 
         </div>
-      </div>
     </div>
   );
 }

@@ -1,18 +1,9 @@
-import ProfessionalATS from './ProfessionalATS';
-import ModernATS from './ModernATS';
-import MinimalATS from './MinimalATS';
-import ModernProATS from './ModernProATS';
-
-const templates = {
-  'ats-classic': ProfessionalATS,
-  'ats-modern': ModernATS,
-  'minimal-professional': MinimalATS,
-  'ProfessionalATS': ProfessionalATS,
-  'ModernATS': ModernATS,
-  'MinimalATS': MinimalATS,
-  'ModernProATS': ModernProATS,
-};
+import React from 'react';
+import TailorRender from '../components/Resume/TailorRender';
 
 export const getTemplateComponent = (id: string) => {
-  return templates[id] || ProfessionalATS;
+  // Returns the config-driven TailorRender engine wrapper matching the target configuration name
+  return function TemplateWrapper({ resume, sectionOrder }: { resume: any, sectionOrder?: string[] }) {
+    return React.createElement(TailorRender, { resume, templateName: id, sectionOrder });
+  };
 };

@@ -14,6 +14,8 @@ def get_modern_html(resume: ResumeStructure) -> str:
     location = escape_html(resume.personal_info.location)
     linkedin = escape_html(resume.personal_info.linkedin)
     website = escape_html(resume.personal_info.website)
+    github = escape_html(resume.personal_info.github)
+    job_title = escape_html(resume.personal_info.job_title or getattr(resume.personal_info, "title", ""))
     summary = escape_html(resume.summary)
 
     # Experience HTML
@@ -94,6 +96,88 @@ def get_modern_html(resume: ResumeStructure) -> str:
             <span class="cert-details">{escape_html(cert.issuing_organization)}{issue}</span>
         </div>
         """
+
+    # Achievements / Awards HTML
+    achievements_html = ""
+    if resume.achievements:
+        ach_bullets = "".join([f"<li>{escape_html(ach)}</li>" for ach in resume.achievements if ach.strip()])
+        awards_list_html = ""
+        if resume.awards:
+            for award in resume.awards:
+                award_title = escape_html(award.get("title", ""))
+                award_issuer = escape_html(award.get("issuer", ""))
+                award_date = escape_html(award.get("date", ""))
+                award_desc = escape_html(award.get("description", ""))
+                issuer_str = f" - {award_issuer}" if award_issuer else ""
+                date_str = f" ({award_date})" if award_date else ""
+                desc_str = f"<p style='margin-top: 2px; color: #4A5568;'>{award_desc}</p>" if award_desc else ""
+                awards_list_html += f"""
+                <div style="margin-top: 6px; font-size: 8.5pt;">
+                    <strong>{award_title}</strong>{issuer_str}{date_str}
+                    {desc_str}
+                </div>
+                """
+        achievements_html = f"""
+        <ul class="bullet-list">{ach_bullets}</ul>
+        {awards_list_html}
+        """
+
+    # Volunteer Experience HTML
+    volunteer_html = ""
+    if resume.volunteer_experience:
+        for vol in resume.volunteer_experience:
+            vol_role = escape_html(vol.get("role", ""))
+            vol_org = escape_html(vol.get("organization", ""))
+            vol_start = escape_html(vol.get("start_date", ""))
+            vol_end = escape_html(vol.get("end_date", "Present"))
+            vol_desc = vol.get("description", [])
+            vol_bullets = "".join([f"<li>{escape_html(b)}</li>" for b in vol_desc if b.strip()])
+            volunteer_html += f"""
+            <div class="section-item">
+                <table class="item-header-table" width="100%">
+                    <tr>
+                        <td align="left"><strong>{vol_role}</strong> - <em>{vol_org}</em></td>
+                        <td align="right" class="date-text">{vol_start} - {vol_end}</td>
+                    </tr>
+                </table>
+                <ul class="bullet-list">{vol_bullets}</ul>
+            </div>
+            """
+
+    # Publications HTML
+    publications_html = ""
+    if resume.publications:
+        for pub in resume.publications:
+            pub_title = escape_html(pub.get("title", ""))
+            pub_date = escape_html(pub.get("date", ""))
+            pub_publisher = escape_html(pub.get("publisher", ""))
+            pub_link = escape_html(pub.get("link", ""))
+            pub_desc = escape_html(pub.get("description", ""))
+            link_str = f"<div class='link-text'>{pub_link}</div>" if pub_link else ""
+            desc_str = f"<p style='margin-top: 2px; color: #4A5568;'>{pub_desc}</p>" if pub_desc else ""
+            publications_html += f"""
+            <div class="section-item">
+                <table class="item-header-table" width="100%">
+                    <tr>
+                        <td align="left"><strong>{pub_title}</strong> {f'<em>({pub_publisher})</em>' if pub_publisher else ''}</td>
+                        <td align="right" class="date-text">{pub_date}</td>
+                    </tr>
+                </table>
+                {link_str}
+                {desc_str}
+            </div>
+            """
+
+    # Languages HTML
+    languages_html = ""
+    if resume.languages:
+        lang_list = []
+        for lang in resume.languages:
+            lang_name = escape_html(lang.get("name", ""))
+            lang_prof = escape_html(lang.get("proficiency", ""))
+            prof_str = f" ({lang_prof})" if lang_prof else ""
+            lang_list.append(f"{lang_name}{prof_str}")
+        languages_html = ", ".join(lang_list)
 
     html = f"""
     <html>
@@ -221,6 +305,7 @@ def get_modern_html(resume: ResumeStructure) -> str:
                 <tr>
                     <td align="left">
                         <div class="candidate-name">{name}</div>
+                        {f'<div style="font-size: 12pt; color: #4A5568; margin-top: 2px; font-weight: bold; text-transform: uppercase;">{job_title}</div>' if job_title else ''}
                     </td>
                 </tr>
             </table>
@@ -233,9 +318,10 @@ def get_modern_html(resume: ResumeStructure) -> str:
                     <div class="sidebar-title">Contact</div>
                     {f'<div class="contact-info">📞 {phone}</div>' if phone else ''}
                     {f'<div class="contact-info">✉️ {email}</div>' if email else ''}
-                    {f'<div class="contact-info">📍 {location}</div>' if location else ''}
                     {f'<div class="contact-info">🔗 <a href="https://{linkedin}">{linkedin}</a></div>' if linkedin else ''}
+                    {f'<div class="contact-info">🐙 <a href="https://{github}">{github}</a></div>' if github else ''}
                     {f'<div class="contact-info">🌐 <a href="https://{website}">{website}</a></div>' if website else ''}
+                    {f'<div class="contact-info">📍 {location}</div>' if location else ''}
                     
                     <div class="sidebar-title">Skills</div>
                     <div style="margin-top: 5px;">
@@ -243,17 +329,24 @@ def get_modern_html(resume: ResumeStructure) -> str:
                     </div>
                     
                     {f'<div class="sidebar-title">Certifications</div>{certs_html}' if certs_html else ''}
+                    {f'<div class="sidebar-title">Languages</div><div style="font-size: 8.5pt; color: #4A5568; margin-top: 4px;">{languages_html}</div>' if languages_html else ''}
                 </td>
                 
                 <!-- RIGHT MAIN CONTENT -->
                 <td class="main-content">
                     {f'<div class="section-title">Professional Summary</div><div style="font-size: 9pt; margin-bottom: 10px;">{summary}</div>' if summary else ''}
                     
+                    {f'<div class="section-title">Education</div>{education_html}' if education_html else ''}
+
                     {f'<div class="section-title">Work Experience</div>{experience_html}' if experience_html else ''}
                     
                     {f'<div class="section-title">Projects</div>{projects_html}' if projects_html else ''}
-                    
-                    {f'<div class="section-title">Education</div>{education_html}' if education_html else ''}
+
+                    {f'<div class="section-title">Achievements / Awards</div>{achievements_html}' if achievements_html else ''}
+
+                    {f'<div class="section-title">Leadership / Volunteering</div>{volunteer_html}' if volunteer_html else ''}
+
+                    {f'<div class="section-title">Publications / Research</div>{publications_html}' if publications_html else ''}
                 </td>
             </tr>
         </table>
@@ -270,15 +363,18 @@ def get_classic_html(resume: ResumeStructure) -> str:
     location = escape_html(resume.personal_info.location)
     linkedin = escape_html(resume.personal_info.linkedin)
     website = escape_html(resume.personal_info.website)
+    github = escape_html(resume.personal_info.github)
+    job_title = escape_html(resume.personal_info.job_title or getattr(resume.personal_info, "title", ""))
     summary = escape_html(resume.summary)
 
     # Contact header
     contact_parts = []
     if phone: contact_parts.append(phone)
     if email: contact_parts.append(email)
-    if location: contact_parts.append(location)
     if linkedin: contact_parts.append(f'<a href="https://{linkedin}">LinkedIn</a>')
+    if github: contact_parts.append(f'<a href="https://{github}">GitHub</a>')
     if website: contact_parts.append(f'<a href="https://{website}">Website</a>')
+    if location: contact_parts.append(location)
     contact_header = " | ".join(contact_parts)
 
     # Experience HTML
@@ -320,6 +416,21 @@ def get_classic_html(resume: ResumeStructure) -> str:
         </div>
         """
 
+    # Skills HTML
+    skills_html = ""
+    skills_categories = getattr(resume, "skills_categories", None)
+    if skills_categories and isinstance(skills_categories, dict) and len(skills_categories) > 0:
+        html_lines = []
+        for category, items in skills_categories.items():
+            if items:
+                escaped_items = ", ".join([escape_html(item) for item in items if item.strip()])
+                escaped_category = escape_html(category)
+                html_lines.append(f'<div><strong>{escaped_category}:</strong> {escaped_items}</div>')
+        skills_html = f'<div class="section-item" style="line-height: 1.5; text-align: left;">{"".join(html_lines)}</div>'
+    elif resume.skills:
+        skills_list = ", ".join(resume.skills)
+        skills_html = f'<div class="section-item"><strong>Skills:</strong> {escape_html(skills_list)}</div>'
+
     # Education HTML
     education_html = ""
     for edu in resume.education:
@@ -336,27 +447,88 @@ def get_classic_html(resume: ResumeStructure) -> str:
         </div>
         """
 
-    # Skills HTML
-    skills_html = ""
-    skills_categories = getattr(resume, "skills_categories", None)
-    if skills_categories and isinstance(skills_categories, dict) and len(skills_categories) > 0:
-        html_lines = []
-        for category, items in skills_categories.items():
-            if items:
-                escaped_items = ", ".join([escape_html(item) for item in items if item.strip()])
-                escaped_category = escape_html(category)
-                html_lines.append(f'<div><strong>{escaped_category}:</strong> {escaped_items}</div>')
-        skills_html = f'<div class="section-item" style="line-height: 1.5; text-align: left;">{"".join(html_lines)}</div>'
-    elif resume.skills:
-        skills_list = ", ".join(resume.skills)
-        skills_html = f'<div class="section-item"><strong>Skills:</strong> {escape_html(skills_list)}</div>'
-
     # Certifications HTML
-    certs_list = []
-    for cert in resume.certifications:
-        issue = f" ({escape_html(cert.issue_date)})" if cert.issue_date else ""
-        certs_list.append(f"{escape_html(cert.name)} by {escape_html(cert.issuing_organization)}{issue}")
-    certs_html = f'<div class="section-item"><strong>Certifications:</strong> {"; ".join(certs_list)}</div>' if certs_list else ""
+    certs_html = ""
+    if resume.certifications:
+        certs_list = []
+        for cert in resume.certifications:
+            issue = f" ({escape_html(cert.issue_date)})" if cert.issue_date else ""
+            certs_list.append(f"{escape_html(cert.name)} by {escape_html(cert.issuing_organization)}{issue}")
+        certs_html = f'<div class="section-item">{"<br/>".join(certs_list)}</div>'
+
+    # Achievements / Awards HTML
+    achievements_html = ""
+    if resume.achievements:
+        ach_bullets = "".join([f"<li>{escape_html(ach)}</li>" for ach in resume.achievements if ach.strip()])
+        awards_list_html = ""
+        if resume.awards:
+            awards_list = []
+            for award in resume.awards:
+                award_title = escape_html(award.get("title", ""))
+                award_issuer = escape_html(award.get("issuer", ""))
+                award_date = escape_html(award.get("date", ""))
+                issuer_str = f" ({award_issuer})" if award_issuer else ""
+                date_str = f" — {award_date}" if award_date else ""
+                awards_list.append(f"<div><strong>{award_title}</strong>{issuer_str}{date_str}</div>")
+            awards_list_html = f'<div style="margin-top: 6px;">{"".join(awards_list)}</div>'
+        achievements_html = f"""
+        <ul class="bullet-list">{ach_bullets}</ul>
+        {awards_list_html}
+        """
+
+    # Volunteer Experience HTML
+    volunteer_html = ""
+    if resume.volunteer_experience:
+        for vol in resume.volunteer_experience:
+            vol_role = escape_html(vol.get("role", ""))
+            vol_org = escape_html(vol.get("organization", ""))
+            vol_start = escape_html(vol.get("start_date", ""))
+            vol_end = escape_html(vol.get("end_date", "Present"))
+            vol_desc = vol.get("description", [])
+            vol_bullets = "".join([f"<li>{escape_html(b)}</li>" for b in vol_desc if b.strip()])
+            volunteer_html += f"""
+            <div class="section-item">
+                <table class="item-header-table" width="100%">
+                    <tr>
+                        <td align="left"><strong>{vol_org}</strong> — <em>{vol_role}</em></td>
+                        <td align="right" class="date-text">{vol_start} – {vol_end}</td>
+                    </tr>
+                </table>
+                <ul class="bullet-list">{vol_bullets}</ul>
+            </div>
+            """
+
+    # Publications HTML
+    publications_html = ""
+    if resume.publications:
+        for pub in resume.publications:
+            pub_title = escape_html(pub.get("title", ""))
+            pub_date = escape_html(pub.get("date", ""))
+            pub_publisher = escape_html(pub.get("publisher", ""))
+            pub_link = escape_html(pub.get("link", ""))
+            link_str = f" | Link: {pub_link}" if pub_link else ""
+            publications_html += f"""
+            <div class="section-item">
+                <table class="item-header-table" width="100%">
+                    <tr>
+                        <td align="left"><strong>{pub_title}</strong>{link_str}</td>
+                        <td align="right" class="date-text">{pub_date}</td>
+                    </tr>
+                </table>
+                {f'<div class="location-text">{pub_publisher}</div>' if pub_publisher else ''}
+            </div>
+            """
+
+    # Languages HTML
+    languages_html = ""
+    if resume.languages:
+        lang_list = []
+        for lang in resume.languages:
+            lang_name = escape_html(lang.get("name", ""))
+            lang_prof = escape_html(lang.get("proficiency", ""))
+            prof_str = f" ({lang_prof})" if lang_prof else ""
+            lang_list.append(f"{lang_name}{prof_str}")
+        languages_html = f'<div class="section-item">{", ".join(lang_list)}</div>'
 
     html = f"""
     <html>
@@ -426,17 +598,28 @@ def get_classic_html(resume: ResumeStructure) -> str:
     </head>
     <body>
         <div class="candidate-name">{name}</div>
+        {f'<div style="text-align: center; font-size: 11pt; color: #444444; margin-bottom: 2px; font-weight: bold; text-transform: uppercase;">{job_title}</div>' if job_title else ''}
         <div class="contact-header">{contact_header}</div>
         
         {f'<div class="section-title">Professional Summary</div><div style="margin-bottom: 10px;">{summary}</div>' if summary else ''}
         
-        {f'<div class="section-title">Experience</div>{experience_html}' if experience_html else ''}
-        
-        {f'<div class="section-title">Projects</div>{projects_html}' if projects_html else ''}
-        
         {f'<div class="section-title">Education</div>{education_html}' if education_html else ''}
+
+        {f'<div class="section-title">Work Experience</div>{experience_html}' if experience_html else ''}
         
-        {f'<div class="section-title">Skills &amp; Certifications</div>{skills_html}{certs_html}' if (skills_html or certs_html) else ''}
+        {f'<div class="section-title">Skills</div>{skills_html}' if skills_html else ''}
+
+        {f'<div class="section-title">Projects</div>{projects_html}' if projects_html else ''}
+
+        {f'<div class="section-title">Certifications</div>{certs_html}' if certs_html else ''}
+
+        {f'<div class="section-title">Achievements / Awards</div>{achievements_html}' if achievements_html else ''}
+
+        {f'<div class="section-title">Leadership / Volunteering</div>{volunteer_html}' if volunteer_html else ''}
+
+        {f'<div class="section-title">Publications / Research</div>{publications_html}' if publications_html else ''}
+
+        {f'<div class="section-title">Languages</div>{languages_html}' if languages_html else ''}
     </body>
     </html>
     """
@@ -450,15 +633,18 @@ def get_minimal_html(resume: ResumeStructure) -> str:
     location = escape_html(resume.personal_info.location)
     linkedin = escape_html(resume.personal_info.linkedin)
     website = escape_html(resume.personal_info.website)
+    github = escape_html(resume.personal_info.github)
+    job_title = escape_html(resume.personal_info.job_title or getattr(resume.personal_info, "title", ""))
     summary = escape_html(resume.summary)
 
     # Contact details
     contact_parts = []
-    if email: contact_parts.append(f"Email: {email}")
     if phone: contact_parts.append(f"Phone: {phone}")
-    if location: contact_parts.append(f"Loc: {location}")
+    if email: contact_parts.append(f"Email: {email}")
     if linkedin: contact_parts.append(f"LinkedIn: {linkedin}")
+    if github: contact_parts.append(f"GitHub: {github}")
     if website: contact_parts.append(f"Web: {website}")
+    if location: contact_parts.append(f"Loc: {location}")
     contact_text = "  |  ".join(contact_parts)
 
     # Experience HTML
@@ -496,22 +682,6 @@ def get_minimal_html(resume: ResumeStructure) -> str:
         </div>
         """
 
-    # Education HTML
-    education_html = ""
-    for edu in resume.education:
-        gpa_str = f", GPA: {escape_html(edu.gpa)}" if edu.gpa else ""
-        education_html += f"""
-        <div class="section-item">
-            <table class="item-header-table" width="100%">
-                <tr>
-                    <td align="left"><span class="title-bold">{escape_html(edu.degree)}</span> in {escape_html(edu.field_of_study)}</td>
-                    <td align="right" class="meta-text">{escape_html(edu.start_date)} - {escape_html(edu.end_date)}</td>
-                </tr>
-            </table>
-            <div class="meta-text">{escape_html(edu.institution)} ({escape_html(edu.location)}){gpa_str}</div>
-        </div>
-        """
-
     # Skills HTML
     skills_html = ""
     skills_categories = getattr(resume, "skills_categories", None)
@@ -544,6 +714,22 @@ def get_minimal_html(resume: ResumeStructure) -> str:
         </div>
         """
 
+    # Education HTML
+    education_html = ""
+    for edu in resume.education:
+        gpa_str = f", GPA: {escape_html(edu.gpa)}" if edu.gpa else ""
+        education_html += f"""
+        <div class="section-item">
+            <table class="item-header-table" width="100%">
+                <tr>
+                    <td align="left"><span class="title-bold">{escape_html(edu.degree)}</span> in {escape_html(edu.field_of_study)}</td>
+                    <td align="right" class="meta-text">{escape_html(edu.start_date)} - {escape_html(edu.end_date)}</td>
+                </tr>
+            </table>
+            <div class="meta-text">{escape_html(edu.institution)} ({escape_html(edu.location)}){gpa_str}</div>
+        </div>
+        """
+
     # Certifications HTML
     certs_html = ""
     if resume.certifications:
@@ -557,6 +743,89 @@ def get_minimal_html(resume: ResumeStructure) -> str:
                 <tr>
                     <td width="15%" valign="top"><span class="title-bold">Certs</span></td>
                     <td width="85%" valign="top">{escape_html(', '.join(certs_list))}</td>
+                </tr>
+            </table>
+        </div>
+        """
+
+    # Achievements / Awards HTML
+    achievements_html = ""
+    if resume.achievements:
+        ach_bullets = "".join([f"<li>{escape_html(ach)}</li>" for ach in resume.achievements if ach.strip()])
+        awards_list_html = ""
+        if resume.awards:
+            awards_list = []
+            for award in resume.awards:
+                award_title = escape_html(award.get("title", ""))
+                award_issuer = escape_html(award.get("issuer", ""))
+                award_date = escape_html(award.get("date", ""))
+                issuer_str = f" ({award_issuer})" if award_issuer else ""
+                date_str = f" — {award_date}" if award_date else ""
+                awards_list.append(f"<li><strong>{award_title}</strong>{issuer_str}{date_str}</li>")
+            awards_list_html = f'<ul class="bullet-list" style="margin-top: 4px;">{"".join(awards_list)}</ul>'
+        achievements_html = f"""
+        <ul class="bullet-list">{ach_bullets}</ul>
+        {awards_list_html}
+        """
+
+    # Volunteer Experience HTML
+    volunteer_html = ""
+    if resume.volunteer_experience:
+        for vol in resume.volunteer_experience:
+            vol_role = escape_html(vol.get("role", ""))
+            vol_org = escape_html(vol.get("organization", ""))
+            vol_start = escape_html(vol.get("start_date", ""))
+            vol_end = escape_html(vol.get("end_date", "Present"))
+            vol_desc = vol.get("description", [])
+            vol_bullets = "".join([f"<li>{escape_html(b)}</li>" for b in vol_desc if b.strip()])
+            volunteer_html += f"""
+            <div class="section-item">
+                <table class="item-header-table" width="100%">
+                    <tr>
+                        <td align="left"><span class="title-bold">{vol_role}</span> — {vol_org}</td>
+                        <td align="right" class="meta-text">{vol_start} - {vol_end}</td>
+                    </tr>
+                </table>
+                <ul class="bullet-list">{vol_bullets}</ul>
+            </div>
+            """
+
+    # Publications HTML
+    publications_html = ""
+    if resume.publications:
+        for pub in resume.publications:
+            pub_title = escape_html(pub.get("title", ""))
+            pub_date = escape_html(pub.get("date", ""))
+            pub_publisher = escape_html(pub.get("publisher", ""))
+            pub_link = escape_html(pub.get("link", ""))
+            link_str = f" | [{pub_link}]" if pub_link else ""
+            publications_html += f"""
+            <div class="section-item">
+                <table class="item-header-table" width="100%">
+                    <tr>
+                        <td align="left"><span class="title-bold">{pub_title}</span>{link_str}</td>
+                        <td align="right" class="meta-text">{pub_date}</td>
+                    </tr>
+                </table>
+                <div class="meta-text">{pub_publisher}</div>
+            </div>
+            """
+
+    # Languages HTML
+    languages_html = ""
+    if resume.languages:
+        lang_list = []
+        for lang in resume.languages:
+            lang_name = escape_html(lang.get("name", ""))
+            lang_prof = escape_html(lang.get("proficiency", ""))
+            prof_str = f" ({lang_prof})" if lang_prof else ""
+            lang_list.append(f"{lang_name}{prof_str}")
+        languages_html = f"""
+        <div class="section-item">
+            <table width="100%">
+                <tr>
+                    <td width="15%" valign="top"><span class="title-bold">Languages</span></td>
+                    <td width="85%" valign="top">{", ".join(lang_list)}</td>
                 </tr>
             </table>
         </div>
@@ -623,17 +892,28 @@ def get_minimal_html(resume: ResumeStructure) -> str:
     </head>
     <body>
         <div class="candidate-name">{name}</div>
+        {f'<div style="font-size: 10pt; color: #444444; margin-bottom: 4px; font-weight: bold; text-transform: uppercase;">{job_title}</div>' if job_title else ''}
         <div class="contact-line">{contact_text}</div>
         
         {f'<div class="section-title">Summary</div><div style="margin-bottom: 8px; font-family: Arial, sans-serif; font-size: 8.5pt;">{summary}</div>' if summary else ''}
         
+        {f'<div class="section-title">Education</div>{education_html}' if education_html else ''}
+
         {f'<div class="section-title">Experience</div>{experience_html}' if experience_html else ''}
         
+        {f'<div class="section-title">Skills</div>{skills_html}' if skills_html else ''}
+
         {f'<div class="section-title">Projects</div>{projects_html}' if projects_html else ''}
-        
-        {f'<div class="section-title">Education</div>{education_html}' if education_html else ''}
-        
-        {f'<div class="section-title">Skills &amp; Credentials</div>{skills_html}{certs_html}' if (skills_html or certs_html) else ''}
+
+        {f'<div class="section-title">Certifications</div>{certs_html}' if certs_html else ''}
+
+        {f'<div class="section-title">Achievements / Awards</div>{achievements_html}' if achievements_html else ''}
+
+        {f'<div class="section-title">Leadership / Volunteering</div>{volunteer_html}' if volunteer_html else ''}
+
+        {f'<div class="section-title">Publications / Research</div>{publications_html}' if publications_html else ''}
+
+        {f'<div class="section-title">Languages</div>{languages_html}' if languages_html else ''}
     </body>
     </html>
     """

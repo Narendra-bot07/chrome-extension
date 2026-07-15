@@ -3,10 +3,13 @@ from playwright.sync_api import sync_playwright
 
 def test():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+        )
         page = browser.new_page()
         
-        page.on("console", lambda msg: print(f"Browser console: {msg.text}"))
+        page.on("console", lambda msg: print(f"Browser console: {msg.text.encode('ascii', 'ignore').decode('ascii')}"))
         page.on("pageerror", lambda err: print(f"Browser error: {err}"))
         
         try:
@@ -20,7 +23,7 @@ def test():
                 page.reload(wait_until="networkidle")
             
             resume_data = '{"personal_info": {"name": "Narendra Bandi"}, "summary": "AI Engineer", "skills": ["Python"]}'
-            page.evaluate(f"window.__INJECTED_RESUME_DATA__ = {resume_data};")
+            page.evaluate("data => { window.__INJECTED_RESUME_DATA__ = JSON.parse(data); }", resume_data)
             page.evaluate("window.dispatchEvent(new Event('resumeDataReady'));")
             
             page.wait_for_timeout(2000)

@@ -50,15 +50,16 @@ class TailoringService:
         # AI Tailoring Process
         start_time = time.time()
         
-        from app.groq_service import apply_tailoring_patch
-        tailored_resume_obj = apply_tailoring_patch(
-            resume=resume_obj,
-            patch=patch
+        from app.services.agents import orchestrate_multi_agent_flow
+        agent_res = orchestrate_multi_agent_flow(
+            original_resume=resume_obj,
+            jd_text=job["raw_text"]
         )
+        tailored_resume_obj = ResumeStructure(**agent_res["tailored_content"])
         latency = int((time.time() - start_time) * 1000)
 
-        # Estimate ATS score improvement
-        ats_score = 85.0
+        # Retrieve ATS score from agent feedback evaluations
+        ats_score = float(agent_res["ats_score"])
 
         # Log AI Generation stats
         self.audit_repo.log_ai_generation(

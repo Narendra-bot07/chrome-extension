@@ -28,14 +28,17 @@ def generate_latex_code(resume: ResumeStructure, template_name: str = "modern") 
     location = escape_latex(resume.personal_info.location)
     linkedin = escape_latex(resume.personal_info.linkedin)
     website = escape_latex(resume.personal_info.website)
+    github = escape_latex(resume.personal_info.github)
+    job_title = escape_latex(resume.personal_info.job_title or getattr(resume.personal_info, "title", ""))
     summary = escape_latex(resume.summary)
 
     contact_parts = []
     if phone: contact_parts.append(phone)
     if email: contact_parts.append(f"\\href{{mailto:{email}}}{{{email}}}")
-    if location: contact_parts.append(location)
     if linkedin: contact_parts.append(f"\\href{{https://{linkedin}}}{{LinkedIn}}")
+    if github: contact_parts.append(f"\\href{{https://{github}}}{{GitHub}}")
     if website: contact_parts.append(f"\\href{{https://{website}}}{{Website}}")
+    if location: contact_parts.append(location)
 
     # Set margins and fonts based on layout templates
     margin = "0.5in"
@@ -63,6 +66,8 @@ def generate_latex_code(resume: ResumeStructure, template_name: str = "modern") 
     elif template_name == "startup":
         margin = "0.45in"
         font_pkg = "\\usepackage[sfdefault]{FiraSans}"
+
+    job_title_line = f"{{\\large \\textit{{{job_title}}}}} \\\\\n  \\vspace{{2pt}}\n" if job_title else ""
 
     latex = f"""\\documentclass[letterpaper,10pt]{{article}}
 \\usepackage[utf8]{{inputenc}}
@@ -95,7 +100,7 @@ def generate_latex_code(resume: ResumeStructure, template_name: str = "modern") 
 \\begin{{center}}
   {{\\Huge \\textbf{{{name}}}}} \\\\
   \\vspace{{4pt}}
-  \\small{{" $|$ ".join(contact_parts)}}
+  {job_title_line}  \\small{{" $|$ ".join(contact_parts)}}
 \\end{{center}}
 """
 
@@ -105,6 +110,28 @@ def generate_latex_code(resume: ResumeStructure, template_name: str = "modern") 
 \\section{{Summary}}
 \\small{{{summary}}}
 """
+
+    if resume.education:
+        latex += """
+%--- EDUCATION ---
+\\section{Education}
+\\begin{itemize}[leftmargin=0.15in, label={}]
+"""
+        for edu in resume.education:
+            degree = escape_latex(edu.degree)
+            field = escape_latex(edu.field_of_study)
+            inst = escape_latex(edu.institution)
+            eloc = escape_latex(edu.location)
+            dates = escape_latex(f"{edu.start_date} - {edu.end_date}")
+            gpa = f" (GPA: {escape_latex(edu.gpa)})" if edu.gpa else ""
+            
+            latex += f"""  \\item
+    \\begin{{tabular*}}{{0.97\\textwidth}}[t]{{l@{{\\extracolsep{{\\fill}}}}r}}
+      \\textbf{{{inst}}} -- {eloc} & \\small{{{dates}}} \\\\
+      \\textit{{\\small{{{degree}}} in {field}}}{gpa} & \\\\
+    \\end{{tabular*}}\\\\
+"""
+        latex += "\\end{itemize}\n"
 
     if resume.experience:
         latex += """
@@ -130,55 +157,6 @@ def generate_latex_code(resume: ResumeStructure, template_name: str = "modern") 
                 if bullet.strip():
                     latex += f"      \\resumeItem{{{escape_latex(bullet)}}}\n"
             latex += "    \\end{itemize}\n"
-        latex += "\\end{itemize}\n"
-
-    if resume.projects:
-        latex += """
-%--- PROJECTS ---
-\\section{Projects}
-\\begin{itemize}[leftmargin=0.15in, label={}]
-"""
-        for proj in resume.projects:
-            pname = escape_latex(proj.name)
-            prole = escape_latex(proj.role)
-            plink = escape_latex(proj.link)
-            tech = escape_latex(", ".join(proj.technology_stack)) if proj.technology_stack else ""
-            tech_str = f" ({tech})" if tech else ""
-            link_str = f" $|$ \\href{{https://{proj.link}}}{{Link}}" if proj.link else ""
-            
-            latex += f"""  \\item
-    \\begin{{tabular*}}{{0.97\\textwidth}}[t]{{l@{{\\extracolsep{{\\fill}}}}r}}
-      \\textbf{{{pname}}}{tech_str} & \\small{{{prole}}}{link_str} \\\\
-    \\end{{tabular*}}\\\\
-    \\vspace{{-4pt}}
-    \\begin{{itemize}}[leftmargin=0.10in]
-"""
-            for bullet in proj.description:
-                if bullet.strip():
-                    latex += f"      \\resumeItem{{{escape_latex(bullet)}}}\n"
-            latex += "    \\end{itemize}\n"
-        latex += "\\end{itemize}\n"
-
-    if resume.education:
-        latex += """
-%--- EDUCATION ---
-\\section{Education}
-\\begin{itemize}[leftmargin=0.15in, label={}]
-"""
-        for edu in resume.education:
-            degree = escape_latex(edu.degree)
-            field = escape_latex(edu.field_of_study)
-            inst = escape_latex(edu.institution)
-            eloc = escape_latex(edu.location)
-            dates = escape_latex(f"{edu.start_date} - {edu.end_date}")
-            gpa = f" (GPA: {escape_latex(edu.gpa)})" if edu.gpa else ""
-            
-            latex += f"""  \\item
-    \\begin{{tabular*}}{{0.97\\textwidth}}[t]{{l@{{\\extracolsep{{\\fill}}}}r}}
-      \\textbf{{{inst}}} -- {eloc} & \\small{{{dates}}} \\\\
-      \\textit{{\\small{{{degree}}} in {field}}}{gpa} & \\\\
-    \\end{{tabular*}}\\\\
-"""
         latex += "\\end{itemize}\n"
 
     # Check if we have skills_categories
@@ -209,6 +187,35 @@ def generate_latex_code(resume: ResumeStructure, template_name: str = "modern") 
 \\small{{\\textbf{{Skills: }} {skills_escaped}}}
 """
 
+    if resume.projects:
+        latex += """
+%--- PROJECTS ---
+\\section{Projects}
+\\begin{itemize}[leftmargin=0.15in, label={}]
+"""
+        for proj in resume.projects:
+            pname = escape_latex(proj.name)
+            prole = escape_latex(proj.role)
+            plink = escape_latex(proj.link)
+            tech = escape_latex(", ".join(proj.technology_stack)) if proj.technology_stack else ""
+            tech_str = f" ({tech})" if tech else ""
+            link_str = f" $|$ \\href{{https://{proj.link}}}{{Link}}" if proj.link else ""
+            
+            latex += f"""  \\item
+    \\begin{{tabular*}}{{0.97\\textwidth}}[t]{{l@{{\\extracolsep{{\\fill}}}}r}}
+      \\textbf{{{pname}}}{tech_str} & \\small{{{prole}}}{link_str} \\\\
+    \\end{{tabular*}}\\\\
+    \\vspace{{-4pt}}
+    \\begin{{itemize}}[leftmargin=0.10in]
+"""
+            for bullet in proj.description:
+                if bullet.strip():
+                    latex += f"      \\resumeItem{{{escape_latex(bullet)}}}\n"
+            latex += "    \\end{itemize}\n"
+        latex += "\\end{itemize}\n"
+
+
+
     if resume.certifications:
         certs_list = []
         for cert in resume.certifications:
@@ -222,6 +229,89 @@ def generate_latex_code(resume: ResumeStructure, template_name: str = "modern") 
 %--- CERTIFICATIONS ---
 \\section{{Certifications}}
 \\small{{{certs_str}}}
+"""
+
+    if resume.achievements:
+        latex += """
+%--- ACHIEVEMENTS & AWARDS ---
+\\section{Achievements / Awards}
+\\begin{itemize}[leftmargin=0.15in]
+"""
+        for ach in resume.achievements:
+            if ach.strip():
+                latex += f"  \\item \\small{{{escape_latex(ach)}}}\n"
+        if resume.awards:
+            for award in resume.awards:
+                aw_title = escape_latex(award.get("title", ""))
+                aw_issuer = escape_latex(award.get("issuer", ""))
+                aw_date = escape_latex(award.get("date", ""))
+                issuer_str = f" -- {aw_issuer}" if aw_issuer else ""
+                date_str = f" ({aw_date})" if aw_date else ""
+                latex += f"  \\item \\small{{\\textbf{{{aw_title}}}{issuer_str}{date_str}}}\n"
+        latex += "\\end{itemize}\n"
+
+    if resume.volunteer_experience:
+        latex += """
+%--- VOLUNTEER EXPERIENCE ---
+\\section{Leadership / Volunteering}
+\\begin{itemize}[leftmargin=0.15in, label={}]
+"""
+        for vol in resume.volunteer_experience:
+            role = escape_latex(vol.get("role", ""))
+            org = escape_latex(vol.get("organization", ""))
+            dates = escape_latex(f"{vol.get('start_date', '')} - {vol.get('end_date', 'Present')}")
+            latex += f"""  \\item
+    \\begin{{tabular*}}{{0.97\\textwidth}}[t]{{l@{{\\extracolsep{{\\fill}}}}r}}
+      \\textbf{{{role}}} -- {org} & \\small{{{dates}}} \\\\
+    \\end{{tabular*}}\\\\
+"""
+            vol_desc = vol.get("description", [])
+            if vol_desc:
+                latex += "    \\vspace{-4pt}\n    \\begin{itemize}[leftmargin=0.10in]\n"
+                for bullet in vol_desc:
+                    if bullet.strip():
+                        latex += f"      \\resumeItem{{{escape_latex(bullet)}}}\n"
+                latex += "    \\end{itemize}\n"
+        latex += "\\end{itemize}\n"
+
+    if resume.publications:
+        latex += """
+%--- PUBLICATIONS ---
+\\section{Publications / Research}
+\\begin{itemize}[leftmargin=0.15in, label={}]
+"""
+        for pub in resume.publications:
+            title = escape_latex(pub.get("title", ""))
+            publisher = escape_latex(pub.get("publisher", ""))
+            date = escape_latex(pub.get("date", ""))
+            link = escape_latex(pub.get("link", ""))
+            link_str = f" $|$ \\href{{https://{link}}}{{Link}}" if link else ""
+            pub_str = f" -- {publisher}" if publisher else ""
+            
+            latex += f"""  \\item
+    \\begin{{tabular*}}{{0.97\\textwidth}}[t]{{l@{{\\extracolsep{{\\fill}}}}r}}
+      \\textbf{{{title}}}{link_str}{pub_str} & \\small{{{date}}} \\\\
+    \\end{{tabular*}}\\\\
+"""
+        latex += "\\end{itemize}\n"
+
+    if resume.languages:
+        latex += """
+%--- LANGUAGES ---
+\\section{Languages}
+\\begin{itemize}[leftmargin=0.15in, label={}]
+  \\item \\small{
+"""
+        lang_parts = []
+        for lang in resume.languages:
+            lname = escape_latex(lang.get("name", ""))
+            lprof = escape_latex(lang.get("proficiency", ""))
+            prof_str = f" ({lprof})" if lprof else ""
+            lang_parts.append(f"\\textbf{{{lname}}}{prof_str}")
+        latex += ", ".join(lang_parts)
+        latex += """
+  }
+\\end{itemize}
 """
 
     latex += "\n\\end{document}\n"

@@ -8,6 +8,8 @@ class PersonalInfo(BaseModel):
     location: str = ""
     linkedin: str = ""
     website: str = ""
+    github: str = ""
+    job_title: str = ""
 
 class ExperienceItem(BaseModel):
     company: str = ""

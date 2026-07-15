@@ -8,6 +8,8 @@ class PersonalInfo(BaseModel):
     location: str = ""
     linkedin: str = ""
     website: str = ""
+    github: str = ""
+    job_title: str = ""
 
 class ExperienceItem(BaseModel):
     company: str = ""
@@ -160,3 +162,24 @@ class ProjectEditorOutput(BaseModel):
 class TailorRequest(BaseModel):
     resume: ResumeStructure
     patch: ResumePatch
+
+# Multi-Agent Platform Redesign Schemas
+
+class TailoringStrategy(BaseModel):
+    summary_focus: str
+    skills_to_add: List[str]
+    experience_goals: Dict[str, str] = {} # Bullet-by-bullet focus guide for experience indexes
+    project_goals: Dict[str, str] = {} # Bullet-by-bullet focus guide for project indexes
+    reasoning: str
+
+class FactVerificationResult(BaseModel):
+    is_valid: bool
+    hallucinations: List[str] = [] # List of any fabricated facts/metrics/dates
+    corrections: Dict[str, str] = {} # Keyed by path e.g. "experience.0.description.1" -> corrected text
+
+class ReviewReport(BaseModel):
+    score: int = 0 # 0-100 rating
+    strengths: List[str] = []
+    weaknesses: List[str] = []
+    actionable_feedback: List[str] = []
+

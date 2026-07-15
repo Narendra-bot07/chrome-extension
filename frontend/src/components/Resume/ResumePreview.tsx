@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { ZoomIn, ZoomOut, Expand, Shrink, Printer, Download } from 'lucide-react';
 import { getTemplateComponent } from '../../templates';
 
-export default function ResumePreview({ resumeData, selectedTemplate }) {
+export default function ResumePreview({ resumeData, selectedTemplate, sectionOrder }: { resumeData: any, selectedTemplate: string, sectionOrder?: string[] }) {
   const [zoom, setZoom] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isFitPage, setIsFitPage] = useState(false);
@@ -146,7 +146,7 @@ export default function ResumePreview({ resumeData, selectedTemplate }) {
       <div className="flex-1 overflow-auto custom-scrollbar p-6 pt-20 flex justify-center" ref={containerRef}>
         <div className="origin-top flex justify-center transition-transform duration-200 ease-out" style={{ transform: `scale(${zoom})` }}>
           <div id="resume-print-container" className="shadow-2xl bg-white ring-1 ring-zinc-200/50" style={{ width: '8.5in' }}>
-            <TemplateComponent resume={resumeData} />
+            <TemplateComponent resume={resumeData} sectionOrder={sectionOrder} />
           </div>
         </div>
       </div>
