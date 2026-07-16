@@ -9,6 +9,9 @@ import {
 import { Button } from './ui/Button';
 import SettingsOverlay from './SettingsOverlay';
 import InvalidJdWarningModal from './InvalidJdWarningModal';
+import HowItWorksModal from './modals/HowItWorksModal';
+import FeedbackModal from './modals/FeedbackModal';
+import SupportModal from './modals/SupportModal';
 
 function Layout() {
   const navigate = useNavigate();
@@ -50,6 +53,10 @@ function Layout() {
     }
     return true;
   });
+
+  const [isHowItWorksOpen, setIsHowItWorksOpen] = useState(false);
+  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
+  const [isSupportOpen, setIsSupportOpen] = useState(false);
 
   useEffect(() => {
     const fetchProfileData = async () => {
@@ -246,11 +253,39 @@ function Layout() {
           </div>
 
           <div className="flex items-center gap-4">
-            <span className="hidden md:inline text-xs text-zinc-500 font-semibold cursor-pointer hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors">How it works</span>
-            <span className="hidden md:inline text-xs text-zinc-500 font-semibold cursor-pointer hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors">Upgrade</span>
+            <button 
+              onClick={() => {
+                // Tracking if api is available, though Context api object was not explicitly extracted above.
+                // It's recommended to just emit client side if there is an endpoint, or rely on page load events.
+                // We'll trust the backend emits for the ones with endpoints, but for client UI events we can log to console or fire a simple fetch if we had an analytics hook.
+                setIsHowItWorksOpen(true);
+              }}
+              className="hidden md:inline text-xs text-zinc-500 font-semibold cursor-pointer hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors"
+            >
+              How it works
+            </button>
+            <button 
+              onClick={() => {
+                navigate('/profile?tab=BILLING');
+              }}
+              className="hidden md:inline text-xs text-zinc-500 font-semibold cursor-pointer hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors"
+            >
+              Upgrade
+            </button>
+            <button 
+              onClick={() => setIsFeedbackOpen(true)}
+              className="hidden md:inline text-xs text-zinc-500 font-semibold cursor-pointer hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors"
+            >
+              Feedback
+            </button>
 
-            {/* Discord support */}
-            <Button variant="outline" size="sm" className="hidden sm:inline-flex">
+            {/* Support support */}
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="hidden sm:inline-flex"
+              onClick={() => setIsSupportOpen(true)}
+            >
               Need Help?
             </Button>
 
@@ -422,7 +457,9 @@ function Layout() {
           />
         )}
       </div>
-
+      <HowItWorksModal isOpen={isHowItWorksOpen} onClose={() => setIsHowItWorksOpen(false)} />
+      <FeedbackModal isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />
+      <SupportModal isOpen={isSupportOpen} onClose={() => setIsSupportOpen(false)} />
     </div>
   );
 }

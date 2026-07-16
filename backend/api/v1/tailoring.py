@@ -10,6 +10,8 @@ from services.resume.tailoring_service import TailoringService
 from services.storage.file_service import FileService
 from repositories.audit_repository import AuditRepository
 from repositories.tailoring_repository import TailoringRepository
+from app.analytics.events.tracking.analytics_service import AnalyticsService
+from core.database import get_db_connection
 
 router = APIRouter(prefix="/tailor", tags=["tailor"])
 
@@ -17,7 +19,8 @@ router = APIRouter(prefix="/tailor", tags=["tailor"])
 async def tailor_resume(
     request: TailorRequest,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
-    service: TailoringService = Depends(get_tailoring_service)
+    service: TailoringService = Depends(get_tailoring_service),
+    conn = Depends(get_db_connection)
 ):
     try:
         # We assume request has job_analysis attached if the old format had it, 
@@ -33,6 +36,16 @@ async def tailor_resume(
             job_id=job_title,
             patch=request.patch
         )
+        
+        # Emit event
+        AnalyticsService(conn).emit_event(
+            user_id=user["id"],
+            event_type="RESUME_TAILORED",
+            resource_type="tailoring",
+            resource_id=record["id"],
+            metadata={"job_title": job_title}
+        )
+        
         return record
     except ValueError as val_err:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(val_err))
@@ -45,7 +58,8 @@ async def download_pdf(
     company_name: Optional[str] = "Company",
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     storage: FileService = Depends(get_storage_service),
-    audit_repo: AuditRepository = Depends(get_audit_repository)
+    audit_repo: AuditRepository = Depends(get_audit_repository),
+    conn = Depends(get_db_connection)
 ):
     try:
         from app.playwright_pdf import generate_pdf_via_playwright
@@ -75,6 +89,14 @@ async def download_pdf(
             ats_score=85.0,
             company_name=company_name,
             job_title="Software Engineer"
+        )
+        
+        AnalyticsService(conn).emit_event(
+            user_id=user["id"],
+            event_type="PDF_DOWNLOADED",
+            resource_type="pdf",
+            resource_id=file_path,
+            metadata={"company_name": company_name, "template": request.template_name}
         )
 
         filename = f"{company_name}_Tailored_Resume.pdf"

@@ -7,6 +7,8 @@ from repositories.resume_repository import ResumeRepository
 from services.storage.file_service import FileService
 from services.resume.parser import ResumeParser
 from services.ai.groq_service import GroqService
+from app.analytics.events.tracking.analytics_service import AnalyticsService
+from core.database import get_db_connection
 
 router = APIRouter(prefix="/resumes", tags=["resumes"])
 
@@ -15,7 +17,8 @@ async def upload_and_parse(
     file: UploadFile = File(...),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     resume_repo: ResumeRepository = Depends(get_resume_repository),
-    storage: FileService = Depends(get_storage_service)
+    storage: FileService = Depends(get_storage_service),
+    conn = Depends(get_db_connection)
 ):
     ext = file.filename.split(".")[-1].upper()
     if ext not in SUPPORTED_FILE_EXTENSIONS:
@@ -55,6 +58,15 @@ async def upload_and_parse(
         file_type=ext,
         parsed_content=parsed_res
     )
+    
+    AnalyticsService(conn).emit_event(
+        user_id=user["id"],
+        event_type="RESUME_UPLOADED",
+        resource_type="resume",
+        resource_id=record["id"],
+        metadata={"file_name": file.filename, "file_size": len(content)}
+    )
+    
     return record
 
 @router.get("/")
@@ -82,7 +94,8 @@ async def delete_resume(
 async def parse_existing_resume(
     resume_id: str,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
-    repo: ResumeRepository = Depends(get_resume_repository)
+    repo: ResumeRepository = Depends(get_resume_repository),
+    conn = Depends(get_db_connection)
 ):
     record = repo.get_by_id(resume_id, user["id"])
     if not record:
@@ -113,6 +126,14 @@ async def parse_existing_resume(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update parsed resume content in database."
         )
+    # Emit Analytics Event
+    AnalyticsService(conn).emit_event(
+        user_id=user["id"],
+        event_type="RESUME_PARSED",
+        resource_type="resume",
+        resource_id=resume_id,
+        metadata={"source": "on-demand"}
+    )
         
     # Return updated record format
     record["parsed_content"] = updated_content

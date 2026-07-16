@@ -5,6 +5,8 @@ from pydantic import BaseModel
 from core.security import verify_supabase_jwt
 from api.dependencies import get_application_repository
 from repositories.application_repository import ApplicationRepository
+from app.analytics.events.tracking.analytics_service import AnalyticsService
+from core.database import get_db_connection
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 
@@ -53,7 +55,8 @@ async def list_applications(
 async def create_application(
     request: ApplicationCreateRequest,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
-    repo: ApplicationRepository = Depends(get_application_repository)
+    repo: ApplicationRepository = Depends(get_application_repository),
+    conn = Depends(get_db_connection)
 ):
     try:
         # Default timelines if none supplied
@@ -76,6 +79,19 @@ async def create_application(
             current_stage=request.current_stage or "Ready To Apply",
             timeline=timeline
         )
+        
+        AnalyticsService(conn).emit_event(
+            user_id=user["id"],
+            event_type="APPLICATION_CREATED",
+            resource_type="application",
+            resource_id=record["id"],
+            metadata={
+                "company_name": request.company_name,
+                "job_title": request.job_title,
+                "current_stage": request.current_stage or "Ready To Apply"
+            }
+        )
+        
         return record
     except Exception as e:
         raise HTTPException(
@@ -88,7 +104,8 @@ async def update_application(
     id: str,
     request: ApplicationUpdateRequest,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
-    repo: ApplicationRepository = Depends(get_application_repository)
+    repo: ApplicationRepository = Depends(get_application_repository),
+    conn = Depends(get_db_connection)
 ):
     try:
         # Filter request data to only fields that were set
@@ -99,6 +116,24 @@ async def update_application(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Application session not found."
             )
+            
+        if request.current_stage:
+            event_type = "APPLICATION_MOVED"
+            if request.current_stage == "Accepted":
+                event_type = "OFFER_ACCEPTED"
+            elif request.current_stage == "Rejected":
+                event_type = "OFFER_REJECTED"
+            elif request.current_stage == "Archived":
+                event_type = "APPLICATION_ARCHIVED"
+                
+            AnalyticsService(conn).emit_event(
+                user_id=user["id"],
+                event_type=event_type,
+                resource_type="application",
+                resource_id=id,
+                metadata={"new_stage": request.current_stage}
+            )
+            
         return record
     except HTTPException as he:
         raise he

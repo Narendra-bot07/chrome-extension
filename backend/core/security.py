@@ -3,9 +3,11 @@ from fastapi import Header, Depends
 from core.database import get_db_connection
 from core.exceptions import CredentialError
 from core.config import settings
+from app.services.session_service import SessionService
 
 async def verify_supabase_jwt(
-    authorization: str = Header(None, description="Bearer JWT token from custom auth")
+    authorization: str = Header(None, description="Bearer JWT token from custom auth"),
+    conn = Depends(get_db_connection)
 ) -> Dict[str, Any]:
     """
     Validates client session token (JWT) using settings.JWT_SECRET.
@@ -30,9 +32,18 @@ async def verify_supabase_jwt(
     try:
         import jwt
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        
+        # Verify session using SessionService
+        session_id = payload.get("jti")
+        if session_id:
+            session_service = SessionService(conn)
+            if not session_service.verify_and_update_session(session_id):
+                raise CredentialError("Session expired or revoked.")
+
         return {
             "id": payload["sub"],
             "email": payload["email"],
+            "created_at": payload.get("created_at", ""),
             "metadata": {
                 "full_name": payload.get("full_name", ""),
                 "provider": payload.get("provider", "email")

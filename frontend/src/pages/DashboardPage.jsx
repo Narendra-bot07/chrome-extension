@@ -28,7 +28,7 @@ class DashboardErrorBoundary extends React.Component {
           <h2 className="text-base font-black uppercase text-zinc-950 dark:text-zinc-50 tracking-wider">
             Dashboard Crash Intercepted
           </h2>
-          <p className="text-xs text-zinc-550 max-w-md mt-2 font-semibold">
+          <p className="text-xs text-zinc-550 dark:text-zinc-400 mt-2 font-medium">
             {this.state.error?.toString() || "An unexpected rendering crash occurred."}
           </p>
           <pre className="text-[10px] text-rose-600 bg-rose-50 dark:bg-rose-955/25 border border-rose-200 dark:border-rose-955/40 p-4 rounded-xl max-w-lg overflow-x-auto mt-4 text-left max-h-[200px] w-full font-mono">
@@ -48,14 +48,16 @@ class DashboardErrorBoundary extends React.Component {
 }
 
 function DashboardContent() {
-  const { session, applications: rawApps, fetchApplications, apiUrl } = useApp();
+  const { session, applications: rawApps, fetchApplications, apiUrl, profile } = useApp();
   const applications = rawApps || [];
-  const [profile, setProfile] = useState({
-    full_name: '',
-    email: '',
-    subscription_plan: 'Free',
-    credits_remaining: 5,
-    resume_count: 0
+  const [metrics, setMetrics] = useState({
+    current_plan: 'free',
+    credits_remaining: 0,
+    credits_used: 0,
+    subscription_status: 'none',
+    resumes_tailored: 0,
+    applications_tracked: 0,
+    avg_ats_score: 0
   });
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
@@ -67,11 +69,11 @@ function DashboardContent() {
         if (!token) return;
         const headers = { 'Authorization': `Bearer ${token}` };
 
-        // Fetch user profile
-        const profileRes = await fetch(`${apiUrl}/api/v1/profile/`, { headers });
-        if (profileRes.ok) {
-          const profileData = await profileRes.json();
-          setProfile(profileData);
+        // Fetch analytics dashboard
+        const metricsRes = await fetch(`${apiUrl}/api/v1/analytics/dashboard`, { headers });
+        if (metricsRes.ok) {
+          const metricsData = await metricsRes.json();
+          setMetrics(metricsData);
         }
 
         await fetchApplications();
@@ -89,7 +91,7 @@ function DashboardContent() {
   // REAL-TIME ANALYTICS CALCULATIONS
   // ==========================================
 
-  const totalResumesTailored = applications.length;
+  const totalResumesTailored = metrics.resumes_tailored;
 
   // Monthly and today tailoring counts
   const now = new Date();
@@ -113,7 +115,7 @@ function DashboardContent() {
     : Math.round(((tailoredThisMonth - tailoredLastMonth) / tailoredLastMonth) * 100);
 
   // Stage filters
-  const jobsTracked = applications.length;
+  const jobsTracked = metrics.applications_tracked;
   const appsSubmitted = applications.filter(a => a && a.current_stage !== 'Ready To Apply').length;
   const interviewsCount = applications.filter(a => a && ['Interview', 'Final Round'].includes(a.current_stage)).length;
   const offersCount = applications.filter(a => a && ['Offer', 'Accepted'].includes(a.current_stage)).length;
@@ -122,10 +124,7 @@ function DashboardContent() {
   const successRate = appsSubmitted === 0 ? 0 : Math.round((acceptedCount / appsSubmitted) * 100);
 
   // ATS match averages
-  const validAtsScores = applications.filter(a => a && a.ats_score > 0);
-  const atsAverage = validAtsScores.length === 0 
-    ? 85 
-    : Math.round(validAtsScores.reduce((sum, a) => sum + (a.ats_score || 0), 0) / validAtsScores.length);
+  const atsAverage = metrics.avg_ats_score;
 
   const activeAppsCount = applications.filter(a => 
     a && !['Accepted', 'Rejected', 'Archived'].includes(a.current_stage)
@@ -288,7 +287,7 @@ function DashboardContent() {
       </div>
 
       {/* Profile check banner warning */}
-      {!loading && profile.resume_count === 0 && (
+      {!loading && profile?.resume_count === 0 && (
         <div className="bg-amber-50/50 dark:bg-amber-500/5 border border-amber-200/50 dark:border-amber-900/30 rounded-2xl p-5 flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-4">
             <div className="w-9 h-9 rounded-xl bg-amber-100/50 dark:bg-amber-500/10 flex items-center justify-center text-amber-600 dark:text-amber-500 font-extrabold text-sm">
@@ -465,8 +464,8 @@ function DashboardContent() {
         {/* Status Distribution progress pie list */}
         <div className="p-5 border border-zinc-200 dark:border-zinc-900 rounded-3xl bg-zinc-50/10 dark:bg-zinc-900/5 flex flex-col justify-between gap-5">
           <div>
-            <h3 className="text-xs font-black uppercase tracking-widest text-zinc-955 dark:text-zinc-50">Stage distribution</h3>
-            <p className="text-[9px] text-zinc-450 dark:text-zinc-550 font-bold uppercase mt-0.5 font-sans">Visual status breakdown of scan tracker</p>
+            <h3 className="text-xs font-black uppercase tracking-widest text-zinc-955 dark:text-zinc-50">Credits remaining</h3>
+            <div className="text-3xl font-bold tracking-tight mt-2">{metrics.credits_remaining === -1 ? '∞' : metrics.credits_remaining}</div>
           </div>
 
           {/* Premium status bar */}
@@ -653,8 +652,18 @@ function DashboardContent() {
       {/* 7. Recent Applications directory table */}
       <div className="p-5 border border-zinc-200 dark:border-zinc-900 rounded-3xl bg-zinc-50/10 dark:bg-zinc-900/5 select-none mt-2">
         <div className="mb-4">
-          <h3 className="text-xs font-black uppercase tracking-widest text-zinc-900 dark:text-zinc-50">Recent Applications</h3>
-          <p className="text-[9px] text-zinc-450 dark:text-zinc-550 font-bold uppercase mt-0.5 font-sans">Latest jobs tracked in the pipeline</p>
+          <div className="flex justify-between items-center">
+            <div>
+              <h3 className="text-xs font-black uppercase tracking-widest text-zinc-900 dark:text-zinc-50">Recent Applications</h3>
+              <p className="text-[9px] text-zinc-450 dark:text-zinc-550 font-bold uppercase mt-0.5 font-sans">Latest jobs tracked in the pipeline</p>
+            </div>
+            <div className="text-right">
+              <h3 className="font-bold text-zinc-950 dark:text-zinc-50 capitalize text-sm">{metrics.current_plan} Tier</h3>
+              <span className="px-2 py-0.5 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400 text-[10px] font-bold tracking-wider rounded-md uppercase border border-violet-200 dark:border-violet-900/50">
+                {metrics.subscription_status}
+              </span>
+            </div>
+          </div>
         </div>
 
         <div className="overflow-x-auto select-none font-sans text-xs">

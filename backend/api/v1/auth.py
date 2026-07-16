@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from core.security import verify_supabase_jwt, hash_password, verify_password
 from core.database import get_db_connection
 from schemas.auth import RegisterRequest, LoginRequest, GoogleAuthRequest
 from app.services.auth_service import AuthService
+from app.services.session_service import SessionService
+from app.analytics.events.tracking.analytics_service import AnalyticsService
 from typing import Dict, Any
 from psycopg2.extras import RealDictCursor
+import datetime
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -39,6 +42,14 @@ async def register_user(
             )
             conn.commit()
             
+            # Emit Analytics Event
+            analytics_service = AnalyticsService(conn)
+            analytics_service.emit_event(
+                user_id=user[0],
+                event_type="USER_REGISTERED",
+                metadata={"provider": "email"}
+            )
+            
             return {
                 "status": "success",
                 "message": "User registered successfully.",
@@ -60,6 +71,7 @@ async def register_user(
 @router.post("/login")
 async def login_user(
     payload: LoginRequest,
+    request: Request,
     conn = Depends(get_db_connection)
 ):
     try:
@@ -78,7 +90,19 @@ async def login_user(
             conn.commit()
 
             auth_service = AuthService(conn)
-            access_token = auth_service.generate_custom_jwt(user)
+            session_service = SessionService(conn)
+            
+            session_id = session_service.create_session(user["id"], request, "email")
+            access_token = auth_service.generate_custom_jwt(user, session_id)
+
+            # Emit Analytics Event
+            analytics_service = AnalyticsService(conn)
+            analytics_service.emit_event(
+                user_id=user["id"],
+                event_type="USER_LOGIN",
+                metadata={"provider": "email"},
+                session_id=session_id
+            )
 
             return {
                 "status": "success",
@@ -89,7 +113,8 @@ async def login_user(
                         "id": user["id"],
                         "email": user["email"],
                         "full_name": user.get("full_name", ""),
-                        "provider": user.get("provider", "email")
+                        "provider": user.get("provider", "email"),
+                        "created_at": user.get("created_at", datetime.datetime.utcnow()).isoformat() if isinstance(user.get("created_at"), datetime.datetime) else str(user.get("created_at", ""))
                     }
                 }
             }
@@ -104,25 +129,39 @@ async def login_user(
 @router.post("/google")
 async def google_login(
     payload: GoogleAuthRequest,
+    request: Request,
     conn = Depends(get_db_connection)
 ):
-    """
-    End-to-End Google Authentication
-    """
     if not payload.credential:
         raise HTTPException(status_code=400, detail="Missing credential.")
 
     auth_service = AuthService(conn)
     try:
-        # Verify token with Google
         idinfo = auth_service.verify_google_token(payload.credential)
         
-        # Sync user in public.users table
-        user = auth_service.sync_google_user(idinfo)
+        user = auth_service.sync_oauth_user(
+            provider="google",
+            provider_user_id=idinfo.get("sub"),
+            email=idinfo.get("email"),
+            full_name=idinfo.get("name", ""),
+            avatar_url=idinfo.get("picture", ""),
+            email_verified=idinfo.get("email_verified", False)
+        )
         
-        # Generate custom JWT
-        access_token = auth_service.generate_custom_jwt(user)
+        session_service = SessionService(conn)
+        session_id = session_service.create_session(user["id"], request, "google")
         
+        access_token = auth_service.generate_custom_jwt(user, session_id)
+        
+        # Emit Analytics Event
+        analytics_service = AnalyticsService(conn)
+        analytics_service.emit_event(
+            user_id=user["id"],
+            event_type="USER_LOGIN",
+            metadata={"provider": "google"},
+            session_id=session_id
+        )
+
         return {
             "status": "success",
             "session": {
@@ -133,7 +172,8 @@ async def google_login(
                     "email": user["email"],
                     "full_name": user.get("full_name", ""),
                     "provider": user.get("provider", "google"),
-                    "avatar_url": user.get("avatar_url", "")
+                    "avatar_url": user.get("avatar_url", ""),
+                    "created_at": user.get("created_at", datetime.datetime.utcnow()).isoformat() if isinstance(user.get("created_at"), datetime.datetime) else str(user.get("created_at", ""))
                 }
             }
         }
@@ -145,9 +185,7 @@ async def google_login(
             detail=f"Google login failed: {str(e)}"
         )
 
+
 @router.get("/session")
 async def verify_session(user: Dict[str, Any] = Depends(verify_supabase_jwt)):
-    """
-    Validates token and returns user details.
-    """
     return {"status": "authenticated", "user": user}

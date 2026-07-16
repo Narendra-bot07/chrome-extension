@@ -19,7 +19,11 @@ import PrintLayout from './components/Resume/PrintLayout';
 import PrintCoverLetterLayout from './pages/PrintCoverLetterLayout';
 import DashboardPage from './pages/DashboardPage';
 import ProfilePage from './pages/ProfilePage';
+import SecurityPage from './pages/SecurityPage';
 import JobTrackerPage from './pages/JobTrackerPage';
+import HelpSearchPage from './pages/HelpSearchPage';
+import FAQPage from './pages/FAQPage';
+import ContactSupportPage from './pages/ContactSupportPage';
 
 function ProtectedRoute({ children }) {
   const { user, loadingAuth } = useApp();
@@ -79,6 +83,7 @@ function AppRoutes() {
         <Route path="/tailor" element={<JobExtractPage />} />
         <Route path="/job-tracker" element={<JobTrackerPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/settings/security" element={<SecurityPage />} />
         <Route path="/resume-detect" element={<ResumeDetectPage />} />
         <Route path="/resume-parse" element={<ResumeParsePage />} />
         <Route path="/resume-review" element={<ResumeReviewPage />} />
@@ -88,6 +93,9 @@ function AppRoutes() {
         <Route path="/templates" element={<TemplatesPage />} />
         <Route path="/download" element={<DownloadPage />} />
         <Route path="/cover-letter" element={<CoverLetterPage />} />
+        <Route path="/support/search" element={<HelpSearchPage />} />
+        <Route path="/support/faq" element={<FAQPage />} />
+        <Route path="/support/contact" element={<ContactSupportPage />} />
       </Route>
       <Route path="/print" element={<PrintLayout />} />
       <Route path="/print-cover-letter" element={<PrintCoverLetterLayout />} />

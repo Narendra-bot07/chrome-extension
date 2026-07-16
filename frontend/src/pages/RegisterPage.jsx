@@ -131,7 +131,7 @@ export default function RegisterPage() {
   };
 
   const handleOAuthLogin = async (provider) => {
-    if (provider === 'google') return; // Handled by GoogleLogin component
+    if (provider === 'google') return; // Handled by components/hooks
     setLoginLoading(true);
     setLoginError(null);
     try {
@@ -361,7 +361,7 @@ export default function RegisterPage() {
               </div>
 
               {/* Social OAuth Buttons */}
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-1 gap-2.5">
                 <div className="flex justify-center h-[42px] overflow-hidden rounded-xl border border-zinc-200">
                   <GoogleLogin
                     onSuccess={handleGoogleSuccess}
@@ -371,14 +371,6 @@ export default function RegisterPage() {
                     text="continue_with"
                   />
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => handleOAuthLogin('azure')}
-                  className="py-2.5 bg-white border border-zinc-200 hover:bg-zinc-55 text-zinc-800 font-bold text-xs rounded-xl transition cursor-pointer"
-                >
-                  Microsoft
-                </button>
               </div>
 
               {/* Action Link Footer */}
@@ -511,23 +503,13 @@ export default function RegisterPage() {
               </div>
 
               {/* Social OAuth Buttons */}
-              <div className="grid grid-cols-2 gap-2.5">
-                <div className="flex justify-center h-[42px] overflow-hidden rounded-xl border border-zinc-200">
-                  <GoogleLogin
-                    onSuccess={handleGoogleSuccess}
-                    onError={() => setRegError('Google registration failed.')}
-                    shape="rectangular"
-                    text="continue_with"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => handleOAuthLogin('azure')}
-                  className="py-2.5 bg-white border border-zinc-200 hover:bg-zinc-55 text-zinc-800 font-bold text-xs rounded-xl transition cursor-pointer"
-                >
-                  Microsoft
-                </button>
+              <div className="flex justify-center mt-2">
+                <GoogleLogin
+                  onSuccess={handleGoogleSuccess}
+                  onError={() => setRegError('Google registration failed.')}
+                  shape="rectangular"
+                  text="continue_with"
+                />
               </div>
 
               {/* Already have account toggler */}

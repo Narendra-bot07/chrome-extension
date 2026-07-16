@@ -26,22 +26,16 @@ class AuthService:
         except Exception as e:
             raise ValueError(f"Invalid Google token: {str(e)}")
 
-    def sync_google_user(self, idinfo: dict) -> dict:
+    def sync_oauth_user(self, provider: str, provider_user_id: str, email: str, full_name: str, avatar_url: str, email_verified: bool) -> dict:
         """
-        Find existing user by google_sub or email, update or create accordingly.
+        Find existing user by provider_user_id or email, update or create accordingly.
         """
-        google_sub = idinfo.get("sub")
-        email = idinfo.get("email")
-        full_name = idinfo.get("name", "")
-        avatar_url = idinfo.get("picture", "")
-        email_verified = idinfo.get("email_verified", False)
-
-        if not google_sub or not email:
-            raise ValueError("Incomplete Google user profile.")
+        if not provider_user_id or not email:
+            raise ValueError(f"Incomplete {provider} user profile.")
 
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # Check by google_sub first
-            cur.execute("SELECT * FROM public.users WHERE google_sub = %s", (google_sub,))
+            # Check by provider_user_id first
+            cur.execute("SELECT * FROM public.users WHERE provider_user_id = %s", (provider_user_id,))
             user = cur.fetchone()
 
             if user:
@@ -53,26 +47,26 @@ class AuthService:
                 """, (full_name, avatar_url, user['id']))
                 user = cur.fetchone()
             else:
-                # Check by email in case they signed up with email/password before
+                # Check by email in case they signed up with email/password or another provider before
                 cur.execute("SELECT * FROM public.users WHERE email = %s", (email,))
                 user = cur.fetchone()
 
                 if user:
-                    # Link google sub to existing email account
+                    # Link oauth provider to existing email account
                     cur.execute("""
                         UPDATE public.users 
-                        SET google_sub = %s, provider = 'google', last_login = NOW(), 
+                        SET provider_user_id = %s, provider = %s, last_login = NOW(), 
                             avatar_url = COALESCE(avatar_url, %s), updated_at = NOW()
                         WHERE id = %s RETURNING *
-                    """, (google_sub, avatar_url, user['id']))
+                    """, (provider_user_id, provider, avatar_url, user['id']))
                     user = cur.fetchone()
                 else:
                     # Create completely new user
                     cur.execute("""
-                        INSERT INTO public.users (google_sub, email, full_name, avatar_url, provider, email_verified, last_login)
-                        VALUES (%s, %s, %s, %s, 'google', %s, NOW())
+                        INSERT INTO public.users (provider_user_id, email, full_name, avatar_url, provider, email_verified, last_login)
+                        VALUES (%s, %s, %s, %s, %s, %s, NOW())
                         RETURNING *
-                    """, (google_sub, email, full_name, avatar_url, email_verified))
+                    """, (provider_user_id, email, full_name, avatar_url, provider, email_verified))
                     user = cur.fetchone()
 
             # Ensure public.profiles is seeded for compatibility with old architecture
@@ -86,15 +80,23 @@ class AuthService:
             self.conn.commit()
             return user
 
-    def generate_custom_jwt(self, user: dict) -> str:
+    def generate_custom_jwt(self, user: dict, session_id: str) -> str:
         """
         Generate MY OWN JWT for the authenticated user.
         """
+        created_at_val = user.get("created_at")
+        if isinstance(created_at_val, datetime.datetime):
+            created_at_val = created_at_val.isoformat()
+        elif not created_at_val:
+            created_at_val = datetime.datetime.utcnow().isoformat()
+            
         token_payload = {
             "sub": str(user["id"]),
             "email": user["email"],
             "full_name": user.get("full_name", ""),
             "provider": user.get("provider", "email"),
+            "created_at": created_at_val,
+            "jti": session_id,
             "exp": datetime.datetime.utcnow() + datetime.timedelta(days=7)
         }
         access_token = jwt.encode(token_payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
