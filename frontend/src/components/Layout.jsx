@@ -263,14 +263,7 @@ function Layout() {
             >
               {darkMode ? <Sun size={14} /> : <Moon size={14} />}
             </button>
-            <button 
-              className={`p-2 rounded-lg border transition-colors ${
-                darkMode ? 'border-zinc-800 bg-zinc-900/40 text-zinc-400 hover:text-white hover:bg-zinc-800' : 'border-zinc-200 bg-white text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50'
-              }`}
-              onClick={() => setShowSettings(true)}
-            >
-              <Settings size={14} />
-            </button>
+
 
             {/* Profile Dropdown */}
             <div className="relative">

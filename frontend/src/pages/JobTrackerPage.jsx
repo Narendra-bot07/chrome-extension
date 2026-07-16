@@ -3,7 +3,7 @@ import {
   Briefcase, Search, Trash2, Clock, 
   MapPin, Send, BrainCircuit, ExternalLink, Lightbulb, Bell, FileText,
   X, Zap, CheckCircle2, AlertCircle, Building, Sparkles, ArrowRight, CheckCircle,
-  ClipboardCheck, Eye, Calendar, FileEdit, ShieldCheck, Check, DollarSign, User, Link, Plus
+  ClipboardCheck, Eye, Calendar, FileEdit, ShieldCheck, Check, DollarSign, User, Link, Plus, Archive
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Button } from '../components/ui/Button';
@@ -372,7 +372,11 @@ Best regards,
   const renderStageBox = (stage) => {
     const isOccupied = selectedApp?.current_stage === stage.id;
     const isOver = dragOverStage === stage.id;
-    const isCompleted = selectedApp && STAGE_ORDER[selectedApp.current_stage] > STAGE_ORDER[stage.id];
+    const isCompletedLinear = selectedApp && STAGE_ORDER[selectedApp.current_stage] > STAGE_ORDER[stage.id];
+    
+    const showAsCompleted = isCompletedLinear || (isOccupied && stage.id === 'Accepted');
+    const showAsRejected = isOccupied && stage.id === 'Rejected';
+    const showAsArchived = isOccupied && stage.id === 'Archived';
 
     return (
       <div
@@ -381,31 +385,51 @@ Best regards,
         onDragLeave={handleDragLeave}
         onDrop={(e) => handleDrop(e, stage.id)}
         onClick={() => handleOpenStagePopup(stage.id)}
-        className={`w-[170px] shrink-0 p-3.5 rounded-2xl border transition-all duration-200 cursor-pointer bg-white dark:bg-zinc-900/40 relative ${
+        className={`w-[170px] shrink-0 p-3.5 rounded-2xl border transition-all duration-200 cursor-pointer relative ${
+          showAsCompleted && isOccupied ? 'border-emerald-500 shadow-xs bg-emerald-500/5' :
+          showAsRejected ? 'border-rose-500 shadow-xs bg-rose-500/5' :
+          showAsArchived ? 'border-zinc-500 shadow-xs bg-zinc-500/5' :
           isOccupied 
-            ? 'border-[#00bda5] shadow-xs' 
-            : isCompleted
+            ? 'border-[#00bda5] shadow-xs bg-white dark:bg-zinc-900/40' 
+            : isCompletedLinear
             ? 'border-emerald-500/35 bg-emerald-500/5 dark:bg-emerald-950/10'
-            : 'border-zinc-200 dark:border-zinc-900 hover:border-zinc-350 dark:hover:border-zinc-800'
+            : 'border-zinc-200 dark:border-zinc-900 hover:border-zinc-350 dark:hover:border-zinc-800 bg-white dark:bg-zinc-900/40'
         } ${isOver ? 'ring-2 ring-[#00bda5] border-transparent bg-emerald-500/5' : ''}`}
       >
         <div className="flex items-center justify-between pb-1.5 mb-2 border-b border-zinc-150 dark:border-zinc-900/60 select-none">
           <div className="flex items-center gap-1.5 min-w-0 w-full justify-between">
             <div className="flex items-center gap-1.5 min-w-0">
-              {isCompleted ? (
+              {showAsCompleted ? (
                 <Check className="w-3 h-3 text-emerald-500 shrink-0 stroke-[3.5]" />
+              ) : showAsRejected ? (
+                <X className="w-3 h-3 text-rose-500 shrink-0 stroke-[3.5]" />
+              ) : showAsArchived ? (
+                <Archive className="w-3 h-3 text-zinc-500 shrink-0 stroke-[3.5]" />
               ) : (
                 <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: stage.color }} />
               )}
               <span className={`text-[8.5px] font-black uppercase tracking-wider truncate ${
-                isCompleted ? 'text-emerald-600 dark:text-emerald-500' : 'text-zinc-955 dark:text-zinc-50'
+                showAsCompleted ? 'text-emerald-600 dark:text-emerald-500' :
+                showAsRejected ? 'text-rose-600 dark:text-rose-500' :
+                showAsArchived ? 'text-zinc-600 dark:text-zinc-400' :
+                'text-zinc-955 dark:text-zinc-50'
               }`}>
                 {stage.label}
               </span>
             </div>
-            {isCompleted && (
+            {showAsCompleted && (
               <span className="text-[7.5px] font-black text-emerald-600 dark:text-emerald-500 uppercase tracking-widest leading-none bg-emerald-500/10 dark:bg-emerald-500/20 px-1 py-0.5 rounded shrink-0">
-                Done
+                {isOccupied ? 'Won' : 'Done'}
+              </span>
+            )}
+            {showAsRejected && (
+              <span className="text-[7.5px] font-black text-rose-600 dark:text-rose-500 uppercase tracking-widest leading-none bg-rose-500/10 dark:bg-rose-500/20 px-1 py-0.5 rounded shrink-0">
+                Closed
+              </span>
+            )}
+            {showAsArchived && (
+              <span className="text-[7.5px] font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest leading-none bg-zinc-500/10 dark:bg-zinc-500/20 px-1 py-0.5 rounded shrink-0">
+                Closed
               </span>
             )}
           </div>
@@ -650,7 +674,7 @@ Best regards,
               
               {/* TAB 1: WORKFLOW STAGE PIPELINE */}
               {workspaceTab === 'Workflow' && (
-                <div className="w-full flex items-center justify-start py-12 px-6 overflow-x-auto custom-scrollbar select-none animate-fadeIn">
+                <div className="w-full h-full flex items-center justify-start py-12 px-6 overflow-x-auto custom-scrollbar select-none animate-fadeIn">
                   
                   {/* Primary flow layout */}
                   <div className="flex items-center shrink-0">
@@ -671,8 +695,8 @@ Best regards,
                     {/* Horizontal link coming out of Offer Received */}
                     <div className="w-8 h-0.5 bg-zinc-200 dark:bg-zinc-800 shrink-0" />
                     
-                    {/* Vertical branching track bar of height 160px */}
-                    <div className="w-0.5 h-[160px] bg-zinc-200 dark:bg-zinc-800 relative shrink-0">
+                    {/* Vertical branching track bar of height 300px for better spacing */}
+                    <div className="w-0.5 h-[300px] bg-zinc-200 dark:bg-zinc-800 relative shrink-0">
                       {/* Top outlet branch line to Accepted */}
                       <div className="absolute left-0 top-0 w-8 h-0.5 bg-zinc-200 dark:bg-zinc-800" />
                       {/* Middle outlet branch line to Rejected */}
@@ -683,7 +707,7 @@ Best regards,
                   </div>
 
                   {/* Terminal outcome stages stacked vertically, matching outlets */}
-                  <div className="flex flex-col justify-between h-[180px] ml-8 shrink-0 select-none">
+                  <div className="flex flex-col justify-between h-[320px] ml-8 shrink-0 select-none">
                     {TERMINAL_STAGES.map((tStage) => renderStageBox(tStage))}
                   </div>
 

@@ -29,11 +29,17 @@ async def verify_supabase_jwt(
 
     try:
         import jwt
-        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
         return {
             "id": payload["sub"],
             "email": payload["email"],
-            "metadata": {"full_name": payload.get("full_name", "")}
+            "metadata": {
+                "full_name": payload.get("full_name", ""),
+                "provider": payload.get("provider", "email")
+            },
+            "app_metadata": {
+                "provider": payload.get("provider", "email")
+            }
         }
     except jwt.ExpiredSignatureError:
         raise CredentialError("Session expired.")

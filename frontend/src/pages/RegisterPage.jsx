@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { Mail, Lock, User, ChevronRight, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { GoogleLogin } from '@react-oauth/google';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -105,7 +106,32 @@ export default function RegisterPage() {
   };
 
   // --- OAUTH BYPASS ---
+  const handleGoogleSuccess = async (credentialResponse) => {
+    setLoginLoading(true);
+    setLoginError(null);
+    try {
+      const res = await fetch('http://localhost:8000/api/v1/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: credentialResponse.credential })
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || 'Google login failed.');
+      }
+      const data = await res.json();
+      localStorage.setItem('access_token', data.session.access_token);
+      window.location.href = '#/';
+      window.location.reload();
+    } catch (err) {
+      setLoginError(err.message || 'Google login failed.');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
   const handleOAuthLogin = async (provider) => {
+    if (provider === 'google') return; // Handled by GoogleLogin component
     setLoginLoading(true);
     setLoginError(null);
     try {
@@ -335,21 +361,17 @@ export default function RegisterPage() {
               </div>
 
               {/* Social OAuth Buttons */}
-              <div className="grid grid-cols-3 gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => handleOAuthLogin('google')}
-                  className="py-2.5 bg-white border border-zinc-200 hover:bg-zinc-55 text-zinc-800 font-bold text-xs rounded-xl transition cursor-pointer"
-                >
-                  Google
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleOAuthLogin('github')}
-                  className="py-2.5 bg-white border border-zinc-200 hover:bg-zinc-55 text-zinc-800 font-bold text-xs rounded-xl transition cursor-pointer"
-                >
-                  GitHub
-                </button>
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="flex justify-center h-[42px] overflow-hidden rounded-xl border border-zinc-200">
+                  <GoogleLogin
+                    onSuccess={handleGoogleSuccess}
+                    onError={() => setLoginError('Google login failed.')}
+                    useOneTap
+                    shape="rectangular"
+                    text="continue_with"
+                  />
+                </div>
+
                 <button
                   type="button"
                   onClick={() => handleOAuthLogin('azure')}
@@ -361,13 +383,6 @@ export default function RegisterPage() {
 
               {/* Action Link Footer */}
               <div className="mt-6 text-center flex flex-col gap-2 select-none text-xs text-zinc-555 font-semibold">
-                <button
-                  type="button"
-                  onClick={() => setIsMagicLink(!isMagicLink)}
-                  className="text-xs text-zinc-500 hover:text-zinc-950 font-bold transition-colors border-none bg-transparent cursor-pointer"
-                >
-                  {isMagicLink ? 'Sign in with Password instead' : 'Request a Magic Link'}
-                </button>
                 <span className="text-zinc-400 font-medium">
                   Don't have an account?{' '}
                   <button 
@@ -496,21 +511,16 @@ export default function RegisterPage() {
               </div>
 
               {/* Social OAuth Buttons */}
-              <div className="grid grid-cols-3 gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => handleOAuthLogin('google')}
-                  className="py-2.5 bg-white border border-zinc-200 hover:bg-zinc-55 text-zinc-800 font-bold text-xs rounded-xl transition cursor-pointer"
-                >
-                  Google
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleOAuthLogin('github')}
-                  className="py-2.5 bg-white border border-zinc-200 hover:bg-zinc-55 text-zinc-800 font-bold text-xs rounded-xl transition cursor-pointer"
-                >
-                  GitHub
-                </button>
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="flex justify-center h-[42px] overflow-hidden rounded-xl border border-zinc-200">
+                  <GoogleLogin
+                    onSuccess={handleGoogleSuccess}
+                    onError={() => setRegError('Google registration failed.')}
+                    shape="rectangular"
+                    text="continue_with"
+                  />
+                </div>
+
                 <button
                   type="button"
                   onClick={() => handleOAuthLogin('azure')}

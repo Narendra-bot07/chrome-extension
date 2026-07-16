@@ -10,3 +10,6 @@ class LoginRequest(BaseModel):
     email: str
     password: str
 
+class GoogleAuthRequest(BaseModel):
+    credential: str
+
