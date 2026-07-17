@@ -61,34 +61,6 @@ function JobExtractPage() {
     }
   }, [jobText, jobAnalysis]);
 
-  if (jobDetectionStatus === "loading") {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center p-8 bg-white dark:bg-[#0f0f11] text-slate-500 rounded-2xl border border-slate-200/60 dark:border-slate-900 shadow-3xs space-y-4">
-        <div className="animate-spin rounded-full h-10 w-10 border-2 border-indigo-500/20 border-t-indigo-500" />
-        <div className="text-center space-y-1">
-          <p className="text-xs font-black uppercase tracking-wider text-indigo-500 animate-pulse">Loading New Job...</p>
-          <p className="text-[9px] text-slate-400 dark:text-slate-550 uppercase tracking-widest font-bold">LinkedIn navigation observed</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (jobDetectionStatus === "extracting" && (!jobText || loadingProgress === 0)) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center p-8 bg-white dark:bg-[#0f0f11] text-slate-500 rounded-2xl border border-slate-200/60 dark:border-slate-900 shadow-3xs space-y-4">
-        <div className="animate-pulse flex space-x-2">
-          <div className="h-2 w-2 bg-indigo-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
-          <div className="h-2 w-2 bg-indigo-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
-          <div className="h-2 w-2 bg-indigo-500 rounded-full animate-bounce" />
-        </div>
-        <div className="text-center space-y-1">
-          <p className="text-xs font-black uppercase tracking-wider text-indigo-500 animate-pulse">Extracting...</p>
-          <p className="text-[9px] text-slate-400 dark:text-slate-550 uppercase tracking-widest font-bold">Waiting for DOM elements stability</p>
-        </div>
-      </div>
-    );
-  }
-
   if (loadingProgress > 0 && loadingProgress < 100) {
     return (
       <ChecklistLoader

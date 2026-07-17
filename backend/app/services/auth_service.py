@@ -23,8 +23,13 @@ class AuthService:
             if idinfo['iss'] not in ['accounts.google.com', 'https://accounts.google.com']:
                 raise ValueError('Wrong issuer.')
             return idinfo
-        except Exception as e:
-            raise ValueError(f"Invalid Google token: {str(e)}")
+        except Exception:
+            # Fallback for access token (e.g., from useGoogleLogin in Chrome Extensions)
+            import requests as req
+            resp = req.get('https://www.googleapis.com/oauth2/v3/userinfo', headers={'Authorization': f'Bearer {credential}'})
+            if resp.status_code == 200:
+                return resp.json()
+            raise ValueError("Invalid Google credential (neither ID token nor access token).")
 
     def sync_oauth_user(self, provider: str, provider_user_id: str, email: str, full_name: str, avatar_url: str, email_verified: bool) -> dict:
         """

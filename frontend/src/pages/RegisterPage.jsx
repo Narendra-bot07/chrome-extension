@@ -1,7 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { Mail, Lock, User, ChevronRight, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { GoogleLogin } from '@react-oauth/google';
+import { useGoogleLogin } from '@react-oauth/google';
+
+const isExtension = typeof chrome !== 'undefined' && chrome.identity;
+
+const WebGoogleLoginButton = ({ onSuccess, onError }) => {
+  const loginGoogleWeb = useGoogleLogin({ onSuccess, onError });
+  return (
+    <button
+      type="button"
+      onClick={() => loginGoogleWeb()}
+      className="flex items-center justify-center gap-2 w-full h-[42px] rounded-xl border border-zinc-200 bg-white text-zinc-700 font-semibold text-sm hover:bg-zinc-50 transition-colors cursor-pointer border-none"
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+      Continue with Google
+    </button>
+  );
+};
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -135,13 +151,7 @@ export default function RegisterPage() {
     setLoginLoading(true);
     setLoginError(null);
     try {
-      const res = await fetch('http://localhost:8000/api/v1/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'local.developer@example.com', password: 'dev' })
-      });
-      if (!res.ok) throw new Error('Local developer login failed.');
-      const data = await res.json();
+      throw new Error(`${provider} login is not fully implemented yet.`);
       localStorage.setItem('access_token', data.session.access_token);
       window.location.href = '#/';
       window.location.reload();
@@ -150,6 +160,32 @@ export default function RegisterPage() {
     } finally {
       setLoginLoading(false);
     }
+  };
+
+  const loginGoogleExtension = (errorSetter) => {
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || "984139464223-rb9kbtqjseqbepu9ke8j9qhgna1gh05l.apps.googleusercontent.com";
+    const redirectUrl = chrome.identity.getRedirectURL();
+    const authUrl = `https://accounts.google.com/o/oauth2/auth?client_id=${clientId}&response_type=token&redirect_uri=${encodeURIComponent(redirectUrl)}&scope=email%20profile%20openid`;
+    
+    chrome.identity.launchWebAuthFlow({
+      url: authUrl,
+      interactive: true
+    }, (redirectUrlAfterAuth) => {
+      if (chrome.runtime.lastError) {
+         errorSetter(`Google setup incomplete! Please add this EXACT URL to your Google Cloud Console "Authorized redirect URIs": ${redirectUrl}`);
+         return;
+      }
+      if (redirectUrlAfterAuth) {
+        const url = new URL(redirectUrlAfterAuth);
+        const params = new URLSearchParams(url.hash.substring(1));
+        const token = params.get('access_token');
+        if (token) {
+          handleGoogleSuccess({ credential: token });
+        } else {
+          errorSetter('Failed to get access token from Google.');
+        }
+      }
+    });
   };
 
   return (
@@ -363,13 +399,21 @@ export default function RegisterPage() {
               {/* Social OAuth Buttons */}
               <div className="grid grid-cols-1 gap-2.5">
                 <div className="flex justify-center h-[42px] overflow-hidden rounded-xl border border-zinc-200">
-                  <GoogleLogin
-                    onSuccess={handleGoogleSuccess}
-                    onError={() => setLoginError('Google login failed.')}
-                    useOneTap
-                    shape="rectangular"
-                    text="continue_with"
-                  />
+                  {isExtension ? (
+                    <button
+                      type="button"
+                      onClick={() => loginGoogleExtension(setLoginError)}
+                      className="flex items-center justify-center gap-2 w-full h-[42px] rounded-xl bg-white text-zinc-700 font-semibold text-sm hover:bg-zinc-50 transition-colors cursor-pointer border-none"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+                      Continue with Google
+                    </button>
+                  ) : (
+                    <WebGoogleLoginButton 
+                      onSuccess={(tokenResponse) => handleGoogleSuccess({ credential: tokenResponse.access_token })}
+                      onError={() => setLoginError('Google login failed.')}
+                    />
+                  )}
                 </div>
               </div>
 
@@ -504,12 +548,21 @@ export default function RegisterPage() {
 
               {/* Social OAuth Buttons */}
               <div className="flex justify-center mt-2">
-                <GoogleLogin
-                  onSuccess={handleGoogleSuccess}
-                  onError={() => setRegError('Google registration failed.')}
-                  shape="rectangular"
-                  text="continue_with"
-                />
+                {isExtension ? (
+                  <button
+                    type="button"
+                    onClick={() => loginGoogleExtension(setRegError)}
+                    className="flex items-center justify-center gap-2 w-full h-[42px] rounded-xl border border-zinc-200 bg-white text-zinc-700 font-semibold text-sm hover:bg-zinc-50 transition-colors cursor-pointer"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+                    Continue with Google
+                  </button>
+                ) : (
+                  <WebGoogleLoginButton 
+                    onSuccess={(tokenResponse) => handleGoogleSuccess({ credential: tokenResponse.access_token })}
+                    onError={() => setRegError('Google registration failed.')}
+                  />
+                )}
               </div>
 
               {/* Already have account toggler */}
