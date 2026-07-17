@@ -155,30 +155,29 @@ export function AppProvider({ children }) {
 
   const isExtension = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local;
 
-  // Load configs & saved resume
+  // Load configs & saved resume (STRICTLY NO cached job extraction or UI state)
   useEffect(() => {
     if (isExtension) {
-      chrome.storage.local.get(['groqApiKey', 'apiUrl', 'parsedResume', 'tailoredResume', 'selectedTemplate', 'jobAnalysis', 'jobText', 'companyName', 'jobTitle'], (result) => {
+      chrome.storage.local.get(['groqApiKey', 'apiUrl', 'parsedResume', 'tailoredResume', 'selectedTemplate'], (result) => {
         if (result.groqApiKey) setApiKey(result.groqApiKey);
         if (result.apiUrl) setApiUrl(result.apiUrl);
         if (result.parsedResume) setParsedResume(result.parsedResume);
         if (result.tailoredResume) setTailoredResume(result.tailoredResume);
         if (result.selectedTemplate) setSelectedTemplate(result.selectedTemplate);
-        if (result.jobAnalysis) setJobAnalysis(result.jobAnalysis);
-        if (result.jobText) setJobText(result.jobText);
-        if (result.companyName) setCompanyName(result.companyName);
-        if (result.jobTitle) setJobTitle(result.jobTitle);
       });
+      // Purge any old extraction caches from chrome.storage
+      chrome.storage.local.remove(['jobAnalysis', 'jobText', 'companyName', 'jobTitle']);
     } else {
       const savedKey = localStorage.getItem('groq_api_key');
       const savedUrl = localStorage.getItem('fastapi_api_url');
       const savedResume = localStorage.getItem('parsed_resume');
       const savedTailored = localStorage.getItem('tailored_resume');
       const savedTemplate = localStorage.getItem('selected_template');
-      const savedJobAnalysis = localStorage.getItem('job_analysis');
-      const savedJobText = localStorage.getItem('job_text');
-      const savedCompany = localStorage.getItem('company_name');
-      const savedTitle = localStorage.getItem('job_title');
+      // Purge any old extraction caches from localStorage
+      localStorage.removeItem('job_analysis');
+      localStorage.removeItem('job_text');
+      localStorage.removeItem('company_name');
+      localStorage.removeItem('job_title');
       if (savedKey) setApiKey(savedKey);
       if (savedUrl) setApiUrl(savedUrl);
       if (savedResume) {
@@ -300,28 +299,7 @@ export function AppProvider({ children }) {
     }
   }, [parsedResume]);
 
-  // Save/Remove job analysis context storage so full browser tabs open cleanly with extracted job
-  useEffect(() => {
-    if (jobAnalysis) {
-      if (isExtension) {
-        chrome.storage.local.set({ jobAnalysis, jobText, companyName, jobTitle });
-      } else {
-        localStorage.setItem('job_analysis', JSON.stringify(jobAnalysis));
-        if (jobText) localStorage.setItem('job_text', jobText);
-        if (companyName) localStorage.setItem('company_name', companyName);
-        if (jobTitle) localStorage.setItem('job_title', jobTitle);
-      }
-    } else {
-      if (isExtension) {
-        chrome.storage.local.remove(['jobAnalysis', 'jobText', 'companyName', 'jobTitle']);
-      } else {
-        localStorage.removeItem('job_analysis');
-        localStorage.removeItem('job_text');
-        localStorage.removeItem('company_name');
-        localStorage.removeItem('job_title');
-      }
-    }
-  }, [jobAnalysis, jobText, companyName, jobTitle]);
+  // Strictly stateless extraction: Never save jobAnalysis or job text to storage
 
   // Save/Remove tailored resume context storage
   useEffect(() => {
@@ -681,7 +659,12 @@ export function AppProvider({ children }) {
             "Content-Type": "application/json",
             ...headers
           },
-          body: JSON.stringify({ jd_text: jobText })
+          body: JSON.stringify({
+            jd_text: jobText,
+            url: window.location.href,
+            page_title: jobTitle || document.title,
+            page_company: companyName || ""
+          })
         });
         if (!jobRes.ok) throw new Error("V1 extract route returned error or not found");
         analyzedJob = await jobRes.json();
@@ -692,7 +675,12 @@ export function AppProvider({ children }) {
             "Content-Type": "application/json",
             ...headers
           },
-          body: JSON.stringify({ jd_text: jobText })
+          body: JSON.stringify({
+            jd_text: jobText,
+            url: window.location.href,
+            page_title: jobTitle || document.title,
+            page_company: companyName || ""
+          })
         });
         if (!jobResFallback.ok) {
           const errData = await jobResFallback.json().catch(() => ({ detail: jobResFallback.statusText }));
@@ -728,6 +716,297 @@ export function AppProvider({ children }) {
     } catch (error) {
       clearInterval(progressInterval);
       console.error(error);
+      setApiError(error.message || "Failed to extract job description.");
+      setLoadingProgress(0);
+      setJobDetectionStatus("idle");
+    }
+  };
+
+  // Strictly Stateless Fresh Session Extraction Pipeline (Steps 1 - 12)
+  const handleFreshSessionExtraction = async () => {
+    const sessionTimestamp = new Date().toISOString();
+    console.log("==================================================");
+    console.log("NEW EXTRACTION SESSION");
+    console.log(`Timestamp: ${sessionTimestamp}`);
+    console.log("==================================================");
+    console.log("Popup Opened");
+
+    // Steps 2, 3, & 4: Reset extraction state, Clear previous extraction variables, Clear previous UI
+    console.log("Clearing Previous State");
+    setJobAnalysis(null);
+    setJobText("");
+    setCompanyName("");
+    setJobTitle("");
+    setLastAnalyzedUrl("");
+    setApiError(null);
+    setLoadingProgress(0);
+    setJobDetectionStatus("idle");
+
+    console.log("Previous Cache Cleared");
+    if (isExtension && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.remove(['jobAnalysis', 'jobText', 'companyName', 'jobTitle']);
+    }
+    localStorage.removeItem('job_analysis');
+    localStorage.removeItem('job_text');
+    localStorage.removeItem('company_name');
+    localStorage.removeItem('job_title');
+
+    if (!isExtension || typeof chrome === 'undefined' || !chrome.tabs) {
+      console.log("Current URL: dev-mode-non-extension");
+      console.log("Current Title: Development Mode");
+      return;
+    }
+
+    try {
+      // Step 5 & 6: Query the active browser tab & Verify the tab still exists
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab || !tab.id) {
+        console.error("No active browser window or tab found.");
+        return;
+      }
+
+      const currentUrl = tab.url || '';
+      const currentTitle = tab.title || '';
+      console.log("Current URL:", currentUrl);
+      console.log("Current Title:", currentTitle);
+
+      if (currentUrl.includes('linkedin.com/in/') || 
+          currentUrl.includes('linkedin.com/feed/') || 
+          currentUrl.includes('linkedin.com/messaging/') || 
+          currentUrl.includes('linkedin.com/mynetwork/')) {
+        console.log("Active tab is a profile, feed, network, or message page. Bypassing extraction.");
+        return;
+      }
+
+      // Step 7: Send a fresh extraction request to the content script
+      console.log("Sending Extraction Request...");
+      console.log("Waiting for Content Script...");
+
+      // Step 8: The content script extracts the CURRENT page DOM
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          let title = '';
+          let company = '';
+          let text = '';
+
+          if (window.location.host.includes('linkedin.com')) {
+            const titleEl = document.querySelector('.job-details-jobs-unified-top-card__job-title, .jobs-unified-top-card__job-title, .p5, h1');
+            if (titleEl) title = titleEl.innerText.trim();
+            const companyEl = document.querySelector('.job-details-jobs-unified-top-card__company-name, .jobs-unified-top-card__company-name, .jobs-unified-top-card__primary-description a');
+            if (companyEl) company = companyEl.innerText.trim();
+            const descEl = document.querySelector('.jobs-description__content, .jobs-description-content__text, .jobs-box__html-content, .jobs-description, #job-details');
+            if (descEl) text = descEl.innerText.trim();
+          } else if (window.location.host.includes('indeed.com')) {
+            const titleEl = document.querySelector('.jobsearch-JobInfoHeader-title, h1');
+            if (titleEl) title = titleEl.innerText.trim();
+            const companyEl = document.querySelector('[data-company-name="true"], .jobsearch-CompanyInfoContainer, .jobsearch-InlineCompanyRating');
+            if (companyEl) company = companyEl.innerText.trim();
+            const descEl = document.querySelector('#jobDescriptionText, .jobsearch-JobComponent-description');
+            if (descEl) text = descEl.innerText.trim();
+          } else if (window.location.host.includes('mail.google.com')) {
+            const subjectEl = document.querySelector('h2.hP');
+            if (subjectEl) title = subjectEl.innerText.trim();
+            const bodies = document.querySelectorAll('.a3s');
+            if (bodies.length > 0) {
+              const activeBody = bodies[bodies.length - 1];
+              text = activeBody.innerText.trim();
+            }
+          } else if (window.location.host.includes('greenhouse.io')) {
+            const titleEl = document.querySelector('h1.app-title, .app-title');
+            if (titleEl) title = titleEl.innerText.trim();
+            const companyEl = document.querySelector('.company-name');
+            if (companyEl) {
+              company = companyEl.innerText.replace('at ', '').trim();
+            }
+            const descEl = document.querySelector('#content, #main');
+            if (descEl) text = descEl.innerText.trim();
+          } else if (window.location.host.includes('lever.co')) {
+            const titleEl = document.querySelector('.posting-header h2, h2');
+            if (titleEl) title = titleEl.innerText.trim();
+            const companyEl = document.querySelector('.posting-header img, .logo img');
+            if (companyEl) {
+              company = companyEl.getAttribute('alt') || 'Lever Company';
+            }
+            const descEl = document.querySelector('.posting-description, .section.page-centered');
+            if (descEl) text = descEl.innerText.trim();
+          } else if (window.location.host.includes('myworkdayjobs.com')) {
+            const titleEl = document.querySelector('[data-automation-id="jobPostingHeader"], h2');
+            if (titleEl) title = titleEl.innerText.trim();
+            const descEl = document.querySelector('[data-automation-id="jobPostingDescription"], .job-description');
+            if (descEl) text = descEl.innerText.trim();
+          }
+          
+          if (!title) {
+            const mainHeading = document.querySelector('h1, h2.job-title, .job-title, [class*="jobTitle"], [class*="job-title"], .app-title');
+            if (mainHeading) title = mainHeading.innerText.trim();
+          }
+          
+          if (!company || company === 'Target Company') {
+            const ogSiteEl = document.querySelector('meta[property="og:site_name"]');
+            if (ogSiteEl && ogSiteEl.getAttribute('content')) {
+              company = ogSiteEl.getAttribute('content').trim();
+            } else {
+              const authorEl = document.querySelector('meta[name="author"]');
+              if (authorEl && authorEl.getAttribute('content')) {
+                company = authorEl.getAttribute('content').trim();
+              }
+            }
+          }
+
+          if ((!title || title === 'Software Engineer' || !company || company === 'Target Company') && document.title && document.title.includes('| LinkedIn')) {
+            const parts = document.title.split('|')[0].trim();
+            if (parts.includes(' hiring at ')) {
+              const [t, c] = parts.split(' hiring at ');
+              title = t.trim();
+              company = c.trim();
+            } else if (parts.includes(' at ')) {
+              const [t, c] = parts.split(' at ');
+              title = t.trim();
+              company = c.trim();
+            }
+          }
+
+          if (!text && document.body) {
+            text = document.body.innerText.trim();
+          }
+
+          return {
+            title: title || 'Software Engineer',
+            company: company || 'Target Company',
+            text: text || ''
+          };
+        }
+      });
+
+      // Step 9: Return the freshly extracted data
+      console.log("Fresh DOM Received");
+
+      let activeResult = null;
+      if (results && results.length > 0) {
+        const validFrames = results
+          .map(r => r.result)
+          .filter(r => r && r.text && r.text.length > 100);
+          
+        if (validFrames.length > 0) {
+          validFrames.sort((a, b) => b.text.length - a.text.length);
+          activeResult = validFrames[0];
+        } else {
+          activeResult = results[0].result;
+        }
+      }
+
+      if (!activeResult || !activeResult.text || activeResult.text.length <= 50) {
+        console.warn("Fresh DOM text too short or empty.");
+        return;
+      }
+
+      const { title, company, text } = activeResult;
+      const cleanedTitle = title
+        .replace(/\(verified job\)/i, '')
+        .replace(/\(remote\)/i, '')
+        .replace(/\(hybrid\)/i, '')
+        .replace(/\(on-site\)/i, '')
+        .split('•')[0]
+        .split('-')[0]
+        .split('–')[0]
+        .trim();
+        
+      const cleanedCompany = company
+        .replace(/•.*$/g, '')
+        .split('-')[0]
+        .split('–')[0]
+        .trim();
+        
+      let cleanedText = text;
+      const noiseDividers = [
+        "About the company", "Trending employee content", "Put your best foot forward",
+        "Fraud Awareness", "E-Verify", "US Only", "Illinois: Click here",
+        "Equal Opportunity Employer", "Fraud Privacy Policy", "We value your privacy",
+        "Interested in working with us", "Members who share that", "Hire a resume writer",
+        "Get a resume review", "Job search faster with Premium", "Access company insights",
+        "Set alert for similar jobs"
+      ];
+      for (const divider of noiseDividers) {
+        const matchIdx = cleanedText.toLowerCase().indexOf(divider.toLowerCase());
+        if (matchIdx !== -1 && matchIdx > 200) {
+          cleanedText = cleanedText.substring(0, matchIdx);
+        }
+      }
+      cleanedText = cleanedText.replace(/At \w+, we strive for an environment[\s\S]*$/gi, '').trim();
+
+      setJobText(cleanedText);
+      setCompanyName(cleanedCompany);
+      setJobTitle(cleanedTitle);
+
+      // Step 10 & 11: Validate whether it is a job page & Extract structured job information
+      console.log("Validation Started");
+      console.log("Extraction Started");
+      setLoadingType('extraction');
+      setLoadingProgress(10);
+      setLoadingMessage("Reading & Validating Job Description...");
+
+      const headers = {};
+      if (apiKey) headers["x-groq-key"] = apiKey;
+      const token = session?.access_token || localStorage.getItem('access_token');
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      let analyzedJob;
+      try {
+        const jobRes = await fetch(`${apiUrl}/api/v1/jobs/extract`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...headers
+          },
+          body: JSON.stringify({
+            jd_text: cleanedText,
+            url: currentUrl,
+            page_title: cleanedTitle || currentTitle,
+            page_company: cleanedCompany || ""
+          })
+        });
+        if (!jobRes.ok) throw new Error("V1 extract route returned error or not found");
+        analyzedJob = await jobRes.json();
+      } catch (err) {
+        const jobResFallback = await fetch(`${apiUrl}/api/analyze-job`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...headers
+          },
+          body: JSON.stringify({
+            jd_text: cleanedText,
+            url: currentUrl,
+            page_title: cleanedTitle || currentTitle,
+            page_company: cleanedCompany || ""
+          })
+        });
+        if (!jobResFallback.ok) {
+          const errData = await jobResFallback.json().catch(() => ({ detail: jobResFallback.statusText }));
+          throw new Error("Job analysis error: " + (errData.detail || "Request failed"));
+        }
+        analyzedJob = await jobResFallback.json();
+      }
+
+      // Step 12: Render the UI
+      console.log("Rendering UI");
+      const isValidText = (str) => typeof str === 'string' && str.trim() !== '' && str.trim().toLowerCase() !== 'not available' && str.trim().toLowerCase() !== 'n/a' && str.trim().toLowerCase() !== 'unspecified';
+      const details = analyzedJob?.normalized_content || analyzedJob || {};
+      const finalTitle = isValidText(analyzedJob?.job_title) ? analyzedJob.job_title : (isValidText(details.title) ? details.title : (isValidText(analyzedJob?.title) ? analyzedJob.title : (isValidText(cleanedTitle) ? cleanedTitle : 'Software Engineer')));
+      const finalCompany = isValidText(analyzedJob?.company_name) ? analyzedJob.company_name : (isValidText(details.company) ? details.company : (isValidText(analyzedJob?.company) ? analyzedJob.company : (isValidText(cleanedCompany) ? cleanedCompany : 'Target Company')));
+
+      setJobAnalysis(analyzedJob);
+      if (isValidText(finalCompany)) setCompanyName(finalCompany);
+      if (isValidText(finalTitle)) setJobTitle(finalTitle);
+
+      setLoadingProgress(0);
+      setJobDetectionStatus("ready");
+      console.log("Extraction Complete");
+      console.log("==================================================");
+
+    } catch (error) {
+      console.error("Fresh session extraction error:", error);
       setApiError(error.message || "Failed to extract job description.");
       setLoadingProgress(0);
       setJobDetectionStatus("idle");
@@ -1430,6 +1709,7 @@ export function AppProvider({ children }) {
       handleDeleteResume,
       handleScanPage,
       handleExtractJob,
+      handleFreshSessionExtraction,
       handleParseResume,
       handleRunGapAnalysis,
       handleGenerateFinalResume,

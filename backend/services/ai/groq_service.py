@@ -21,8 +21,8 @@ class GroqService(LLMService):
         res = legacy_parse(raw_text, api_key=self.api_key)
         return ResumeStructure(**res.dict())
 
-    def analyze_job(self, jd_text: str) -> JobAnalysis:
-        res = legacy_analyze(jd_text, api_key=self.api_key)
+    def analyze_job(self, jd_text: str, url: Optional[str] = "", page_title: Optional[str] = "", page_company: Optional[str] = "") -> JobAnalysis:
+        res = legacy_analyze(jd_text, api_key=self.api_key, url=url, page_title=page_title, page_company=page_company)
         return JobAnalysis(**res.dict())
 
     def generate_tailoring_patch(self, resume: ResumeStructure, job: JobAnalysis) -> TailoringReport:

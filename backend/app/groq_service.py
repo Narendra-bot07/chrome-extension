@@ -40,42 +40,124 @@ def parse_resume(raw_text: str, api_key: Optional[str] = None) -> ResumeStructur
     chain = prompt | structured_llm
     return chain.invoke({"text": raw_text})
 
-def analyze_job_description(jd_text: str, api_key: Optional[str] = None) -> JobAnalysis:
+def analyze_job_description(jd_text: str, api_key: Optional[str] = None, url: Optional[str] = "", page_title: Optional[str] = "", page_company: Optional[str] = "") -> JobAnalysis:
     llm = get_llm(api_key, temperature=0.0)
     structured_llm = llm.with_structured_output(JobAnalysis)
     
     prompt = ChatPromptTemplate.from_messages([
-        ("system", """You are an expert job description analyzer. Extract key details into the structured format (title, company, location, salary, job_type, work_mode, experience_required, highlights, qualifications, required_skills, preferred_skills, skills_categories, responsibilities, keywords, ats_keywords, seniority).
-        
-        Guidance for fields:
-        - is_job_related: Must be a strict JSON boolean value (true or false). NEVER return it as a string "true" or "false".
-        - title: The official job title (e.g., "AI Engineer"). Check headings, title metadata, or the start of the text. Do not return "Not Available" if a title is mentioned anywhere in the document.
-        - company: The hiring company name (e.g., "Cornerstone OnDemand"). Check the text, hyperlinks, or headers. Do not return "Not Available" if a company name is mentioned.
-        - location: E.g., "Cupertino, California, United States" or "Remote". If not found, use "Not Available".
-        - salary: E.g., "$147,400 - $272,100" if mentioned, otherwise use "Not Available".
-        - job_type: E.g., "Full-time", "Contract", "Part-time", "Internship". If not found, use "Not Available".
-        - work_mode: E.g., "Remote", "Hybrid", "On-site". If not found, use "Not Available".
-        - experience_required: E.g., "5+ years", "Entry level". If not found, use "Not Available".
-        - highlights: Extract 2-4 key company highlights, benefits, or perks. Keep each bullet EXTREMELY short and concise (under 8 words, e.g., "Employee stock programs", "Relocation eligible"). If none, use ["Not Available"].
-        - qualifications: Extract 2-3 key required qualifications. Keep each bullet short, concise, and punchy (under 15 words, e.g., "Bachelor's degree in CS", "5+ years of ML experience"). If none, use ["Not Available"].
-        - required_skills: Extract 10-15 specific technical skills, tools, or methodologies. Each must be 1-3 words max. If none, use ["Not Available"].
-        - preferred_skills: Extract 5-10 preferred or optional skills. Each 1-3 words. If none, use ["Not Available"].
-        - skills_categories: Group all required and preferred skills into distinct logical categories (e.g., 'Languages', 'Frameworks/Libraries', 'Databases', 'Cloud/DevOps', 'Data Engineering', 'CS Fundamentals', etc.) where keys are category names and values are lists of skills.
-        - responsibilities: Extract 3-5 main responsibilities as short bullet points. If none, use ["Not Available"].
-        
-        CRITICAL PARSING GUIDELINES:
-        - The input text may be a raw webpage scrape or clipboard content from a job board (like LinkedIn or Indeed). It might be messy and contain cookie notices, navigation headers, search results, or secondary posts.
-        - You MUST identify the target job's title, company name, location, and details from the text.
-        - Even if a formal section header like 'About the job' or 'Description' is missing, parse the entire text block to extract all fields. Be helpful and make inferences where reasonable (e.g., if the text starts with a title and company, extract them). Do not return 'Not Available' for title or company if they appear anywhere in the text."""),
-        ("human", "{text}")
+        ("system", """You are a Senior Software Engineer building the core validation engine for a Job Description Extraction system.
+
+Your task is NOT to extract fields first.
+
+Your first responsibility is to determine whether the CURRENT PAGE represents a SINGLE VALID JOB POSTING.
+
+Think like a human reading the page.
+
+=========================================================
+YOUR JOB
+=========================================================
+
+Analyze the page as a whole.
+
+Determine whether the page is a real job description page.
+
+DO NOT rely on keywords alone.
+
+Understand the page.
+
+Reason about its purpose.
+
+=========================================================
+VALID JOB PAGE
+=========================================================
+
+A valid job page usually represents ONE specific role.
+
+Examples:
+
+- Amazon Software Development Engineer
+- Google Data Engineer
+- Microsoft Product Manager
+
+The page usually contains information such as:
+
+- role overview
+- responsibilities
+- qualifications
+- requirements
+- preferred qualifications
+- benefits
+- location
+- employment details
+
+The exact wording varies by company.
+
+=========================================================
+INVALID PAGE
+=========================================================
+
+Reject pages such as:
+
+- LinkedIn Job Search
+- LinkedIn Recommended Jobs
+- Job Collections
+- Company Home Pages
+- Career Landing Pages
+- Search Results
+- Category Pages
+- Blog Articles
+- News Articles
+- Login Pages
+- Error Pages
+- Profile Pages
+- Pages containing multiple unrelated jobs
+
+=========================================================
+IMPORTANT
+=========================================================
+
+Do NOT guess.
+
+If the page is ambiguous,
+
+prefer
+
+is_job_related = false
+
+instead of making assumptions.
+
+=========================================================
+IF VALID
+=========================================================
+
+Build the structured job object using ONLY information that actually exists on the page.
+
+Never invent information.
+
+=========================================================
+RULES
+=========================================================
+
+- Think about the entire page before making a decision.
+- Do not rely on one keyword.
+- Do not rely on page titles only.
+- Understand the document.
+- Never hallucinate.
+- Never fabricate missing fields.
+- Return valid JSON matching the exact schema only.
+- No markdown.
+- No explanations outside the JSON."""),
+        ("human", "Page Title: {page_title}\nDetected Company: {page_company}\nURL: {url}\n\nCleaned Extracted Text:\n{text}")
     ])
     
     chain = prompt | structured_llm
-    result = chain.invoke({"text": jd_text})
+    result = chain.invoke({
+        "text": jd_text,
+        "url": url or "",
+        "page_title": page_title or "",
+        "page_company": page_company or ""
+    })
     
-    # Always set to True to prevent false-negative extraction blocks on messy user copy-pastes
-    result.is_job_related = True
-        
     return result
 
 def analyze_gaps(resume: ResumeStructure, job: JobAnalysis, api_key: Optional[str] = None) -> GapsAnalysis:

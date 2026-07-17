@@ -16,50 +16,44 @@ function JobExtractPage() {
     resumeFile, setResumeFile,
     jobAnalysis, setJobAnalysis,
     loadingProgress, loadingMessage,
-    handleScanPage, handleExtractJob,
+    handleScanPage, handleExtractJob, handleFreshSessionExtraction,
     jobDetectionStatus,
     loading, isExtension
   } = useApp();
 
-  // Auto-run scanning on side panel mount and listen to active tab updates/switches
+  // Strictly stateless: Run fresh extraction session (Steps 1-12) every time popup opens or user navigates tabs/SPA
   useEffect(() => {
     if (isExtension && chrome.tabs) {
       const timer = setTimeout(() => {
-        handleScanPage();
-      }, 150);
+        handleFreshSessionExtraction();
+      }, 100);
 
       const handleTabUpdate = (tabId, changeInfo, tab) => {
         if (changeInfo.status === 'complete') {
           chrome.tabs.query({ active: true, currentWindow: true }, ([activeTab]) => {
             if (activeTab && activeTab.id === tabId) {
-              handleScanPage();
+              handleFreshSessionExtraction();
             }
           });
         }
       };
 
       const handleTabActivated = (activeInfo) => {
-        handleScanPage();
+        handleFreshSessionExtraction();
       };
 
       chrome.tabs.onUpdated.addListener(handleTabUpdate);
       chrome.tabs.onActivated.addListener(handleTabActivated);
 
       return () => {
+        clearTimeout(timer);
         chrome.tabs.onUpdated.removeListener(handleTabUpdate);
         chrome.tabs.onActivated.removeListener(handleTabActivated);
       };
     } else {
-      handleScanPage();
+      handleFreshSessionExtraction();
     }
   }, []);
-
-  // Auto-run job extraction as soon as jobText is scraped or pasted
-  useEffect(() => {
-    if (jobText && jobText.length > 50 && !jobAnalysis && loadingProgress === 0) {
-      handleExtractJob();
-    }
-  }, [jobText, jobAnalysis]);
 
   if (loadingProgress > 0 && loadingProgress < 100) {
     return (
@@ -78,6 +72,48 @@ function JobExtractPage() {
   }
 
   if (jobAnalysis) {
+    const isRelated = jobAnalysis.is_job_related !== false && jobAnalysis.normalized_content?.is_job_related !== false;
+    if (!isRelated) {
+      const reason = jobAnalysis.reason || jobAnalysis.normalized_content?.reason || "This page does not appear to represent a single valid job posting.";
+      return (
+        <div className="p-6 max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300">
+          <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-2xl p-6 text-center space-y-4 shadow-sm">
+            <div className="w-16 h-16 bg-amber-100 dark:bg-amber-900/60 text-amber-600 dark:text-amber-400 rounded-full flex items-center justify-center mx-auto text-2xl font-bold shadow-inner">
+              ⚠️
+            </div>
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white">Not a Single Job Posting</h2>
+            <p className="text-slate-600 dark:text-slate-300 max-w-md mx-auto text-sm leading-relaxed">
+              {reason}
+            </p>
+            <div className="flex flex-col sm:flex-row justify-center gap-3 pt-4">
+              <button
+                onClick={() => {
+                  setJobAnalysis(null);
+                  setJobText("");
+                }}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl transition shadow-sm"
+              >
+                Scan Another Page
+              </button>
+              <button
+                onClick={() => {
+                  // Allow user to proceed if they want to manually edit/override
+                  setJobAnalysis({
+                    ...jobAnalysis,
+                    is_job_related: true,
+                    normalized_content: { ...(jobAnalysis.normalized_content || jobAnalysis), is_job_related: true }
+                  });
+                }}
+                className="px-5 py-2.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium rounded-xl transition"
+              >
+                Review & Edit Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <JobReviewView
         jobAnalysis={jobAnalysis}

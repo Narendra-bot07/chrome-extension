@@ -31,7 +31,12 @@ async def extract_job_details(
         )
         
         ai = GroqService()
-        analysis = ai.analyze_job(request.jd_text)
+        analysis = ai.analyze_job(
+            request.jd_text,
+            url=request.url,
+            page_title=request.page_title,
+            page_company=request.page_company
+        )
 
         record = repo.create(
             user_id=user["id"],

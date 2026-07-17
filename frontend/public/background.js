@@ -1,7 +1,15 @@
-// Enable opening the side panel on extension action click
-chrome.sidePanel
-  .setPanelBehavior({ openPanelOnActionClick: true })
-  .catch((error) => console.error(error));
+// Enable opening the side panel on extension action click safely
+const setupSidePanel = () => {
+  if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((error) => {
+      console.warn("[Background] sidePanel behavior warning (safe to ignore):", error.message || error);
+    });
+  }
+};
+
+chrome.runtime.onInstalled.addListener(setupSidePanel);
+chrome.runtime.onStartup.addListener(setupSidePanel);
+setupSidePanel();
 
 // Listener for background messages (non-extraction events)
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

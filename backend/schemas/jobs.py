@@ -3,6 +3,7 @@ from typing import List, Dict, Optional
 
 class JobAnalysis(BaseModel):
     is_job_related: bool = True
+    reason: Optional[str] = ""
     title: str = ""
     company: str = ""
     location: str = ""
@@ -22,3 +23,6 @@ class JobAnalysis(BaseModel):
 
 class JobExtractRequest(BaseModel):
     jd_text: str
+    url: Optional[str] = ""
+    page_title: Optional[str] = ""
+    page_company: Optional[str] = ""

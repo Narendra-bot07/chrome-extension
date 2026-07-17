@@ -33,6 +33,9 @@ async def get_templates():
         )
 class JobAnalysisRequest(BaseModel):
     jd_text: str
+    url: Optional[str] = ""
+    page_title: Optional[str] = ""
+    page_company: Optional[str] = ""
 
 class CompareRequest(BaseModel):
     resume: ResumeStructure
@@ -61,7 +64,13 @@ async def api_analyze_job(
     x_groq_key: Optional[str] = Header(None)
 ):
     try:
-        analysis = analyze_job_description(request.jd_text, api_key=x_groq_key)
+        analysis = analyze_job_description(
+            request.jd_text, 
+            api_key=x_groq_key,
+            url=request.url,
+            page_title=request.page_title,
+            page_company=request.page_company
+        )
         return analysis
     except Exception as e:
         raise HTTPException(

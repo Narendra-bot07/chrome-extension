@@ -66,6 +66,7 @@ class ResumeStructure(BaseModel):
 
 class JobAnalysis(BaseModel):
     is_job_related: bool = True
+    reason: Optional[str] = ""
     title: str = ""
     company: str = ""
     location: str = ""
