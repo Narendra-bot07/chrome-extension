@@ -38,6 +38,22 @@ async def extract_job_details(
             page_company=request.page_company
         )
 
+        # Preserve and merge manual user entries if provided
+        if request.page_title:
+            analysis.title = request.page_title
+        if request.page_company:
+            analysis.company = request.page_company
+        if hasattr(request, 'location') and request.location:
+            analysis.location = request.location
+        if hasattr(request, 'employment_type') and request.employment_type:
+            analysis.job_type = request.employment_type
+        if hasattr(request, 'experience_level') and request.experience_level:
+            analysis.experience_required = request.experience_level
+            analysis.seniority = request.experience_level
+        if hasattr(request, 'salary_range') and request.salary_range:
+            analysis.salary = request.salary_range
+        analysis.is_job_related = True
+
         record = repo.create(
             user_id=user["id"],
             raw_text=request.jd_text,

@@ -119,6 +119,9 @@ export function AppProvider({ children }) {
   const [companyName, setCompanyName] = useState('Company');
   const [jobTitle, setJobTitle] = useState('Software Engineer');
   const [lastAnalyzedUrl, setLastAnalyzedUrl] = useState('');
+  const [lastAnalyzedTitle, setLastAnalyzedTitle] = useState('');
+  const [lastAnalyzedCompany, setLastAnalyzedCompany] = useState('');
+  const [lastAnalyzedText, setLastAnalyzedText] = useState('');
 
   // Data states
   const [parsedResume, setParsedResume] = useState(null);
@@ -722,6 +725,107 @@ export function AppProvider({ children }) {
     }
   };
 
+  // Shared submission function merging manual entry into the structured extraction pipeline
+  const submitManualJobEntry = async ({
+    url,
+    role,
+    company,
+    description,
+    location = "",
+    employmentType = "",
+    experience = "",
+    salary = ""
+  }) => {
+    setApiError(null);
+    setJobText(description);
+    setCompanyName(company);
+    setJobTitle(role);
+    setJobAnalysis(null);
+    navigate('/tailor');
+    setLoadingType('extraction');
+    setLoadingProgress(10);
+    setLoadingMessage("Extracting Job Description Details...");
+
+    const progressInterval = setInterval(() => {
+      setLoadingProgress((prev) => {
+        if (prev >= 90) return prev;
+        return prev + 15;
+      });
+    }, 300);
+
+    const headers = {};
+    if (apiKey) headers["x-groq-key"] = apiKey;
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    try {
+      let analyzedJob;
+      try {
+        const jobRes = await fetch(`${apiUrl}/api/v1/jobs/extract`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...headers
+          },
+          body: JSON.stringify({
+            jd_text: description,
+            url: url,
+            page_title: role,
+            page_company: company,
+            location: location,
+            employment_type: employmentType,
+            experience_level: experience,
+            salary_range: salary
+          })
+        });
+        if (!jobRes.ok) throw new Error("V1 extract route returned error or not found");
+        analyzedJob = await jobRes.json();
+      } catch (err) {
+        const jobResFallback = await fetch(`${apiUrl}/api/analyze-job`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...headers
+          },
+          body: JSON.stringify({
+            jd_text: description,
+            url: url,
+            page_title: role,
+            page_company: company,
+            location: location,
+            employment_type: employmentType,
+            experience_level: experience,
+            salary_range: salary
+          })
+        });
+        if (!jobResFallback.ok) {
+          throw new Error(`Server returned ${jobResFallback.status}`);
+        }
+        analyzedJob = await jobResFallback.json();
+      }
+
+      clearInterval(progressInterval);
+
+      const isValidText = (str) => typeof str === 'string' && str.trim() !== '' && str.trim().toLowerCase() !== 'not available' && str.trim().toLowerCase() !== 'n/a' && str.trim().toLowerCase() !== 'unspecified';
+      const details = analyzedJob?.normalized_content || analyzedJob || {};
+      const finalTitle = isValidText(analyzedJob?.job_title) ? analyzedJob.job_title : (isValidText(details.title) ? details.title : (isValidText(analyzedJob?.title) ? analyzedJob.title : role));
+      const finalCompany = isValidText(analyzedJob?.company_name) ? analyzedJob.company_name : (isValidText(details.company) ? details.company : (isValidText(analyzedJob?.company) ? analyzedJob.company : company));
+
+      setJobAnalysis(analyzedJob);
+      if (isValidText(finalCompany)) setCompanyName(finalCompany);
+      if (isValidText(finalTitle)) setJobTitle(finalTitle);
+
+      setLoadingProgress(0);
+      setJobDetectionStatus("ready");
+    } catch (error) {
+      clearInterval(progressInterval);
+      console.error("Manual job submission error:", error);
+      setLoadingProgress(0);
+      setJobDetectionStatus("ready");
+      navigate('/no-job-detected');
+    }
+  };
+
   // Strictly Stateless Fresh Session Extraction Pipeline (Steps 1 - 12)
   const handleFreshSessionExtraction = async () => {
     const sessionTimestamp = new Date().toISOString();
@@ -1021,7 +1125,15 @@ export function AppProvider({ children }) {
       }
 
       if (!activeResult) {
-        console.warn("DOM Candidate Discovery returned no result.");
+        console.warn("DOM Candidate Discovery returned no result. Navigating to No Job Found flow.");
+        setJobAnalysis(null);
+        setLoadingProgress(0);
+        setJobDetectionStatus("ready");
+        setLastAnalyzedUrl(currentUrl);
+        setLastAnalyzedTitle(currentTitle);
+        setLastAnalyzedCompany("");
+        setLastAnalyzedText("");
+        navigate('/no-job-detected');
         return;
       }
 
@@ -1054,18 +1166,16 @@ export function AppProvider({ children }) {
         console.groupEnd();
         console.warn(`[Job Detection Engine] Validation Rejected: Winner score (${activeResult.winnerScore}) below threshold.`);
         
-        setJobAnalysis({
-          is_job_related: false,
-          reason: "This page doesn't appear to contain a single job posting.",
-          normalized_content: {
-            is_job_related: false,
-            reason: "This page doesn't appear to contain a single job posting."
-          }
-        });
+        setJobAnalysis(null);
         setLoadingProgress(0);
         setJobDetectionStatus("ready");
-        console.log("Extraction Complete (Aborted by DOM Scoring Threshold)");
+        setLastAnalyzedUrl(currentUrl);
+        setLastAnalyzedTitle(activeResult.title || currentTitle);
+        setLastAnalyzedCompany(activeResult.company || "");
+        setLastAnalyzedText(activeResult.extractedText || "");
+        console.log("Extraction Complete (Aborted by DOM Scoring Threshold - navigating to No Job Found flow)");
         console.log("==================================================");
+        navigate('/no-job-detected');
         return;
       }
 
@@ -1139,8 +1249,23 @@ export function AppProvider({ children }) {
       console.log("Rendering UI");
       const isValidText = (str) => typeof str === 'string' && str.trim() !== '' && str.trim().toLowerCase() !== 'not available' && str.trim().toLowerCase() !== 'n/a' && str.trim().toLowerCase() !== 'unspecified';
       const details = analyzedJob?.normalized_content || analyzedJob || {};
-      const finalTitle = isValidText(analyzedJob?.job_title) ? analyzedJob.job_title : (isValidText(details.title) ? details.title : (isValidText(analyzedJob?.title) ? analyzedJob.title : (isValidText(cleanedTitle) ? cleanedTitle : 'Software Engineer')));
-      const finalCompany = isValidText(analyzedJob?.company_name) ? analyzedJob.company_name : (isValidText(details.company) ? details.company : (isValidText(analyzedJob?.company) ? analyzedJob.company : (isValidText(cleanedCompany) ? cleanedCompany : 'Target Company')));
+      const finalTitle = isValidText(analyzedJob?.job_title) ? analyzedJob.job_title : (isValidText(details.title) ? details.title : (isValidText(analyzedJob?.title) ? analyzedJob.title : (isValidText(activeResult.title) ? activeResult.title : 'Software Engineer')));
+      const finalCompany = isValidText(analyzedJob?.company_name) ? analyzedJob.company_name : (isValidText(details.company) ? details.company : (isValidText(analyzedJob?.company) ? analyzedJob.company : (isValidText(activeResult.company) ? activeResult.company : 'Target Company')));
+
+      const isRelated = analyzedJob?.is_job_related !== false && analyzedJob?.normalized_content?.is_job_related !== false;
+      if (!isRelated) {
+        setJobAnalysis(null);
+        setLoadingProgress(0);
+        setJobDetectionStatus("ready");
+        setLastAnalyzedUrl(currentUrl);
+        setLastAnalyzedTitle(finalTitle !== 'Software Engineer' ? finalTitle : (activeResult.title || currentTitle));
+        setLastAnalyzedCompany(finalCompany !== 'Target Company' ? finalCompany : (activeResult.company || ""));
+        setLastAnalyzedText(activeResult.extractedText || "");
+        console.log("Extraction Complete (Not a job posting by backend check - navigating to No Job Found flow)");
+        console.log("==================================================");
+        navigate('/no-job-detected');
+        return;
+      }
 
       setJobAnalysis(analyzedJob);
       if (isValidText(finalCompany)) setCompanyName(finalCompany);
@@ -1153,9 +1278,15 @@ export function AppProvider({ children }) {
 
     } catch (error) {
       console.error("Fresh session extraction error:", error);
-      setApiError(error.message || "Failed to extract job description.");
+      setApiError(null);
+      setJobAnalysis(null);
       setLoadingProgress(0);
-      setJobDetectionStatus("idle");
+      setJobDetectionStatus("ready");
+      setLastAnalyzedUrl(currentUrl);
+      setLastAnalyzedTitle(activeResult.title || currentTitle);
+      setLastAnalyzedCompany(activeResult.company || "");
+      setLastAnalyzedText(activeResult.extractedText || "");
+      navigate('/no-job-detected');
     }
   };
 
@@ -1823,6 +1954,10 @@ export function AppProvider({ children }) {
       companyName, setCompanyName,
       jobTitle, setJobTitle,
       lastAnalyzedUrl, setLastAnalyzedUrl,
+      lastAnalyzedTitle, setLastAnalyzedTitle,
+      lastAnalyzedCompany, setLastAnalyzedCompany,
+      lastAnalyzedText, setLastAnalyzedText,
+      submitManualJobEntry,
       parsedResume, setParsedResume,
       jobAnalysis, setJobAnalysis,
       comparison, setComparison,

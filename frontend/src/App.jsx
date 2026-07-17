@@ -24,6 +24,8 @@ import JobTrackerPage from './pages/JobTrackerPage';
 import HelpSearchPage from './pages/HelpSearchPage';
 import FAQPage from './pages/FAQPage';
 import ContactSupportPage from './pages/ContactSupportPage';
+import NoJobDetectedPage from './pages/NoJobDetectedPage';
+import ManualJobEntryPage from './pages/ManualJobEntryPage';
 
 function ProtectedRoute({ children }) {
   const { user, loadingAuth } = useApp();
@@ -96,6 +98,8 @@ function AppRoutes() {
         <Route path="/support/search" element={<HelpSearchPage />} />
         <Route path="/support/faq" element={<FAQPage />} />
         <Route path="/support/contact" element={<ContactSupportPage />} />
+        <Route path="/no-job-detected" element={<NoJobDetectedPage />} />
+        <Route path="/manual-job-entry" element={<ManualJobEntryPage />} />
       </Route>
       <Route path="/print" element={<PrintLayout />} />
       <Route path="/print-cover-letter" element={<PrintCoverLetterLayout />} />

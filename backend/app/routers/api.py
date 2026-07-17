@@ -36,6 +36,10 @@ class JobAnalysisRequest(BaseModel):
     url: Optional[str] = ""
     page_title: Optional[str] = ""
     page_company: Optional[str] = ""
+    location: Optional[str] = ""
+    employment_type: Optional[str] = ""
+    experience_level: Optional[str] = ""
+    salary_range: Optional[str] = ""
 
 class CompareRequest(BaseModel):
     resume: ResumeStructure
@@ -71,6 +75,20 @@ async def api_analyze_job(
             page_title=request.page_title,
             page_company=request.page_company
         )
+        if request.page_title:
+            analysis.title = request.page_title
+        if request.page_company:
+            analysis.company = request.page_company
+        if request.location:
+            analysis.location = request.location
+        if request.employment_type:
+            analysis.job_type = request.employment_type
+        if request.experience_level:
+            analysis.experience_required = request.experience_level
+            analysis.seniority = request.experience_level
+        if request.salary_range:
+            analysis.salary = request.salary_range
+        analysis.is_job_related = True
         return analysis
     except Exception as e:
         raise HTTPException(

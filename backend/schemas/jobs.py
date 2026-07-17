@@ -26,3 +26,7 @@ class JobExtractRequest(BaseModel):
     url: Optional[str] = ""
     page_title: Optional[str] = ""
     page_company: Optional[str] = ""
+    location: Optional[str] = ""
+    employment_type: Optional[str] = ""
+    experience_level: Optional[str] = ""
+    salary_range: Optional[str] = ""
