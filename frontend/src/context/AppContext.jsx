@@ -783,168 +783,314 @@ export function AppProvider({ children }) {
       console.log("Waiting for Content Script...");
 
       // Step 8: The content script extracts the CURRENT page DOM
+      // Step 8: The content script runs DOM Candidate Discovery & Scoring Engine (<100ms)
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: () => {
+          const startTime = performance.now();
+
+          // Helper for generating XPath
+          const getXPath = (el) => {
+            if (!el || el.nodeType !== 1) return '';
+            if (el.id && el.id.indexOf(' ') === -1 && !/\d{4,}/.test(el.id)) {
+              return `//*[@id="${el.id}"]`;
+            }
+            const parts = [];
+            let curr = el;
+            while (curr && curr.nodeType === 1 && curr !== document.documentElement) {
+              let index = 1;
+              let sibling = curr.previousElementSibling;
+              while (sibling) {
+                if (sibling.nodeName === curr.nodeName) index++;
+                sibling = sibling.previousElementSibling;
+              }
+              const name = curr.nodeName.toLowerCase();
+              parts.unshift(index > 1 ? `${name}[${index}]` : name);
+              curr = curr.parentNode;
+            }
+            return '/' + parts.join('/');
+          };
+
+          // Step 1: Traverse DOM and generate candidates
+          // Elements: main, article, section, div
+          // Ignore: header, footer, nav, aside and anything inside them
+          const allElements = document.querySelectorAll('main, article, section, div');
+          const candidates = [];
+
+          for (let i = 0; i < allElements.length; i++) {
+            const el = allElements[i];
+            if (!el) continue;
+            
+            const tag = el.nodeName.toLowerCase();
+            if (['header', 'footer', 'nav', 'aside'].includes(tag)) continue;
+            if (el.closest('header, footer, nav, aside')) continue;
+
+            const textContent = el.textContent || '';
+            const textLength = textContent.trim().length;
+            // Generate candidate for every reasonably large subtree
+            if (textLength < 300) continue;
+            if (el === document.body || el === document.documentElement) continue;
+
+            candidates.push(el);
+          }
+
+          // Step 2: Candidate Scoring
+          const scoredCandidates = candidates.map((el, index) => {
+            let score = 0;
+            const posReasons = [];
+            const negReasons = [];
+            const text = el.textContent || '';
+            const textLength = text.trim().length;
+            const classNameAndId = `${el.className || ''} ${el.id || ''}`.toLowerCase();
+
+            // --- POSITIVE SIGNALS ---
+            if (el.querySelector('h1')) {
+              score += 20; posReasons.push("H1 Title (+20)");
+            } else if (el.querySelector('h2')) {
+              score += 15; posReasons.push("H2 Title (+15)");
+            }
+
+            if (/\b(company|employer|hiring at|inc\.|llc|corp|technologies|solutions)\b/i.test(text) || /company/i.test(classNameAndId)) {
+              score += 10; posReasons.push("Company Name (+10)");
+            }
+
+            if (/\b(location|hybrid|remote|on-site|full-time|part-time|workplace)\b/i.test(text) || /location/i.test(classNameAndId)) {
+              score += 10; posReasons.push("Location (+10)");
+            }
+
+            if (el.querySelector('a[href*="apply" i], button[class*="apply" i], [aria-label*="apply" i], .apply-button, #apply-button')) {
+              score += 15; posReasons.push("Apply Button (+15)");
+            }
+
+            if (/\b(description|job description|about the job|about the role)\b/i.test(text) || /description/i.test(classNameAndId)) {
+              score += 15; posReasons.push("Description (+15)");
+            }
+
+            if (/\b(responsibilities|key responsibilities|what you'll do|what you will do|daily tasks)\b/i.test(text)) {
+              score += 20; posReasons.push("Responsibilities (+20)");
+            }
+
+            if (/\b(qualifications|preferred qualifications|basic qualifications|minimum qualifications)\b/i.test(text)) {
+              score += 20; posReasons.push("Qualifications (+20)");
+            }
+
+            if (/\b(requirements|job requirements|what we look for|technical requirements|must have)\b/i.test(text)) {
+              score += 20; posReasons.push("Requirements (+20)");
+            }
+
+            if (/\b(benefits|what we offer|perks|health insurance|paid time off)\b/i.test(text)) {
+              score += 10; posReasons.push("Benefits (+10)");
+            }
+
+            if (/\b(experience|years of experience|track record|demonstrated experience)\b/i.test(text)) {
+              score += 10; posReasons.push("Experience (+10)");
+            }
+
+            if (/\b(employment type|full-time|part-time|contract|permanent|internship)\b/i.test(text)) {
+              score += 10; posReasons.push("Employment Type (+10)");
+            }
+
+            if (/\b(salary|compensation|pay range|\$\d+|\d+k\b|per hour|per year)\b/i.test(text)) {
+              score += 10; posReasons.push("Salary (+10)");
+            }
+
+            if (textLength >= 800 && textLength <= 15000) {
+              score += 20; posReasons.push("Large Readable Content (+20)");
+            } else if (textLength >= 300 && textLength < 800) {
+              score += 10; posReasons.push("Readable Content (+10)");
+            }
+
+            const links = el.querySelectorAll('a');
+            if (links.length <= 5 && textLength >= 400) {
+              score += 10; posReasons.push("Few External Links (+10)");
+            }
+
+            // --- NEGATIVE SIGNALS ---
+            if (links.length > 25) {
+              score -= 40; negReasons.push(`Many Links (${links.length}: -40)`);
+            } else if (links.length > 12) {
+              score -= 20; negReasons.push(`Repeated Links (${links.length}: -20)`);
+            }
+
+            if (/nav|menu|breadcrumb|topbar/i.test(classNameAndId)) {
+              score -= 40; negReasons.push("Navigation (-40)");
+            }
+
+            if (/sidebar|aside|panel|widget|jobs-search-results-list/i.test(classNameAndId)) {
+              score -= 40; negReasons.push("Sidebar (-40)");
+            }
+
+            if (/header|footer/i.test(classNameAndId)) {
+              score -= 50; negReasons.push("Header/Footer (-50)");
+            }
+
+            if (/messaging|chat|inbox|conversation/i.test(classNameAndId)) {
+              score -= 50; negReasons.push("Messaging (-50)");
+            }
+
+            if (/ad-|advert|banner|sponsored/i.test(classNameAndId)) {
+              score -= 50; negReasons.push("Advertisements (-50)");
+            }
+
+            if (/\b(recommended jobs|similar jobs|top job picks|jobs for you|people also viewed|browse jobs)\b/i.test(text) || /recommend|similar/i.test(classNameAndId)) {
+              score -= 40; negReasons.push("Recommended Jobs (-40)");
+            }
+
+            if (/job-list|jobs-list|search-results|job-card/i.test(classNameAndId) || (text.match(/\b(Promoted|Actively hiring|Verified job|Easy Apply)\b/gi) || []).length >= 3) {
+              score -= 60; negReasons.push("Multiple Job Cards List (-60)");
+            }
+
+            if (/\b(jobs-description__content|job-details|jobsearch-jobcomponent-description|posting-description|job-description|app-title)\b/i.test(classNameAndId)) {
+              score += 25; posReasons.push("Exact Job Container Class (+25)");
+            }
+
+            const xpath = getXPath(el);
+            const reasonStr = `POS: [${posReasons.join(', ')}] | NEG: [${negReasons.join(', ')}]`;
+
+            return {
+              index: index + 1,
+              xpath,
+              nodeName: el.nodeName.toLowerCase(),
+              childrenCount: el.children.length,
+              textLength,
+              score,
+              reason: reasonStr,
+              el
+            };
+          });
+
+          scoredCandidates.sort((a, b) => b.score - a.score);
+
+          // Step 3: Choose highest scoring candidate
+          const winner = scoredCandidates.length > 0 ? scoredCandidates[0] : null;
+
+          // Step 4: Extract ONLY the winner subtree. Use textContent. Normalize whitespace. Remove script/style.
+          let extractedText = '';
+          if (winner && winner.el) {
+            const clone = winner.el.cloneNode(true);
+            clone.querySelectorAll('script, style, noscript, svg, path, iframe, button').forEach(n => n.remove());
+            extractedText = (clone.textContent || '')
+              .replace(/\r\n|\r|\n/g, '\n')
+              .replace(/[ \t]+/g, ' ')
+              .replace(/\n\s*\n+/g, '\n\n')
+              .trim();
+          }
+
+          const endTime = performance.now();
+          const processingTimeMs = (endTime - startTime).toFixed(2);
+
+          // Extract quick header info for UI
           let title = '';
           let company = '';
-          let text = '';
+          const titleEl = document.querySelector('h1, .job-details-jobs-unified-top-card__job-title, .jobsearch-JobInfoHeader-title, .app-title');
+          if (titleEl) title = titleEl.innerText.trim();
+          const companyEl = document.querySelector('.job-details-jobs-unified-top-card__company-name, [data-company-name="true"], .company-name, .jobsearch-CompanyInfoContainer');
+          if (companyEl) company = companyEl.innerText.replace('at ', '').trim();
 
-          if (window.location.host.includes('linkedin.com')) {
-            const titleEl = document.querySelector('.job-details-jobs-unified-top-card__job-title, .jobs-unified-top-card__job-title, .p5, h1');
-            if (titleEl) title = titleEl.innerText.trim();
-            const companyEl = document.querySelector('.job-details-jobs-unified-top-card__company-name, .jobs-unified-top-card__company-name, .jobs-unified-top-card__primary-description a');
-            if (companyEl) company = companyEl.innerText.trim();
-            const descEl = document.querySelector('.jobs-description__content, .jobs-description-content__text, .jobs-box__html-content, .jobs-description, #job-details');
-            if (descEl) text = descEl.innerText.trim();
-          } else if (window.location.host.includes('indeed.com')) {
-            const titleEl = document.querySelector('.jobsearch-JobInfoHeader-title, h1');
-            if (titleEl) title = titleEl.innerText.trim();
-            const companyEl = document.querySelector('[data-company-name="true"], .jobsearch-CompanyInfoContainer, .jobsearch-InlineCompanyRating');
-            if (companyEl) company = companyEl.innerText.trim();
-            const descEl = document.querySelector('#jobDescriptionText, .jobsearch-JobComponent-description');
-            if (descEl) text = descEl.innerText.trim();
-          } else if (window.location.host.includes('mail.google.com')) {
-            const subjectEl = document.querySelector('h2.hP');
-            if (subjectEl) title = subjectEl.innerText.trim();
-            const bodies = document.querySelectorAll('.a3s');
-            if (bodies.length > 0) {
-              const activeBody = bodies[bodies.length - 1];
-              text = activeBody.innerText.trim();
-            }
-          } else if (window.location.host.includes('greenhouse.io')) {
-            const titleEl = document.querySelector('h1.app-title, .app-title');
-            if (titleEl) title = titleEl.innerText.trim();
-            const companyEl = document.querySelector('.company-name');
-            if (companyEl) {
-              company = companyEl.innerText.replace('at ', '').trim();
-            }
-            const descEl = document.querySelector('#content, #main');
-            if (descEl) text = descEl.innerText.trim();
-          } else if (window.location.host.includes('lever.co')) {
-            const titleEl = document.querySelector('.posting-header h2, h2');
-            if (titleEl) title = titleEl.innerText.trim();
-            const companyEl = document.querySelector('.posting-header img, .logo img');
-            if (companyEl) {
-              company = companyEl.getAttribute('alt') || 'Lever Company';
-            }
-            const descEl = document.querySelector('.posting-description, .section.page-centered');
-            if (descEl) text = descEl.innerText.trim();
-          } else if (window.location.host.includes('myworkdayjobs.com')) {
-            const titleEl = document.querySelector('[data-automation-id="jobPostingHeader"], h2');
-            if (titleEl) title = titleEl.innerText.trim();
-            const descEl = document.querySelector('[data-automation-id="jobPostingDescription"], .job-description');
-            if (descEl) text = descEl.innerText.trim();
-          }
-          
-          if (!title) {
-            const mainHeading = document.querySelector('h1, h2.job-title, .job-title, [class*="jobTitle"], [class*="job-title"], .app-title');
-            if (mainHeading) title = mainHeading.innerText.trim();
-          }
-          
-          if (!company || company === 'Target Company') {
-            const ogSiteEl = document.querySelector('meta[property="og:site_name"]');
-            if (ogSiteEl && ogSiteEl.getAttribute('content')) {
-              company = ogSiteEl.getAttribute('content').trim();
-            } else {
-              const authorEl = document.querySelector('meta[name="author"]');
-              if (authorEl && authorEl.getAttribute('content')) {
-                company = authorEl.getAttribute('content').trim();
-              }
-            }
-          }
-
-          if ((!title || title === 'Software Engineer' || !company || company === 'Target Company') && document.title && document.title.includes('| LinkedIn')) {
-            const parts = document.title.split('|')[0].trim();
-            if (parts.includes(' hiring at ')) {
-              const [t, c] = parts.split(' hiring at ');
-              title = t.trim();
-              company = c.trim();
-            } else if (parts.includes(' at ')) {
-              const [t, c] = parts.split(' at ');
-              title = t.trim();
-              company = c.trim();
-            }
-          }
-
-          if (!text && document.body) {
-            text = document.body.innerText.trim();
-          }
+          const candidatesSummary = scoredCandidates.slice(0, 15).map(c => ({
+            index: c.index,
+            xpath: c.xpath,
+            nodeName: c.nodeName,
+            childrenCount: c.childrenCount,
+            textLength: c.textLength,
+            score: c.score,
+            reason: c.reason
+          }));
 
           return {
+            candidatesCount: scoredCandidates.length,
+            candidatesSummary,
+            winnerScore: winner ? winner.score : 0,
+            winnerXpath: winner ? winner.xpath : '',
+            winnerNodeName: winner ? winner.nodeName : '',
+            winnerDomSize: winner ? winner.childrenCount : 0,
+            winnerTextLength: winner ? winner.textLength : 0,
+            extractedText,
+            processingTimeMs,
             title: title || 'Software Engineer',
-            company: company || 'Target Company',
-            text: text || ''
+            company: company || 'Target Company'
           };
         }
       });
 
-      // Step 9: Return the freshly extracted data
+      // Step 9: Return freshly extracted data & Print DEBUG LOGS
       console.log("Fresh DOM Received");
-
       let activeResult = null;
-      if (results && results.length > 0) {
-        const validFrames = results
-          .map(r => r.result)
-          .filter(r => r && r.text && r.text.length > 100);
-          
-        if (validFrames.length > 0) {
-          validFrames.sort((a, b) => b.text.length - a.text.length);
-          activeResult = validFrames[0];
-        } else {
-          activeResult = results[0].result;
-        }
+      if (results && results.length > 0 && results[0].result) {
+        activeResult = results[0].result;
       }
 
-      if (!activeResult || !activeResult.text || activeResult.text.length <= 50) {
-        console.warn("Fresh DOM text too short or empty.");
+      if (!activeResult) {
+        console.warn("DOM Candidate Discovery returned no result.");
         return;
       }
 
-      const { title, company, text } = activeResult;
-      const cleanedTitle = title
-        .replace(/\(verified job\)/i, '')
-        .replace(/\(remote\)/i, '')
-        .replace(/\(hybrid\)/i, '')
-        .replace(/\(on-site\)/i, '')
-        .split('•')[0]
-        .split('-')[0]
-        .split('–')[0]
-        .trim();
+      console.group("====================================================\nDOM DISCOVERY\n====================================================");
+      console.log(`Candidates Found: ${activeResult.candidatesCount} (Processing time: ${activeResult.processingTimeMs}ms)`);
+      (activeResult.candidatesSummary || []).forEach(c => {
+        console.log(`\nCandidate #${c.index}\nXPath: ${c.xpath}\nNode Name: ${c.nodeName}\nChildren: ${c.childrenCount}\nText Length: ${c.textLength}\nScore: ${c.score}\nReason: ${c.reason}\n----------------------`);
+      });
+      console.groupEnd();
+
+      console.group("====================================================\nWINNER\n====================================================");
+      console.log(`Winner XPath: ${activeResult.winnerXpath}`);
+      console.log(`Winner Score: ${activeResult.winnerScore}`);
+      console.log(`Winner DOM Size: ${activeResult.winnerDomSize} children`);
+      console.log(`Winner Text Length: ${activeResult.winnerTextLength} characters`);
+      console.log(`Preview:\n${(activeResult.extractedText || '').substring(0, 300)}...`);
+      console.groupEnd();
+
+      console.group("====================================================\nEXTRACTION\n====================================================");
+      console.log(`Extracted Characters: ${(activeResult.extractedText || '').length}`);
+      console.log(`Preview:\n${(activeResult.extractedText || '').substring(0, 500)}${(activeResult.extractedText || '').length > 500 ? '\n[...truncated]' : ''}`);
+      console.groupEnd();
+
+      // Configurable score threshold for single job validation
+      const CONFIGURABLE_THRESHOLD = 35;
+
+      console.group("====================================================\nSEND TO BACKEND\n====================================================");
+      if (activeResult.winnerScore < CONFIGURABLE_THRESHOLD || !activeResult.extractedText || activeResult.extractedText.length < 150) {
+        console.log(`Payload Size: 0 bytes (Aborted: Winner score ${activeResult.winnerScore} below threshold ${CONFIGURABLE_THRESHOLD})`);
+        console.groupEnd();
+        console.warn(`[Job Detection Engine] Validation Rejected: Winner score (${activeResult.winnerScore}) below threshold.`);
         
-      const cleanedCompany = company
-        .replace(/•.*$/g, '')
-        .split('-')[0]
-        .split('–')[0]
-        .trim();
-        
-      let cleanedText = text;
-      const noiseDividers = [
-        "About the company", "Trending employee content", "Put your best foot forward",
-        "Fraud Awareness", "E-Verify", "US Only", "Illinois: Click here",
-        "Equal Opportunity Employer", "Fraud Privacy Policy", "We value your privacy",
-        "Interested in working with us", "Members who share that", "Hire a resume writer",
-        "Get a resume review", "Job search faster with Premium", "Access company insights",
-        "Set alert for similar jobs"
-      ];
-      for (const divider of noiseDividers) {
-        const matchIdx = cleanedText.toLowerCase().indexOf(divider.toLowerCase());
-        if (matchIdx !== -1 && matchIdx > 200) {
-          cleanedText = cleanedText.substring(0, matchIdx);
-        }
+        setJobAnalysis({
+          is_job_related: false,
+          reason: "This page doesn't appear to contain a single job posting.",
+          normalized_content: {
+            is_job_related: false,
+            reason: "This page doesn't appear to contain a single job posting."
+          }
+        });
+        setLoadingProgress(0);
+        setJobDetectionStatus("ready");
+        console.log("Extraction Complete (Aborted by DOM Scoring Threshold)");
+        console.log("==================================================");
+        return;
       }
-      cleanedText = cleanedText.replace(/At \w+, we strive for an environment[\s\S]*$/gi, '').trim();
 
-      setJobText(cleanedText);
-      setCompanyName(cleanedCompany);
-      setJobTitle(cleanedTitle);
+      const payloadObj = {
+        jd_text: activeResult.extractedText,
+        url: currentUrl,
+        page_title: activeResult.title || currentTitle,
+        page_company: activeResult.company || ""
+      };
+      const payloadStr = JSON.stringify(payloadObj);
+      const payloadSize = new Blob([payloadStr]).size;
 
-      // Step 10 & 11: Validate whether it is a job page & Extract structured job information
-      console.log("Validation Started");
+      console.log(`Payload Size: ${payloadSize} bytes`);
+      console.log(`Preview:\n${activeResult.extractedText.substring(0, 400)}...`);
+      console.groupEnd();
+
+      setJobText(activeResult.extractedText);
+      setCompanyName(activeResult.company);
+      setJobTitle(activeResult.title);
+
+      // Step 11: LLM Structured Extraction (Only invoked when winner score >= threshold)
       console.log("Extraction Started");
       setLoadingType('extraction');
       setLoadingProgress(10);
-      setLoadingMessage("Reading & Validating Job Description...");
+      setLoadingMessage("Extracting Job Description Details...");
 
       const headers = {};
       if (apiKey) headers["x-groq-key"] = apiKey;
@@ -960,10 +1106,10 @@ export function AppProvider({ children }) {
             ...headers
           },
           body: JSON.stringify({
-            jd_text: cleanedText,
+            jd_text: activeResult.extractedText,
             url: currentUrl,
-            page_title: cleanedTitle || currentTitle,
-            page_company: cleanedCompany || ""
+            page_title: activeResult.title || currentTitle,
+            page_company: activeResult.company || ""
           })
         });
         if (!jobRes.ok) throw new Error("V1 extract route returned error or not found");
@@ -976,10 +1122,10 @@ export function AppProvider({ children }) {
             ...headers
           },
           body: JSON.stringify({
-            jd_text: cleanedText,
+            jd_text: activeResult.extractedText,
             url: currentUrl,
-            page_title: cleanedTitle || currentTitle,
-            page_company: cleanedCompany || ""
+            page_title: activeResult.title || currentTitle,
+            page_company: activeResult.company || ""
           })
         });
         if (!jobResFallback.ok) {

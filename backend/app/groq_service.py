@@ -1,4 +1,5 @@
 import os
+import re
 import json
 from typing import List, Optional, Dict, Any
 from langchain_groq import ChatGroq
@@ -45,109 +46,33 @@ def analyze_job_description(jd_text: str, api_key: Optional[str] = None, url: Op
     structured_llm = llm.with_structured_output(JobAnalysis)
     
     prompt = ChatPromptTemplate.from_messages([
-        ("system", """You are a Senior Software Engineer building the core validation engine for a Job Description Extraction system.
+        ("system", """You are an expert Job Description Structured Extraction Engine.
+Your responsibility is to extract exact structured fields from the provided single job posting text.
 
-Your task is NOT to extract fields first.
-
-Your first responsibility is to determine whether the CURRENT PAGE represents a SINGLE VALID JOB POSTING.
-
-Think like a human reading the page.
-
-=========================================================
-YOUR JOB
-=========================================================
-
-Analyze the page as a whole.
-
-Determine whether the page is a real job description page.
-
-DO NOT rely on keywords alone.
-
-Understand the page.
-
-Reason about its purpose.
-
-=========================================================
-VALID JOB PAGE
-=========================================================
-
-A valid job page usually represents ONE specific role.
-
-Examples:
-
-- Amazon Software Development Engineer
-- Google Data Engineer
-- Microsoft Product Manager
-
-The page usually contains information such as:
-
-- role overview
-- responsibilities
-- qualifications
-- requirements
-- preferred qualifications
-- benefits
+The input text is the pre-validated, high-scoring main job container from the DOM.
+Always set is_job_related = true and extract:
+- job_title
+- company_name
 - location
-- employment details
-
-The exact wording varies by company.
-
-=========================================================
-INVALID PAGE
-=========================================================
-
-Reject pages such as:
-
-- LinkedIn Job Search
-- LinkedIn Recommended Jobs
-- Job Collections
-- Company Home Pages
-- Career Landing Pages
-- Search Results
-- Category Pages
-- Blog Articles
-- News Articles
-- Login Pages
-- Error Pages
-- Profile Pages
-- Pages containing multiple unrelated jobs
-
-=========================================================
-IMPORTANT
-=========================================================
-
-Do NOT guess.
-
-If the page is ambiguous,
-
-prefer
-
-is_job_related = false
-
-instead of making assumptions.
-
-=========================================================
-IF VALID
-=========================================================
-
-Build the structured job object using ONLY information that actually exists on the page.
-
-Never invent information.
+- workplace_type (Remote, Hybrid, On-site)
+- employment_type (Full-time, Part-time, Contract, Internship)
+- experience_level (Entry, Mid, Senior, Lead, Executive)
+- summary
+- responsibilities (list of strings)
+- qualifications (list of strings)
+- required_skills (list of strings)
+- preferred_skills (list of strings)
+- salary_range
 
 =========================================================
 RULES
 =========================================================
-
-- Think about the entire page before making a decision.
-- Do not rely on one keyword.
-- Do not rely on page titles only.
-- Understand the document.
-- Never hallucinate.
-- Never fabricate missing fields.
+- Build the structured job object using ONLY information that actually exists in the provided text.
+- Never invent or hallucinate information.
+- Never fabricate missing fields. If a field is not stated, leave it empty/null/default.
 - Return valid JSON matching the exact schema only.
-- No markdown.
-- No explanations outside the JSON."""),
-        ("human", "Page Title: {page_title}\nDetected Company: {page_company}\nURL: {url}\n\nCleaned Extracted Text:\n{text}")
+- No markdown or explanations outside the JSON."""),
+        ("human", "Page Title: {page_title}\nDetected Company: {page_company}\nURL: {url}\n\nMain Job Container Text:\n{text}")
     ])
     
     chain = prompt | structured_llm
