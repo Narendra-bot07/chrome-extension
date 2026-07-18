@@ -1,269 +1,291 @@
-import React, { useState } from 'react';
-import { Upload, FileText, Calendar, HardDrive, Trash2, ArrowRight, Eye, X } from 'lucide-react';
-import TailorRender from './Resume/TailorRender';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  CalendarDays,
+  CheckCircle2,
+  Eye,
+  FileText,
+  FolderOpen,
+  HardDrive,
+  Star,
+  Trash2,
+  Upload,
+  X
+} from 'lucide-react';
+import { useApp } from '../context/AppContext';
 
-function ResumeDetectionView({
+function formatDate(value) {
+  if (!value) return '—';
+  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatSize(bytes) {
+  if (!bytes) return 'Unknown';
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function normalizeResume(resume) {
+  if (!resume) return null;
+  return {
+    ...(resume.parsed_content || resume),
+    id: resume.id,
+    file_name: resume.file_name,
+    file_size: resume.file_size,
+    file_type: resume.file_type,
+    created_at: resume.created_at || resume.uploaded_at,
+    uploaded_at: resume.uploaded_at || resume.created_at,
+    is_active: !!resume.is_active
+  };
+}
+
+export default function ResumeDetectionView({
   parsedResume,
   resumesList = [],
   onDeleteResume,
-  resumeFile,
+  onActivateResume,
   setResumeFile,
   onSelect,
-  dragActive,
-  setDragActive,
-  uploadProgress,
-  loading
+  onUploadResume,
+  loading,
+  loadingResume
 }) {
-  const [showPreviewModal, setShowPreviewModal] = useState(false);
-  const [previewResume, setPreviewResume] = useState(null);
+  const { apiUrl, session } = useApp();
+  const fileInputRef = useRef(null);
+  const [pendingUpload, setPendingUpload] = useState(false);
+  const [toast, setToast] = useState('');
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [previewName, setPreviewName] = useState('');
 
-  const handleDrag = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
+  const activeResumeId = useMemo(() => {
+    return resumesList.find((resume) => resume.is_active)?.id || parsedResume?.id || resumesList[0]?.id || null;
+  }, [resumesList, parsedResume?.id]);
+
+  const orderedResumes = useMemo(() => {
+    return [...resumesList].sort((a, b) => {
+      const aActive = a.id === activeResumeId || a.is_active;
+      const bActive = b.id === activeResumeId || b.is_active;
+      if (aActive !== bActive) return aActive ? -1 : 1;
+      return new Date(b.created_at || b.uploaded_at || 0) - new Date(a.created_at || a.uploaded_at || 0);
+    });
+  }, [resumesList, activeResumeId]);
+
+  const displayNamesById = useMemo(() => {
+    const nameCounts = {};
+    orderedResumes.forEach((resume) => {
+      const name = resume.file_name || 'Resume.pdf';
+      nameCounts[name] = (nameCounts[name] || 0) + 1;
+    });
+
+    const seen = {};
+    return orderedResumes.reduce((acc, resume) => {
+      const name = resume.file_name || 'Resume.pdf';
+      seen[name] = (seen[name] || 0) + 1;
+      acc[resume.id] = nameCounts[name] > 1 ? `${name} (${seen[name]})` : name;
+      return acc;
+    }, {});
+  }, [orderedResumes]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setResumeFile(file);
+    setPendingUpload(true);
+    event.target.value = '';
+    const uploaded = await onUploadResume?.(file);
+    setPendingUpload(false);
+    if (uploaded) {
+      onSelect?.({ ...uploaded, is_active: true });
+      setToast('Resume uploaded and set as active.');
+      setTimeout(() => setToast(''), 3000);
     }
   };
 
-  const handleDrop = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      setResumeFile(e.dataTransfer.files[0]);
+  const handlePreview = async (resume) => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token) return;
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/resumes/${resume.id}/preview`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Preview unavailable.');
+      const blob = await res.blob();
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setPreviewName(resume.file_name || 'Resume');
+      setPreviewUrl(URL.createObjectURL(blob));
+    } catch (err) {
+      console.error(err);
+      setToast('Preview unavailable for this resume.');
+      setTimeout(() => setToast(''), 3000);
     }
   };
 
-  const handleFileChange = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      setResumeFile(e.target.files[0]);
-    }
+  const handleSelect = async (resume) => {
+    if (resume.id === activeResumeId || resume.is_active) return;
+    const result = await onActivateResume?.(resume.id);
+    const active = normalizeResume(result?.activeResume || resume);
+    if (active) onSelect?.({ ...active, is_active: true });
+    setToast('Active resume updated.');
+    setTimeout(() => setToast(''), 3000);
+  };
+
+  const handleDelete = async (resume) => {
+    if (!window.confirm(`Delete ${resume.file_name || 'this resume'}?`)) return;
+    await onDeleteResume?.(resume.id);
+    setToast('Resume deleted.');
+    setTimeout(() => setToast(''), 3000);
   };
 
   return (
-    <div className="space-y-4 flex-1 flex flex-col justify-between select-none text-slate-650 dark:text-slate-350 font-sans">
-      
-      {/* Title */}
-      <div className="space-y-1">
-        <h2 className="text-lg font-black tracking-tight text-slate-800 dark:text-slate-100">Resume Source</h2>
-        <p className="text-xs text-slate-500">Provide the resume document to match against the target job requirements.</p>
+    <div className="h-full flex flex-col overflow-y-auto px-1 py-1 text-slate-700 dark:text-slate-250">
+      <div className="mb-5">
+        <h2 className="text-xl font-black text-slate-900 dark:text-white">Resume Manager</h2>
+        <p className="text-sm text-slate-500 mt-1">A list of uploaded resumes.</p>
       </div>
 
-      {/* Resumes List Scroll Container */}
-      <div className="flex-1 flex flex-col justify-start my-2 space-y-4 overflow-y-auto max-h-[380px] pr-1 custom-scrollbar">
-        {resumesList && resumesList.length > 0 ? (
-          <div className="space-y-2">
-            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-1">Select Active Resume</span>
-            {resumesList.map((res) => {
-              const isActive = parsedResume && parsedResume.id === res.id;
-              const fileSz = res.file_size 
-                ? `${(res.file_size / 1024).toFixed(1)} KB` 
-                : "Unknown Size";
-              const modDate = res.created_at
-                ? new Date(res.created_at).toLocaleDateString(undefined, { dateStyle: 'medium' })
-                : "Recently";
+      {toast && (
+        <div className="mb-3 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-2 text-xs font-bold">
+          {toast}
+        </div>
+      )}
 
-              const handleSelectResume = () => {
-                if (parsedResume && parsedResume.id !== res.id) {
-                  const confirmChange = window.confirm(
-                    `Are you sure you want to change your active resume from "${parsedResume.file_name || 'Current'}" to "${res.file_name}"?`
-                  );
-                  if (!confirmChange) return;
-                }
+      {loadingResume ? (
+        <div className="flex-1 min-h-[220px] flex items-center justify-center text-sm font-bold text-slate-400">
+          Loading resumes...
+        </div>
+      ) : orderedResumes.length === 0 ? (
+        <div className="flex-1 min-h-[260px] flex flex-col items-center justify-center text-center text-slate-400">
+          <FolderOpen size={36} className="mb-3" />
+          <p className="text-sm font-black">No resumes uploaded yet.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto border-y border-slate-200 dark:border-slate-850">
+          <div className="min-w-[900px]">
+            <div className="grid grid-cols-[minmax(260px,1.7fr)_170px_120px_130px_110px_150px_100px] items-center gap-3 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-50/70 dark:bg-slate-950/50">
+              <span><FileText size={13} className="inline mr-1" /> Resume Name</span>
+              <span><CalendarDays size={13} className="inline mr-1" /> Uploaded</span>
+              <span><HardDrive size={13} className="inline mr-1" /> Size</span>
+              <span>Status</span>
+              <span><Eye size={13} className="inline mr-1" /> Preview</span>
+              <span><Star size={13} className="inline mr-1" /> Select</span>
+              <span><Trash2 size={13} className="inline mr-1" /> Delete</span>
+            </div>
 
-                const selected = {
-                  ...(res.parsed_content || res),
-                  id: res.id,
-                  file_name: res.file_name,
-                  file_size: res.file_size,
-                  file_type: res.file_type,
-                  created_at: res.created_at
-                };
-                onSelect(selected);
-              };
-
+            {orderedResumes.map((resume) => {
+              const isActive = resume.id === activeResumeId || resume.is_active;
               return (
-                <div 
-                  key={res.id}
-                  onClick={handleSelectResume}
-                  className={`p-3.5 rounded-xl border flex items-center justify-between transition cursor-pointer ${
-                    isActive 
-                      ? 'border-indigo-500 bg-indigo-50/40 dark:bg-indigo-950/20 shadow-sm' 
-                      : 'border-slate-200 dark:border-slate-900 bg-white dark:bg-[#0f0f11] hover:border-slate-350 dark:hover:border-slate-800'
+                <div
+                  key={resume.id}
+                  className={`grid grid-cols-[minmax(260px,1.7fr)_170px_120px_130px_110px_150px_100px] items-center gap-3 px-3 py-3 border-t border-slate-100 dark:border-slate-900 text-sm transition ${
+                    isActive ? 'bg-indigo-50/50 dark:bg-indigo-950/20' : 'hover:bg-slate-50 dark:hover:bg-slate-950/50'
                   }`}
                 >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                      isActive 
-                        ? 'bg-indigo-500/10 text-indigo-500' 
-                        : 'bg-slate-100 dark:bg-slate-900 text-slate-400'
-                    }`}>
-                      <FileText size={16} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className={`text-xs font-extrabold truncate ${
-                        isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-750 dark:text-slate-300'
-                      }`}>
-                        {res.file_name || "Resume_Document.pdf"}
-                      </p>
-                      <p className="text-[9px] text-slate-400 font-bold mt-0.5 uppercase tracking-wider">
-                        {modDate} • {fileSz}
-                      </p>
-                    </div>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handlePreview(resume)}
+                    className={`min-w-0 text-left border-none bg-transparent cursor-pointer flex items-center gap-2 ${
+                      isActive ? 'font-black text-slate-950 dark:text-white' : 'font-bold text-slate-750 dark:text-slate-250'
+                    }`}
+                  >
+                    <FileText size={16} className="text-slate-400 flex-shrink-0" />
+                    <span className="truncate">{displayNamesById[resume.id]}</span>
+                  </button>
 
-                  <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
-                    {isActive ? (
-                      <span className="py-1 px-2.5 bg-emerald-500/10 text-emerald-500 rounded-lg text-[9px] font-black uppercase tracking-wider select-none">
-                        Active
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSelectResume();
-                        }}
-                        className="py-1 px-2.5 bg-slate-100 dark:bg-slate-900 hover:bg-indigo-600 dark:hover:bg-indigo-605 hover:text-white text-slate-600 dark:text-slate-400 rounded-lg text-[9px] font-black uppercase tracking-wider cursor-pointer border-none transition"
-                      >
-                        Select
-                      </button>
-                    )}
+                  <span className="text-slate-500 font-medium">{formatDate(resume.created_at || resume.uploaded_at)}</span>
+                  <span className="text-slate-500 font-medium">{formatSize(resume.file_size)}</span>
+                  <span className={`inline-flex w-fit items-center gap-1.5 rounded-full px-2 py-1 text-xs font-black ${
+                    isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500 dark:bg-slate-900'
+                  }`}>
+                    {isActive ? <CheckCircle2 size={13} /> : <span className="h-2 w-2 rounded-full bg-slate-300" />}
+                    {isActive ? 'Active' : 'Inactive'}
+                  </span>
 
+                  <button
+                    type="button"
+                    onClick={() => handlePreview(resume)}
+                    className="w-fit inline-flex items-center gap-1.5 border-none bg-transparent text-indigo-600 hover:text-indigo-700 font-bold cursor-pointer"
+                  >
+                    <Eye size={15} /> Preview
+                  </button>
+
+                  {isActive ? (
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const selected = {
-                          ...(res.parsed_content || res),
-                          id: res.id,
-                          file_name: res.file_name,
-                          file_size: res.file_size,
-                          file_type: res.file_type,
-                          created_at: res.created_at
-                        };
-                        setPreviewResume(selected);
-                        setShowPreviewModal(true);
-                      }}
-                      className="p-1.5 hover:bg-indigo-500/10 text-slate-450 hover:text-indigo-500 rounded-lg transition border-none bg-transparent cursor-pointer flex-shrink-0"
-                      title="Preview Resume"
+                      disabled
+                      className="w-fit inline-flex items-center gap-1.5 border-none bg-transparent text-slate-500 font-black"
                     >
-                      <Eye size={14} />
+                      <Star size={15} /> Active Resume
                     </button>
-
+                  ) : (
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (confirm(`Are you sure you want to delete ${res.file_name}?`)) {
-                          onDeleteResume(res.id);
-                        }
-                      }}
-                      className="p-1.5 hover:bg-rose-500/10 text-slate-450 hover:text-rose-500 rounded-lg transition border-none bg-transparent cursor-pointer flex-shrink-0"
-                      title="Delete Resume"
+                      onClick={() => handleSelect(resume)}
+                      className="w-fit inline-flex items-center gap-1.5 border-none bg-transparent text-slate-700 hover:text-indigo-600 dark:text-slate-250 font-bold cursor-pointer"
                     >
-                      <Trash2 size={14} />
+                      <Star size={15} /> Select
                     </button>
-                  </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(resume)}
+                    className="w-fit inline-flex items-center gap-1.5 border-none bg-transparent text-rose-600 hover:text-rose-700 font-bold cursor-pointer"
+                  >
+                    <Trash2 size={15} /> Delete
+                  </button>
                 </div>
               );
             })}
           </div>
-        ) : (
-          <div className="text-center py-6 text-[10px] text-slate-450 uppercase font-black tracking-widest bg-slate-50 dark:bg-slate-950/40 border border-dashed border-slate-200 dark:border-slate-900 rounded-2xl">
-            No resumes uploaded yet
-          </div>
-        )}
-      </div>
-
-      {/* Upload Zone to append new Resumes */}
-      <div className="pt-2">
-        <div 
-          className={`border border-dashed p-4 rounded-xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all duration-200 ${
-            dragActive 
-              ? 'border-brand bg-brand/5 shadow-premium-glow' 
-              : 'border-slate-200 dark:border-slate-900 hover:border-slate-350 dark:hover:border-slate-805 bg-slate-50/50 dark:bg-[#0f0f11]/10 hover:bg-slate-50 dark:hover:bg-[#0f0f11]/30 shadow-3xs'
-          }`}
-          onDragEnter={handleDrag}
-          onDragOver={handleDrag}
-          onDragLeave={handleDrag}
-          onDrop={handleDrop}
-          onClick={() => document.getElementById('resume-source-file-comp').click()}
-        >
-          <input 
-            id="resume-source-file-comp"
-            type="file" 
-            className="hidden" 
-            accept=".pdf,.docx,.txt"
-            onChange={handleFileChange}
-          />
-          
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-350">
-            <Upload size={14} className="text-slate-400" />
-            <span>{resumeFile ? `Selected: ${resumeFile.name}` : "Upload new resume"}</span>
-          </div>
-
-          {/* Upload Progress Bar */}
-          {uploadProgress > 0 && (
-            <div className="w-full max-w-[200px] space-y-1.5 pt-1">
-              <div className="w-full h-1 bg-slate-100 dark:bg-slate-900 rounded-full overflow-hidden border border-slate-200/50 dark:border-slate-800">
-                <div 
-                  className="h-full bg-brand rounded-full transition-all duration-300"
-                  style={{ width: `${uploadProgress}%` }}
-                />
-              </div>
-              <p className="text-[8px] text-brand font-black uppercase text-center tracking-wider">{uploadProgress}% Uploaded</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Fullscreen Zoom Preview Modal inside Resume Source Page */}
-      {showPreviewModal && previewResume && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-xs z-50 flex flex-col animate-fade-in text-white">
-          <div className="bg-zinc-900 border-b border-zinc-800 px-6 py-4 flex items-center justify-between shrink-0 shadow-md">
-            <div>
-              <h3 className="text-xs font-black uppercase tracking-widest text-indigo-400">Resume Preview</h3>
-              <p className="text-[9px] text-zinc-450 font-bold uppercase mt-0.5">{previewResume.file_name || 'Resume Document'}</p>
-            </div>
-            
-            <button 
-              onClick={() => {
-                setShowPreviewModal(false);
-                setPreviewResume(null);
-              }}
-              className="p-2 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition border-none bg-transparent cursor-pointer"
-            >
-              <X size={18} />
-            </button>
-          </div>
-          
-          <div className="flex-1 bg-zinc-950 overflow-auto flex justify-center items-start p-8 custom-scrollbar">
-            <div className="bg-white shadow-2xl rounded-sm p-8 text-zinc-900 w-[816px] min-h-[1056px] select-text">
-              {/* If the resume is not parsed yet, show a clean raw text layout */}
-              {(!previewResume.experience || previewResume.experience.length === 0) ? (
-                <div className="font-mono text-[10.5px] leading-relaxed whitespace-pre-wrap break-words p-4 bg-slate-50 border border-slate-100 rounded-xl">
-                  <div className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-4 pb-2 border-b border-slate-200/60">
-                    Raw Document Text Extraction (Unparsed)
-                  </div>
-                  {previewResume.raw_text || "No text extracted from this resume."}
-                </div>
-              ) : (
-                <TailorRender 
-                  resume={previewResume} 
-                  templateName="ExecutiveATS" 
-                  layoutLevel={5}
-                />
-              )}
-            </div>
-          </div>
         </div>
       )}
 
+      <div className="mt-5">
+        <input ref={fileInputRef} type="file" accept=".pdf" className="hidden" onChange={handleFileChange} />
+        <button
+          type="button"
+          onClick={handleUploadClick}
+          disabled={loading || pendingUpload}
+          className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white px-4 py-2.5 text-sm font-black border-none cursor-pointer"
+        >
+          <Upload size={16} />
+          {loading || pendingUpload ? 'Uploading...' : 'Upload New Resume'}
+        </button>
+      </div>
+
+      {previewUrl && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
+          <div className="w-full max-w-5xl h-[88vh] bg-white dark:bg-zinc-950 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+            <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-850 flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <FileText size={16} className="text-slate-400" />
+                <span className="text-sm font-black truncate">{previewName}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  URL.revokeObjectURL(previewUrl);
+                  setPreviewUrl('');
+                  setPreviewName('');
+                }}
+                className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-900 border-none bg-transparent cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <iframe title="Resume Preview" src={previewUrl} className="flex-1 w-full bg-white" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
-export default ResumeDetectionView;

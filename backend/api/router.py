@@ -9,6 +9,10 @@ from api.v1.health import router as health_router
 from api.v1.applications import router as applications_router
 from api.v1.sessions import router as sessions_router
 from api.v1.support import router as support_router
+from api.v1.plans import router as plans_router
+from api.v1.subscription import router as subscription_router
+from api.v1.usage import router as usage_router
+from api.v1.admin_subscriptions import router as admin_subscriptions_router
 from app.billing.routers.billing import router as billing_router
 
 api_router = APIRouter()
@@ -24,4 +28,8 @@ api_router.include_router(health_router)
 api_router.include_router(applications_router)
 api_router.include_router(sessions_router)
 api_router.include_router(support_router)
+api_router.include_router(plans_router)
+api_router.include_router(subscription_router)
+api_router.include_router(usage_router)
+api_router.include_router(admin_subscriptions_router)
 api_router.include_router(billing_router)

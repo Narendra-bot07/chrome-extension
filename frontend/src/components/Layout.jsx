@@ -35,7 +35,10 @@ function Layout() {
     setPendingApplicationSubmitted,
     activeApplicationId,
     updateApplicationStage,
-    applications
+    applications,
+    subscription,
+    usage,
+    fetchSubscription
   } = useApp();
 
   const [profile, setProfile] = useState({
@@ -57,6 +60,17 @@ function Layout() {
   const [isHowItWorksOpen, setIsHowItWorksOpen] = useState(false);
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [routeTitleOverride, setRouteTitleOverride] = useState('');
+
+  useEffect(() => {
+    const handler = (event) => setRouteTitleOverride(event.detail?.title || '');
+    window.addEventListener('applyflow:title', handler);
+    return () => window.removeEventListener('applyflow:title', handler);
+  }, []);
+
+  useEffect(() => {
+    setRouteTitleOverride('');
+  }, [currentPath]);
 
   useEffect(() => {
     const fetchProfileData = async () => {
@@ -66,13 +80,14 @@ function Layout() {
         const res = await fetch('http://localhost:8000/api/v1/profile/', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
-        if (res.ok) {
-          const data = await res.json();
-          setProfile(data);
+          if (res.ok) {
+            const data = await res.json();
+            setProfile(data);
+          }
+          fetchSubscription();
+        } catch (err) {
+          console.error("Failed to load layout profile:", err);
         }
-      } catch (err) {
-        console.error("Failed to load layout profile:", err);
-      }
     };
     fetchProfileData();
   }, [currentPath]);
@@ -85,6 +100,7 @@ function Layout() {
   );
 
   const getHeaderTitle = () => {
+    if (currentPath === '/profile' && routeTitleOverride) return routeTitleOverride;
     switch (currentPath) {
       case '/': return 'Dashboard';
       case '/tailor': return 'Extract Job Details';
@@ -99,9 +115,16 @@ function Layout() {
       case '/templates': return 'Choose Style Layout';
       case '/download': return 'Tailoring Complete';
       case '/cover-letter': return 'Draft Cover Letter';
+      case '/subscription': return 'Subscription';
       default: return 'ApplyFlow';
     }
   };
+
+  const jdUsage = subscription?.usage?.jd_extraction || usage?.jd_extraction;
+  const jdLimit = jdUsage?.limit;
+  const jdUsed = jdUsage?.used || 0;
+  const jdRemaining = jdUsage?.remaining;
+  const jdPercent = jdLimit ? Math.min(100, (jdUsed / jdLimit) * 100) : 0;
 
 
 
@@ -192,6 +215,17 @@ function Layout() {
               <User size={16} />
               Account
             </Link>
+            <Link
+              to="/subscription"
+              className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                currentPath === '/subscription'
+                  ? darkMode ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-100 text-zinc-950'
+                  : darkMode ? 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-950' : 'text-zinc-650 hover:text-zinc-900 hover:bg-zinc-50'
+              }`}
+            >
+              <Zap size={16} />
+              Subscription
+            </Link>
           </nav>
         </div>
 
@@ -204,7 +238,7 @@ function Layout() {
               <div>
                 <span className="text-[8px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">CURRENT PLAN</span>
                 <p className={`text-[11px] font-black mt-0.5 ${darkMode ? 'text-white' : 'text-zinc-800'}`}>
-                  {profile.subscription_plan} Plan
+                  {subscription?.plan?.name || profile.subscription_plan} Plan
                 </p>
               </div>
               <Zap className="w-3.5 h-3.5 text-[#00bda5]" />
@@ -212,21 +246,26 @@ function Layout() {
             <div className="space-y-1.5">
               <div className="flex justify-between text-[10px] font-bold text-zinc-500">
                 <span>Job extractions</span>
-                <span className={darkMode ? 'text-white' : 'text-zinc-800'}>{profile.resume_count}/6</span>
+                <span className={darkMode ? 'text-white' : 'text-zinc-800'}>
+                  {jdLimit ? `${jdUsed}/${jdLimit}` : `${jdUsed}/∞`}
+                </span>
               </div>
               <div className={`w-full h-1 rounded-full overflow-hidden ${darkMode ? 'bg-zinc-800' : 'bg-zinc-200'}`}>
                 <div 
                   className="bg-[#00bda5] h-full transition-all duration-300"
-                  style={{ width: `${(profile.resume_count / 6) * 100}%` }}
+                  style={{ width: `${jdPercent}%` }}
                 />
+              </div>
+              <div className="text-[9px] font-bold text-zinc-400">
+                {jdLimit ? `${jdRemaining ?? 0} remaining` : 'Unlimited'}{jdUsage?.period_end ? ` · Resets ${new Date(jdUsage.period_end).toLocaleDateString()}` : ''}
               </div>
             </div>
             <Link 
-              to="/profile"
+              to="/subscription"
               className="mt-1"
             >
               <Button variant="outline" size="sm" className="w-full text-xs py-1.5 font-bold rounded-lg border-zinc-200 dark:border-zinc-800">
-                Upgrade Account
+                Manage Plan
               </Button>
             </Link>
           </div>

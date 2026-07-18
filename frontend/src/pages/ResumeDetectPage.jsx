@@ -1,31 +1,24 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import ResumeDetectionView from '../components/ResumeDetectionView';
 
 function ResumeDetectPage() {
-  const navigate = useNavigate();
   const {
     parsedResume, setParsedResume,
     resumesList, fetchResumesList,
     handleDeleteResume,
+    handleActivateResume,
     resumeFile, setResumeFile,
-    dragActive, setDragActive,
+    session,
     loadingProgress,
     handleParseResume,
-    loading, isExtension
+    loading,
+    loadingResume
   } = useApp();
 
   React.useEffect(() => {
     fetchResumesList();
-  }, []);
-
-  // Auto-parse when a file is chosen
-  React.useEffect(() => {
-    if (resumeFile) {
-      handleParseResume();
-    }
-  }, [resumeFile]);
+  }, [session?.access_token]);
 
   return (
     <ResumeDetectionView
@@ -33,6 +26,7 @@ function ResumeDetectPage() {
       setParsedResume={setParsedResume}
       resumesList={resumesList}
       onDeleteResume={handleDeleteResume}
+      onActivateResume={handleActivateResume}
       resumeFile={resumeFile}
       setResumeFile={setResumeFile}
       onSelect={(selected) => {
@@ -44,12 +38,11 @@ function ResumeDetectPage() {
         } else {
           localStorage.setItem('parsed_resume', JSON.stringify(selected));
         }
-        navigate('/resume-review');
       }}
-      dragActive={dragActive}
-      setDragActive={setDragActive}
+      onUploadResume={handleParseResume}
       uploadProgress={loadingProgress}
       loading={loading}
+      loadingResume={loadingResume}
     />
   );
 }

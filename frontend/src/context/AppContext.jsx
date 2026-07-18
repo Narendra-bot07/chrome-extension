@@ -44,7 +44,8 @@ export function AppProvider({ children }) {
                 file_name: resumes[0].file_name,
                 file_size: resumes[0].file_size,
                 file_type: resumes[0].file_type,
-                created_at: resumes[0].created_at
+                created_at: resumes[0].created_at,
+                is_active: !!resumes[0].is_active
               };
               setParsedResume(latestResume);
               const isExt = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local;
@@ -119,9 +120,6 @@ export function AppProvider({ children }) {
   const [companyName, setCompanyName] = useState('Company');
   const [jobTitle, setJobTitle] = useState('Software Engineer');
   const [lastAnalyzedUrl, setLastAnalyzedUrl] = useState('');
-  const [lastAnalyzedTitle, setLastAnalyzedTitle] = useState('');
-  const [lastAnalyzedCompany, setLastAnalyzedCompany] = useState('');
-  const [lastAnalyzedText, setLastAnalyzedText] = useState('');
 
   // Data states
   const [parsedResume, setParsedResume] = useState(null);
@@ -155,8 +153,28 @@ export function AppProvider({ children }) {
   const [loadingType, setLoadingType] = useState('extraction');
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState(null);
+  const [subscription, setSubscription] = useState(null);
+  const [usage, setUsage] = useState(null);
 
   const isExtension = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local;
+
+  const fetchSubscription = async () => {
+    try {
+      const token = session?.access_token || localStorage.getItem('access_token');
+      if (!token) return null;
+      const res = await fetch(`${apiUrl}/api/v1/subscription/me`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      setSubscription(data);
+      setUsage(data.usage || null);
+      return data;
+    } catch (err) {
+      console.error("Failed to fetch subscription:", err);
+      return null;
+    }
+  };
 
   // Load configs & saved resume
   useEffect(() => {
@@ -268,6 +286,7 @@ export function AppProvider({ children }) {
   useEffect(() => {
     if (session) {
       fetchApplications();
+      fetchSubscription();
     }
   }, [session]);
 
@@ -362,18 +381,25 @@ export function AppProvider({ children }) {
 
   const fetchResumesList = async (tokenOverride) => {
     const token = tokenOverride || session?.access_token || localStorage.getItem('access_token');
-    if (!token) return;
+    if (!token) return [];
+    setLoadingResume(true);
     try {
       const res = await fetch(`${apiUrl}/api/v1/resumes/`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
         const data = await res.json();
-        setResumesList(data);
-        return data;
+        const resumes = Array.isArray(data) ? data : (data.resumes || []);
+        setResumesList(resumes);
+        return resumes;
       }
+      console.error("Failed to fetch resumes:", res.status, await res.text());
+      return [];
     } catch (err) {
       console.error("Failed to fetch resumes:", err);
+      return [];
+    } finally {
+      setLoadingResume(false);
     }
   };
 
@@ -387,28 +413,59 @@ export function AppProvider({ children }) {
       });
       if (res.ok) {
         const updatedList = await fetchResumesList();
-        if (parsedResume && parsedResume.id === resumeId) {
-          if (updatedList && updatedList.length > 0) {
-            const nextResume = {
-              ...(updatedList[0].parsed_content || updatedList[0]),
-              id: updatedList[0].id,
-              file_name: updatedList[0].file_name,
-              file_size: updatedList[0].file_size,
-              file_type: updatedList[0].file_type,
-              created_at: updatedList[0].created_at
-            };
-            setParsedResume(nextResume);
-            if (isExtension) chrome.storage.local.set({ parsedResume: nextResume });
-            else localStorage.setItem('parsed_resume', JSON.stringify(nextResume));
-          } else {
-            setParsedResume(null);
-            if (isExtension) chrome.storage.local.remove('parsedResume');
-            else localStorage.removeItem('parsed_resume');
-          }
+        if (updatedList && updatedList.length > 0) {
+          const next = updatedList.find((resume) => resume.is_active) || updatedList[0];
+          const nextResume = {
+            ...(next.parsed_content || next),
+            id: next.id,
+            file_name: next.file_name,
+            file_size: next.file_size,
+            file_type: next.file_type,
+            created_at: next.created_at,
+            is_active: !!next.is_active
+          };
+          setParsedResume(nextResume);
+          if (isExtension) chrome.storage.local.set({ parsedResume: nextResume });
+          else localStorage.setItem('parsed_resume', JSON.stringify(nextResume));
+        } else {
+          setParsedResume(null);
+          if (isExtension) chrome.storage.local.remove('parsedResume');
+          else localStorage.removeItem('parsed_resume');
         }
       }
     } catch (err) {
       console.error("Failed to delete resume:", err);
+    }
+  };
+
+  const handleActivateResume = async (resumeId) => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token) return null;
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/resumes/${resumeId}/activate`, {
+        method: "POST",
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error("Failed to activate resume.");
+      const activeRecord = await res.json();
+      const updatedList = await fetchResumesList();
+      const activeResume = {
+        ...(activeRecord.parsed_content || activeRecord),
+        id: activeRecord.id,
+        file_name: activeRecord.file_name,
+        file_size: activeRecord.file_size,
+        file_type: activeRecord.file_type,
+        created_at: activeRecord.created_at,
+        is_active: true
+      };
+      setParsedResume(activeResume);
+      if (isExtension) chrome.storage.local.set({ parsedResume: activeResume });
+      else localStorage.setItem('parsed_resume', JSON.stringify(activeResume));
+      return { activeResume, resumes: updatedList };
+    } catch (err) {
+      console.error("Failed to activate resume:", err);
+      setApiError(err.message || "Failed to activate resume.");
+      return null;
     }
   };
 
@@ -464,18 +521,92 @@ export function AppProvider({ children }) {
       
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: () => {
+        func: async () => {
           let title = '';
           let company = '';
           let text = '';
 
           if (window.location.host.includes('linkedin.com')) {
-            const titleEl = document.querySelector('.job-details-jobs-unified-top-card__job-title, .jobs-unified-top-card__job-title, .p5, h1');
-            if (titleEl) title = titleEl.innerText.trim();
-            const companyEl = document.querySelector('.job-details-jobs-unified-top-card__company-name, .jobs-unified-top-card__company-name, .jobs-unified-top-card__primary-description a');
-            if (companyEl) company = companyEl.innerText.trim();
-            const descEl = document.querySelector('.jobs-description__content, .jobs-description-content__text, .jobs-box__html-content, .jobs-description, #job-details');
-            if (descEl) text = descEl.innerText.trim();
+            const clean = (value) => (value || '').replace(/\s+/g, ' ').trim();
+            const readText = (selector) => {
+              const el = document.querySelector(selector);
+              return el ? clean(el.innerText || el.textContent) : '';
+            };
+            const usefulDescription = (value) => {
+              const normalized = clean(value);
+              return normalized.length > 120 && !/^0 notifications$/i.test(normalized);
+            };
+            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+            const descriptionSelectors = [
+              '#job-details',
+              '.jobs-description__content',
+              '.jobs-description-content__text',
+              '.jobs-box__html-content',
+              '.jobs-description',
+              '[class*="jobs-description"]',
+              '[class*="job-details"]'
+            ];
+
+            const titleSelectors = [
+              '.job-details-jobs-unified-top-card__job-title h1',
+              '.job-details-jobs-unified-top-card__job-title',
+              '.jobs-unified-top-card__job-title',
+              'h1'
+            ];
+            for (const selector of titleSelectors) {
+              title = readText(selector);
+              if (title) break;
+            }
+
+            const companySelectors = [
+              '.job-details-jobs-unified-top-card__company-name a',
+              '.job-details-jobs-unified-top-card__company-name',
+              '.jobs-unified-top-card__company-name a',
+              '.jobs-unified-top-card__company-name',
+              '.jobs-unified-top-card__primary-description a'
+            ];
+            for (const selector of companySelectors) {
+              company = readText(selector);
+              if (company) break;
+            }
+
+            for (let attempt = 0; attempt < 18 && !usefulDescription(text); attempt += 1) {
+              for (const selector of descriptionSelectors) {
+                const candidate = readText(selector);
+                if (candidate.length > text.length) text = candidate;
+                if (usefulDescription(text)) break;
+              }
+
+              if (usefulDescription(text)) break;
+
+              const detailsPanel = document.querySelector('.jobs-search__job-details--container, .jobs-details, main');
+              if (detailsPanel) detailsPanel.scrollBy(0, 450);
+              window.scrollBy(0, 450);
+              await sleep(250);
+            }
+
+            const showMore = Array.from(document.querySelectorAll('button'))
+              .find((button) => /show more|see more/i.test(button.innerText || button.textContent || ''));
+            if (showMore) {
+              showMore.click();
+              await sleep(150);
+              for (const selector of descriptionSelectors) {
+                const candidate = readText(selector);
+                if (candidate.length > text.length) text = candidate;
+              }
+            }
+
+            if (!usefulDescription(text) && document.body) {
+              const bodyText = clean(document.body.innerText);
+              const starts = ['About the job', 'Job description', 'Responsibilities', 'Minimum qualifications', 'What you will do'];
+              for (const marker of starts) {
+                const idx = bodyText.toLowerCase().indexOf(marker.toLowerCase());
+                if (idx !== -1) {
+                  const candidate = bodyText.slice(idx);
+                  if (candidate.length > text.length) text = candidate;
+                }
+              }
+            }
           } else if (window.location.host.includes('indeed.com')) {
             const titleEl = document.querySelector('.jobsearch-JobInfoHeader-title, h1');
             if (titleEl) title = titleEl.innerText.trim();
@@ -619,6 +750,22 @@ export function AppProvider({ children }) {
             cleanedText = cleanedText.substring(0, matchIdx);
           }
         }
+
+        if (cleanedText.trim().length < 100 || /^0 notifications$/i.test(cleanedText.trim())) {
+          console.warn("[LetMeApply Extraction] Rejected invalid scrape:", {
+            url,
+            title: cleanedTitle,
+            company: cleanedCompany,
+            textLength: cleanedText.trim().length,
+            preview: cleanedText.trim()
+          });
+          setJobText('');
+          setCompanyName(cleanedCompany);
+          setJobTitle(cleanedTitle);
+          setLastAnalyzedUrl(url);
+          setApiError("Couldn't read the job description from this page yet. Scroll the job details panel once, then click Scan Again.");
+          return;
+        }
         
         cleanedText = cleanedText
           .replace(/At \w+, we strive for an environment[\s\S]*$/gi, '')
@@ -678,6 +825,7 @@ export function AppProvider({ children }) {
 
       let analyzedJob;
       try {
+        const requestId = (crypto?.randomUUID && crypto.randomUUID()) || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
         const jobRes = await fetch(`${apiUrl}/api/v1/jobs/extract`, {
           method: "POST",
           headers: {
@@ -686,26 +834,37 @@ export function AppProvider({ children }) {
           },
           body: JSON.stringify({
             jd_text: jobText,
-            url: window.location.href,
-            page_title: jobTitle || document.title,
-            page_company: companyName || ""
+            url: lastAnalyzedUrl || "",
+            page_title: jobTitle || "",
+            page_company: companyName || "",
+            request_id: requestId
           })
         });
-        if (!jobRes.ok) throw new Error("V1 extract route returned error or not found");
-        analyzedJob = await jobRes.json();
+        if (!jobRes.ok) {
+          const errData = await jobRes.json().catch(() => ({ detail: jobRes.statusText }));
+          if (["QUOTA_EXCEEDED", "FEATURE_NOT_AVAILABLE", "SUBSCRIPTION_INACTIVE", "SUBSCRIPTION_SUSPENDED"].includes(errData?.detail?.code)) {
+            await fetchSubscription();
+            const subError = new Error(errData.detail.message || "Subscription does not allow this extraction.");
+            subError.skipLegacyFallback = true;
+            throw subError;
+          }
+          throw new Error(errData?.detail?.message || errData?.detail || "V1 extract route returned error or not found");
+        }
+        const jobPayload = await jobRes.json();
+        if (jobPayload?.usage) {
+          setUsage(prev => ({ ...(prev || {}), jd_extraction: jobPayload.usage }));
+          await fetchSubscription();
+        }
+        analyzedJob = jobPayload?.data || jobPayload;
       } catch (err) {
+        if (err.skipLegacyFallback) throw err;
         const jobResFallback = await fetch(`${apiUrl}/api/analyze-job`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             ...headers
           },
-          body: JSON.stringify({
-            jd_text: jobText,
-            url: window.location.href,
-            page_title: jobTitle || document.title,
-            page_company: companyName || ""
-          })
+          body: JSON.stringify({ jd_text: jobText })
         });
         if (!jobResFallback.ok) {
           const errData = await jobResFallback.json().catch(() => ({ detail: jobResFallback.statusText }));
@@ -747,121 +906,20 @@ export function AppProvider({ children }) {
     }
   };
 
-  // Shared submission function merging manual entry into the structured extraction pipeline
-  const submitManualJobEntry = async ({
-    url,
-    role,
-    company,
-    description,
-    location = "",
-    employmentType = "",
-    experience = "",
-    salary = ""
-  }) => {
-    setApiError(null);
-    setJobText(description);
-    setCompanyName(company);
-    setJobTitle(role);
-    setJobAnalysis(null);
-    navigate('/tailor');
-    setLoadingType('extraction');
-    setLoadingProgress(10);
-    setLoadingMessage("Extracting Job Description Details...");
-
-    const progressInterval = setInterval(() => {
-      setLoadingProgress((prev) => {
-        if (prev >= 90) return prev;
-        return prev + 15;
-      });
-    }, 300);
-
-    const headers = {};
-    if (apiKey) headers["x-groq-key"] = apiKey;
-    const token = session?.access_token || localStorage.getItem('access_token');
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-
-    try {
-      let analyzedJob;
-      try {
-        const jobRes = await fetch(`${apiUrl}/api/v1/jobs/extract`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...headers
-          },
-          body: JSON.stringify({
-            jd_text: description,
-            url: url,
-            page_title: role,
-            page_company: company,
-            location: location,
-            employment_type: employmentType,
-            experience_level: experience,
-            salary_range: salary
-          })
-        });
-        if (!jobRes.ok) throw new Error("V1 extract route returned error or not found");
-        analyzedJob = await jobRes.json();
-      } catch (err) {
-        const jobResFallback = await fetch(`${apiUrl}/api/analyze-job`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...headers
-          },
-          body: JSON.stringify({
-            jd_text: description,
-            url: url,
-            page_title: role,
-            page_company: company,
-            location: location,
-            employment_type: employmentType,
-            experience_level: experience,
-            salary_range: salary
-          })
-        });
-        if (!jobResFallback.ok) {
-          throw new Error(`Server returned ${jobResFallback.status}`);
-        }
-        analyzedJob = await jobResFallback.json();
-      }
-
-      clearInterval(progressInterval);
-
-      const isValidText = (str) => typeof str === 'string' && str.trim() !== '' && str.trim().toLowerCase() !== 'not available' && str.trim().toLowerCase() !== 'n/a' && str.trim().toLowerCase() !== 'unspecified';
-      const details = analyzedJob?.normalized_content || analyzedJob || {};
-      const finalTitle = isValidText(analyzedJob?.job_title) ? analyzedJob.job_title : (isValidText(details.title) ? details.title : (isValidText(analyzedJob?.title) ? analyzedJob.title : role));
-      const finalCompany = isValidText(analyzedJob?.company_name) ? analyzedJob.company_name : (isValidText(details.company) ? details.company : (isValidText(analyzedJob?.company) ? analyzedJob.company : company));
-
-      setJobAnalysis(analyzedJob);
-      if (isValidText(finalCompany)) setCompanyName(finalCompany);
-      if (isValidText(finalTitle)) setJobTitle(finalTitle);
-
-      setLoadingProgress(0);
-      setJobDetectionStatus("ready");
-    } catch (error) {
-      clearInterval(progressInterval);
-      console.error("Manual job submission error:", error);
-      setLoadingProgress(0);
-      setJobDetectionStatus("ready");
-      navigate('/no-job-detected');
-    }
-  };
-
   // Perform Resume Parsing (Step 4)
-  const handleParseResume = async () => {
-    if (!resumeFile && !parsedResume) {
+  const handleParseResume = async (fileOverride = null) => {
+    const selectedFile = fileOverride || resumeFile;
+    if (!selectedFile && !parsedResume) {
       alert("Please select a resume file to parse.");
       return;
     }
 
-    if (parsedResume && !resumeFile) {
+    if (parsedResume && !selectedFile) {
       navigate('/resume-review');
       return;
     }
 
     setApiError(null);
-    navigate('/resume-parse');
     setLoadingProgress(5);
     setLoadingMessage("Reading Resume...");
 
@@ -885,7 +943,7 @@ export function AppProvider({ children }) {
       if (apiKey) headers["x-groq-key"] = apiKey;
 
       const formData = new FormData();
-      formData.append("file", resumeFile);
+      formData.append("file", selectedFile);
 
       const parseRes = await fetch(`${apiUrl}/api/v1/resumes/upload`, {
         method: "POST",
@@ -897,14 +955,16 @@ export function AppProvider({ children }) {
         throw new Error("Resume parse error: " + (await parseRes.json()).detail);
       }
       const resumeRecord = await parseRes.json();
-      await fetchResumesList();
+      const refreshedResumes = await fetchResumesList();
+      const backendActiveResume = refreshedResumes?.find((resume) => resume.id === resumeRecord.id) || resumeRecord;
       const currentResume = {
-        ...(resumeRecord.parsed_content || resumeRecord),
-        id: resumeRecord.id,
-        file_name: resumeRecord.file_name,
-        file_size: resumeRecord.file_size,
-        file_type: resumeRecord.file_type,
-        created_at: resumeRecord.created_at
+        ...(backendActiveResume.parsed_content || backendActiveResume),
+        id: backendActiveResume.id,
+        file_name: backendActiveResume.file_name,
+        file_size: backendActiveResume.file_size,
+        file_type: backendActiveResume.file_type,
+        created_at: backendActiveResume.created_at,
+        is_active: !!backendActiveResume.is_active
       };
       setParsedResume(currentResume);
 
@@ -915,15 +975,19 @@ export function AppProvider({ children }) {
       clearInterval(progressInterval);
       setLoadingProgress(100);
       setLoadingMessage("Parsing Complete!");
+      setResumeFile(null);
       setTimeout(() => {
-        navigate('/resume-review');
+        setLoadingProgress(0);
+        setLoadingMessage("");
       }, 300);
+      return currentResume;
 
     } catch (error) {
       clearInterval(progressInterval);
       console.error(error);
       setApiError(error.message || "Failed to parse resume.");
       navigate('/resume-detect');
+      return null;
     }
   };
 
@@ -971,15 +1035,7 @@ export function AppProvider({ children }) {
         });
 
         if (!parseRes.ok) {
-          const errData = await parseRes.json().catch(() => ({ detail: parseRes.statusText }));
-          if (parseRes.status === 404) {
-            setParsedResume(null);
-            if (isExtension) chrome.storage.local.remove('parsedResume');
-            else localStorage.removeItem('parsed_resume');
-            await fetchResumesList();
-            throw new Error("Selected resume no longer exists. Please upload or select a resume again.");
-          }
-          throw new Error("AI parsing on-demand failed: " + (errData.detail || "Request failed"));
+          throw new Error("AI parsing on-demand failed: " + (await parseRes.json()).detail);
         }
 
         const updatedRecord = await parseRes.json();
@@ -1406,15 +1462,7 @@ export function AppProvider({ children }) {
         });
 
         if (!parseRes.ok) {
-          const errData = await parseRes.json().catch(() => ({ detail: parseRes.statusText }));
-          if (parseRes.status === 404) {
-            setParsedResume(null);
-            if (isExtension) chrome.storage.local.remove('parsedResume');
-            else localStorage.removeItem('parsed_resume');
-            await fetchResumesList();
-            throw new Error("Selected resume no longer exists. Please upload or select a resume again.");
-          }
-          throw new Error("AI parsing on-demand failed: " + (errData.detail || "Request failed"));
+          throw new Error("AI parsing on-demand failed: " + (await parseRes.json()).detail);
         }
 
         const updatedRecord = await parseRes.json();
@@ -1528,10 +1576,6 @@ export function AppProvider({ children }) {
       companyName, setCompanyName,
       jobTitle, setJobTitle,
       lastAnalyzedUrl, setLastAnalyzedUrl,
-      lastAnalyzedTitle, setLastAnalyzedTitle,
-      lastAnalyzedCompany, setLastAnalyzedCompany,
-      lastAnalyzedText, setLastAnalyzedText,
-      submitManualJobEntry,
       parsedResume, setParsedResume,
       jobAnalysis, setJobAnalysis,
       comparison, setComparison,
@@ -1555,6 +1599,9 @@ export function AppProvider({ children }) {
       loadingType, setLoadingType,
       loading, setLoading,
       apiError, setApiError,
+      subscription, setSubscription,
+      usage, setUsage,
+      fetchSubscription,
       isExtension,
       loadingResume,
       hasRedirectedOnStartup,
@@ -1562,6 +1609,7 @@ export function AppProvider({ children }) {
       resumesList, setResumesList,
       fetchResumesList,
       handleDeleteResume,
+      handleActivateResume,
       handleScanPage,
       handleExtractJob,
       handleParseResume,

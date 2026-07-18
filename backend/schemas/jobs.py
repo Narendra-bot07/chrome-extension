@@ -30,3 +30,4 @@ class JobExtractRequest(BaseModel):
     employment_type: Optional[str] = ""
     experience_level: Optional[str] = ""
     salary_range: Optional[str] = ""
+    request_id: Optional[str] = None

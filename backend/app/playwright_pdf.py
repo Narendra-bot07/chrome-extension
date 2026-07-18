@@ -64,24 +64,52 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
                     ? data.section_order
                     : defaultSectionOrder;
                 const shouldRender = (section) => configuredSectionOrder.includes(section);
+                const printContainer = document.querySelector("#resume-print-container");
+                const compressionClass = Array.from(printContainer?.classList || [])
+                    .find(className => className.startsWith("print-compression-level-"));
+                const compressionLevel = compressionClass
+                    ? Number(compressionClass.replace("print-compression-level-", ""))
+                    : 0;
+                const prunedByAutoFit = (section) => {
+                    if (compressionLevel >= 5 && ["certifications", "achievements", "awards", "publications"].includes(section)) return true;
+                    if (compressionLevel >= 4 && ["volunteer", "languages"].includes(section)) return true;
+                    return false;
+                };
 
                 const expectedSections = [];
-                if (shouldRender("summary") && data.summary && data.summary.trim() !== '') expectedSections.push("summary");
-                if (shouldRender("experience") && data.experience && data.experience.length > 0) expectedSections.push("experience");
-                if (shouldRender("projects") && data.projects && data.projects.length > 0) expectedSections.push("projects");
-                if (shouldRender("education") && data.education && data.education.length > 0) expectedSections.push("education");
-                if (shouldRender("skills") && data.skills && data.skills.length > 0) expectedSections.push("skills");
-                if (shouldRender("certifications") && data.certifications && data.certifications.length > 0) expectedSections.push("certifications");
-                if (shouldRender("achievements") && data.achievements && data.achievements.length > 0) expectedSections.push("achievements");
-                if (shouldRender("languages") && data.languages && data.languages.length > 0) expectedSections.push("languages");
-                if (shouldRender("awards") && data.awards && data.awards.length > 0) expectedSections.push("awards");
-                if (shouldRender("volunteer") && data.volunteer_experience && data.volunteer_experience.length > 0) expectedSections.push("volunteer");
-                if (shouldRender("publications") && data.publications && data.publications.length > 0) expectedSections.push("publications");
+                if (shouldRender("summary") && !prunedByAutoFit("summary") && data.summary && data.summary.trim() !== '') expectedSections.push("summary");
+                if (shouldRender("experience") && !prunedByAutoFit("experience") && data.experience && data.experience.length > 0) expectedSections.push("experience");
+                if (shouldRender("projects") && !prunedByAutoFit("projects") && data.projects && data.projects.length > 0) expectedSections.push("projects");
+                if (shouldRender("education") && !prunedByAutoFit("education") && data.education && data.education.length > 0) expectedSections.push("education");
+                if (shouldRender("skills") && !prunedByAutoFit("skills") && data.skills && data.skills.length > 0) expectedSections.push("skills");
+                if (shouldRender("certifications") && !prunedByAutoFit("certifications") && data.certifications && data.certifications.length > 0) expectedSections.push("certifications");
+                if (shouldRender("achievements") && !prunedByAutoFit("achievements") && data.achievements && data.achievements.length > 0) expectedSections.push("achievements");
+                if (shouldRender("languages") && !prunedByAutoFit("languages") && data.languages && data.languages.length > 0) expectedSections.push("languages");
+                if (shouldRender("awards") && !prunedByAutoFit("awards") && data.awards && data.awards.length > 0) expectedSections.push("awards");
+                if (shouldRender("volunteer") && !prunedByAutoFit("volunteer") && data.volunteer_experience && data.volunteer_experience.length > 0) expectedSections.push("volunteer");
+                if (shouldRender("publications") && !prunedByAutoFit("publications") && data.publications && data.publications.length > 0) expectedSections.push("publications");
                 
                 const missingSections = [];
+                const sectionHeadingAliases = {
+                    summary: ["summary", "professional summary"],
+                    education: ["education"],
+                    experience: ["experience", "work experience"],
+                    skills: ["skills"],
+                    projects: ["projects"],
+                    certifications: ["certifications", "certs"],
+                    achievements: ["achievements", "achievements / awards", "awards"],
+                    volunteer: ["volunteer", "leadership / volunteering", "volunteering"],
+                    publications: ["publications", "publications / research", "research"],
+                    languages: ["languages"]
+                };
+                const renderedHeadings = Array.from(document.querySelectorAll(".section-title, .sidebar-title, .title-bold"))
+                    .map(el => (el.textContent || "").trim().toLowerCase())
+                    .filter(Boolean);
                 for (const section of expectedSections) {
                     const el = document.querySelector(`[data-section="${section}"]`);
-                    if (!el) {
+                    const aliases = sectionHeadingAliases[section] || [section];
+                    const hasHeading = renderedHeadings.some(heading => aliases.includes(heading));
+                    if (!el && !hasHeading) {
                         missingSections.push(section);
                     }
                 }

@@ -11,8 +11,12 @@ function UploaderView({
   handleScanPage,
   handleAnalyzeAndMatch,
   loading,
-  isExtension
+  isExtension,
+  subscription
 }) {
+  const jdUsage = subscription?.usage?.jd_extraction;
+  const quotaExhausted = jdUsage?.enabled && jdUsage?.remaining !== null && jdUsage?.remaining <= 0;
+
   return (
     <div className={`space-y-5 flex-1 flex flex-col justify-between select-none font-sans text-zinc-650 dark:text-zinc-350 mx-auto w-full ${
       isExtension ? 'max-w-lg' : 'max-w-4xl py-2'
@@ -28,6 +32,22 @@ function UploaderView({
             Scan or paste the target job description to match your qualifications against.
           </p>
         </div>
+
+        {subscription?.plan && (
+          <div className="rounded-xl border border-zinc-200/70 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-3 text-[11px] font-bold text-zinc-500 dark:text-zinc-400">
+            <div className="flex justify-between">
+              <span>{subscription.plan.name} Plan</span>
+              <span>
+                {jdUsage?.limit ? `${jdUsage.used || 0}/${jdUsage.limit}` : `${jdUsage?.used || 0}/∞`} JD extractions
+              </span>
+            </div>
+            <div className="mt-1">
+              {quotaExhausted
+                ? "You have used all JD extractions for this month."
+                : `${jdUsage?.remaining ?? 'Unlimited'} extractions remaining`}
+            </div>
+          </div>
+        )}
 
         {/* Input coordinates (Company & Title) */}
         <div className="space-y-2">
@@ -106,7 +126,7 @@ function UploaderView({
         <button 
           type="button"
           onClick={handleAnalyzeAndMatch}
-          disabled={!jobText}
+          disabled={!jobText || quotaExhausted}
           className="w-full py-3 bg-[#00bda5] hover:bg-[#00a894] disabled:bg-zinc-100 disabled:text-zinc-400 dark:disabled:bg-zinc-900 dark:disabled:text-zinc-600 disabled:cursor-not-allowed text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 cursor-pointer border-none"
         >
           <Sparkles size={14} />

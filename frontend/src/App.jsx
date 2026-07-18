@@ -26,6 +26,7 @@ import FAQPage from './pages/FAQPage';
 import ContactSupportPage from './pages/ContactSupportPage';
 import NoJobDetectedPage from './pages/NoJobDetectedPage';
 import ManualJobEntryPage from './pages/ManualJobEntryPage';
+import SubscriptionPage from './pages/SubscriptionPage';
 
 function ProtectedRoute({ children }) {
   const { user, loadingAuth } = useApp();
@@ -100,6 +101,7 @@ function AppRoutes() {
         <Route path="/support/contact" element={<ContactSupportPage />} />
         <Route path="/no-job-detected" element={<NoJobDetectedPage />} />
         <Route path="/manual-job-entry" element={<ManualJobEntryPage />} />
+        <Route path="/subscription" element={<SubscriptionPage />} />
       </Route>
       <Route path="/print" element={<PrintLayout />} />
       <Route path="/print-cover-letter" element={<PrintCoverLetterLayout />} />

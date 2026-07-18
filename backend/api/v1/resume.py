@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, UploadFile, File, Header, HTTPException, status
+from fastapi.responses import Response
 from typing import Dict, Any, List
 from core.security import verify_supabase_jwt
 from core.constants import MAX_FILE_SIZE_BYTES, SUPPORTED_FILE_EXTENSIONS
@@ -43,12 +44,8 @@ async def upload_and_parse(
     unique_path = f"{user['id']}/{uuid.uuid4()}_{file.filename}"
     storage.upload_file("original-resumes", unique_path, content, file.content_type)
 
-    # Parse immediately so the uploaded resume is usable without a fragile second request.
-    ai = GroqService(api_key=x_groq_key)
-    parsed_res = ai.parse_resume(raw_text).dict()
-    parsed_res["raw_text"] = raw_text
-
-    # Save to database
+    # Save to database before AI parsing so uploaded files are never lost from the Resume Manager.
+    parsed_res = {"raw_text": raw_text, "parse_status": "pending"}
     record = resume_repo.create(
         user_id=user["id"],
         file_path=unique_path,
@@ -57,6 +54,20 @@ async def upload_and_parse(
         file_type=ext,
         parsed_content=parsed_res
     )
+
+    # Parse immediately when possible, but keep the uploaded resume even if AI parsing fails.
+    try:
+        ai = GroqService(api_key=x_groq_key)
+        parsed_res = ai.parse_resume(raw_text).dict()
+        parsed_res["raw_text"] = raw_text
+        parsed_res["parse_status"] = "parsed"
+        if resume_repo.update_parsed_content(record["id"], user["id"], parsed_res):
+            record["parsed_content"] = parsed_res
+    except Exception as parse_err:
+        parsed_res["parse_status"] = "failed"
+        parsed_res["parse_error"] = str(parse_err)
+        resume_repo.update_parsed_content(record["id"], user["id"], parsed_res)
+        record["parsed_content"] = parsed_res
     
     AnalyticsService(conn).emit_event(
         user_id=user["id"],
@@ -74,6 +85,50 @@ async def list_resumes(
     repo: ResumeRepository = Depends(get_resume_repository)
 ):
     return repo.list_by_user(user["id"])
+
+@router.get("/{resume_id}/file")
+async def get_resume_file(
+    resume_id: str,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository),
+    storage: FileService = Depends(get_storage_service)
+):
+    record = repo.get_by_id(resume_id, user["id"])
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Resume not found."
+        )
+    file_bytes = storage.download_file("original-resumes", record["file_path"])
+    media_type = "application/pdf" if (record.get("file_type") or "").lower() == "pdf" else "application/octet-stream"
+    return Response(
+        content=file_bytes,
+        media_type=media_type,
+        headers={"Content-Disposition": f'inline; filename="{record.get("file_name") or "resume"}"'}
+    )
+
+@router.get("/{resume_id}/preview")
+async def preview_resume_file(
+    resume_id: str,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository),
+    storage: FileService = Depends(get_storage_service)
+):
+    return await get_resume_file(resume_id, user, repo, storage)
+
+@router.post("/{resume_id}/activate")
+async def activate_resume(
+    resume_id: str,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository)
+):
+    record = repo.activate(resume_id, user["id"])
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Resume not found."
+        )
+    return record
 
 @router.delete("/{resume_id}")
 async def delete_resume(

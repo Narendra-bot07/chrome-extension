@@ -16,11 +16,13 @@ from app.schemas import (
 )
 from app.parser import extract_text
 from app.groq_service import parse_resume, analyze_job_description, generate_tailoring_patch, apply_tailoring_patch, generate_cover_letter, refine_section_with_ai
+from api.v1.resume import router as resume_manager_router
 
 
 from app.template_engine import template_engine
 
 router = APIRouter(prefix="/api")
+router.include_router(resume_manager_router)
 
 @router.get("/templates")
 async def get_templates():

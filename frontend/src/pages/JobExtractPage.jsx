@@ -18,7 +18,8 @@ function JobExtractPage() {
     loadingProgress, loadingMessage,
     handleScanPage, handleExtractJob,
     jobDetectionStatus,
-    loading, isExtension
+    loading, isExtension,
+    subscription
   } = useApp();
 
   // Auto-run scanning on side panel mount and listen to active tab updates/switches
@@ -46,7 +47,6 @@ function JobExtractPage() {
       chrome.tabs.onActivated.addListener(handleTabActivated);
 
       return () => {
-        clearTimeout(timer);
         chrome.tabs.onUpdated.removeListener(handleTabUpdate);
         chrome.tabs.onActivated.removeListener(handleTabActivated);
       };
@@ -110,6 +110,7 @@ function JobExtractPage() {
       handleAnalyzeAndMatch={handleExtractJob}
       loading={loading}
       isExtension={isExtension}
+      subscription={subscription}
     />
   );
 }

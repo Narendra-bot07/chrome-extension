@@ -7,6 +7,8 @@ from repositories.job_repository import JobRepository
 from services.ai.groq_service import GroqService
 from app.analytics.events.tracking.analytics_service import AnalyticsService
 from core.database import get_db_connection
+from services.subscriptions.feature_gate_service import FeatureGateService
+from services.subscriptions.usage_service import UsageService
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -23,7 +25,19 @@ async def extract_job_details(
             detail="Job text cannot be empty."
         )
 
+    usage_service = UsageService(conn)
+    usage_consumed = False
     try:
+        FeatureGateService(conn).require_feature(user["id"], "jd_extraction")
+        usage_summary = usage_service.consume_usage(
+            user_id=user["id"],
+            feature_key="jd_extraction",
+            quantity=1,
+            request_id=request.request_id,
+            metadata={"url": request.url, "page_title": request.page_title}
+        )
+        usage_consumed = True
+
         AnalyticsService(conn).emit_event(
             user_id=user["id"],
             event_type="JD_EXTRACTION_STARTED",
@@ -72,8 +86,14 @@ async def extract_job_details(
             metadata={"company_name": analysis.company, "job_title": analysis.title}
         )
         
-        return record
+        return {
+            "success": True,
+            "data": record,
+            "usage": usage_summary
+        }
     except ValueError as val_err:
+        if usage_consumed:
+            usage_service.credit_usage(user["id"], "jd_extraction", 1, {"reason": "validation_failure_release", "request_id": request.request_id})
         AnalyticsService(conn).emit_event(
             user_id=user["id"],
             event_type="JD_EXTRACTION_FAILED",
@@ -83,7 +103,11 @@ async def extract_job_details(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(val_err)
         )
+    except HTTPException:
+        raise
     except Exception as e:
+        if usage_consumed:
+            usage_service.credit_usage(user["id"], "jd_extraction", 1, {"reason": "internal_error_release", "request_id": request.request_id})
         AnalyticsService(conn).emit_event(
             user_id=user["id"],
             event_type="JD_EXTRACTION_FAILED",
