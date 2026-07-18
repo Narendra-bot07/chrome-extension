@@ -63,7 +63,7 @@ function AppRoutes() {
       // 2. Startup / Login Redirection: Only run once on startup or login
       if (!hasRedirectedOnStartup) {
         if (parsedResume) {
-          if (location.pathname === '/' || location.pathname === '/login' || location.pathname === '/register') {
+          if (location.pathname === '/login' || location.pathname === '/register') {
             setHasRedirectedOnStartup(true);
             navigate('/tailor', { replace: true });
           }
