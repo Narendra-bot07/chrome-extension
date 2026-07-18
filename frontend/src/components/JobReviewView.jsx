@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { 
   Heart,
   FilePenLine,
-  RefreshCw
+  RefreshCw,
+  Target,
+  X
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
@@ -28,15 +30,118 @@ const getValidString = (...candidates) => {
   return null;
 };
 
+const normalizeToken = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9+#.]/g, '').trim();
+const normalizeWords = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9+#.]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+const humanizeToken = (value) => String(value || '')
+  .replace(/[_-]+/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const flattenResumeSkills = (resume) => {
+  const out = [];
+  const push = (value) => {
+    if (!value) return;
+    if (Array.isArray(value)) value.forEach(push);
+    else if (typeof value === 'object') Object.values(value).forEach(push);
+    else out.push(String(value));
+  };
+  push(resume?.skills);
+  push(resume?.skills_categories);
+  push(resume?.technical_skills);
+  push(resume?.parsed_content?.skills);
+  push(resume?.parsed_content?.skills_categories);
+  return Array.from(new Set(out.flatMap((item) => [normalizeToken(item), normalizeWords(item)]).filter(Boolean)));
+};
+
+const calculateMatchScore = ({ resume, requiredSkills, preferredSkills, qualificationsList, responsibilitiesList }) => {
+  const resumeSkills = flattenResumeSkills(resume);
+  const explicitJdSkills = Array.from(new Set([
+    ...requiredSkills,
+    ...preferredSkills
+  ].flatMap((skill) => [normalizeToken(skill), normalizeWords(skill)]).filter(Boolean)));
+
+  const jdTextRaw = [...qualificationsList, ...responsibilitiesList].join(' ');
+  const inferredSkillPatterns = [
+    'python', 'java', 'javascript', 'typescript', 'c++', 'c#', 'go', 'rust', 'sql',
+    'react', 'nodejs', 'node.js', 'spring', 'fastapi', 'django',
+    'aws', 'azure', 'google cloud', 'gcp', 'cloud', 'docker', 'kubernetes',
+    'linux', 'unix', 'machine learning', 'ml', 'ai', 'genai', 'llms', 'llm',
+    'nlp', 'security', 'data structures', 'algorithms', 'distributed systems',
+    'microservices', 'backend', 'frontend', 'api', 'apis'
+  ];
+  const inferredJdSkills = inferredSkillPatterns
+    .filter((skill) => jdTextRaw.toLowerCase().includes(skill))
+    .flatMap((skill) => [normalizeToken(skill), normalizeWords(skill)]);
+
+  const jdSkills = Array.from(new Set([...explicitJdSkills, ...inferredJdSkills]))
+    .filter((skill, index, all) => {
+      const compact = normalizeToken(skill);
+      return all.findIndex((other) => normalizeToken(other) === compact) === index;
+    });
+
+  const resumeText = JSON.stringify(resume || {}).toLowerCase();
+  const compactResumeText = normalizeToken(resumeText);
+  const spacedResumeText = normalizeWords(resumeText);
+  const skillMatchesResume = (skill) => {
+    const compact = normalizeToken(skill);
+    const spaced = normalizeWords(skill);
+    if (!compact && !spaced) return false;
+    return resumeSkills.includes(compact) ||
+      resumeSkills.includes(spaced) ||
+      compactResumeText.includes(compact) ||
+      spacedResumeText.includes(spaced);
+  };
+  const displaySkill = new Map();
+  [...requiredSkills, ...preferredSkills, ...inferredSkillPatterns].forEach((skill) => {
+    displaySkill.set(normalizeToken(skill), humanizeToken(skill));
+    displaySkill.set(normalizeWords(skill), humanizeToken(skill));
+  });
+  const matchedSkills = jdSkills.filter((skill) => skillMatchesResume(skill));
+  const missingSkills = jdSkills.filter((skill) => !skillMatchesResume(skill));
+
+  const jdText = jdTextRaw.toLowerCase();
+  const experienceMatch = jdText.match(/\b(\d{1,2})\+?\s+years?\s+of\s+experience\b/);
+  const requiredYears = experienceMatch ? Number(experienceMatch[1]) : null;
+  const resumeYears = (JSON.stringify(resume?.experience || resume?.parsed_content?.experience || []) || '')
+    .match(/\b(19|20)\d{2}\b/g);
+  const hasExperienceSignal = !requiredYears || (resumeYears && resumeYears.length >= 1);
+
+  if (!resume || jdSkills.length === 0) {
+    return {
+      score: null,
+      matchedSkills: [],
+      missingSkills: [],
+      requiredCount: jdSkills.length,
+      matchedCount: 0,
+      reason: !resume ? 'No active resume selected.' : 'No JD skills detected.'
+    };
+  }
+
+  const skillScore = Math.round((matchedSkills.length / jdSkills.length) * 75);
+  const experienceScore = hasExperienceSignal ? 15 : 5;
+  const structureScore = resume ? 10 : 0;
+  const score = Math.max(0, Math.min(100, skillScore + experienceScore + structureScore));
+
+  return {
+    score,
+    matchedSkills: matchedSkills.map((skill) => displaySkill.get(skill) || humanizeToken(skill)).slice(0, 8),
+    missingSkills: missingSkills.map((skill) => displaySkill.get(skill) || humanizeToken(skill)).slice(0, 8),
+    requiredCount: jdSkills.length,
+    matchedCount: matchedSkills.length
+  };
+};
+
 function JobReviewView({
   jobAnalysis,
   handleReExtract,
   loading
 }) {
   const navigate = useNavigate();
-  const { user, parsedResume, isExtension, jobTitle, companyName } = useApp();
+  const { user, parsedResume, isExtension, jobTitle, companyName, jobText, jobAnalysis: currentJobAnalysis, comparison } = useApp();
   const [applied, setApplied] = useState(false);
   const [favourite, setFavourite] = useState(false);
+  const [showMatchPopup, setShowMatchPopup] = useState(false);
 
   // Extract initials for the user profile circle
   const getInitials = () => {
@@ -49,27 +154,37 @@ function JobReviewView({
     return 'D';
   };
 
-  const openInFullTab = (path) => {
+  const openWorkflowRoute = (path) => {
     if (isExtension && typeof chrome !== 'undefined' && chrome.tabs && chrome.runtime?.getURL) {
-      chrome.tabs.create({ url: chrome.runtime.getURL(`index.html#${path}`) });
-    } else {
-      navigate(path);
+      const snapshot = {
+        jobAnalysis: currentJobAnalysis || jobAnalysis,
+        jobText,
+        companyName,
+        jobTitle,
+        comparison
+      };
+      chrome.storage.local.set(snapshot, () => {
+        chrome.tabs.create({ url: chrome.runtime.getURL(`index.html#${path}`) });
+      });
+      return;
     }
+
+    navigate(path);
   };
 
   const handleResumeTailor = () => {
     if (!parsedResume) {
-      openInFullTab('/resume-detect');
+      openWorkflowRoute('/resume-detect');
     } else {
-      openInFullTab('/tailor-config');
+      openWorkflowRoute('/tailor-config');
     }
   };
 
   const handleCoverLetterGenerate = () => {
     if (!parsedResume) {
-      openInFullTab('/resume-detect');
+      openWorkflowRoute('/resume-detect');
     } else {
-      openInFullTab('/cover-letter');
+      openWorkflowRoute('/cover-letter');
     }
   };
 
@@ -108,15 +223,92 @@ function JobReviewView({
 
   const atsKeywordsList = !isNotAvailable(jobAnalysis?.ats_keywords) ? (Array.isArray(jobAnalysis.ats_keywords) ? jobAnalysis.ats_keywords : [jobAnalysis.ats_keywords]) : (!isNotAvailable(details.ats_keywords) ? (Array.isArray(details.ats_keywords) ? details.ats_keywords : [details.ats_keywords]) : []);
 
+  const localMatchScore = useMemo(() => calculateMatchScore({
+    resume: parsedResume,
+    requiredSkills,
+    preferredSkills,
+    qualificationsList,
+    responsibilitiesList
+  }), [parsedResume, requiredSkills, preferredSkills, qualificationsList, responsibilitiesList]);
+
+  const backendScore = comparison?.ats_score_before ?? comparison?.ats_score ?? comparison?.match_score ?? comparison?.score ?? null;
+  const hasBackendScore = backendScore !== null && backendScore !== undefined && Number.isFinite(Number(backendScore));
+  const matchStatus = parsedResume && hasBackendScore ? 'backend' : (parsedResume ? 'calculating' : 'idle');
+  const matchScore = {
+    ...localMatchScore,
+    score: hasBackendScore ? Math.round(Number(backendScore)) : null,
+    source: hasBackendScore ? 'backend' : matchStatus
+  };
+
+  useEffect(() => {
+    if (parsedResume && jobAnalysis && hasBackendScore) {
+      setShowMatchPopup(true);
+    }
+  }, [parsedResume, jobAnalysis, hasBackendScore]);
+
   return (
     <div className={`flex-1 flex flex-col justify-between select-none text-zinc-700 dark:text-zinc-300 font-sans mx-auto w-full ${
       isExtension ? 'max-w-md h-full' : 'max-w-4xl py-2'
     }`}>
+      {showMatchPopup && parsedResume && (
+        <div className="fixed inset-0 z-50 bg-black/25 flex items-center justify-center px-6">
+          <div className="w-full max-w-sm rounded-3xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 shadow-2xl p-5 relative">
+            <button onClick={() => setShowMatchPopup(false)} className="absolute right-4 top-4 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200">
+              <X size={18} />
+            </button>
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-[#00bda5]/10 text-[#00bda5] flex items-center justify-center">
+                <Target size={24} />
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest font-black text-zinc-400">Resume Match Score</p>
+                <h3 className="text-3xl font-black text-zinc-950 dark:text-white">{matchScore.score === null ? '--' : `${matchScore.score}%`}</h3>
+              </div>
+            </div>
+            <p className="mt-3 text-sm font-semibold text-zinc-600 dark:text-zinc-400">
+              {matchStatus === 'calculating'
+                ? 'Comparing your active resume with the extracted JD...'
+                : matchStatus === 'unavailable'
+                ? 'Could not calculate the backend match score right now.'
+                : `Backend match score from your active resume and this JD.`}
+            </p>
+            <button onClick={() => setShowMatchPopup(false)} className="mt-5 w-full py-3 rounded-xl bg-[#00bda5] text-white font-extrabold text-xs uppercase tracking-wider">
+              View Job Details
+            </button>
+          </div>
+        </div>
+      )}
       
       {/* 2. Body Content */}
       <div className={`flex-1 space-y-6 py-4 ${
         isExtension ? 'overflow-y-auto scrollbar-thin max-h-[460px] pr-1.5' : 'w-full'
       }`}>
+        {parsedResume && (
+          <div className="rounded-2xl border border-[#00bda5]/30 bg-[#00bda5]/5 dark:bg-[#00bda5]/10 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[9px] uppercase tracking-widest font-black text-[#00a894]">Resume Match Score</p>
+                <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400 mt-1">
+                  {matchStatus === 'calculating'
+                    ? 'Comparing active resume with extracted JD...'
+                    : matchStatus === 'unavailable'
+                    ? 'Match score unavailable'
+                    : 'Active resume vs extracted JD'}
+                </p>
+              </div>
+              <div className="text-3xl font-black text-[#00bda5]">{matchScore.score === null ? '--' : `${matchScore.score}%`}</div>
+            </div>
+            {matchScore.score === null && (
+              <p className="mt-2 text-[11px] font-semibold text-zinc-600 dark:text-zinc-400">
+                {matchStatus === 'calculating'
+                  ? 'Backend comparison is running.'
+                  : matchStatus === 'unavailable'
+                  ? 'Backend comparison failed or returned no score.'
+                  : matchScore.reason}
+              </p>
+            )}
+          </div>
+        )}
         
         {/* Title and Company Subtitle */}
         <div>

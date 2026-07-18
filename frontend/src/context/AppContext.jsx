@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { compressResumeData } from '../utils/resumeCompression';
+import { runJobExtractionInPage } from '../utils/jobExtractionEngine';
 
 const AppContext = createContext();
 
@@ -120,6 +121,7 @@ export function AppProvider({ children }) {
   const [companyName, setCompanyName] = useState('Company');
   const [jobTitle, setJobTitle] = useState('Software Engineer');
   const [lastAnalyzedUrl, setLastAnalyzedUrl] = useState('');
+  const [currentJobIdentity, setCurrentJobIdentity] = useState('');
 
   // Data states
   const [parsedResume, setParsedResume] = useState(null);
@@ -157,6 +159,37 @@ export function AppProvider({ children }) {
   const [usage, setUsage] = useState(null);
 
   const isExtension = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local;
+  const extractionVersionRef = useRef(0);
+  const activeExtractionIdentityRef = useRef('');
+
+  const logExtraction = (event, meta = {}) => {
+    if (import.meta.env?.MODE === 'production') return;
+    console.log(`[ApplyFlow:Extraction] ${event}`, meta);
+  };
+
+  const getJobIdentityFromUrl = (url = '') => {
+    try {
+      const parsed = new URL(url);
+      const currentJobId = parsed.searchParams.get('currentJobId');
+      if (currentJobId) return `linkedin:${currentJobId}`;
+      const linkedInMatch = parsed.pathname.match(/\/jobs\/view\/(\d+)/i);
+      if (linkedInMatch) return `linkedin:${linkedInMatch[1]}`;
+      const pathMatch = parsed.pathname.match(/\/(?:job|jobs|careers|career|opening|position|vacancy|details)\/?([^/?#]+)?/i);
+      if (pathMatch) return `${parsed.hostname}:${parsed.pathname}`;
+      return `${parsed.hostname}:${parsed.pathname}`;
+    } catch {
+      return url || '';
+    }
+  };
+
+  const resetExtractedJobState = (reason, meta = {}) => {
+    logExtraction('old job invalidated', { reason, ...meta });
+    setJobText('');
+    setJobAnalysis(null);
+    setComparison(null);
+    setCompanyName('Company');
+    setJobTitle('Software Engineer');
+  };
 
   const fetchSubscription = async () => {
     try {
@@ -179,7 +212,7 @@ export function AppProvider({ children }) {
   // Load configs & saved resume
   useEffect(() => {
     if (isExtension) {
-      chrome.storage.local.get(['groqApiKey', 'apiUrl', 'parsedResume', 'tailoredResume', 'selectedTemplate', 'jobAnalysis', 'jobText', 'companyName', 'jobTitle'], (result) => {
+      chrome.storage.local.get(['groqApiKey', 'apiUrl', 'parsedResume', 'tailoredResume', 'selectedTemplate', 'jobAnalysis', 'jobText', 'companyName', 'jobTitle', 'comparison'], (result) => {
         if (result.groqApiKey) setApiKey(result.groqApiKey);
         if (result.apiUrl) setApiUrl(result.apiUrl);
         if (result.parsedResume) setParsedResume(result.parsedResume);
@@ -189,6 +222,7 @@ export function AppProvider({ children }) {
         if (result.jobText) setJobText(result.jobText);
         if (result.companyName) setCompanyName(result.companyName);
         if (result.jobTitle) setJobTitle(result.jobTitle);
+        if (result.comparison) setComparison(result.comparison);
       });
     } else {
       const savedKey = localStorage.getItem('groq_api_key');
@@ -322,26 +356,20 @@ export function AppProvider({ children }) {
     }
   }, [parsedResume]);
 
-  // Save/Remove job analysis context storage so full browser tabs open cleanly with extracted job
+  // Save/Remove job analysis context storage so full browser tabs open cleanly with extracted job.
+  // Extension side panel intentionally does not persist job data globally; it must represent the active tab.
   useEffect(() => {
+    if (isExtension) return;
     if (jobAnalysis) {
-      if (isExtension) {
-        chrome.storage.local.set({ jobAnalysis, jobText, companyName, jobTitle });
-      } else {
-        localStorage.setItem('job_analysis', JSON.stringify(jobAnalysis));
-        if (jobText) localStorage.setItem('job_text', jobText);
-        if (companyName) localStorage.setItem('company_name', companyName);
-        if (jobTitle) localStorage.setItem('job_title', jobTitle);
-      }
+      localStorage.setItem('job_analysis', JSON.stringify(jobAnalysis));
+      if (jobText) localStorage.setItem('job_text', jobText);
+      if (companyName) localStorage.setItem('company_name', companyName);
+      if (jobTitle) localStorage.setItem('job_title', jobTitle);
     } else {
-      if (isExtension) {
-        chrome.storage.local.remove(['jobAnalysis', 'jobText', 'companyName', 'jobTitle']);
-      } else {
-        localStorage.removeItem('job_analysis');
-        localStorage.removeItem('job_text');
-        localStorage.removeItem('company_name');
-        localStorage.removeItem('job_title');
-      }
+      localStorage.removeItem('job_analysis');
+      localStorage.removeItem('job_text');
+      localStorage.removeItem('company_name');
+      localStorage.removeItem('job_title');
     }
   }, [jobAnalysis, jobText, companyName, jobTitle]);
 
@@ -483,20 +511,9 @@ export function AppProvider({ children }) {
       }
     }
 
-    if (!isManual && jobAnalysis) {
-      if (currentTabUrl && lastAnalyzedUrl && currentTabUrl === lastAnalyzedUrl) {
-        console.log("[AppContext] Ignoring auto-scan because a job is already being tailored for this exact URL.");
-        return;
-      }
-      if (currentTabUrl && lastAnalyzedUrl && currentTabUrl !== lastAnalyzedUrl) {
-        console.log("[AppContext] New URL detected during auto-scan. Clearing previous job analysis.");
-        setJobAnalysis(null);
-      }
-    }
-
     if (isManual) {
       setLastAnalyzedUrl('');
-      setJobAnalysis(null);
+      resetExtractedJobState('manual rescan');
     }
     
     if (!isExtension) {
@@ -511,23 +528,73 @@ export function AppProvider({ children }) {
       if (!tab) throw new Error("No active browser window or tab found.");
       
       const url = tab.url || currentTabUrl || '';
+      const scanVersion = extractionVersionRef.current + 1;
+      extractionVersionRef.current = scanVersion;
+      const expectedIdentity = getJobIdentityFromUrl(url);
+      const previousIdentity = activeExtractionIdentityRef.current || currentJobIdentity;
+      activeExtractionIdentityRef.current = expectedIdentity;
+      setCurrentJobIdentity(expectedIdentity);
+      setJobDetectionStatus("checking");
+      logExtraction('extraction started', { tabId: tab.id, url, jobIdentity: expectedIdentity, navigationVersion: scanVersion });
+
+      if (previousIdentity && previousIdentity !== expectedIdentity) {
+        resetExtractedJobState('job identity changed', { from: previousIdentity, to: expectedIdentity });
+      }
+
       if (url.includes('linkedin.com/in/') || 
           url.includes('linkedin.com/feed/') || 
           url.includes('linkedin.com/messaging/') || 
           url.includes('linkedin.com/mynetwork/')) {
-        console.log("Auto-scan bypassed: Active tab is a profile, feed, network, or message page.");
+        resetExtractedJobState('not a job page', { url, navigationVersion: scanVersion });
+        setLastAnalyzedUrl(url);
+        setJobDetectionStatus("not-job");
+        logExtraction('page classified', { tabId: tab.id, url, pageType: 'NOT_A_JOB_PAGE', reason: 'LinkedIn non-job route' });
         return;
       }
       
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: async () => {
+        func: runJobExtractionInPage
+      });
+
+      if (false) await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        args: [runJobExtractionInPage.toString()],
+        func: async (engineSource) => {
+          const runExtraction = (0, eval)(`(${engineSource})`);
+          return await runExtraction();
+
           let title = '';
           let company = '';
           let text = '';
+          const clean = (value) => (value || '').replace(/\s+/g, ' ').trim();
+          const meaningfulDescription = (value) => {
+            const normalized = clean(value);
+            if (normalized.length < 120) return false;
+            if (/^0 notifications$/i.test(normalized)) return false;
+            if (/^(apply|save|share|view job|show more|see more)$/i.test(normalized)) return false;
+            return /(responsibilit|qualification|requirement|experience|skills|about the job|minimum qualifications|preferred qualifications|what you)/i.test(normalized);
+          };
+          const hasJobPostingJsonLd = () => {
+            const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+            return scripts.some((script) => {
+              try {
+                const parsed = JSON.parse(script.textContent || '{}');
+                const items = Array.isArray(parsed) ? parsed : [parsed, ...(parsed['@graph'] || [])];
+                return items.some((item) => {
+                  const type = item?.['@type'];
+                  return Array.isArray(type) ? type.includes('JobPosting') : type === 'JobPosting';
+                });
+              } catch {
+                return false;
+              }
+            });
+          };
+          const hasApplyButton = () => Array.from(document.querySelectorAll('button, a'))
+            .some((el) => /\bapply\b/i.test(el.innerText || el.textContent || ''));
+          const urlLooksJobLike = /\/(job|jobs|careers|career|opening|position|vacancy|details)(\/|\?|#|$)/i.test(window.location.pathname);
 
           if (window.location.host.includes('linkedin.com')) {
-            const clean = (value) => (value || '').replace(/\s+/g, ' ').trim();
             const readText = (selector) => {
               const el = document.querySelector(selector);
               return el ? clean(el.innerText || el.textContent) : '';
@@ -607,6 +674,58 @@ export function AppProvider({ children }) {
                 }
               }
             }
+          } else if (
+            window.location.host.includes('google.com') &&
+            window.location.pathname.includes('/about/careers/applications/jobs/results/')
+          ) {
+            const readText = (selector) => {
+              const el = document.querySelector(selector);
+              return el ? (el.innerText || el.textContent || '').trim() : '';
+            };
+            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+            title = readText('h1') || document.title.replace(/\s*-\s*Google Careers.*$/i, '').trim();
+            company = 'Google';
+
+            const collectGoogleJobText = () => {
+              const mainText = readText('main') || readText('[role="main"]') || document.body.innerText || '';
+              const normalized = mainText.replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
+              const sectionNames = [
+                'Minimum qualifications',
+                'Preferred qualifications',
+                'About the job',
+                'Responsibilities'
+              ];
+              const lower = normalized.toLowerCase();
+              const positions = sectionNames
+                .map((name) => ({ name, index: lower.indexOf(name.toLowerCase()) }))
+                .filter((section) => section.index >= 0)
+                .sort((a, b) => a.index - b.index);
+
+              if (positions.length === 0) return normalized;
+
+              const chunks = [];
+              for (let i = 0; i < positions.length; i += 1) {
+                const start = positions[i].index;
+                const end = positions[i + 1]?.index ?? normalized.length;
+                const chunk = normalized.slice(start, end).trim();
+                if (chunk) chunks.push(chunk);
+              }
+
+              return chunks.join('\n\n')
+                .replace(/\n?Apply\s*$/i, '')
+                .replace(/\n?Share\s*$/i, '')
+                .trim();
+            };
+
+            for (let attempt = 0; attempt < 6; attempt += 1) {
+              text = collectGoogleJobText();
+              if (/Minimum qualifications|Preferred qualifications|About the job|Responsibilities/i.test(text) && text.length > 500) {
+                break;
+              }
+              window.scrollBy(0, 700);
+              await sleep(200);
+            }
           } else if (window.location.host.includes('indeed.com')) {
             const titleEl = document.querySelector('.jobsearch-JobInfoHeader-title, h1');
             if (titleEl) title = titleEl.innerText.trim();
@@ -681,12 +800,21 @@ export function AppProvider({ children }) {
             text = document.body.innerText.trim();
           }
 
+          const jobId = new URL(window.location.href).searchParams.get('currentJobId') ||
+            (window.location.pathname.match(/\/jobs\/view\/(\d+)/i)?.[1] || '');
+          const isJobPage = hasJobPostingJsonLd() ||
+            (title && meaningfulDescription(text) && (hasApplyButton() || urlLooksJobLike || company)) ||
+            (window.location.host.includes('linkedin.com') && Boolean(jobId) && meaningfulDescription(text));
+
           console.log("⚡ [LetMeApply Page Script] Scraped -> Title:", title || "Software Engineer", "| Company:", company || "Target Company", "| Text chars:", text ? text.length : 0);
 
           return {
             title: title || 'Software Engineer',
             company: company || 'Target Company',
-            text: text || ''
+            text: text || '',
+            isJobPage,
+            jobId,
+            url: window.location.href
           };
         }
       });
@@ -695,7 +823,7 @@ export function AppProvider({ children }) {
       if (results && results.length > 0) {
         const validFrames = results
           .map(r => r.result)
-          .filter(r => r && r.text && r.text.length > 100);
+          .filter(r => r && r.isJobPage && r.text && r.text.length > 100);
           
         if (validFrames.length > 0) {
           validFrames.sort((a, b) => b.text.length - a.text.length);
@@ -706,6 +834,33 @@ export function AppProvider({ children }) {
       }
 
       if (activeResult) {
+        const resultIdentity = activeResult.jobId ? `linkedin:${activeResult.jobId}` : getJobIdentityFromUrl(activeResult.url || url);
+        const [latestTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const latestUrl = latestTab?.url || '';
+        const latestIdentity = getJobIdentityFromUrl(latestUrl);
+
+        if (scanVersion !== extractionVersionRef.current || expectedIdentity !== activeExtractionIdentityRef.current || latestIdentity !== expectedIdentity) {
+          logExtraction('stale result discarded', {
+            tabId: tab.id,
+            url,
+            latestUrl,
+            expectedIdentity,
+            resultIdentity,
+            latestIdentity,
+            navigationVersion: scanVersion,
+            currentVersion: extractionVersionRef.current
+          });
+          return;
+        }
+
+        if (!activeResult.isJobPage) {
+          resetExtractedJobState('not a job page', { url, jobIdentity: expectedIdentity, navigationVersion: scanVersion });
+          setLastAnalyzedUrl(url);
+          setJobDetectionStatus("not-job");
+          logExtraction('page classified', { tabId: tab.id, url, pageType: 'NOT_A_JOB_PAGE', reason: 'No strong job-page signal' });
+          return;
+        }
+
         const { title, company, text } = activeResult;
         const cleanedTitle = title
           .replace(/\(verified job\)/i, '')
@@ -763,7 +918,9 @@ export function AppProvider({ children }) {
           setCompanyName(cleanedCompany);
           setJobTitle(cleanedTitle);
           setLastAnalyzedUrl(url);
+          setJobDetectionStatus("not-job");
           setApiError("Couldn't read the job description from this page yet. Scroll the job details panel once, then click Scan Again.");
+          logExtraction('extraction rejected', { tabId: tab.id, url, jobIdentity: expectedIdentity, navigationVersion: scanVersion, descriptionLength: cleanedText.trim().length });
           return;
         }
         
@@ -779,10 +936,29 @@ export function AppProvider({ children }) {
         console.log("📝 Scraped Text Preview:\n", cleanedText.substring(0, 600) + (cleanedText.length > 600 ? "\n[...truncated for console]" : ""));
         console.groupEnd();
 
+        if (url.includes('google.com/about/careers/applications/jobs/results/')) {
+          cleanedText = cleanedText
+            .replace(/Google is proud to be an equal opportunity workplace[\s\S]*$/i, '')
+            .replace(/See also[\s\S]*$/i, '')
+            .replace(/Related information[\s\S]*$/i, '')
+            .replace(/Privacy\s+Terms[\s\S]*$/i, '')
+            .trim();
+        }
+
         setJobText(cleanedText);
         setCompanyName(cleanedCompany);
         setJobTitle(cleanedTitle);
         setLastAnalyzedUrl(url);
+        setCurrentJobIdentity(expectedIdentity);
+        setJobDetectionStatus("ready");
+        logExtraction('extraction succeeded', {
+          tabId: tab.id,
+          url,
+          jobIdentity: expectedIdentity,
+          navigationVersion: scanVersion,
+          descriptionLength: cleanedText.length,
+          source: activeResult.jobId ? 'linkedin-selectors' : 'dom-selectors'
+        });
       }
     } catch (error) {
       console.warn("Auto-scan page error (silenced):", error.message);
@@ -796,10 +972,13 @@ export function AppProvider({ children }) {
       return;
     }
 
+    const extractVersion = extractionVersionRef.current;
+    const extractIdentity = activeExtractionIdentityRef.current || currentJobIdentity || getJobIdentityFromUrl(lastAnalyzedUrl);
     setApiError(null);
     setLoadingType('extraction');
     setLoadingProgress(5);
     setLoadingMessage("Reading Job Description...");
+    logExtraction('backend analysis started', { url: lastAnalyzedUrl, jobIdentity: extractIdentity, navigationVersion: extractVersion, descriptionLength: jobText.length });
 
     const progressInterval = setInterval(() => {
       setLoadingProgress((prev) => {
@@ -889,6 +1068,19 @@ export function AppProvider({ children }) {
       console.log("🔑 ATS Keywords:", analyzedJob.ats_keywords || details.ats_keywords || details.keywords);
       console.log("📦 Full Structured Output Object:", analyzedJob);
       console.groupEnd();
+
+      if (extractIdentity !== activeExtractionIdentityRef.current) {
+        clearInterval(progressInterval);
+        setLoadingProgress(0);
+        logExtraction('stale analysis discarded', {
+          url: lastAnalyzedUrl,
+          jobIdentity: extractIdentity,
+          activeIdentity: activeExtractionIdentityRef.current,
+          navigationVersion: extractVersion,
+          currentVersion: extractionVersionRef.current
+        });
+        return;
+      }
 
       setJobAnalysis(analyzedJob);
       if (isValidText(finalCompany)) setCompanyName(finalCompany);
@@ -992,6 +1184,63 @@ export function AppProvider({ children }) {
   };
 
   // Perform full Gap analysis (ATS Compare) & Pre-Tailoring merge (Step 7)
+  const handleCompareActiveResumeToJob = async () => {
+    if (!parsedResume || !jobAnalysis) return null;
+
+    let activeParsed = parsedResume;
+    try {
+      if (parsedResume.id && (!parsedResume.experience || parsedResume.experience.length === 0) && parsedResume.raw_text) {
+        const token = session?.access_token || localStorage.getItem('access_token');
+        const parseHeaders = {};
+        if (token) parseHeaders["Authorization"] = `Bearer ${token}`;
+        if (apiKey) parseHeaders["x-groq-key"] = apiKey;
+
+        const parseRes = await fetch(`${apiUrl}/api/v1/resumes/${parsedResume.id}/parse`, {
+          method: "POST",
+          headers: parseHeaders
+        });
+
+        if (parseRes.ok) {
+          const updatedRecord = await parseRes.json();
+          activeParsed = {
+            ...(updatedRecord.parsed_content || updatedRecord),
+            id: updatedRecord.id,
+            file_name: updatedRecord.file_name,
+            file_size: updatedRecord.file_size,
+            file_type: updatedRecord.file_type,
+            created_at: updatedRecord.created_at
+          };
+          setParsedResume(activeParsed);
+          if (isExtension) chrome.storage.local.set({ parsedResume: activeParsed });
+          else localStorage.setItem('parsed_resume', JSON.stringify(activeParsed));
+        }
+      }
+
+      const headers = {};
+      if (apiKey) headers["x-groq-key"] = apiKey;
+
+      const compareRes = await fetch(`${apiUrl}/api/compare`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...headers
+        },
+        body: JSON.stringify({
+          resume: activeParsed,
+          job: jobAnalysis
+        })
+      });
+
+      if (!compareRes.ok) return null;
+      const compResult = await compareRes.json();
+      setComparison(compResult);
+      return compResult;
+    } catch (err) {
+      console.error("Failed to compare active resume to job:", err);
+      return null;
+    }
+  };
+
   const handleRunGapAnalysis = async () => {
     if (!parsedResume || !jobAnalysis) {
       alert("Missing resume or job details.");
@@ -1612,6 +1861,7 @@ export function AppProvider({ children }) {
       handleActivateResume,
       handleScanPage,
       handleExtractJob,
+      handleCompareActiveResumeToJob,
       handleParseResume,
       handleRunGapAnalysis,
       handleGenerateFinalResume,

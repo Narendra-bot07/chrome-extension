@@ -12,10 +12,11 @@ from app.schemas import (
     DownloadPDFRequest,
     CoverLetterRequest,
     CoverLetterResult,
-    TailoringReport
+    TailoringReport,
+    ResumePatch
 )
 from app.parser import extract_text
-from app.groq_service import parse_resume, analyze_job_description, generate_tailoring_patch, apply_tailoring_patch, generate_cover_letter, refine_section_with_ai
+from app.groq_service import parse_resume, analyze_job_description, generate_tailoring_patch, apply_tailoring_patch, generate_cover_letter, refine_section_with_ai, calculate_resume_job_match_score
 from api.v1.resume import router as resume_manager_router
 
 
@@ -129,11 +130,20 @@ async def api_compare(
     try:
         resume = ResumeStructure(**normalize_resume_payload(request.resume))
         job = JobAnalysis(**normalize_job_payload(request.job))
-        comparison = generate_tailoring_patch(
-            resume,
-            job,
-            api_key=x_groq_key
-        )
+        try:
+            comparison = generate_tailoring_patch(
+                resume,
+                job,
+                api_key=x_groq_key
+            )
+        except Exception:
+            score = calculate_resume_job_match_score(resume, job)
+            comparison = TailoringReport(
+                changes_made=[],
+                ats_score_before=score,
+                ats_score_after=score,
+                patch=ResumePatch()
+            )
         return comparison
     except Exception as e:
         raise HTTPException(
