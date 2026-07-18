@@ -48,7 +48,7 @@ class DashboardErrorBoundary extends React.Component {
 }
 
 function DashboardContent() {
-  const { session, applications: rawApps, fetchApplications, apiUrl, profile } = useApp();
+  const { session, applications: rawApps, fetchApplications, apiUrl, profile, jobPreferences } = useApp();
   const applications = rawApps || [];
   const [metrics, setMetrics] = useState({
     current_plan: 'free',
@@ -200,40 +200,66 @@ function DashboardContent() {
     return acc;
   }, {});
 
-  const sortedCompanies = Object.entries(companyCounts)
-    .map(([name, stats]) => ({
-      name,
-      ...stats,
-      acceptanceRate: stats.apps === 0 ? 0 : Math.round((stats.accepted / stats.apps) * 100)
-    }))
-    .sort((a, b) => b.apps - a.apps)
+  const targetCompanies = (jobPreferences?.target_companies || []).filter(Boolean);
+  const targetRoles = (jobPreferences?.target_roles || []).filter(Boolean);
+
+  const sortedCompanies = [
+    ...targetCompanies.map((name) => {
+      const stats = companyCounts[name] || { apps: 0, interviews: 0, offers: 0, accepted: 0 };
+      return {
+        name,
+        ...stats,
+        isTarget: true,
+        acceptanceRate: stats.apps === 0 ? 0 : Math.round((stats.accepted / stats.apps) * 100)
+      };
+    }),
+    ...Object.entries(companyCounts)
+      .filter(([name]) => !targetCompanies.some((target) => target.toLowerCase() === name.toLowerCase()))
+      .map(([name, stats]) => ({
+        name,
+        ...stats,
+        isTarget: false,
+        acceptanceRate: stats.apps === 0 ? 0 : Math.round((stats.accepted / stats.apps) * 100)
+      }))
+  ]
+    .sort((a, b) => Number(b.isTarget) - Number(a.isTarget) || b.apps - a.apps)
     .slice(0, 5);
 
   // Role targeted distributions
   const roleCounts = applications.reduce((acc, app) => {
     if (!app) return acc;
     const role = app.job_title || 'Untitled Role';
-    let match = 'Other Roles';
-    if (role.toLowerCase().includes('backend')) match = 'Backend Engineer';
-    else if (role.toLowerCase().includes('frontend')) match = 'Frontend Engineer';
-    else if (role.toLowerCase().includes('data')) match = 'Data Engineer';
-    else if (role.toLowerCase().includes('ml') || role.toLowerCase().includes('machine')) match = 'ML Engineer';
-    else if (role.toLowerCase().includes('ai')) match = 'AI Engineer';
-    else if (role.toLowerCase().includes('devops')) match = 'DevOps Engineer';
-    else if (role.toLowerCase().includes('cloud')) match = 'Cloud Engineer';
+    const normalizedRole = role.toLowerCase();
+    let match = targetRoles.find((target) => normalizedRole.includes(target.toLowerCase()));
+    if (!match) {
+      match = 'Other Roles';
+      if (normalizedRole.includes('backend')) match = 'Backend Engineer';
+      else if (normalizedRole.includes('frontend')) match = 'Frontend Engineer';
+      else if (normalizedRole.includes('data')) match = 'Data Engineer';
+      else if (normalizedRole.includes('ml') || normalizedRole.includes('machine')) match = 'ML Engineer';
+      else if (normalizedRole.includes('ai')) match = 'AI Engineer';
+      else if (normalizedRole.includes('devops')) match = 'DevOps Engineer';
+      else if (normalizedRole.includes('cloud')) match = 'Cloud Engineer';
+    }
     
     acc[match] = (acc[match] || 0) + 1;
     return acc;
   }, {});
 
-  const totalRoles = Object.values(roleCounts).reduce((sum, v) => sum + v, 0) || 1;
-  const sortedRoles = Object.entries(roleCounts)
-    .map(([role, count]) => ({
-      role,
-      count,
-      percent: Math.round((count / totalRoles) * 100)
+  const roleRows = [
+    ...targetRoles.map((role) => ({ role, count: roleCounts[role] || 0, isTarget: true })),
+    ...Object.entries(roleCounts)
+      .filter(([role]) => !targetRoles.some((target) => target.toLowerCase() === role.toLowerCase()))
+      .map(([role, count]) => ({ role, count, isTarget: false }))
+  ];
+  const totalRoles = roleRows.reduce((sum, r) => sum + r.count, 0) || Math.max(1, roleRows.length);
+  const sortedRoles = roleRows
+    .map((row) => ({
+      ...row,
+      percent: row.count > 0 ? Math.round((row.count / totalRoles) * 100) : 0
     }))
-    .sort((a, b) => b.count - a.count);
+    .sort((a, b) => Number(b.isTarget) - Number(a.isTarget) || b.count - a.count)
+    .slice(0, 5);
 
   // Flattened events timeline
   const activityTimeline = applications.flatMap(app => {
@@ -572,7 +598,7 @@ function DashboardContent() {
         <div className="p-5 border border-zinc-200 dark:border-zinc-900 rounded-3xl bg-zinc-50/10 dark:bg-zinc-900/5">
           <div className="mb-4">
             <h3 className="text-xs font-black uppercase tracking-widest text-zinc-900 dark:text-zinc-50">Top Companies</h3>
-            <p className="text-[9px] text-zinc-455 dark:text-zinc-550 font-bold uppercase mt-0.5">List of organizations scanned in tracker sessions</p>
+            <p className="text-[9px] text-zinc-455 dark:text-zinc-550 font-bold uppercase mt-0.5">Saved target companies plus tracked application activity</p>
           </div>
 
           <div className="overflow-x-auto select-none font-sans text-xs">
@@ -589,7 +615,14 @@ function DashboardContent() {
                 {sortedCompanies.length > 0 ? (
                   sortedCompanies.map((c) => (
                     <tr key={c.name} className="hover:bg-zinc-50/20 dark:hover:bg-zinc-900/20">
-                      <td className="py-2.5 truncate max-w-[120px]">{c.name}</td>
+                      <td className="py-2.5 truncate max-w-[120px]">
+                        {c.name}
+                        {c.isTarget && (
+                          <span className="ml-2 rounded-full bg-[#00bda5]/10 px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-[#00a18d]">
+                            Target
+                          </span>
+                        )}
+                      </td>
                       <td className="py-2.5 text-center">{c.apps}</td>
                       <td className="py-2.5 text-center">{c.interviews}</td>
                       <td className="py-2.5 text-center text-[#00bda5] font-extrabold">{c.acceptanceRate}%</td>
@@ -598,7 +631,7 @@ function DashboardContent() {
                 ) : (
                   <tr>
                     <td colSpan="4" className="py-6 text-center text-[10px] text-zinc-455 font-black uppercase">
-                      No tailored company logs recorded.
+                      No target companies or tracked company logs recorded.
                     </td>
                   </tr>
                 )}
@@ -611,7 +644,7 @@ function DashboardContent() {
         <div className="p-5 border border-zinc-200 dark:border-zinc-900 rounded-3xl bg-zinc-50/10 dark:bg-zinc-900/5 flex flex-col justify-between gap-4">
           <div className="mb-2">
             <h3 className="text-xs font-black uppercase tracking-widest text-zinc-900 dark:text-zinc-50">Targeted Roles</h3>
-            <p className="text-[9px] text-zinc-455 dark:text-zinc-550 font-bold uppercase mt-0.5">Visual distribution of job roles optimized</p>
+            <p className="text-[9px] text-zinc-455 dark:text-zinc-550 font-bold uppercase mt-0.5">Saved target roles plus optimized job distribution</p>
           </div>
 
           <div className="space-y-2.5 font-sans select-none">
@@ -619,7 +652,10 @@ function DashboardContent() {
               sortedRoles.slice(0, 5).map((r) => (
                 <div key={r.role} className="space-y-1">
                   <div className="flex justify-between items-center text-[9px] font-bold text-zinc-650">
-                    <span className="uppercase">{r.role}</span>
+                    <span className="uppercase">
+                      {r.role}
+                      {r.isTarget && <span className="ml-2 text-[#00bda5]">Target</span>}
+                    </span>
                     <span className="font-extrabold text-zinc-800 dark:text-zinc-300">{r.count} ({r.percent}%)</span>
                   </div>
                   <div className="h-1.5 w-full bg-zinc-100 dark:bg-zinc-900 rounded-full overflow-hidden">

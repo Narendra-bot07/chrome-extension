@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Briefcase, Building2, Check, Edit3, MapPin, Settings2, Sparkles, Target, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Briefcase, Building2, Check, Edit3, MapPin, Settings2, Sparkles, Target, X, SlidersHorizontal } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 const defaults = {
@@ -203,64 +203,66 @@ export default function JobPreferencesPage() {
     ];
 
     return (
-      <div className="min-h-full flex items-center justify-center px-4 py-8">
-        <div className="w-full max-w-5xl rounded-[2rem] border border-zinc-200 bg-white/95 shadow-2xl shadow-zinc-200/50 overflow-hidden">
-          <div className="grid md:grid-cols-[300px,1fr]">
-            <aside className="border-r border-zinc-100 bg-zinc-50 p-8">
-              <div className="w-12 h-12 rounded-2xl bg-zinc-950 text-white flex items-center justify-center mb-6">
-                <Target size={22} />
+      <div className="min-h-full px-4 py-8">
+        <div className="mx-auto w-full max-w-6xl space-y-5">
+          <section className="rounded-[2rem] border border-zinc-200 bg-white/95 p-6 shadow-xl shadow-zinc-200/40">
+            <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-start gap-4">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-zinc-950 text-white">
+                  <SlidersHorizontal size={24} />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#00bda5]">Job Preferences</p>
+                  <h1 className="mt-2 text-3xl font-black tracking-tight text-zinc-950">Career targets</h1>
+                  <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-zinc-500">
+                    ApplyFlow uses this profile to tune match scores, dashboard insights, resume generation, and job recommendations.
+                  </p>
+                </div>
               </div>
-              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#00bda5]">Job Preferences</p>
-              <h1 className="mt-3 text-3xl font-black tracking-tight text-zinc-950">Your career targets</h1>
-              <p className="mt-3 text-sm font-medium leading-7 text-zinc-500">
-                These preferences personalize reminders, match scores, recommendations, and future AI workflows.
-              </p>
               <button
                 type="button"
                 onClick={() => {
                   setIsEditing(true);
                   setStep(1);
                 }}
-                className="mt-8 inline-flex items-center gap-2 rounded-2xl bg-zinc-950 px-5 py-3 text-sm font-black text-white"
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-zinc-950 px-5 py-3 text-sm font-black text-white shadow-lg shadow-zinc-300/40"
               >
-                <Edit3 size={16} /> Edit Preferences
+                <Edit3 size={16} /> Edit all
               </button>
-            </aside>
+            </div>
+          </section>
 
-            <main className="p-8 md:p-10">
-              <div className="grid gap-4">
-                {rows.map(({ label, values, stepIndex }) => {
-                  const visibleValues = (values || []).filter(Boolean);
-                  return (
-                  <div key={label} className="rounded-3xl border border-zinc-200 bg-white p-5">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="block text-[10px] font-black uppercase tracking-widest text-zinc-400">{label}</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsEditing(true);
-                          setStep(stepIndex);
-                        }}
-                        className="text-[11px] font-black uppercase tracking-widest text-[#00bda5]"
-                      >
-                        Edit
-                      </button>
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {visibleValues.length ? visibleValues.map((item) => (
-                        <span key={item} className="rounded-full bg-zinc-100 px-3 py-1.5 text-xs font-bold text-zinc-700">
-                          {item}
-                        </span>
-                      )) : (
-                        <span className="text-xs font-bold text-zinc-400">No preference</span>
-                      )}
-                    </div>
+          <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {rows.map(({ label, values, stepIndex }) => {
+              const visibleValues = (values || []).filter(Boolean);
+              return (
+                <article key={label} className="group rounded-3xl border border-zinc-200 bg-white/90 p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-[#00bda5]/50 hover:shadow-lg hover:shadow-zinc-200/60">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <h2 className="text-[11px] font-black uppercase tracking-widest text-zinc-500">{label}</h2>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditing(true);
+                        setStep(stepIndex);
+                      }}
+                      className="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest text-[#00a18d] transition hover:bg-[#00bda5]/10"
+                    >
+                      Edit
+                    </button>
                   </div>
-                );
-                })}
-              </div>
-            </main>
-          </div>
+                  <div className="flex min-h-16 flex-wrap content-start gap-2">
+                    {visibleValues.length ? visibleValues.map((item) => (
+                      <span key={item} className="rounded-full bg-zinc-100 px-3 py-1.5 text-xs font-bold text-zinc-750">
+                        {item}
+                      </span>
+                    )) : (
+                      <span className="text-xs font-bold text-zinc-400">No preference added</span>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </section>
         </div>
       </div>
     );
