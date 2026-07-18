@@ -1,8 +1,10 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import ResumeDetectionView from '../components/ResumeDetectionView';
 
 function ResumeDetectPage() {
+  const navigate = useNavigate();
   const {
     parsedResume, setParsedResume,
     resumesList, fetchResumesList,

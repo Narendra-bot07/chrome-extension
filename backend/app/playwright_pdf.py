@@ -46,18 +46,37 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
                 const data = window.__INJECTED_RESUME_DATA__;
                 if (!data) return { valid: true }; // Skip if no data
                 
+                const defaultSectionOrder = [
+                    "summary",
+                    "education",
+                    "experience",
+                    "skills",
+                    "projects",
+                    "certifications",
+                    "achievements",
+                    "volunteer",
+                    "publications",
+                    "languages",
+                    "awards",
+                    "interests"
+                ];
+                const configuredSectionOrder = Array.isArray(data.section_order) && data.section_order.length > 0
+                    ? data.section_order
+                    : defaultSectionOrder;
+                const shouldRender = (section) => configuredSectionOrder.includes(section);
+
                 const expectedSections = [];
-                if (data.summary && data.summary.trim() !== '') expectedSections.push("summary");
-                if (data.experience && data.experience.length > 0) expectedSections.push("experience");
-                if (data.projects && data.projects.length > 0) expectedSections.push("projects");
-                if (data.education && data.education.length > 0) expectedSections.push("education");
-                if (data.skills && data.skills.length > 0) expectedSections.push("skills");
-                if (data.certifications && data.certifications.length > 0) expectedSections.push("certifications");
-                if (data.achievements && data.achievements.length > 0) expectedSections.push("achievements");
-                if (data.languages && data.languages.length > 0) expectedSections.push("languages");
-                if (data.awards && data.awards.length > 0) expectedSections.push("awards");
-                if (data.volunteer_experience && data.volunteer_experience.length > 0) expectedSections.push("volunteer");
-                if (data.publications && data.publications.length > 0) expectedSections.push("publications");
+                if (shouldRender("summary") && data.summary && data.summary.trim() !== '') expectedSections.push("summary");
+                if (shouldRender("experience") && data.experience && data.experience.length > 0) expectedSections.push("experience");
+                if (shouldRender("projects") && data.projects && data.projects.length > 0) expectedSections.push("projects");
+                if (shouldRender("education") && data.education && data.education.length > 0) expectedSections.push("education");
+                if (shouldRender("skills") && data.skills && data.skills.length > 0) expectedSections.push("skills");
+                if (shouldRender("certifications") && data.certifications && data.certifications.length > 0) expectedSections.push("certifications");
+                if (shouldRender("achievements") && data.achievements && data.achievements.length > 0) expectedSections.push("achievements");
+                if (shouldRender("languages") && data.languages && data.languages.length > 0) expectedSections.push("languages");
+                if (shouldRender("awards") && data.awards && data.awards.length > 0) expectedSections.push("awards");
+                if (shouldRender("volunteer") && data.volunteer_experience && data.volunteer_experience.length > 0) expectedSections.push("volunteer");
+                if (shouldRender("publications") && data.publications && data.publications.length > 0) expectedSections.push("publications");
                 
                 const missingSections = [];
                 for (const section of expectedSections) {

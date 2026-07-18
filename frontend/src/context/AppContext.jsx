@@ -158,29 +158,30 @@ export function AppProvider({ children }) {
 
   const isExtension = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local;
 
-  // Load configs & saved resume (STRICTLY NO cached job extraction or UI state)
+  // Load configs & saved resume
   useEffect(() => {
     if (isExtension) {
-      chrome.storage.local.get(['groqApiKey', 'apiUrl', 'parsedResume', 'tailoredResume', 'selectedTemplate'], (result) => {
+      chrome.storage.local.get(['groqApiKey', 'apiUrl', 'parsedResume', 'tailoredResume', 'selectedTemplate', 'jobAnalysis', 'jobText', 'companyName', 'jobTitle'], (result) => {
         if (result.groqApiKey) setApiKey(result.groqApiKey);
         if (result.apiUrl) setApiUrl(result.apiUrl);
         if (result.parsedResume) setParsedResume(result.parsedResume);
         if (result.tailoredResume) setTailoredResume(result.tailoredResume);
         if (result.selectedTemplate) setSelectedTemplate(result.selectedTemplate);
+        if (result.jobAnalysis) setJobAnalysis(result.jobAnalysis);
+        if (result.jobText) setJobText(result.jobText);
+        if (result.companyName) setCompanyName(result.companyName);
+        if (result.jobTitle) setJobTitle(result.jobTitle);
       });
-      // Purge any old extraction caches from chrome.storage
-      chrome.storage.local.remove(['jobAnalysis', 'jobText', 'companyName', 'jobTitle']);
     } else {
       const savedKey = localStorage.getItem('groq_api_key');
       const savedUrl = localStorage.getItem('fastapi_api_url');
       const savedResume = localStorage.getItem('parsed_resume');
       const savedTailored = localStorage.getItem('tailored_resume');
       const savedTemplate = localStorage.getItem('selected_template');
-      // Purge any old extraction caches from localStorage
-      localStorage.removeItem('job_analysis');
-      localStorage.removeItem('job_text');
-      localStorage.removeItem('company_name');
-      localStorage.removeItem('job_title');
+      const savedJobAnalysis = localStorage.getItem('job_analysis');
+      const savedJobText = localStorage.getItem('job_text');
+      const savedCompany = localStorage.getItem('company_name');
+      const savedTitle = localStorage.getItem('job_title');
       if (savedKey) setApiKey(savedKey);
       if (savedUrl) setApiUrl(savedUrl);
       if (savedResume) {
@@ -302,7 +303,28 @@ export function AppProvider({ children }) {
     }
   }, [parsedResume]);
 
-  // Strictly stateless extraction: Never save jobAnalysis or job text to storage
+  // Save/Remove job analysis context storage so full browser tabs open cleanly with extracted job
+  useEffect(() => {
+    if (jobAnalysis) {
+      if (isExtension) {
+        chrome.storage.local.set({ jobAnalysis, jobText, companyName, jobTitle });
+      } else {
+        localStorage.setItem('job_analysis', JSON.stringify(jobAnalysis));
+        if (jobText) localStorage.setItem('job_text', jobText);
+        if (companyName) localStorage.setItem('company_name', companyName);
+        if (jobTitle) localStorage.setItem('job_title', jobTitle);
+      }
+    } else {
+      if (isExtension) {
+        chrome.storage.local.remove(['jobAnalysis', 'jobText', 'companyName', 'jobTitle']);
+      } else {
+        localStorage.removeItem('job_analysis');
+        localStorage.removeItem('job_text');
+        localStorage.removeItem('company_name');
+        localStorage.removeItem('job_title');
+      }
+    }
+  }, [jobAnalysis, jobText, companyName, jobTitle]);
 
   // Save/Remove tailored resume context storage
   useEffect(() => {
@@ -826,470 +848,6 @@ export function AppProvider({ children }) {
     }
   };
 
-  // Strictly Stateless Fresh Session Extraction Pipeline (Steps 1 - 12)
-  const handleFreshSessionExtraction = async () => {
-    const sessionTimestamp = new Date().toISOString();
-    console.log("==================================================");
-    console.log("NEW EXTRACTION SESSION");
-    console.log(`Timestamp: ${sessionTimestamp}`);
-    console.log("==================================================");
-    console.log("Popup Opened");
-
-    // Steps 2, 3, & 4: Reset extraction state, Clear previous extraction variables, Clear previous UI
-    console.log("Clearing Previous State");
-    setJobAnalysis(null);
-    setJobText("");
-    setCompanyName("");
-    setJobTitle("");
-    setLastAnalyzedUrl("");
-    setApiError(null);
-    setLoadingProgress(0);
-    setJobDetectionStatus("idle");
-
-    console.log("Previous Cache Cleared");
-    if (isExtension && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.remove(['jobAnalysis', 'jobText', 'companyName', 'jobTitle']);
-    }
-    localStorage.removeItem('job_analysis');
-    localStorage.removeItem('job_text');
-    localStorage.removeItem('company_name');
-    localStorage.removeItem('job_title');
-
-    if (!isExtension || typeof chrome === 'undefined' || !chrome.tabs) {
-      console.log("Current URL: dev-mode-non-extension");
-      console.log("Current Title: Development Mode");
-      return;
-    }
-
-    try {
-      // Step 5 & 6: Query the active browser tab & Verify the tab still exists
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab || !tab.id) {
-        console.error("No active browser window or tab found.");
-        return;
-      }
-
-      const currentUrl = tab.url || '';
-      const currentTitle = tab.title || '';
-      console.log("Current URL:", currentUrl);
-      console.log("Current Title:", currentTitle);
-
-      if (currentUrl.includes('linkedin.com/in/') || 
-          currentUrl.includes('linkedin.com/feed/') || 
-          currentUrl.includes('linkedin.com/messaging/') || 
-          currentUrl.includes('linkedin.com/mynetwork/')) {
-        console.log("Active tab is a profile, feed, network, or message page. Bypassing extraction.");
-        return;
-      }
-
-      // Step 7: Send a fresh extraction request to the content script
-      console.log("Sending Extraction Request...");
-      console.log("Waiting for Content Script...");
-
-      // Step 8: The content script extracts the CURRENT page DOM
-      // Step 8: The content script runs DOM Candidate Discovery & Scoring Engine (<100ms)
-      const results = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => {
-          const startTime = performance.now();
-
-          // Helper for generating XPath
-          const getXPath = (el) => {
-            if (!el || el.nodeType !== 1) return '';
-            if (el.id && el.id.indexOf(' ') === -1 && !/\d{4,}/.test(el.id)) {
-              return `//*[@id="${el.id}"]`;
-            }
-            const parts = [];
-            let curr = el;
-            while (curr && curr.nodeType === 1 && curr !== document.documentElement) {
-              let index = 1;
-              let sibling = curr.previousElementSibling;
-              while (sibling) {
-                if (sibling.nodeName === curr.nodeName) index++;
-                sibling = sibling.previousElementSibling;
-              }
-              const name = curr.nodeName.toLowerCase();
-              parts.unshift(index > 1 ? `${name}[${index}]` : name);
-              curr = curr.parentNode;
-            }
-            return '/' + parts.join('/');
-          };
-
-          // Step 1: Traverse DOM and generate candidates
-          // Elements: main, article, section, div
-          // Ignore: header, footer, nav, aside and anything inside them
-          const allElements = document.querySelectorAll('main, article, section, div');
-          const candidates = [];
-
-          for (let i = 0; i < allElements.length; i++) {
-            const el = allElements[i];
-            if (!el) continue;
-            
-            const tag = el.nodeName.toLowerCase();
-            if (['header', 'footer', 'nav', 'aside'].includes(tag)) continue;
-            if (el.closest('header, footer, nav, aside')) continue;
-
-            const textContent = el.textContent || '';
-            const textLength = textContent.trim().length;
-            // Generate candidate for every reasonably large subtree
-            if (textLength < 300) continue;
-            if (el === document.body || el === document.documentElement) continue;
-
-            candidates.push(el);
-          }
-
-          // Step 2: Candidate Scoring
-          const scoredCandidates = candidates.map((el, index) => {
-            let score = 0;
-            const posReasons = [];
-            const negReasons = [];
-            const text = el.textContent || '';
-            const textLength = text.trim().length;
-            const classNameAndId = `${el.className || ''} ${el.id || ''}`.toLowerCase();
-
-            // --- POSITIVE SIGNALS ---
-            if (el.querySelector('h1')) {
-              score += 20; posReasons.push("H1 Title (+20)");
-            } else if (el.querySelector('h2')) {
-              score += 15; posReasons.push("H2 Title (+15)");
-            }
-
-            if (/\b(company|employer|hiring at|inc\.|llc|corp|technologies|solutions)\b/i.test(text) || /company/i.test(classNameAndId)) {
-              score += 10; posReasons.push("Company Name (+10)");
-            }
-
-            if (/\b(location|hybrid|remote|on-site|full-time|part-time|workplace)\b/i.test(text) || /location/i.test(classNameAndId)) {
-              score += 10; posReasons.push("Location (+10)");
-            }
-
-            if (el.querySelector('a[href*="apply" i], button[class*="apply" i], [aria-label*="apply" i], .apply-button, #apply-button')) {
-              score += 15; posReasons.push("Apply Button (+15)");
-            }
-
-            if (/\b(description|job description|about the job|about the role)\b/i.test(text) || /description/i.test(classNameAndId)) {
-              score += 15; posReasons.push("Description (+15)");
-            }
-
-            if (/\b(responsibilities|key responsibilities|what you'll do|what you will do|daily tasks)\b/i.test(text)) {
-              score += 20; posReasons.push("Responsibilities (+20)");
-            }
-
-            if (/\b(qualifications|preferred qualifications|basic qualifications|minimum qualifications)\b/i.test(text)) {
-              score += 20; posReasons.push("Qualifications (+20)");
-            }
-
-            if (/\b(requirements|job requirements|what we look for|technical requirements|must have)\b/i.test(text)) {
-              score += 20; posReasons.push("Requirements (+20)");
-            }
-
-            if (/\b(benefits|what we offer|perks|health insurance|paid time off)\b/i.test(text)) {
-              score += 10; posReasons.push("Benefits (+10)");
-            }
-
-            if (/\b(experience|years of experience|track record|demonstrated experience)\b/i.test(text)) {
-              score += 10; posReasons.push("Experience (+10)");
-            }
-
-            if (/\b(employment type|full-time|part-time|contract|permanent|internship)\b/i.test(text)) {
-              score += 10; posReasons.push("Employment Type (+10)");
-            }
-
-            if (/\b(salary|compensation|pay range|\$\d+|\d+k\b|per hour|per year)\b/i.test(text)) {
-              score += 10; posReasons.push("Salary (+10)");
-            }
-
-            if (textLength >= 800 && textLength <= 15000) {
-              score += 20; posReasons.push("Large Readable Content (+20)");
-            } else if (textLength >= 300 && textLength < 800) {
-              score += 10; posReasons.push("Readable Content (+10)");
-            }
-
-            const links = el.querySelectorAll('a');
-            if (links.length <= 5 && textLength >= 400) {
-              score += 10; posReasons.push("Few External Links (+10)");
-            }
-
-            // --- NEGATIVE SIGNALS ---
-            if (links.length > 25) {
-              score -= 40; negReasons.push(`Many Links (${links.length}: -40)`);
-            } else if (links.length > 12) {
-              score -= 20; negReasons.push(`Repeated Links (${links.length}: -20)`);
-            }
-
-            if (/nav|menu|breadcrumb|topbar/i.test(classNameAndId)) {
-              score -= 40; negReasons.push("Navigation (-40)");
-            }
-
-            if (/sidebar|aside|panel|widget|jobs-search-results-list/i.test(classNameAndId)) {
-              score -= 40; negReasons.push("Sidebar (-40)");
-            }
-
-            if (/header|footer/i.test(classNameAndId)) {
-              score -= 50; negReasons.push("Header/Footer (-50)");
-            }
-
-            if (/messaging|chat|inbox|conversation/i.test(classNameAndId)) {
-              score -= 50; negReasons.push("Messaging (-50)");
-            }
-
-            if (/ad-|advert|banner|sponsored/i.test(classNameAndId)) {
-              score -= 50; negReasons.push("Advertisements (-50)");
-            }
-
-            if (/\b(recommended jobs|similar jobs|top job picks|jobs for you|people also viewed|browse jobs)\b/i.test(text) || /recommend|similar/i.test(classNameAndId)) {
-              score -= 40; negReasons.push("Recommended Jobs (-40)");
-            }
-
-            if (/job-list|jobs-list|search-results|job-card/i.test(classNameAndId) || (text.match(/\b(Promoted|Actively hiring|Verified job|Easy Apply)\b/gi) || []).length >= 3) {
-              score -= 60; negReasons.push("Multiple Job Cards List (-60)");
-            }
-
-            if (/\b(jobs-description__content|job-details|jobsearch-jobcomponent-description|posting-description|job-description|app-title)\b/i.test(classNameAndId)) {
-              score += 25; posReasons.push("Exact Job Container Class (+25)");
-            }
-
-            const xpath = getXPath(el);
-            const reasonStr = `POS: [${posReasons.join(', ')}] | NEG: [${negReasons.join(', ')}]`;
-
-            return {
-              index: index + 1,
-              xpath,
-              nodeName: el.nodeName.toLowerCase(),
-              childrenCount: el.children.length,
-              textLength,
-              score,
-              reason: reasonStr,
-              el
-            };
-          });
-
-          scoredCandidates.sort((a, b) => b.score - a.score);
-
-          // Step 3: Choose highest scoring candidate
-          const winner = scoredCandidates.length > 0 ? scoredCandidates[0] : null;
-
-          // Step 4: Extract ONLY the winner subtree. Use textContent. Normalize whitespace. Remove script/style.
-          let extractedText = '';
-          if (winner && winner.el) {
-            const clone = winner.el.cloneNode(true);
-            clone.querySelectorAll('script, style, noscript, svg, path, iframe, button').forEach(n => n.remove());
-            extractedText = (clone.textContent || '')
-              .replace(/\r\n|\r|\n/g, '\n')
-              .replace(/[ \t]+/g, ' ')
-              .replace(/\n\s*\n+/g, '\n\n')
-              .trim();
-          }
-
-          const endTime = performance.now();
-          const processingTimeMs = (endTime - startTime).toFixed(2);
-
-          // Extract quick header info for UI
-          let title = '';
-          let company = '';
-          const titleEl = document.querySelector('h1, .job-details-jobs-unified-top-card__job-title, .jobsearch-JobInfoHeader-title, .app-title');
-          if (titleEl) title = titleEl.innerText.trim();
-          const companyEl = document.querySelector('.job-details-jobs-unified-top-card__company-name, [data-company-name="true"], .company-name, .jobsearch-CompanyInfoContainer');
-          if (companyEl) company = companyEl.innerText.replace('at ', '').trim();
-
-          const candidatesSummary = scoredCandidates.slice(0, 15).map(c => ({
-            index: c.index,
-            xpath: c.xpath,
-            nodeName: c.nodeName,
-            childrenCount: c.childrenCount,
-            textLength: c.textLength,
-            score: c.score,
-            reason: c.reason
-          }));
-
-          return {
-            candidatesCount: scoredCandidates.length,
-            candidatesSummary,
-            winnerScore: winner ? winner.score : 0,
-            winnerXpath: winner ? winner.xpath : '',
-            winnerNodeName: winner ? winner.nodeName : '',
-            winnerDomSize: winner ? winner.childrenCount : 0,
-            winnerTextLength: winner ? winner.textLength : 0,
-            extractedText,
-            processingTimeMs,
-            title: title || 'Software Engineer',
-            company: company || 'Target Company'
-          };
-        }
-      });
-
-      // Step 9: Return freshly extracted data & Print DEBUG LOGS
-      console.log("Fresh DOM Received");
-      let activeResult = null;
-      if (results && results.length > 0 && results[0].result) {
-        activeResult = results[0].result;
-      }
-
-      if (!activeResult) {
-        console.warn("DOM Candidate Discovery returned no result. Navigating to No Job Found flow.");
-        setJobAnalysis(null);
-        setLoadingProgress(0);
-        setJobDetectionStatus("ready");
-        setLastAnalyzedUrl(currentUrl);
-        setLastAnalyzedTitle(currentTitle);
-        setLastAnalyzedCompany("");
-        setLastAnalyzedText("");
-        navigate('/no-job-detected');
-        return;
-      }
-
-      console.group("====================================================\nDOM DISCOVERY\n====================================================");
-      console.log(`Candidates Found: ${activeResult.candidatesCount} (Processing time: ${activeResult.processingTimeMs}ms)`);
-      (activeResult.candidatesSummary || []).forEach(c => {
-        console.log(`\nCandidate #${c.index}\nXPath: ${c.xpath}\nNode Name: ${c.nodeName}\nChildren: ${c.childrenCount}\nText Length: ${c.textLength}\nScore: ${c.score}\nReason: ${c.reason}\n----------------------`);
-      });
-      console.groupEnd();
-
-      console.group("====================================================\nWINNER\n====================================================");
-      console.log(`Winner XPath: ${activeResult.winnerXpath}`);
-      console.log(`Winner Score: ${activeResult.winnerScore}`);
-      console.log(`Winner DOM Size: ${activeResult.winnerDomSize} children`);
-      console.log(`Winner Text Length: ${activeResult.winnerTextLength} characters`);
-      console.log(`Preview:\n${(activeResult.extractedText || '').substring(0, 300)}...`);
-      console.groupEnd();
-
-      console.group("====================================================\nEXTRACTION\n====================================================");
-      console.log(`Extracted Characters: ${(activeResult.extractedText || '').length}`);
-      console.log(`Preview:\n${(activeResult.extractedText || '').substring(0, 500)}${(activeResult.extractedText || '').length > 500 ? '\n[...truncated]' : ''}`);
-      console.groupEnd();
-
-      // Configurable score threshold for single job validation
-      const CONFIGURABLE_THRESHOLD = 35;
-
-      console.group("====================================================\nSEND TO BACKEND\n====================================================");
-      if (activeResult.winnerScore < CONFIGURABLE_THRESHOLD || !activeResult.extractedText || activeResult.extractedText.length < 150) {
-        console.log(`Payload Size: 0 bytes (Aborted: Winner score ${activeResult.winnerScore} below threshold ${CONFIGURABLE_THRESHOLD})`);
-        console.groupEnd();
-        console.warn(`[Job Detection Engine] Validation Rejected: Winner score (${activeResult.winnerScore}) below threshold.`);
-        
-        setJobAnalysis(null);
-        setLoadingProgress(0);
-        setJobDetectionStatus("ready");
-        setLastAnalyzedUrl(currentUrl);
-        setLastAnalyzedTitle(activeResult.title || currentTitle);
-        setLastAnalyzedCompany(activeResult.company || "");
-        setLastAnalyzedText(activeResult.extractedText || "");
-        console.log("Extraction Complete (Aborted by DOM Scoring Threshold - navigating to No Job Found flow)");
-        console.log("==================================================");
-        navigate('/no-job-detected');
-        return;
-      }
-
-      const payloadObj = {
-        jd_text: activeResult.extractedText,
-        url: currentUrl,
-        page_title: activeResult.title || currentTitle,
-        page_company: activeResult.company || ""
-      };
-      const payloadStr = JSON.stringify(payloadObj);
-      const payloadSize = new Blob([payloadStr]).size;
-
-      console.log(`Payload Size: ${payloadSize} bytes`);
-      console.log(`Preview:\n${activeResult.extractedText.substring(0, 400)}...`);
-      console.groupEnd();
-
-      setJobText(activeResult.extractedText);
-      setCompanyName(activeResult.company);
-      setJobTitle(activeResult.title);
-
-      // Step 11: LLM Structured Extraction (Only invoked when winner score >= threshold)
-      console.log("Extraction Started");
-      setLoadingType('extraction');
-      setLoadingProgress(10);
-      setLoadingMessage("Extracting Job Description Details...");
-
-      const headers = {};
-      if (apiKey) headers["x-groq-key"] = apiKey;
-      const token = session?.access_token || localStorage.getItem('access_token');
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-
-      let analyzedJob;
-      try {
-        const jobRes = await fetch(`${apiUrl}/api/v1/jobs/extract`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...headers
-          },
-          body: JSON.stringify({
-            jd_text: activeResult.extractedText,
-            url: currentUrl,
-            page_title: activeResult.title || currentTitle,
-            page_company: activeResult.company || ""
-          })
-        });
-        if (!jobRes.ok) throw new Error("V1 extract route returned error or not found");
-        analyzedJob = await jobRes.json();
-      } catch (err) {
-        const jobResFallback = await fetch(`${apiUrl}/api/analyze-job`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...headers
-          },
-          body: JSON.stringify({
-            jd_text: activeResult.extractedText,
-            url: currentUrl,
-            page_title: activeResult.title || currentTitle,
-            page_company: activeResult.company || ""
-          })
-        });
-        if (!jobResFallback.ok) {
-          const errData = await jobResFallback.json().catch(() => ({ detail: jobResFallback.statusText }));
-          throw new Error("Job analysis error: " + (errData.detail || "Request failed"));
-        }
-        analyzedJob = await jobResFallback.json();
-      }
-
-      // Step 12: Render the UI
-      console.log("Rendering UI");
-      const isValidText = (str) => typeof str === 'string' && str.trim() !== '' && str.trim().toLowerCase() !== 'not available' && str.trim().toLowerCase() !== 'n/a' && str.trim().toLowerCase() !== 'unspecified';
-      const details = analyzedJob?.normalized_content || analyzedJob || {};
-      const finalTitle = isValidText(analyzedJob?.job_title) ? analyzedJob.job_title : (isValidText(details.title) ? details.title : (isValidText(analyzedJob?.title) ? analyzedJob.title : (isValidText(activeResult.title) ? activeResult.title : 'Software Engineer')));
-      const finalCompany = isValidText(analyzedJob?.company_name) ? analyzedJob.company_name : (isValidText(details.company) ? details.company : (isValidText(analyzedJob?.company) ? analyzedJob.company : (isValidText(activeResult.company) ? activeResult.company : 'Target Company')));
-
-      const isRelated = analyzedJob?.is_job_related !== false && analyzedJob?.normalized_content?.is_job_related !== false;
-      if (!isRelated) {
-        setJobAnalysis(null);
-        setLoadingProgress(0);
-        setJobDetectionStatus("ready");
-        setLastAnalyzedUrl(currentUrl);
-        setLastAnalyzedTitle(finalTitle !== 'Software Engineer' ? finalTitle : (activeResult.title || currentTitle));
-        setLastAnalyzedCompany(finalCompany !== 'Target Company' ? finalCompany : (activeResult.company || ""));
-        setLastAnalyzedText(activeResult.extractedText || "");
-        console.log("Extraction Complete (Not a job posting by backend check - navigating to No Job Found flow)");
-        console.log("==================================================");
-        navigate('/no-job-detected');
-        return;
-      }
-
-      setJobAnalysis(analyzedJob);
-      if (isValidText(finalCompany)) setCompanyName(finalCompany);
-      if (isValidText(finalTitle)) setJobTitle(finalTitle);
-
-      setLoadingProgress(0);
-      setJobDetectionStatus("ready");
-      console.log("Extraction Complete");
-      console.log("==================================================");
-
-    } catch (error) {
-      console.error("Fresh session extraction error:", error);
-      setApiError(null);
-      setJobAnalysis(null);
-      setLoadingProgress(0);
-      setJobDetectionStatus("ready");
-      setLastAnalyzedUrl(currentUrl);
-      setLastAnalyzedTitle(activeResult.title || currentTitle);
-      setLastAnalyzedCompany(activeResult.company || "");
-      setLastAnalyzedText(activeResult.extractedText || "");
-      navigate('/no-job-detected');
-    }
-  };
-
   // Perform Resume Parsing (Step 4)
   const handleParseResume = async () => {
     if (!resumeFile && !parsedResume) {
@@ -1321,7 +879,7 @@ export function AppProvider({ children }) {
     }, 180);
 
     try {
-      const token = session?.access_token;
+      const token = session?.access_token || localStorage.getItem('access_token');
       const headers = {};
       if (token) headers["Authorization"] = `Bearer ${token}`;
       if (apiKey) headers["x-groq-key"] = apiKey;
@@ -1413,7 +971,15 @@ export function AppProvider({ children }) {
         });
 
         if (!parseRes.ok) {
-          throw new Error("AI parsing on-demand failed: " + (await parseRes.json()).detail);
+          const errData = await parseRes.json().catch(() => ({ detail: parseRes.statusText }));
+          if (parseRes.status === 404) {
+            setParsedResume(null);
+            if (isExtension) chrome.storage.local.remove('parsedResume');
+            else localStorage.removeItem('parsed_resume');
+            await fetchResumesList();
+            throw new Error("Selected resume no longer exists. Please upload or select a resume again.");
+          }
+          throw new Error("AI parsing on-demand failed: " + (errData.detail || "Request failed"));
         }
 
         const updatedRecord = await parseRes.json();
@@ -1840,7 +1406,15 @@ export function AppProvider({ children }) {
         });
 
         if (!parseRes.ok) {
-          throw new Error("AI parsing on-demand failed: " + (await parseRes.json()).detail);
+          const errData = await parseRes.json().catch(() => ({ detail: parseRes.statusText }));
+          if (parseRes.status === 404) {
+            setParsedResume(null);
+            if (isExtension) chrome.storage.local.remove('parsedResume');
+            else localStorage.removeItem('parsed_resume');
+            await fetchResumesList();
+            throw new Error("Selected resume no longer exists. Please upload or select a resume again.");
+          }
+          throw new Error("AI parsing on-demand failed: " + (errData.detail || "Request failed"));
         }
 
         const updatedRecord = await parseRes.json();
@@ -1990,7 +1564,6 @@ export function AppProvider({ children }) {
       handleDeleteResume,
       handleScanPage,
       handleExtractJob,
-      handleFreshSessionExtraction,
       handleParseResume,
       handleRunGapAnalysis,
       handleGenerateFinalResume,

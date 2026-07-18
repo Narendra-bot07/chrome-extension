@@ -2,7 +2,7 @@ from fastapi import APIRouter, UploadFile, File, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import io
-from typing import Optional, List
+from typing import Optional, List, Any, Dict
 
 from app.schemas import (
     ResumeStructure,
@@ -42,8 +42,31 @@ class JobAnalysisRequest(BaseModel):
     salary_range: Optional[str] = ""
 
 class CompareRequest(BaseModel):
-    resume: ResumeStructure
-    job: JobAnalysis
+    resume: Dict[str, Any]
+    job: Dict[str, Any]
+
+def normalize_resume_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    parsed = payload.get("parsed_content")
+    if isinstance(parsed, dict):
+        merged = {**parsed}
+        for key in ("id", "file_name", "file_size", "file_type", "created_at"):
+            if key in payload and key not in merged:
+                merged[key] = payload[key]
+        return merged
+    return payload
+
+def normalize_job_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = payload.get("normalized_content")
+    if isinstance(normalized, dict):
+        job = {**normalized}
+    else:
+        job = {**payload}
+
+    if payload.get("job_title") and not job.get("title"):
+        job["title"] = payload["job_title"]
+    if payload.get("company_name") and not job.get("company"):
+        job["company"] = payload["company_name"]
+    return job
 
 @router.post("/parse-resume", response_model=ResumeStructure)
 async def api_parse_resume(
@@ -102,9 +125,11 @@ async def api_compare(
     x_groq_key: Optional[str] = Header(None)
 ):
     try:
+        resume = ResumeStructure(**normalize_resume_payload(request.resume))
+        job = JobAnalysis(**normalize_job_payload(request.job))
         comparison = generate_tailoring_patch(
-            request.resume, 
-            request.job, 
+            resume,
+            job,
             api_key=x_groq_key
         )
         return comparison

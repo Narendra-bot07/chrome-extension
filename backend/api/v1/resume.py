@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
+from fastapi import APIRouter, Depends, UploadFile, File, Header, HTTPException, status
 from typing import Dict, Any, List
 from core.security import verify_supabase_jwt
 from core.constants import MAX_FILE_SIZE_BYTES, SUPPORTED_FILE_EXTENSIONS
@@ -15,6 +15,7 @@ router = APIRouter(prefix="/resumes", tags=["resumes"])
 @router.post("/upload")
 async def upload_and_parse(
     file: UploadFile = File(...),
+    x_groq_key: str = Header(None),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     resume_repo: ResumeRepository = Depends(get_resume_repository),
     storage: FileService = Depends(get_storage_service),
@@ -42,12 +43,10 @@ async def upload_and_parse(
     unique_path = f"{user['id']}/{uuid.uuid4()}_{file.filename}"
     storage.upload_file("original-resumes", unique_path, content, file.content_type)
 
-    # Store filename and raw_text inside parsed_content for lazy compilation
-    parsed_res = {
-        "personal_info": {"name": file.filename.split(".")[0].replace("_", " ")},
-        "summary": "This resume is uploaded and ready for tailoring.",
-        "raw_text": raw_text
-    }
+    # Parse immediately so the uploaded resume is usable without a fragile second request.
+    ai = GroqService(api_key=x_groq_key)
+    parsed_res = ai.parse_resume(raw_text).dict()
+    parsed_res["raw_text"] = raw_text
 
     # Save to database
     record = resume_repo.create(
@@ -93,6 +92,7 @@ async def delete_resume(
 @router.post("/{resume_id}/parse")
 async def parse_existing_resume(
     resume_id: str,
+    x_groq_key: str = Header(None),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository),
     conn = Depends(get_db_connection)
@@ -113,7 +113,7 @@ async def parse_existing_resume(
         )
         
     # Run Groq AI parse on-demand
-    ai = GroqService()
+    ai = GroqService(api_key=x_groq_key)
     parsed_res = ai.parse_resume(raw_text)
     
     # Save back to database

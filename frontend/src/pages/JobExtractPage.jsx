@@ -16,30 +16,30 @@ function JobExtractPage() {
     resumeFile, setResumeFile,
     jobAnalysis, setJobAnalysis,
     loadingProgress, loadingMessage,
-    handleScanPage, handleExtractJob, handleFreshSessionExtraction,
+    handleScanPage, handleExtractJob,
     jobDetectionStatus,
     loading, isExtension
   } = useApp();
 
-  // Strictly stateless: Run fresh extraction session (Steps 1-12) every time popup opens or user navigates tabs/SPA
+  // Auto-run scanning on side panel mount and listen to active tab updates/switches
   useEffect(() => {
     if (isExtension && chrome.tabs) {
       const timer = setTimeout(() => {
-        handleFreshSessionExtraction();
-      }, 100);
+        handleScanPage();
+      }, 150);
 
       const handleTabUpdate = (tabId, changeInfo, tab) => {
         if (changeInfo.status === 'complete') {
           chrome.tabs.query({ active: true, currentWindow: true }, ([activeTab]) => {
             if (activeTab && activeTab.id === tabId) {
-              handleFreshSessionExtraction();
+              handleScanPage();
             }
           });
         }
       };
 
       const handleTabActivated = (activeInfo) => {
-        handleFreshSessionExtraction();
+        handleScanPage();
       };
 
       chrome.tabs.onUpdated.addListener(handleTabUpdate);
@@ -51,9 +51,16 @@ function JobExtractPage() {
         chrome.tabs.onActivated.removeListener(handleTabActivated);
       };
     } else {
-      handleFreshSessionExtraction();
+      handleScanPage();
     }
   }, []);
+
+  // Auto-run job extraction as soon as jobText is scraped or pasted
+  useEffect(() => {
+    if (jobText && jobText.length > 50 && !jobAnalysis && loadingProgress === 0) {
+      handleExtractJob();
+    }
+  }, [jobText, jobAnalysis]);
 
   if (loadingProgress > 0 && loadingProgress < 100) {
     return (
@@ -72,12 +79,6 @@ function JobExtractPage() {
   }
 
   if (jobAnalysis) {
-    const isRelated = jobAnalysis.is_job_related !== false && jobAnalysis.normalized_content?.is_job_related !== false;
-    if (!isRelated) {
-      setTimeout(() => navigate('/no-job-detected'), 0);
-      return null;
-    }
-
     return (
       <JobReviewView
         jobAnalysis={jobAnalysis}

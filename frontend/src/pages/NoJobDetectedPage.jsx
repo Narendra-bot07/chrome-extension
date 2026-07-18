@@ -4,11 +4,11 @@ import { useApp } from '../context/AppContext';
 
 function NoJobDetectedPage() {
   const navigate = useNavigate();
-  const { handleFreshSessionExtraction } = useApp();
+  const { handleScanPage } = useApp();
 
   const handleScanAgain = () => {
     navigate('/tailor');
-    handleFreshSessionExtraction();
+    handleScanPage(true);
   };
 
   const handleEnterManually = () => {
