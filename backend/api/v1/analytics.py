@@ -26,30 +26,41 @@ async def get_dashboard_metrics(
                 metrics["credits_used"] = user_data["credits_used"]
                 metrics["subscription_status"] = user_data["subscription_status"]
 
-            # 2. Count Resumes Tailored from Events
+            # 2. Count resumes actually tailored and saved
             cur.execute(
-                "SELECT COUNT(*) as count FROM public.user_events WHERE user_id = %s AND event_type = 'RESUME_TAILORED'",
+                """
+                SELECT COUNT(*) as count
+                FROM public.tailored_resumes
+                WHERE user_id = %s AND deleted_at IS NULL
+                """,
                 (user["id"],)
             )
             metrics["resumes_tailored"] = cur.fetchone()["count"]
 
-            # 3. Count Applications Tracked from Events
+            # 3. Count applications actually tracked
             cur.execute(
-                "SELECT COUNT(*) as count FROM public.user_events WHERE user_id = %s AND event_type = 'APPLICATION_CREATED'",
+                "SELECT COUNT(*) as count FROM public.applications WHERE user_id = %s",
                 (user["id"],)
             )
             metrics["applications_tracked"] = cur.fetchone()["count"]
 
-            # 4. Success Rates and Conversions (Mock logic using events)
-            # Let's count how many apps moved to 'Interview' or 'Accepted' vs total 'APPLICATION_CREATED'
+            # 4. Success rates and conversions from current application stages
             cur.execute(
-                "SELECT COUNT(DISTINCT resource_id) as count FROM public.user_events WHERE user_id = %s AND event_type = 'APPLICATION_MOVED' AND metadata->>'new_stage' IN ('Interview', 'Final Round')",
+                """
+                SELECT COUNT(*) as count
+                FROM public.applications
+                WHERE user_id = %s AND current_stage IN ('Interview', 'Final Round')
+                """,
                 (user["id"],)
             )
             interviews_count = cur.fetchone()["count"]
             
             cur.execute(
-                "SELECT COUNT(DISTINCT resource_id) as count FROM public.user_events WHERE user_id = %s AND event_type = 'OFFER_ACCEPTED'",
+                """
+                SELECT COUNT(*) as count
+                FROM public.applications
+                WHERE user_id = %s AND current_stage = 'Accepted'
+                """,
                 (user["id"],)
             )
             accepted_count = cur.fetchone()["count"]
@@ -59,14 +70,51 @@ async def get_dashboard_metrics(
                 metrics["success_rate"] = round((accepted_count / metrics["applications_tracked"]) * 100)
             
             metrics["interviews"] = interviews_count
-
-            # 5. Average ATS Score (If stored in metadata, assuming ATS_ANALYZED was tracked previously or currently defaults to 85)
+            
             cur.execute(
-                "SELECT AVG((metadata->>'ats_score')::numeric) as avg_score FROM public.user_events WHERE user_id = %s AND event_type = 'ATS_ANALYZED' AND metadata->>'ats_score' IS NOT NULL",
+                """
+                SELECT COUNT(*) as count
+                FROM public.applications
+                WHERE user_id = %s AND current_stage = 'Rejected'
+                """,
                 (user["id"],)
             )
+            metrics["rejected"] = cur.fetchone()["count"]
+
+            # 5. Average ATS score from persisted application/tailoring records only
+            cur.execute(
+                """
+                SELECT AVG(score) AS avg_score
+                FROM (
+                    SELECT ats_score::numeric AS score
+                    FROM public.applications
+                    WHERE user_id = %s AND ats_score IS NOT NULL
+                    UNION ALL
+                    SELECT ats_score::numeric AS score
+                    FROM public.tailored_resumes
+                    WHERE user_id = %s AND deleted_at IS NULL AND ats_score IS NOT NULL
+                ) scores
+                """,
+                (user["id"], user["id"])
+            )
             avg = cur.fetchone()
-            metrics["avg_ats_score"] = round(avg["avg_score"]) if avg and avg["avg_score"] else 85 # Fallback to 85 if no events yet
+            metrics["avg_ats_score"] = round(avg["avg_score"]) if avg and avg["avg_score"] is not None else 0
+
+            # 6. Downloads / generated docs
+            cur.execute("SELECT to_regclass('public.downloads') AS table_name")
+            downloads_table = cur.fetchone()
+            if downloads_table and downloads_table["table_name"]:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) as count
+                    FROM public.downloads
+                    WHERE user_id = %s
+                    """,
+                    (user["id"],)
+                )
+                metrics["downloads"] = cur.fetchone()["count"]
+            else:
+                metrics["downloads"] = 0
 
         return metrics
     except Exception as e:

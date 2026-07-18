@@ -6,6 +6,32 @@ class ResumeRepository:
     def __init__(self, conn):
         self.conn = conn
 
+    def _with_metadata_defaults(self, record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not record:
+            return record
+
+        normalized = dict(record)
+        parsed_content = normalized.get("parsed_content") or {}
+        if isinstance(parsed_content, str):
+            try:
+                parsed_content = json.loads(parsed_content)
+            except Exception:
+                parsed_content = {}
+
+        times_used = normalized.get("times_used")
+        tailor_count = normalized.get("tailor_count")
+        normalized["times_used"] = times_used if times_used is not None else (tailor_count or 0)
+        normalized["tailor_count"] = tailor_count if tailor_count is not None else (times_used or 0)
+        normalized["last_used_at"] = normalized.get("last_used_at")
+        normalized["upload_source"] = normalized.get("upload_source") or "user_upload"
+        normalized["parsing_status"] = (
+            normalized.get("parsing_status")
+            or parsed_content.get("parse_status")
+            or parsed_content.get("parsing_status")
+            or "unknown"
+        )
+        return normalized
+
     def create(self, user_id: str, file_path: str, file_name: str, file_size: int, file_type: str, parsed_content: Dict[str, Any]) -> Dict[str, Any]:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
@@ -27,32 +53,28 @@ class ResumeRepository:
                 # Ignore if the Postgres RPC does not exist
                 pass
             self.conn.commit()
-            return record or {}
+            return self._with_metadata_defaults(record) or {}
 
     def get_by_id(self, resume_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         query = "SELECT * FROM public.resumes WHERE id = %s AND user_id = %s AND deleted_at IS NULL"
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (resume_id, user_id))
-            return cur.fetchone()
+            return self._with_metadata_defaults(cur.fetchone())
 
     def list_by_user(self, user_id: str) -> List[Dict[str, Any]]:
         query = """
-            SELECT *,
-                   COALESCE(times_used, tailor_count, 0) AS times_used,
-                   COALESCE(tailor_count, times_used, 0) AS tailor_count
+            SELECT *
             FROM public.resumes
             WHERE user_id = %s AND deleted_at IS NULL
             ORDER BY is_active DESC, created_at DESC
         """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (user_id,))
-            return cur.fetchall()
+            return [self._with_metadata_defaults(record) for record in cur.fetchall()]
 
     def get_active(self, user_id: str) -> Optional[Dict[str, Any]]:
         query = """
-            SELECT *,
-                   COALESCE(times_used, tailor_count, 0) AS times_used,
-                   COALESCE(tailor_count, times_used, 0) AS tailor_count
+            SELECT *
             FROM public.resumes
             WHERE user_id = %s AND deleted_at IS NULL AND is_active = TRUE
             ORDER BY created_at DESC
@@ -60,7 +82,7 @@ class ResumeRepository:
         """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (user_id,))
-            return cur.fetchone()
+            return self._with_metadata_defaults(cur.fetchone())
 
     def activate(self, resume_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -85,7 +107,7 @@ class ResumeRepository:
             )
             record = cur.fetchone()
             self.conn.commit()
-            return record
+            return self._with_metadata_defaults(record)
 
     def soft_delete(self, resume_id: str, user_id: str) -> bool:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -147,7 +169,11 @@ class ResumeRepository:
                       COALESCE(tailor_count, times_used, 0) AS tailor_count
         """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(query, (resume_id, user_id))
-            record = cur.fetchone()
-            self.conn.commit()
-            return record
+            try:
+                cur.execute(query, (resume_id, user_id))
+                record = cur.fetchone()
+                self.conn.commit()
+                return self._with_metadata_defaults(record)
+            except Exception:
+                self.conn.rollback()
+                return self.get_by_id(resume_id, user_id)

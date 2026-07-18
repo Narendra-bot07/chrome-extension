@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { Mail, Lock, User, ChevronRight, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useGoogleLogin } from '@react-oauth/google';
@@ -51,6 +51,16 @@ export default function RegisterPage() {
   const [regError, setRegError] = useState(null);
   const [regSuccess, setRegSuccess] = useState(null);
 
+  const passwordRules = [
+    { label: '8+ characters', valid: regPassword.length >= 8 },
+    { label: 'At least one number', valid: /\d/.test(regPassword) },
+    { label: 'At least one special character', valid: /[^A-Za-z0-9]/.test(regPassword) },
+    { label: 'Upper and lowercase letters', valid: /[a-z]/.test(regPassword) && /[A-Z]/.test(regPassword) }
+  ];
+  const passwordStrengthScore = passwordRules.filter(rule => rule.valid).length;
+  const isStrongPassword = passwordStrengthScore === passwordRules.length;
+  const passwordsMatch = regConfirmPassword.length > 0 && regPassword === regConfirmPassword;
+
   // --- LOGIN SUBMIT ---
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -90,6 +100,12 @@ export default function RegisterPage() {
 
     if (regPassword !== regConfirmPassword) {
       setRegError("Passwords do not match.");
+      setRegLoading(false);
+      return;
+    }
+
+    if (!isStrongPassword) {
+      setRegError("Use a stronger password: 8+ characters, one number, one special character, and mixed case letters.");
       setRegLoading(false);
       return;
     }
@@ -242,10 +258,10 @@ export default function RegisterPage() {
         
         {/* Brand logo header */}
         <div className="flex items-center gap-2.5 relative z-10">
-          <div className="w-10 h-10 rounded-xl bg-zinc-955 text-white flex items-center justify-center font-black text-base shadow-xs">
+          <div className="w-10 h-10 rounded-xl bg-zinc-950 text-white flex items-center justify-center font-black text-base shadow-xs">
             A
           </div>
-          <span className="text-base font-black tracking-tight text-zinc-955 uppercase">
+          <span className="text-base font-black tracking-tight text-zinc-950 uppercase">
             Apply<span className="text-[#00bda5]">Flow</span>
           </span>
         </div>
@@ -256,7 +272,7 @@ export default function RegisterPage() {
             <span className="inline-block px-3 py-1 bg-[#00bda5]/10 border border-[#00bda5]/20 text-[#00bda5] text-[9.5px] font-black uppercase tracking-widest rounded-full">
               Enterprise Orchestration
             </span>
-            <h2 className="text-3xl font-black tracking-tight text-zinc-955 leading-tight">
+            <h2 className="text-3xl font-black tracking-tight text-zinc-950 leading-tight">
               Orchestrate your application pipeline with AI.
             </h2>
             <p className="text-zinc-500 font-bold uppercase tracking-wider text-[11px] leading-relaxed">
@@ -271,7 +287,7 @@ export default function RegisterPage() {
                 1
               </div>
               <div>
-                <h4 className="text-xs font-black text-zinc-955 uppercase tracking-wider leading-none">Upload Master Resume</h4>
+                <h4 className="text-xs font-black text-zinc-950 uppercase tracking-wider leading-none">Upload Master Resume</h4>
                 <p className="text-[10px] text-zinc-400 font-bold mt-1 uppercase tracking-wide">Sync your background details instantly</p>
               </div>
             </div>
@@ -281,7 +297,7 @@ export default function RegisterPage() {
                 2
               </div>
               <div>
-                <h4 className="text-xs font-black text-zinc-955 uppercase tracking-wider leading-none">AI Tailoring Scan</h4>
+                <h4 className="text-xs font-black text-zinc-950 uppercase tracking-wider leading-none">AI Tailoring Scan</h4>
                 <p className="text-[10px] text-zinc-400 font-bold mt-1 uppercase tracking-wide">Generate optimized keyword alignments for JD benchmarks</p>
               </div>
             </div>
@@ -291,7 +307,7 @@ export default function RegisterPage() {
                 3
               </div>
               <div>
-                <h4 className="text-xs font-black text-zinc-955 uppercase tracking-wider leading-none">Active Pipeline Board</h4>
+                <h4 className="text-xs font-black text-zinc-950 uppercase tracking-wider leading-none">Active Pipeline Board</h4>
                 <p className="text-[10px] text-zinc-400 font-bold mt-1 uppercase tracking-wide">Drag, drop, log status and track offer transitions</p>
               </div>
             </div>
@@ -299,7 +315,7 @@ export default function RegisterPage() {
         </div>
 
         {/* Footer info copy */}
-        <div className="text-[9.5px] text-zinc-405 font-extrabold uppercase tracking-widest relative z-10">
+        <div className="text-[9.5px] text-zinc-700 font-extrabold uppercase tracking-widest relative z-10">
           © {new Date().getFullYear()} ApplyFlow AI Corp. All rights reserved.
         </div>
       </div>
@@ -322,11 +338,11 @@ export default function RegisterPage() {
                   <div className="w-9 h-9 rounded-xl bg-zinc-950 text-white flex items-center justify-center font-black text-sm">
                     A
                   </div>
-                  <span className="text-sm font-black tracking-tight text-zinc-955 uppercase">
+                  <span className="text-sm font-black tracking-tight text-zinc-950 uppercase">
                     Apply<span className="text-[#00bda5]">Flow</span>
                   </span>
                 </div>
-                <h1 className="text-2xl font-black text-zinc-955 tracking-tight uppercase">Welcome Back</h1>
+                <h1 className="text-2xl font-black text-zinc-950 tracking-tight uppercase">Welcome Back</h1>
                 <p className="text-zinc-500 text-xs mt-1 font-medium">Tailor your resumes instantly with AI</p>
               </div>
 
@@ -353,7 +369,7 @@ export default function RegisterPage() {
                     value={loginEmail}
                     onChange={(e) => setLoginEmail(e.target.value)}
                     placeholder="you@example.com"
-                    className="w-full px-4 py-3 bg-white border border-zinc-200 rounded-2xl text-zinc-900 placeholder-zinc-400 text-sm focus:outline-hidden focus:border-zinc-955 transition-colors font-semibold"
+                    className="w-full px-4 py-3 bg-white border border-zinc-200 rounded-2xl text-zinc-900 placeholder-zinc-400 text-sm focus:outline-hidden focus:border-zinc-950 transition-colors font-semibold"
                   />
                 </div>
 
@@ -366,8 +382,8 @@ export default function RegisterPage() {
                         required
                         value={loginPassword}
                         onChange={(e) => setLoginPassword(e.target.value)}
-                        placeholder="••••••••"
-                        className="w-full pl-4 pr-12 py-3 bg-white border border-zinc-200 rounded-2xl text-zinc-900 placeholder-zinc-400 text-sm focus:outline-hidden focus:border-zinc-955 transition-colors font-semibold"
+                        placeholder="Password123!"
+                        className="w-full pl-4 pr-12 py-3 bg-white border border-zinc-200 rounded-2xl text-zinc-900 placeholder-zinc-400 text-sm focus:outline-hidden focus:border-zinc-950 transition-colors font-semibold"
                       />
                       <button
                         type="button"
@@ -383,7 +399,7 @@ export default function RegisterPage() {
                 <button
                   type="submit"
                   disabled={loginLoading}
-                  className="w-full py-3 bg-zinc-955 hover:bg-zinc-900 text-white font-extrabold rounded-2xl text-sm transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer border-none shadow-xs mt-4 disabled:opacity-50"
+                  className="w-full py-3 bg-zinc-950 hover:bg-zinc-900 text-white font-extrabold rounded-2xl text-sm transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer border-none shadow-xs mt-4 disabled:opacity-50"
                 >
                   {loginLoading ? 'Processing...' : (isMagicLink ? 'Send Magic Link' : 'Sign In')}
                   <ChevronRight className="w-4 h-4" />
@@ -393,7 +409,7 @@ export default function RegisterPage() {
               {/* Divider continue with */}
               <div className="relative my-6 text-center select-none">
                 <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-zinc-150" /></div>
-                <span className="relative bg-white px-3 text-[9px] font-black text-zinc-405 uppercase tracking-widest">Or continue with</span>
+                <span className="relative bg-white px-3 text-[9px] font-black text-zinc-700 uppercase tracking-widest">Or continue with</span>
               </div>
 
               {/* Social OAuth Buttons */}
@@ -423,7 +439,7 @@ export default function RegisterPage() {
                   Don't have an account?{' '}
                   <button 
                     onClick={() => navigate('/register')}
-                    className="text-zinc-955 hover:text-zinc-800 font-bold transition-colors border-none bg-transparent cursor-pointer ml-1"
+                    className="text-zinc-950 hover:text-zinc-800 font-bold transition-colors border-none bg-transparent cursor-pointer ml-1"
                   >
                     Sign Up
                   </button>
@@ -438,14 +454,14 @@ export default function RegisterPage() {
               <div className="text-center mb-4 select-none">
                 {/* Mobile brand header block */}
                 <div className="lg:hidden flex items-center justify-center gap-2 mb-4">
-                  <div className="w-9 h-9 rounded-xl bg-zinc-955 text-white flex items-center justify-center font-black text-sm">
+                  <div className="w-9 h-9 rounded-xl bg-zinc-950 text-white flex items-center justify-center font-black text-sm">
                     A
                   </div>
-                  <span className="text-sm font-black tracking-tight text-zinc-955 uppercase">
+                  <span className="text-sm font-black tracking-tight text-zinc-950 uppercase">
                     Apply<span className="text-[#00bda5]">Flow</span>
                   </span>
                 </div>
-                <h1 className="text-2xl font-black text-zinc-955 tracking-tight uppercase">Create Account</h1>
+                <h1 className="text-2xl font-black text-zinc-950 tracking-tight uppercase">Create Account</h1>
                 <p className="text-zinc-500 text-xs mt-1 font-medium">Get started tailoring your resumes with AI</p>
               </div>
 
@@ -484,7 +500,7 @@ export default function RegisterPage() {
                     value={regEmail}
                     onChange={(e) => setRegEmail(e.target.value)}
                     placeholder="you@example.com"
-                    className="w-full px-4 py-2.5 bg-white border border-zinc-200 rounded-2xl text-zinc-900 placeholder-zinc-400 text-xs font-semibold focus:outline-hidden focus:border-zinc-955 transition-colors font-semibold"
+                    className="w-full px-4 py-2.5 bg-white border border-zinc-200 rounded-2xl text-zinc-900 placeholder-zinc-400 text-xs font-semibold focus:outline-hidden focus:border-zinc-950 transition-colors font-semibold"
                   />
                 </div>
 
@@ -496,8 +512,8 @@ export default function RegisterPage() {
                       required
                       value={regPassword}
                       onChange={(e) => setRegPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full pl-4 pr-12 py-2.5 bg-white border border-zinc-200 rounded-2xl text-zinc-900 placeholder-zinc-400 text-xs font-semibold focus:outline-hidden focus:border-zinc-955 transition-colors font-semibold"
+                      placeholder="Password123!"
+                      className="w-full pl-4 pr-12 py-2.5 bg-white border border-zinc-200 rounded-2xl text-zinc-900 placeholder-zinc-400 text-xs font-semibold focus:outline-hidden focus:border-zinc-950 transition-colors font-semibold"
                     />
                     <button
                       type="button"
@@ -507,6 +523,32 @@ export default function RegisterPage() {
                       {showRegPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
+                  {regPassword && (
+                    <div className="mt-2 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-black uppercase tracking-widest text-zinc-700">Password strength</span>
+                        <span className={`text-[9px] font-black uppercase tracking-widest ${isStrongPassword ? 'text-emerald-600' : passwordStrengthScore >= 2 ? 'text-amber-600' : 'text-rose-600'}`}>
+                          {isStrongPassword ? 'Strong' : passwordStrengthScore >= 2 ? 'Medium' : 'Weak'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1">
+                        {[0, 1, 2, 3].map((idx) => (
+                          <div
+                            key={idx}
+                            className={`h-1.5 rounded-full ${idx < passwordStrengthScore ? (isStrongPassword ? 'bg-emerald-500' : 'bg-amber-500') : 'bg-zinc-200'}`}
+                          />
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {passwordRules.map((rule) => (
+                          <div key={rule.label} className={`flex items-center gap-1.5 text-[9.5px] font-bold ${rule.valid ? 'text-emerald-600' : 'text-zinc-500'}`}>
+                            {rule.valid ? <CheckCircle2 size={11} /> : <AlertCircle size={11} />}
+                            <span>{rule.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-0.5">
@@ -517,8 +559,8 @@ export default function RegisterPage() {
                       required
                       value={regConfirmPassword}
                       onChange={(e) => setRegConfirmPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full pl-4 pr-12 py-2.5 bg-white border border-zinc-200 rounded-2xl text-zinc-900 placeholder-zinc-400 text-xs font-semibold focus:outline-hidden focus:border-zinc-955 transition-colors font-semibold"
+                      placeholder="Password123!"
+                      className="w-full pl-4 pr-12 py-2.5 bg-white border border-zinc-200 rounded-2xl text-zinc-900 placeholder-zinc-400 text-xs font-semibold focus:outline-hidden focus:border-zinc-950 transition-colors font-semibold"
                     />
                     <button
                       type="button"
@@ -528,12 +570,17 @@ export default function RegisterPage() {
                       {showRegConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
+                  {regConfirmPassword && (
+                    <p className={`mt-1 text-[9.5px] font-bold ${passwordsMatch ? 'text-emerald-600' : 'text-rose-600'}`}>
+                      {passwordsMatch ? 'Passwords match.' : 'Passwords do not match.'}
+                    </p>
+                  )}
                 </div>
 
                 <button
                   type="submit"
-                  disabled={regLoading}
-                  className="w-full py-2.5 bg-zinc-955 hover:bg-zinc-900 text-white font-extrabold rounded-2xl text-xs transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer border-none shadow-xs mt-3.5 disabled:opacity-50"
+                  disabled={regLoading || !isStrongPassword || !passwordsMatch}
+                  className="w-full py-2.5 bg-zinc-950 hover:bg-zinc-900 text-white font-extrabold rounded-2xl text-xs transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer border-none shadow-xs mt-3.5 disabled:opacity-90 disabled:cursor-not-allowed"
                 >
                   {regLoading ? 'Registering...' : 'Create Account'}
                   <ChevronRight className="w-4 h-4" />
@@ -543,7 +590,7 @@ export default function RegisterPage() {
               {/* Divider continue with */}
               <div className="relative my-4 text-center select-none">
                 <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-zinc-150" /></div>
-                <span className="relative bg-white px-3 text-[9px] font-black text-zinc-405 uppercase tracking-widest">Or continue with</span>
+                <span className="relative bg-white px-3 text-[9px] font-black text-zinc-700 uppercase tracking-widest">Or continue with</span>
               </div>
 
               {/* Social OAuth Buttons */}
@@ -570,7 +617,7 @@ export default function RegisterPage() {
                 Already have an account?{' '}
                 <button
                   onClick={() => navigate('/login')}
-                  className="text-zinc-955 hover:text-zinc-850 font-bold transition-colors border-none bg-transparent cursor-pointer ml-1"
+                  className="text-zinc-950 hover:text-zinc-850 font-bold transition-colors border-none bg-transparent cursor-pointer ml-1"
                 >
                   Sign In
                 </button>
@@ -585,3 +632,4 @@ export default function RegisterPage() {
     </div>
   );
 }
+

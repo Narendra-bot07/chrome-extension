@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { 
@@ -57,7 +57,9 @@ function DashboardContent() {
     subscription_status: 'none',
     resumes_tailored: 0,
     applications_tracked: 0,
-    avg_ats_score: 0
+    avg_ats_score: 0,
+    downloads: 0,
+    rejected: 0
   });
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
@@ -120,6 +122,7 @@ function DashboardContent() {
   const interviewsCount = applications.filter(a => a && ['Interview', 'Final Round'].includes(a.current_stage)).length;
   const offersCount = applications.filter(a => a && ['Offer', 'Accepted'].includes(a.current_stage)).length;
   const acceptedCount = applications.filter(a => a && a.current_stage === 'Accepted').length;
+  const rejectedCount = metrics.rejected ?? applications.filter(a => a && a.current_stage === 'Rejected').length;
 
   const successRate = appsSubmitted === 0 ? 0 : Math.round((acceptedCount / appsSubmitted) * 100);
 
@@ -144,10 +147,49 @@ function DashboardContent() {
     'Archived': applications.filter(a => a && a.current_stage === 'Archived').length
   };
 
+  const pipelineStages = ['Ready To Apply', 'Applied', 'Assessment', 'Recruiter', 'Interview', 'Final Round', 'Offer', 'Accepted'];
+  const pipelineRows = pipelineStages.map((stage, idx) => {
+    const count = statusCounts[stage] || 0;
+    const previousCount = idx === 0 ? jobsTracked : (statusCounts[pipelineStages[idx - 1]] || 0);
+    const percent = previousCount > 0 ? Math.round((count / previousCount) * 100) : 0;
+    return {
+      stage,
+      count,
+      percent: Math.min(100, percent),
+      color: 'bg-[#00bda5]',
+      label: idx === 0 ? 'of tracked' : 'from previous'
+    };
+  });
+  const terminalPipelineRows = [
+    {
+      stage: 'Rejected',
+      count: statusCounts['Rejected'] || 0,
+      percent: jobsTracked > 0 ? Math.round(((statusCounts['Rejected'] || 0) / jobsTracked) * 100) : 0,
+      color: 'bg-rose-500',
+      label: 'of tracked'
+    },
+    {
+      stage: 'Archived',
+      count: statusCounts['Archived'] || 0,
+      percent: jobsTracked > 0 ? Math.round(((statusCounts['Archived'] || 0) / jobsTracked) * 100) : 0,
+      color: 'bg-zinc-400',
+      label: 'of tracked'
+    }
+  ];
+  const fullPipelineRows = [...pipelineRows, ...terminalPipelineRows];
+
+  const creditsRemaining = Number(metrics.credits_remaining ?? 0);
+  const creditsUsed = Number(metrics.credits_used ?? 0);
+  const hasUnlimitedCredits = creditsRemaining === -1;
+  const totalCredits = hasUnlimitedCredits ? 0 : creditsRemaining + creditsUsed;
+  const creditsUsedPercent = hasUnlimitedCredits || totalCredits <= 0
+    ? 0
+    : Math.min(100, Math.round((creditsUsed / totalCredits) * 100));
+
   // Company application rates
   const companyCounts = applications.reduce((acc, app) => {
     if (!app) return acc;
-    const company = app.company_name || 'Unknown';
+    const company = app.company_name || 'Unknown Company';
     if (!acc[company]) {
       acc[company] = { apps: 0, interviews: 0, offers: 0, accepted: 0 };
     }
@@ -170,8 +212,8 @@ function DashboardContent() {
   // Role targeted distributions
   const roleCounts = applications.reduce((acc, app) => {
     if (!app) return acc;
-    const role = app.job_title || 'Software Engineer';
-    let match = 'Software Engineer';
+    const role = app.job_title || 'Untitled Role';
+    let match = 'Other Roles';
     if (role.toLowerCase().includes('backend')) match = 'Backend Engineer';
     else if (role.toLowerCase().includes('frontend')) match = 'Frontend Engineer';
     else if (role.toLowerCase().includes('data')) match = 'Data Engineer';
@@ -223,22 +265,21 @@ function DashboardContent() {
       list.push(`You have ${statusCounts['Offer']} offers awaiting response.`);
     }
     
-    // Default fallback insights
     if (list.length === 0) {
-      list.push("Keep tailoring resumes to fit job descriptions. ATS score averages are strong.");
-      list.push("Follow up with recruiters within 7 days of applying to stay on their radar.");
+      list.push("No productivity insights yet. Track applications and update stages to generate insights.");
     }
     return list;
   };
 
   const insights = generateInsights();
 
-  // Dynamic goal progression counts
-  const goals = {
-    dailyTailored: { cur: tailoredToday, target: 3 },
-    dailyApplied: { cur: applications.filter(a => a && a.current_stage === 'Applied' && a.last_activity && new Date(a.last_activity) >= startOfToday).length, target: 5 },
-    weeklyApplied: { cur: applications.filter(a => a && a.current_stage === 'Applied' && a.last_activity && new Date(a.last_activity) >= new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)).length, target: 20 }
-  };
+  const appliedToday = applications.filter(a => a && a.current_stage === 'Applied' && a.last_activity && new Date(a.last_activity) >= startOfToday).length;
+  const appliedThisWeek = applications.filter(a => a && a.current_stage === 'Applied' && a.last_activity && new Date(a.last_activity) >= new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)).length;
+  const activitySnapshots = [
+    { label: 'Tailored Today', value: tailoredToday, detail: 'Applications created today' },
+    { label: 'Applied Today', value: appliedToday, detail: 'Moved to Applied today' },
+    { label: 'Applied This Week', value: appliedThisWeek, detail: 'Moved to Applied in the last 7 days' }
+  ];
 
   // Smart Reminders
   const generateReminders = () => {
@@ -256,9 +297,6 @@ function DashboardContent() {
       }
     });
     
-    if (list.length === 0) {
-      list.push({ message: 'Upload new vacancies to search tracker', type: 'info' });
-    }
     return list.slice(0, 5);
   };
 
@@ -374,6 +412,20 @@ function DashboardContent() {
           </div>
         </div>
 
+        {/* Card 5: Rejected */}
+        <div className="bg-white dark:bg-zinc-900/30 border border-zinc-200 dark:border-zinc-850 rounded-2xl p-4.5 flex flex-col justify-between h-32 shadow-xs select-none">
+          <div className="flex items-center justify-between">
+            <span className="text-zinc-400 dark:text-zinc-500 text-[8.5px] font-black uppercase tracking-widest">Rejected</span>
+            <AlertCircle className="w-3.5 h-3.5 text-rose-500" />
+          </div>
+          <div>
+            <div className="text-2xl font-black text-zinc-955 dark:text-zinc-50 leading-none">
+              {rejectedCount}
+            </div>
+            <p className="text-[8.5px] text-zinc-455 dark:text-zinc-500 mt-2.5 font-black uppercase tracking-wider">Closed as rejected</p>
+          </div>
+        </div>
+
         {/* Card 5: Offers */}
         <div className="bg-white dark:bg-zinc-900/30 border border-zinc-200 dark:border-zinc-850 rounded-2xl p-4.5 flex flex-col justify-between h-32 shadow-xs select-none">
           <div className="flex items-center justify-between">
@@ -443,17 +495,17 @@ function DashboardContent() {
           </div>
 
           <div className="space-y-2.5 font-sans">
-            {Object.entries(statusCounts).slice(0, 8).map(([stage, count], idx) => {
-              const maxCount = Math.max(...Object.values(statusCounts).slice(0, 8)) || 1;
-              const percent = Math.round((count / maxCount) * 100);
+            {fullPipelineRows.map(({ stage, count, percent, color, label }) => {
               return (
                 <div key={stage} className="space-y-1">
                   <div className="flex justify-between items-center text-[9px] font-bold text-zinc-650 dark:text-zinc-350">
                     <span className="uppercase tracking-wider">{stage}</span>
-                    <span className="font-extrabold">{count} applications ({percent}%)</span>
+                    <span className="font-extrabold">
+                      {count} applications ({percent}% {label})
+                    </span>
                   </div>
                   <div className="h-2 w-full bg-zinc-100 dark:bg-zinc-900 rounded-full overflow-hidden">
-                    <div style={{ width: `${percent}%` }} className="bg-[#00bda5] h-full rounded-full transition-all duration-500" />
+                    <div style={{ width: `${Math.min(100, percent)}%` }} className={`${color} h-full rounded-full transition-all duration-500`} />
                   </div>
                 </div>
               );
@@ -465,34 +517,37 @@ function DashboardContent() {
         <div className="p-5 border border-zinc-200 dark:border-zinc-900 rounded-3xl bg-zinc-50/10 dark:bg-zinc-900/5 flex flex-col justify-between gap-5">
           <div>
             <h3 className="text-xs font-black uppercase tracking-widest text-zinc-955 dark:text-zinc-50">Credits remaining</h3>
-            <div className="text-3xl font-bold tracking-tight mt-2">{metrics.credits_remaining === -1 ? '∞' : metrics.credits_remaining}</div>
+            <div className="text-3xl font-bold tracking-tight mt-2">{hasUnlimitedCredits ? 'Unlimited' : creditsRemaining}</div>
+            <p className="text-[9px] text-zinc-450 dark:text-zinc-550 font-bold uppercase mt-1">
+              {hasUnlimitedCredits ? `${creditsUsed} used · unlimited plan` : `${creditsUsed} used / ${totalCredits} total`}
+            </p>
           </div>
 
-          {/* Premium status bar */}
+          {/* Credits usage + outcome summary */}
           <div className="space-y-4 font-sans select-none">
-            {/* Multi color bar indicator */}
-            <div className="h-3 w-full bg-zinc-100 dark:bg-zinc-900 rounded-full flex overflow-hidden">
-              <div style={{ width: `${jobsTracked === 0 ? 33 : (statusCounts['Accepted'] / jobsTracked) * 100}%` }} className="bg-emerald-500 h-full" />
-              <div style={{ width: `${jobsTracked === 0 ? 33 : (statusCounts['Interview'] / jobsTracked) * 100}%` }} className="bg-amber-500 h-full" />
-              <div style={{ width: `${jobsTracked === 0 ? 34 : (statusCounts['Rejected'] / jobsTracked) * 100}%` }} className="bg-rose-500 h-full" />
+            <div className="h-3 w-full bg-zinc-100 dark:bg-zinc-900 rounded-full overflow-hidden">
+              <div
+                style={{ width: `${hasUnlimitedCredits ? 100 : creditsUsedPercent}%` }}
+                className={`h-full rounded-full transition-all duration-500 ${hasUnlimitedCredits ? 'bg-[#00bda5]' : 'bg-violet-500'}`}
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3 pt-2">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 bg-violet-500 rounded-full" />
+                <span className="text-[9px] font-bold text-zinc-500 uppercase">Used ({creditsUsed})</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 bg-zinc-300 dark:bg-zinc-700 rounded-full" />
+                <span className="text-[9px] font-bold text-zinc-500 uppercase">Remaining ({hasUnlimitedCredits ? 'Unlimited' : creditsRemaining})</span>
+              </div>
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 bg-emerald-500 rounded-full" />
                 <span className="text-[9px] font-bold text-zinc-500 uppercase">Accepted ({statusCounts['Accepted']})</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="w-2 h-2 bg-amber-500 rounded-full" />
-                <span className="text-[9px] font-bold text-zinc-500 uppercase">Interview ({statusCounts['Interview']})</span>
-              </div>
-              <div className="flex items-center gap-2">
                 <span className="w-2 h-2 bg-rose-500 rounded-full" />
                 <span className="text-[9px] font-bold text-zinc-500 uppercase">Rejected ({statusCounts['Rejected']})</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 bg-zinc-400 rounded-full" />
-                <span className="text-[9px] font-bold text-zinc-500 uppercase">Archived ({statusCounts['Archived']})</span>
               </div>
             </div>
           </div>
@@ -582,48 +637,21 @@ function DashboardContent() {
 
       </div>
 
-      {/* 5. Goals & Target Progress Tracking */}
+      {/* 5. Search Activity Snapshot */}
       <div className="p-5 border border-zinc-200 dark:border-zinc-900 rounded-3xl bg-zinc-50/10 dark:bg-zinc-900/5 select-none">
         <div className="mb-4">
-          <h3 className="text-xs font-black uppercase tracking-widest text-zinc-900 dark:text-zinc-50">Search Goals Progress</h3>
-          <p className="text-[9px] text-zinc-450 dark:text-zinc-555 font-bold uppercase mt-0.5">Automatically tracked goal targets based on your search activity</p>
+          <h3 className="text-xs font-black uppercase tracking-widest text-zinc-900 dark:text-zinc-50">Search Activity Snapshot</h3>
+          <p className="text-[9px] text-zinc-450 dark:text-zinc-555 font-bold uppercase mt-0.5">Live activity counts from your tracked applications</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5 font-sans">
-          
-          <div className="p-4 bg-white dark:bg-zinc-900/40 border border-zinc-150 dark:border-zinc-850 rounded-2xl space-y-2">
-            <span className="text-[9px] font-black uppercase tracking-wider text-zinc-455 block">Daily Tailored Resumes</span>
-            <div className="flex justify-between text-xs font-extrabold">
-              <span className="text-[#00bda5]">{goals.dailyTailored.cur} / {goals.dailyTailored.target}</span>
-              <span>{Math.min(100, Math.round((goals.dailyTailored.cur / goals.dailyTailored.target) * 100))}%</span>
+          {activitySnapshots.map((item) => (
+            <div key={item.label} className="p-4 bg-white dark:bg-zinc-900/40 border border-zinc-150 dark:border-zinc-850 rounded-2xl space-y-2">
+              <span className="text-[9px] font-black uppercase tracking-wider text-zinc-455 block">{item.label}</span>
+              <div className="text-2xl font-black text-zinc-955 dark:text-zinc-50">{item.value}</div>
+              <p className="text-[9px] text-zinc-455 dark:text-zinc-500 font-black uppercase tracking-wider">{item.detail}</p>
             </div>
-            <div className="h-2 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
-              <div style={{ width: `${Math.min(100, (goals.dailyTailored.cur / goals.dailyTailored.target) * 100)}%` }} className="bg-[#00bda5] h-full" />
-            </div>
-          </div>
-
-          <div className="p-4 bg-white dark:bg-zinc-900/40 border border-zinc-150 dark:border-zinc-850 rounded-2xl space-y-2">
-            <span className="text-[9px] font-black uppercase tracking-wider text-zinc-455 block">Daily Applications Submitted</span>
-            <div className="flex justify-between text-xs font-extrabold">
-              <span className="text-[#00bda5]">{goals.dailyApplied.cur} / {goals.dailyApplied.target}</span>
-              <span>{Math.min(100, Math.round((goals.dailyApplied.cur / goals.dailyApplied.target) * 100))}%</span>
-            </div>
-            <div className="h-2 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
-              <div style={{ width: `${Math.min(100, (goals.dailyApplied.cur / goals.dailyApplied.target) * 100)}%` }} className="bg-[#00bda5] h-full" />
-            </div>
-          </div>
-
-          <div className="p-4 bg-white dark:bg-zinc-900/40 border border-zinc-150 dark:border-zinc-850 rounded-2xl space-y-2">
-            <span className="text-[9px] font-black uppercase tracking-wider text-zinc-455 block">Weekly Target Applications</span>
-            <div className="flex justify-between text-xs font-extrabold">
-              <span className="text-[#00bda5]">{goals.weeklyApplied.cur} / {goals.weeklyApplied.target}</span>
-              <span>{Math.min(100, Math.round((goals.weeklyApplied.cur / goals.weeklyApplied.target) * 100))}%</span>
-            </div>
-            <div className="h-2 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
-              <div style={{ width: `${Math.min(100, (goals.weeklyApplied.cur / goals.weeklyApplied.target) * 100)}%` }} className="bg-[#00bda5] h-full" />
-            </div>
-          </div>
-
+          ))}
         </div>
       </div>
 
@@ -686,8 +714,8 @@ function DashboardContent() {
                     <td className="py-2.5">{app.company_name}</td>
                     <td className="py-2.5">{app.job_title}</td>
                     <td className="py-2.5 text-center text-[#00bda5] uppercase text-[9px] font-black">{app.current_stage}</td>
-                    <td className="py-2.5 text-center">{app.ats_score}%</td>
-                    <td className="py-2.5 text-center">{app.resume_version || 'v1'}</td>
+                    <td className="py-2.5 text-center">{app.ats_score != null ? `${Math.round(app.ats_score)}%` : 'â€”'}</td>
+                    <td className="py-2.5 text-center">{app.resume_version || 'â€”'}</td>
                     <td className="py-2.5 text-center text-[9px] text-zinc-455">{formatSafeDate(app.last_activity)}</td>
                     <td className="py-2.5 text-right">
                       <button
@@ -722,3 +750,4 @@ export default function DashboardPage() {
     </DashboardErrorBoundary>
   );
 }
+

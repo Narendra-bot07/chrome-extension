@@ -57,10 +57,10 @@ class JobTrackerErrorBoundary extends React.Component {
           <h2 className="text-base font-black uppercase text-zinc-950 dark:text-zinc-50 tracking-wider">
             Job Tracker Crash Intercepted
           </h2>
-          <p className="text-xs text-zinc-550 max-w-md mt-2 font-semibold">
+          <p className="text-xs text-zinc-500 max-w-md mt-2 font-semibold">
             {this.state.error?.toString() || "An unexpected rendering crash occurred."}
           </p>
-          <pre className="text-[10px] text-rose-600 bg-rose-50 dark:bg-rose-955/20 border border-rose-200 dark:border-rose-955/40 p-4 rounded-xl max-w-lg overflow-x-auto mt-4 text-left max-h-[200px] w-full font-mono">
+          <pre className="text-[10px] text-rose-600 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-950/40 p-4 rounded-xl max-w-lg overflow-x-auto mt-4 text-left max-h-[200px] w-full font-mono">
             {this.state.error?.stack}
           </pre>
           <button
@@ -393,10 +393,10 @@ Best regards,
             ? 'border-[#00bda5] shadow-xs bg-white dark:bg-zinc-900/40' 
             : isCompletedLinear
             ? 'border-emerald-500/35 bg-emerald-500/5 dark:bg-emerald-950/10'
-            : 'border-zinc-200 dark:border-zinc-900 hover:border-zinc-350 dark:hover:border-zinc-800 bg-white dark:bg-zinc-900/40'
+            : 'border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-800 bg-white dark:bg-zinc-900/40'
         } ${isOver ? 'ring-2 ring-[#00bda5] border-transparent bg-emerald-500/5' : ''}`}
       >
-        <div className="flex items-center justify-between pb-1.5 mb-2 border-b border-zinc-150 dark:border-zinc-900/60 select-none">
+        <div className="flex items-center justify-between pb-1.5 mb-2 border-b border-zinc-200 dark:border-zinc-800/60 select-none">
           <div className="flex items-center gap-1.5 min-w-0 w-full justify-between">
             <div className="flex items-center gap-1.5 min-w-0">
               {showAsCompleted ? (
@@ -412,7 +412,7 @@ Best regards,
                 showAsCompleted ? 'text-emerald-600 dark:text-emerald-500' :
                 showAsRejected ? 'text-rose-600 dark:text-rose-500' :
                 showAsArchived ? 'text-zinc-600 dark:text-zinc-400' :
-                'text-zinc-955 dark:text-zinc-50'
+                'text-zinc-950 dark:text-zinc-50'
               }`}>
                 {stage.label}
               </span>
@@ -442,12 +442,12 @@ Best regards,
             onDragStart={(e) => handleDragStart(e, selectedApp?.id)}
             onDragEnd={handleDragEnd}
             onClick={(e) => e.stopPropagation()}
-            className="p-2.5 bg-zinc-55/40 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-855 rounded-xl select-none space-y-1.5 cursor-grab active:cursor-grabbing hover:shadow-3xs transition-all relative z-10 text-zinc-800 dark:text-zinc-200"
+            className="p-2.5 bg-zinc-50/40 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-855 rounded-xl select-none space-y-1.5 cursor-grab active:cursor-grabbing hover:shadow-3xs transition-all relative z-10 text-zinc-800 dark:text-zinc-200"
           >
-            <h5 className="text-[10px] font-black text-zinc-955 dark:text-zinc-50 leading-tight truncate">
+            <h5 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 leading-tight truncate">
               {selectedApp?.job_title}
             </h5>
-            <p className="text-[8.5px] text-zinc-505 font-bold truncate leading-none">
+            <p className="text-[8.5px] text-zinc-500 font-bold truncate leading-none">
               {selectedApp?.company_name}
             </p>
             
@@ -457,7 +457,7 @@ Best regards,
             </div>
           </div>
         ) : (
-          <div className="border border-dashed border-zinc-200 dark:border-zinc-850 rounded-xl py-4 flex items-center justify-center select-none bg-zinc-55/10 dark:bg-zinc-900/10">
+          <div className="border border-dashed border-zinc-200 dark:border-zinc-850 rounded-xl py-4 flex items-center justify-center select-none bg-zinc-50/10 dark:bg-zinc-900/10">
             <span className="text-[8px] font-black text-zinc-400 uppercase tracking-widest leading-none">
               Drop Here
             </span>
@@ -468,16 +468,16 @@ Best regards,
   };
 
   return (
-    <div className="flex-1 flex gap-6 min-h-0 bg-white dark:bg-zinc-955 text-zinc-800 dark:text-zinc-200 select-none">
+    <div className="flex-1 flex gap-6 min-h-0 bg-transparent text-zinc-800 dark:text-zinc-200 select-none">
       
       {/* LEFT PANEL: minimal searchable applications browser */}
-      <div className="w-[30%] min-w-[300px] max-w-[330px] flex flex-col h-full border-r border-zinc-200 dark:border-zinc-900 pr-6 shrink-0 min-h-0 select-none">
+      <div className="w-[30%] min-w-[300px] max-w-[330px] flex flex-col h-full border-r border-zinc-200 dark:border-zinc-800 pr-6 shrink-0 min-h-0 select-none">
         
-        <div className="border-b border-zinc-200 dark:border-zinc-900 pb-4 mb-4 shrink-0">
-          <h1 className="text-lg font-black tracking-tight text-zinc-900 dark:text-zinc-55 flex items-center gap-2">
+        <div className="border-b border-zinc-200 dark:border-zinc-800 pb-4 mb-4 shrink-0">
+          <h1 className="text-lg font-black tracking-tight text-zinc-900 dark:text-zinc-50 flex items-center gap-2">
             <Briefcase size={18} className="text-[#00bda5]" /> Job Tracker
           </h1>
-          <p className="text-[9px] text-zinc-455 font-bold uppercase tracking-widest mt-0.5">
+          <p className="text-[9px] text-zinc-500 dark:text-zinc-400 font-bold uppercase tracking-widest mt-0.5">
             Lightweight Directory Browser
           </p>
         </div>
@@ -489,7 +489,7 @@ Best regards,
             placeholder="Search applications..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full text-xs font-semibold pl-9 pr-3 py-2 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-900 rounded-xl focus:outline-hidden focus:border-[#00bda5]"
+            className="w-full text-xs font-semibold pl-9 pr-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 rounded-xl focus:outline-hidden focus:border-[#00bda5]"
           />
         </div>
 
@@ -501,7 +501,7 @@ Best regards,
               className={`px-2.5 py-1.5 rounded-lg text-[8.5px] font-black uppercase tracking-wider transition cursor-pointer border-none ${
                 filterTab === tab
                   ? 'bg-[#00bda5]/10 text-[#00bda5]'
-                  : 'text-zinc-455 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 bg-transparent'
+                  : 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 bg-transparent'
               }`}
             >
               {tab}
@@ -509,7 +509,7 @@ Best regards,
           ))}
         </div>
 
-        <div className="flex justify-between items-center text-[8.5px] font-black text-zinc-455 uppercase tracking-widest mb-3 shrink-0">
+        <div className="flex justify-between items-center text-[8.5px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-3 shrink-0">
           <span>Directory ({sortedApps.length})</span>
           <select
             value={sortBy}
@@ -531,22 +531,22 @@ Best regards,
                 <div
                   key={app.id}
                   onClick={() => setSelectedAppId(app.id)}
-                  className={`p-4 bg-white dark:bg-zinc-900/40 border rounded-2xl cursor-pointer hover:border-zinc-350 dark:hover:border-zinc-800 transition relative flex gap-3.5 ${
+                  className={`p-4 bg-white dark:bg-zinc-950 border rounded-2xl cursor-pointer hover:border-zinc-400 dark:hover:border-zinc-700 transition relative flex gap-3.5 ${
                     isSelected 
-                      ? 'ring-2 ring-[#00bda5] border-transparent bg-emerald-500/5 dark:bg-emerald-950/10 shadow-sm' 
-                      : 'border-zinc-200 dark:border-zinc-900 shadow-3xs'
+                      ? 'ring-2 ring-[#00bda5] border-transparent bg-emerald-50 dark:bg-emerald-950/20 shadow-sm' 
+                      : 'border-zinc-200 dark:border-zinc-800 shadow-sm'
                   }`}
                 >
                   {renderLogo(app.company_name)}
                   <div className="min-w-0 flex-1 space-y-1">
-                    <h4 className="text-[11.5px] font-black text-zinc-955 dark:text-zinc-55 truncate leading-tight">
+                    <h4 className="text-[11.5px] font-black text-zinc-950 dark:text-zinc-50 truncate leading-tight">
                       {app.job_title}
                     </h4>
-                    <p className="text-[10px] text-zinc-505 dark:text-zinc-455 font-bold truncate">
+                    <p className="text-[10px] text-zinc-500 dark:text-zinc-500 font-bold truncate">
                       {app.company_name}
                     </p>
 
-                    <div className="flex justify-between items-center text-[8px] text-zinc-400 font-black uppercase pt-2 mt-2 border-t border-zinc-100 dark:border-zinc-900/50">
+                    <div className="flex justify-between items-center text-[8px] text-zinc-400 font-black uppercase pt-2 mt-2 border-t border-zinc-100 dark:border-zinc-800/50">
                       <span className="text-[#00bda5] font-black">
                         {app.current_stage}
                       </span>
@@ -562,9 +562,9 @@ Best regards,
               );
             })
           ) : (
-            <div className="h-44 border border-dashed border-zinc-200 dark:border-zinc-900 rounded-2xl flex flex-col items-center justify-center p-4 text-center">
+            <div className="h-44 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-2xl flex flex-col items-center justify-center p-4 text-center">
               <AlertCircle size={20} className="text-zinc-400 mb-2" />
-              <p className="text-[10px] text-zinc-455 font-black uppercase tracking-wider leading-relaxed">
+              <p className="text-[10px] text-zinc-500 font-black uppercase tracking-wider leading-relaxed">
                 No tracked applications found.
               </p>
             </div>
@@ -574,12 +574,12 @@ Best regards,
       </div>
 
       {/* Placeholder layout */}
-      <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-zinc-50/10 dark:bg-zinc-900/10 rounded-3xl border border-dashed border-zinc-200 dark:border-zinc-900 self-stretch my-1 select-none">
-        <Building size={32} className="text-zinc-350 dark:text-zinc-800 mb-2.5 animate-pulse" />
-        <h3 className="text-xs font-black uppercase text-zinc-955 dark:text-zinc-200 tracking-wider">
+      <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-zinc-50/10 dark:bg-zinc-900/10 rounded-3xl border border-dashed border-zinc-200 dark:border-zinc-800 self-stretch my-1 select-none">
+        <Building size={32} className="text-zinc-400 dark:text-zinc-600 mb-2.5 animate-pulse" />
+        <h3 className="text-xs font-black uppercase text-zinc-950 dark:text-zinc-200 tracking-wider">
           Launch Orchestration Pipeline
         </h3>
-        <p className="text-[10px] text-zinc-455 font-bold max-w-sm mt-1 uppercase tracking-wider leading-relaxed">
+        <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold max-w-sm mt-1 uppercase tracking-wider leading-relaxed">
           Click on any application card in the left list directory to open the large centered modal and visualize the Databricks/Airflow hiring pipeline.
         </p>
       </div>
@@ -591,10 +591,10 @@ Best regards,
           {/* Backdrop Close intercept */}
           <div className="absolute inset-0 z-0" onClick={() => setSelectedAppId(null)} />
 
-          <div className="w-[94vw] h-[92vh] bg-white dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-900 rounded-3xl shadow-2xl flex flex-col overflow-hidden relative z-10 animate-scaleUp">
+          <div className="w-[94vw] h-[92vh] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-2xl flex flex-col overflow-hidden relative z-10 animate-scaleUp">
             
             {/* Modal Header */}
-            <div className="p-6 border-b border-zinc-200 dark:border-zinc-900 flex justify-between items-start shrink-0 select-none bg-zinc-50/20 dark:bg-zinc-950/20">
+            <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-start shrink-0 select-none bg-zinc-50/20 dark:bg-zinc-950/20">
               <div className="flex gap-4 items-start min-w-0">
                 {renderLogo(selectedApp?.company_name)}
                 <div className="min-w-0 space-y-1">
@@ -602,22 +602,22 @@ Best regards,
                     <span className="text-[9px] bg-[#00bda5]/10 text-[#00bda5] px-2 py-0.5 rounded font-black uppercase tracking-wider border border-[#00bda5]/20">
                       {selectedApp?.current_stage}
                     </span>
-                    <span className="text-[9px] bg-zinc-150/40 dark:bg-zinc-900 text-zinc-550 px-2 py-0.5 rounded font-black uppercase border border-zinc-200/50 dark:border-zinc-800">
+                    <span className="text-[9px] bg-zinc-200/40 dark:bg-zinc-900 text-zinc-500 px-2 py-0.5 rounded font-black uppercase border border-zinc-200/50 dark:border-zinc-800">
                       ATS {Math.round(selectedApp?.ats_score || 85)}%
                     </span>
-                    <span className="text-[9px] bg-zinc-150/40 dark:bg-zinc-900 text-zinc-550 px-2 py-0.5 rounded font-black uppercase border border-zinc-200/50 dark:border-zinc-800">
+                    <span className="text-[9px] bg-zinc-200/40 dark:bg-zinc-900 text-zinc-500 px-2 py-0.5 rounded font-black uppercase border border-zinc-200/50 dark:border-zinc-800">
                       Res: {selectedApp?.resume_version || 'v1'}
                     </span>
                     {selectedApp?.location && (
-                      <span className="text-[9px] text-zinc-455 font-bold flex items-center gap-1">
+                      <span className="text-[9px] text-zinc-500 font-bold flex items-center gap-1">
                         <MapPin size={11} className="text-zinc-400" /> {selectedApp?.location}
                       </span>
                     )}
                   </div>
-                  <h2 className="text-base sm:text-lg font-black text-zinc-955 dark:text-zinc-55 leading-tight truncate">
+                  <h2 className="text-base sm:text-lg font-black text-zinc-950 dark:text-zinc-50 leading-tight truncate">
                     {selectedApp?.job_title}
                   </h2>
-                  <p className="text-xs font-bold text-zinc-550 flex items-center gap-1.5 mt-0.5">
+                  <p className="text-xs font-bold text-zinc-500 flex items-center gap-1.5 mt-0.5">
                     <Building size={13} /> {selectedApp?.company_name} • Applied {formatSafeDate(selectedApp?.created_at)}
                   </p>
                 </div>
@@ -629,14 +629,14 @@ Best regards,
                     href={selectedApp?.job_url}
                     target="_blank"
                     rel="noreferrer"
-                    className="p-2 border border-zinc-200 dark:border-zinc-900 hover:border-zinc-350 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-650 dark:text-zinc-400 font-extrabold text-[9px] uppercase tracking-wider rounded-xl transition flex items-center gap-1 cursor-pointer select-none bg-white dark:bg-transparent"
+                    className="p-2 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-600 dark:text-zinc-400 font-extrabold text-[9px] uppercase tracking-wider rounded-xl transition flex items-center gap-1 cursor-pointer select-none bg-white dark:bg-transparent"
                   >
                     View Source <ExternalLink size={11} />
                   </a>
                 )}
                 <button
                   onClick={() => handleDeleteApp(selectedApp?.id)}
-                  className="p-2 border border-rose-200 dark:border-rose-955/40 hover:bg-rose-50 dark:hover:bg-rose-955/20 text-rose-600 rounded-xl transition cursor-pointer bg-white dark:bg-transparent"
+                  className="p-2 border border-rose-200 dark:border-rose-950/40 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-600 rounded-xl transition cursor-pointer bg-white dark:bg-transparent"
                 >
                   <Trash2 size={15} />
                 </button>
@@ -650,7 +650,7 @@ Best regards,
             </div>
 
             {/* Modal horizontal tabs */}
-            <div className="flex px-6 border-b border-zinc-200 dark:border-zinc-900 shrink-0 select-none bg-zinc-50/50 dark:bg-zinc-900/10">
+            <div className="flex px-6 border-b border-zinc-200 dark:border-zinc-800 shrink-0 select-none bg-zinc-50/50 dark:bg-zinc-900/10">
               {['Workflow', 'Overview', 'Timeline', 'Documents', 'Recruiter', 'Notes', 'History'].map(tab => (
                 <button
                   key={tab}
@@ -661,7 +661,7 @@ Best regards,
                   className={`px-4 py-3 text-[10px] font-black uppercase tracking-wider transition-all border-b-2 border-transparent cursor-pointer bg-transparent ${
                     workspaceTab === tab
                       ? 'border-[#00bda5] text-[#00bda5]'
-                      : 'text-zinc-455 hover:text-zinc-800 dark:hover:text-zinc-200'
+                      : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
                   }`}
                 >
                   {tab}
@@ -718,15 +718,15 @@ Best regards,
               {workspaceTab === 'Overview' && (
                 <div className="space-y-6 animate-fadeIn select-text">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                    <div className="p-5 border border-zinc-200 dark:border-zinc-900 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-1">
+                    <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-1">
                       <span className="text-[8.5px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest block">Current Stage</span>
                       <span className="text-base font-black text-[#00bda5]">{selectedApp?.current_stage}</span>
                     </div>
-                    <div className="p-5 border border-zinc-200 dark:border-zinc-900 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-1">
+                    <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-1">
                       <span className="text-[8.5px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest block">ATS Rating Match</span>
                       <span className="text-base font-black text-[#00bda5]">{Math.round(selectedApp?.ats_score || 85)}%</span>
                     </div>
-                    <div className="p-5 border border-zinc-200 dark:border-zinc-900 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-1">
+                    <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-1">
                       <span className="text-[8.5px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest block">Last Activity Logged</span>
                       <span className="text-base font-black text-zinc-700 dark:text-zinc-300">
                         {formatSafeDate(selectedApp?.last_activity)}
@@ -735,16 +735,16 @@ Best regards,
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
-                    <div className="p-5 border border-zinc-200 dark:border-zinc-900 rounded-2xl space-y-3">
-                      <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-955 dark:text-zinc-55">General remarks</h4>
-                      <p className="text-xs text-zinc-550 leading-relaxed font-semibold whitespace-pre-wrap">
+                    <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl space-y-3">
+                      <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-950 dark:text-zinc-50">General remarks</h4>
+                      <p className="text-xs text-zinc-500 leading-relaxed font-semibold whitespace-pre-wrap">
                         {selectedApp?.notes || "No general remarks recorded yet. Update logs inside the 'Notes' tab."}
                       </p>
                     </div>
 
-                    <div className="p-5 border border-zinc-200 dark:border-zinc-900 rounded-2xl space-y-3">
-                      <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-955 dark:text-zinc-55">Recruiter Details</h4>
-                      <p className="text-xs text-zinc-550 leading-relaxed font-semibold whitespace-pre-wrap">
+                    <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl space-y-3">
+                      <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-950 dark:text-zinc-50">Recruiter Details</h4>
+                      <p className="text-xs text-zinc-500 leading-relaxed font-semibold whitespace-pre-wrap">
                         {selectedApp?.recruiter_notes || "No recruiter contact parameters logged. Update contact fields inside the 'Recruiter' tab."}
                       </p>
                     </div>
@@ -755,23 +755,23 @@ Best regards,
               {/* TAB 3: TIMELINE */}
               {workspaceTab === 'Timeline' && (
                 <div className="space-y-4 animate-fadeIn select-text">
-                  <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-955 dark:text-zinc-55 select-none pb-2 border-b border-zinc-150 dark:border-zinc-900">
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-950 dark:text-zinc-50 select-none pb-2 border-b border-zinc-200 dark:border-zinc-800">
                     Activity transitions history
                   </h4>
 
-                  <div className="space-y-3 relative pl-6 border-l border-zinc-200 dark:border-zinc-900 py-1">
+                  <div className="space-y-3 relative pl-6 border-l border-zinc-200 dark:border-zinc-800 py-1">
                     {selectedApp?.timeline && selectedApp?.timeline.length > 0 ? (
                       selectedApp?.timeline.map((event, idx) => (
                         <div key={idx} className="relative space-y-1">
-                          <div className="absolute -left-[20px] top-1.5 w-1.5 h-1.5 rounded-full bg-[#00bda5] border border-white dark:border-zinc-955" />
-                          <div className="flex justify-between text-[10px] font-black uppercase tracking-wider text-zinc-955 dark:text-zinc-55">
+                          <div className="absolute -left-[20px] top-1.5 w-1.5 h-1.5 rounded-full bg-[#00bda5] border border-white dark:border-zinc-950" />
+                          <div className="flex justify-between text-[10px] font-black uppercase tracking-wider text-zinc-950 dark:text-zinc-50">
                             <span>{event?.label || event?.event}</span>
                             <span className="text-zinc-400 font-bold text-[8.5px]">
                               {formatSafeDate(event?.timestamp, true)}
                             </span>
                           </div>
                           {event?.notes && (
-                            <p className="text-[10.5px] text-zinc-555 italic leading-normal">
+                            <p className="text-[10.5px] text-zinc-500 italic leading-normal">
                               "{event?.notes}"
                             </p>
                           )}
@@ -787,13 +787,13 @@ Best regards,
               {/* TAB 4: DOCUMENTS */}
               {workspaceTab === 'Documents' && (
                 <div className="space-y-5 animate-fadeIn select-none">
-                  <div className="p-5 border border-zinc-200 dark:border-zinc-900 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-4">
-                    <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-955 dark:text-zinc-55 flex items-center gap-1.5">
+                  <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-4">
+                    <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-950 dark:text-zinc-50 flex items-center gap-1.5">
                       <FileText size={13} className="text-[#00bda5]" /> Tailored Resume PDFs
                     </h4>
-                    <div className="flex justify-between items-center bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-xl p-3.5">
+                    <div className="flex justify-between items-center bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3.5">
                       <div className="min-w-0">
-                        <span className="text-[10px] font-black uppercase block text-zinc-955 dark:text-zinc-55">Tailored Resume PDF</span>
+                        <span className="text-[10px] font-black uppercase block text-zinc-950 dark:text-zinc-50">Tailored Resume PDF</span>
                         <span className="text-[8.5px] text-zinc-400 font-bold">Version: {selectedApp?.resume_version || 'v1'}</span>
                       </div>
                       <span className="text-[8px] bg-[#00bda5]/15 text-[#00bda5] px-1.5 py-0.5 rounded font-black uppercase">
@@ -803,13 +803,13 @@ Best regards,
                   </div>
 
                   {selectedApp?.cover_letter_version && (
-                    <div className="p-5 border border-zinc-200 dark:border-zinc-900 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-4 mt-4">
-                      <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-955 dark:text-zinc-55 flex items-center gap-1.5">
+                    <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-4 mt-4">
+                      <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-950 dark:text-zinc-50 flex items-center gap-1.5">
                         <CheckCircle2 size={13} className="text-[#00bda5]" /> Cover Letter PDFs
                       </h4>
-                      <div className="flex justify-between items-center bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-xl p-3.5">
+                      <div className="flex justify-between items-center bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3.5">
                         <div className="min-w-0">
-                          <span className="text-[10px] font-black uppercase block text-zinc-955 dark:text-zinc-55">Generated Cover Letter PDF</span>
+                          <span className="text-[10px] font-black uppercase block text-zinc-950 dark:text-zinc-50">Generated Cover Letter PDF</span>
                           <span className="text-[8.5px] text-zinc-400 font-bold">Version: v1</span>
                         </div>
                         <span className="text-[8px] bg-[#00bda5]/15 text-[#00bda5] px-1.5 py-0.5 rounded font-black uppercase">
@@ -824,9 +824,9 @@ Best regards,
               {/* TAB 5: RECRUITER */}
               {workspaceTab === 'Recruiter' && (
                 <div className="space-y-5 animate-fadeIn select-text">
-                  <div className="flex justify-between items-center select-none pb-2 border-b border-zinc-150 dark:border-zinc-900">
+                  <div className="flex justify-between items-center select-none pb-2 border-b border-zinc-200 dark:border-zinc-800">
                     <div>
-                      <h4 className="text-[10px] font-black text-zinc-955 dark:text-zinc-55 uppercase tracking-widest">Recruiter / HR Contacts</h4>
+                      <h4 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest">Recruiter / HR Contacts</h4>
                       <p className="text-[8px] text-zinc-400 font-bold uppercase mt-0.5">Editable details stored in Supabase</p>
                     </div>
                     <button
@@ -840,19 +840,19 @@ Best regards,
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     <div className="space-y-1">
-                      <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block flex items-center gap-1 select-none">
+                      <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block flex items-center gap-1 select-none">
                         <User size={10} /> Recruiter Names, Emails, Links
                       </label>
                       <textarea
                         value={editRecruiterNotes}
                         onChange={(e) => setEditRecruiterNotes(e.target.value)}
                         placeholder="Recruiter contact name, email address, LinkedIn links..."
-                        className="w-full text-xs p-3 bg-zinc-55/40 dark:bg-zinc-900/20 border border-zinc-200 dark:border-zinc-900 rounded-xl focus:outline-hidden focus:border-[#00bda5] font-semibold font-sans min-h-[110px]"
+                        className="w-full text-xs p-3 bg-zinc-50/40 dark:bg-zinc-900/20 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden focus:border-[#00bda5] font-semibold font-sans min-h-[110px]"
                       />
                     </div>
 
-                    <div className="p-5 border border-zinc-200 dark:border-zinc-900 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-4 select-none self-start">
-                      <h4 className="text-[9px] font-black uppercase tracking-widest text-zinc-455 flex items-center gap-1.5">
+                    <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-4 select-none self-start">
+                      <h4 className="text-[9px] font-black uppercase tracking-widest text-zinc-500 flex items-center gap-1.5">
                         <Lightbulb size={11} className="text-[#00bda5]" /> AI Email Assist
                       </h4>
                       <button
@@ -865,7 +865,7 @@ Best regards,
 
                       {followUpEmail && (
                         <div className="p-3 bg-white dark:bg-zinc-950 border border-zinc-200 rounded-xl relative mt-2 select-text">
-                          <pre className="text-[8.5px] text-zinc-750 dark:text-zinc-350 whitespace-pre-wrap select-text leading-normal font-sans">{followUpEmail}</pre>
+                          <pre className="text-[8.5px] text-zinc-750 dark:text-zinc-400 whitespace-pre-wrap select-text leading-normal font-sans">{followUpEmail}</pre>
                           <button
                             onClick={() => {
                               navigator.clipboard.writeText(followUpEmail);
@@ -885,9 +885,9 @@ Best regards,
               {/* TAB 6: NOTES */}
               {workspaceTab === 'Notes' && (
                 <div className="space-y-5 animate-fadeIn select-text">
-                  <div className="flex justify-between items-center select-none pb-2 border-b border-zinc-150 dark:border-zinc-900">
+                  <div className="flex justify-between items-center select-none pb-2 border-b border-zinc-200 dark:border-zinc-800">
                     <div>
-                      <h4 className="text-[10px] font-black text-zinc-955 dark:text-zinc-55 uppercase tracking-widest">Interactive Logs & Notes</h4>
+                      <h4 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest">Interactive Logs & Notes</h4>
                       <p className="text-[8px] text-zinc-400 font-bold uppercase mt-0.5">Editable details stored in Supabase</p>
                     </div>
                     <button
@@ -901,32 +901,32 @@ Best regards,
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     <div className="space-y-1">
-                      <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block select-none">General Notes & Remarks</label>
+                      <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block select-none">General Notes & Remarks</label>
                       <textarea
                         value={editNotes}
                         onChange={(e) => setEditNotes(e.target.value)}
                         placeholder="Key milestones, referral codes..."
-                        className="w-full text-xs p-3 bg-zinc-55/40 dark:bg-zinc-900/20 border border-zinc-200 dark:border-zinc-900 rounded-xl focus:outline-hidden focus:border-[#00bda5] font-semibold font-sans min-h-[90px]"
+                        className="w-full text-xs p-3 bg-zinc-50/40 dark:bg-zinc-900/20 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden focus:border-[#00bda5] font-semibold font-sans min-h-[90px]"
                       />
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block select-none">Interview Prep Questions</label>
+                      <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block select-none">Interview Prep Questions</label>
                       <textarea
                         value={editInterviewNotes}
                         onChange={(e) => setEditInterviewNotes(e.target.value)}
                         placeholder="Technical details questions preparation..."
-                        className="w-full text-xs p-3 bg-zinc-55/40 dark:bg-zinc-900/20 border border-zinc-200 dark:border-zinc-900 rounded-xl focus:outline-hidden focus:border-[#00bda5] font-semibold font-sans min-h-[90px]"
+                        className="w-full text-xs p-3 bg-zinc-50/40 dark:bg-zinc-900/20 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden focus:border-[#00bda5] font-semibold font-sans min-h-[90px]"
                       />
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block select-none">Salary Package & Expectations</label>
+                      <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block select-none">Salary Package & Expectations</label>
                       <textarea
                         value={editSalaryNotes}
                         onChange={(e) => setEditSalaryNotes(e.target.value)}
                         placeholder="Negotiation boundaries, base values, options grant..."
-                        className="w-full text-xs p-3 bg-zinc-55/40 dark:bg-zinc-900/20 border border-zinc-200 dark:border-zinc-900 rounded-xl focus:outline-hidden focus:border-[#00bda5] font-semibold font-sans min-h-[90px]"
+                        className="w-full text-xs p-3 bg-zinc-50/40 dark:bg-zinc-900/20 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden focus:border-[#00bda5] font-semibold font-sans min-h-[90px]"
                       />
                     </div>
                   </div>
@@ -936,18 +936,18 @@ Best regards,
               {/* TAB 7: HISTORICAL TRANSITIONS */}
               {workspaceTab === 'History' && (
                 <div className="space-y-4 animate-fadeIn select-text">
-                  <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-955 dark:text-zinc-55 select-none pb-2 border-b border-zinc-150 dark:border-zinc-900">
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-950 dark:text-zinc-50 select-none pb-2 border-b border-zinc-200 dark:border-zinc-800">
                     Pipeline Stage transition logs
                   </h4>
 
-                  <div className="space-y-3 relative pl-6 border-l border-zinc-200 dark:border-zinc-900 py-1">
+                  <div className="space-y-3 relative pl-6 border-l border-zinc-200 dark:border-zinc-800 py-1">
                     {selectedApp?.timeline && selectedApp?.timeline.length > 0 ? (
                       selectedApp?.timeline
                         .filter(e => e?.event && e?.event.includes('Stage Metadata'))
                         .map((event, idx) => (
                           <div key={idx} className="relative space-y-1">
                             <div className="absolute -left-[20px] top-1.5 w-1.5 h-1.5 rounded-full bg-[#00bda5]" />
-                            <div className="flex justify-between text-[10px] font-black uppercase tracking-wider text-zinc-955 dark:text-zinc-55">
+                            <div className="flex justify-between text-[10px] font-black uppercase tracking-wider text-zinc-950 dark:text-zinc-50">
                               <span>{event?.label || event?.event}</span>
                               <span className="text-zinc-400 font-bold text-[8.5px]">
                                 {formatSafeDate(event?.timestamp)}
@@ -956,7 +956,7 @@ Best regards,
                           </div>
                         ))
                     ) : (
-                      <div className="text-xs text-zinc-455 italic">No stage changes recorded.</div>
+                      <div className="text-xs text-zinc-500 italic">No stage changes recorded.</div>
                     )}
                   </div>
                 </div>
@@ -975,20 +975,20 @@ Best regards,
           {/* Backdrop Click Intercept */}
           <div className="absolute inset-0 z-0" onClick={() => setActiveStageEditPopup(null)} />
           
-          <div className="w-[450px] max-w-full bg-white dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-900 rounded-3xl shadow-2xl p-6 relative z-10 space-y-4 max-h-[85vh] overflow-y-auto animate-scaleUp text-zinc-850 dark:text-zinc-200">
+          <div className="w-[450px] max-w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-2xl p-6 relative z-10 space-y-4 max-h-[85vh] overflow-y-auto animate-scaleUp text-zinc-850 dark:text-zinc-200">
             
-            <div className="flex justify-between items-center pb-3 border-b border-zinc-150 dark:border-zinc-900 select-none">
+            <div className="flex justify-between items-center pb-3 border-b border-zinc-200 dark:border-zinc-800 select-none">
               <div>
                 <span className="text-[8.5px] bg-[#00bda5]/15 text-[#00bda5] px-2 py-0.5 rounded font-black uppercase tracking-wider border border-[#00bda5]/15">
                   Metadata Options
                 </span>
-                <h3 className="text-sm font-black text-zinc-955 dark:text-zinc-50 mt-2">
+                <h3 className="text-sm font-black text-zinc-950 dark:text-zinc-50 mt-2">
                   {activeStageEditPopup} details for {selectedApp?.company_name}
                 </h3>
               </div>
               <button
                 onClick={() => setActiveStageEditPopup(null)}
-                className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-900 rounded-lg text-zinc-455 border-none cursor-pointer bg-transparent"
+                className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-900 rounded-lg text-zinc-500 border-none cursor-pointer bg-transparent"
               >
                 <X size={16} />
               </button>
@@ -1000,18 +1000,18 @@ Best regards,
               {activeStageEditPopup === 'Ready To Apply' && (
                 <div className="space-y-3.5">
                   {['Resume Ready', 'Cover Letter Ready', 'Portfolio Added', 'Referral'].map((chk) => (
-                    <label key={chk} className="flex items-center gap-3 font-bold text-zinc-700 dark:text-zinc-350 cursor-pointer select-none">
+                    <label key={chk} className="flex items-center gap-3 font-bold text-zinc-700 dark:text-zinc-400 cursor-pointer select-none">
                       <input
                         type="checkbox"
                         checked={!!popupFields[chk]}
                         onChange={(e) => setPopupFields({ ...popupFields, [chk]: e.target.checked })}
-                        className="w-4 h-4 rounded text-[#00bda5] border-zinc-300 focus:ring-[#00bda5] dark:bg-zinc-955 dark:border-zinc-800"
+                        className="w-4 h-4 rounded text-[#00bda5] border-zinc-300 focus:ring-[#00bda5] dark:bg-zinc-950 dark:border-zinc-800"
                       />
                       <span>{chk}</span>
                     </label>
                   ))}
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Ready notes</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Ready notes</label>
                     <textarea
                       value={popupFields.notes || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, notes: e.target.value })}
@@ -1026,32 +1026,32 @@ Best regards,
               {activeStageEditPopup === 'Applied' && (
                 <div className="space-y-3.5">
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Application Date</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Application Date</label>
                     <input
                       type="date"
                       value={popupFields.applied_date || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, applied_date: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-600"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Resume Version Used</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Resume Version Used</label>
                     <input
                       type="text"
                       placeholder="e.g. v1 (Tailored)"
                       value={popupFields.resume_version || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, resume_version: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-600"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Job Description URL</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Job Description URL</label>
                     <input
                       type="text"
                       placeholder="https://company.com/job..."
                       value={popupFields.job_url || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, job_url: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-600"
                     />
                   </div>
                 </div>
@@ -1061,11 +1061,11 @@ Best regards,
               {activeStageEditPopup === 'Assessment' && (
                 <div className="space-y-3.5">
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Status</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Status</label>
                     <select
                       value={popupFields.status || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, status: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-600"
                     >
                       <option value="">Select Status</option>
                       {['Passed', 'Failed', 'Scheduled', 'Waiting', 'Ghosted'].map((opt) => (
@@ -1074,13 +1074,13 @@ Best regards,
                     </select>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Assessment Link</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Assessment Link</label>
                     <input
                       type="text"
                       placeholder="HackerRank link..."
                       value={popupFields.assess_link || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, assess_link: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-600"
                     />
                   </div>
                 </div>
@@ -1090,41 +1090,41 @@ Best regards,
               {activeStageEditPopup === 'Recruiter' && (
                 <div className="space-y-3.5">
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Recruiter Name</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Recruiter Name</label>
                     <input
                       type="text"
                       placeholder="John Doe"
                       value={popupFields.recruiter_name || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, recruiter_name: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-600"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Recruiter Email</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Recruiter Email</label>
                     <input
                       type="email"
                       placeholder="recruiter@company.com"
                       value={popupFields.recruiter_email || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, recruiter_email: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-600"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">LinkedIn Profile</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">LinkedIn Profile</label>
                     <input
                       type="text"
                       placeholder="https://linkedin.com/in/..."
                       value={popupFields.linkedin || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, linkedin: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-600"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Status</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Status</label>
                     <select
                       value={popupFields.status || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, status: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
                     >
                       <option value="">Select Status</option>
                       {['Waiting', 'Responded', 'Follow Up', 'Ghosted'].map(opt => (
@@ -1139,11 +1139,11 @@ Best regards,
               {activeStageEditPopup === 'Interview' && (
                 <div className="space-y-3.5">
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Interview Type</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Interview Type</label>
                     <select
                       value={popupFields.type || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, type: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
                     >
                       <option value="">Select Type</option>
                       {['Technical', 'Managerial', 'HR'].map(opt => (
@@ -1152,21 +1152,21 @@ Best regards,
                     </select>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Round Number</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Round Number</label>
                     <input
                       type="number"
                       placeholder="e.g. 1"
                       value={popupFields.round || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, round: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Outcome</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Outcome</label>
                     <select
                       value={popupFields.outcome || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, outcome: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
                     >
                       <option value="">Select Outcome</option>
                       {['Passed', 'Failed', 'Rescheduled', 'Waiting'].map(opt => (
@@ -1181,11 +1181,11 @@ Best regards,
               {activeStageEditPopup === 'Final Round' && (
                 <div className="space-y-3.5">
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Outcome</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Outcome</label>
                     <select
                       value={popupFields.outcome || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, outcome: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
                     >
                       <option value="">Select Outcome</option>
                       {['Passed', 'Failed', 'Waiting'].map(opt => (
@@ -1200,23 +1200,23 @@ Best regards,
               {activeStageEditPopup === 'Offer' && (
                 <div className="space-y-3.5">
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Salary Parameters</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Salary Parameters</label>
                     <input
                       type="text"
                       placeholder="e.g. $140,000 base + options"
                       value={popupFields.salary || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, salary: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Negotiation Remarks</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Negotiation Remarks</label>
                     <input
                       type="text"
                       placeholder="Counter offered base..."
                       value={popupFields.negotiation || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, negotiation: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
                     />
                   </div>
                 </div>
@@ -1226,22 +1226,22 @@ Best regards,
               {activeStageEditPopup === 'Accepted' && (
                 <div className="space-y-3.5">
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Expected Joining Date</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Expected Joining Date</label>
                     <input
                       type="date"
                       value={popupFields.joining_date || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, joining_date: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Package Details</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Package Details</label>
                     <input
                       type="text"
                       placeholder="Final confirmed package details..."
                       value={popupFields.package_details || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, package_details: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
                     />
                   </div>
                 </div>
@@ -1251,11 +1251,11 @@ Best regards,
               {activeStageEditPopup === 'Rejected' && (
                 <div className="space-y-3.5">
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Reason</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Reason</label>
                     <select
                       value={popupFields.reason || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, reason: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
                     >
                       <option value="">Select Reason</option>
                       {['Salary too low', 'Selected another company', 'Didn\'t clear', 'Company withdrew'].map(opt => (
@@ -1270,11 +1270,11 @@ Best regards,
               {activeStageEditPopup === 'Archived' && (
                 <div className="space-y-3.5">
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-455 uppercase tracking-widest block">Reason</label>
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Reason</label>
                     <select
                       value={popupFields.reason || ''}
                       onChange={(e) => setPopupFields({ ...popupFields, reason: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-650"
+                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
                     >
                       <option value="">Select Reason</option>
                       {['Old application', 'No response', 'Closed'].map(opt => (
@@ -1286,10 +1286,10 @@ Best regards,
               )}
 
               {/* Save footer buttons */}
-              <div className="flex justify-end gap-2 pt-3 border-t border-zinc-150 dark:border-zinc-900 select-none">
+              <div className="flex justify-end gap-2 pt-3 border-t border-zinc-200 dark:border-zinc-800 select-none">
                 <button
                   onClick={() => setActiveStageEditPopup(null)}
-                  className="px-4 py-2 text-[10px] font-black uppercase tracking-wider hover:bg-zinc-55 dark:hover:bg-zinc-900 text-zinc-550 rounded-xl border-none bg-transparent cursor-pointer"
+                  className="px-4 py-2 text-[10px] font-black uppercase tracking-wider hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-500 rounded-xl border-none bg-transparent cursor-pointer"
                 >
                   Cancel
                 </button>
