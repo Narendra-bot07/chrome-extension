@@ -48,15 +48,23 @@ function ProtectedRoute({ children }) {
 }
 
 function AppRoutes() {
-  const { user, loadingAuth, loadingResume, parsedResume, hasRedirectedOnStartup, setHasRedirectedOnStartup } = useApp();
+  const { user, loadingAuth, loadingResume, parsedResume, hasRedirectedOnStartup, setHasRedirectedOnStartup, isExtension } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
 
   useEffect(() => {
     if (!loadingAuth && !loadingResume && user) {
+      const isExtensionLanding = isExtension && location.pathname === '/';
+
+      if (isExtensionLanding) {
+        setHasRedirectedOnStartup(true);
+        navigate(parsedResume ? '/tailor' : '/resume-detect', { replace: true });
+        return;
+      }
+
       // 1. Dynamic Route Guard: Protect /tailor route when user has no resume
       if (!parsedResume && location.pathname === '/tailor') {
-        navigate('/', { replace: true });
+        navigate('/resume-detect', { replace: true });
         return;
       }
 
@@ -70,7 +78,7 @@ function AppRoutes() {
         } else {
           if (location.pathname === '/login' || location.pathname === '/register' || location.pathname === '/tailor') {
             setHasRedirectedOnStartup(true);
-            navigate('/', { replace: true });
+            navigate('/resume-detect', { replace: true });
           }
         }
       }

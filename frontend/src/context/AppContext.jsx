@@ -503,8 +503,28 @@ export function AppProvider({ children }) {
     }
   };
 
+  const ensureExtractionProfileReady = () => {
+    if (loadingAuth || loadingResume) return false;
+
+    const token = session?.access_token || localStorage.getItem('access_token');
+    const hasResume = Boolean(parsedResume) || (Array.isArray(resumesList) && resumesList.length > 0);
+
+    if (!token || !user || !hasResume) {
+      setLoading(false);
+      setLoadingProgress(0);
+      setJobDetectionStatus("profile-incomplete");
+      setApiError(null);
+      navigate('/resume-detect');
+      return false;
+    }
+
+    return true;
+  };
+
   // Scan Active Page content
   const handleScanPage = async (isManual = false) => {
+    if (!ensureExtractionProfileReady()) return;
+
     let currentTabUrl = '';
     if (isExtension && chrome.tabs) {
       try {
@@ -973,6 +993,8 @@ export function AppProvider({ children }) {
 
   // Perform Job Description Extraction (Step 1)
   const handleExtractJob = async () => {
+    if (!ensureExtractionProfileReady()) return;
+
     if (!jobText) {
       alert("Please scan or paste a job description first.");
       return;
