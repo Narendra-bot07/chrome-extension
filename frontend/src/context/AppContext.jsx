@@ -34,6 +34,8 @@ export function AppProvider({ children }) {
           const data = await res.json();
           setUser(data.user);
           setSession({ access_token: storedToken });
+          setHasCompletedPreferences(!!data.has_completed_preferences);
+          await fetchJobPreferences(storedToken);
 
           // Fetch resumes to check if any exist and load the latest one if not already set
           try {
@@ -50,6 +52,9 @@ export function AppProvider({ children }) {
         } else {
           localStorage.removeItem('access_token');
           setLoadingResume(false);
+          setLoadingPreferences(false);
+          setHasCompletedPreferences(false);
+          setJobPreferences(null);
           setParsedResume(null);
           localStorage.removeItem('parsed_resume');
           const isExt = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local;
@@ -84,6 +89,9 @@ export function AppProvider({ children }) {
     setJobText('');
     setCompanyName('Company');
     setJobTitle('Software Engineer');
+    setJobPreferences(null);
+    setHasCompletedPreferences(false);
+    setLoadingPreferences(false);
     setHasRedirectedOnStartup(false);
     navigate('/login');
   };
@@ -143,6 +151,9 @@ export function AppProvider({ children }) {
   const [apiError, setApiError] = useState(null);
   const [subscription, setSubscription] = useState(null);
   const [usage, setUsage] = useState(null);
+  const [jobPreferences, setJobPreferences] = useState(null);
+  const [loadingPreferences, setLoadingPreferences] = useState(true);
+  const [hasCompletedPreferences, setHasCompletedPreferences] = useState(false);
 
   const isExtension = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local;
   const extractionVersionRef = useRef(0);
@@ -305,6 +316,7 @@ export function AppProvider({ children }) {
   // Fetch applications when session is loaded or changed
   useEffect(() => {
     if (session) {
+      fetchJobPreferences();
       fetchApplications();
       fetchSubscription();
     }
@@ -417,6 +429,59 @@ export function AppProvider({ children }) {
     }
   };
 
+  const fetchJobPreferences = async (tokenOverride) => {
+    const token = tokenOverride || session?.access_token || localStorage.getItem('access_token');
+    if (!token) {
+      setLoadingPreferences(false);
+      setHasCompletedPreferences(false);
+      setJobPreferences(null);
+      return null;
+    }
+
+    setLoadingPreferences(true);
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/job-preferences/me`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error("Failed to fetch job preferences.");
+      const data = await res.json();
+      setJobPreferences(data);
+      setHasCompletedPreferences(!!data.has_completed_preferences);
+      return data;
+    } catch (err) {
+      console.error("Failed to fetch job preferences:", err);
+      setJobPreferences(null);
+      setHasCompletedPreferences(false);
+      return null;
+    } finally {
+      setLoadingPreferences(false);
+    }
+  };
+
+  const saveJobPreferences = async (payload) => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token) throw new Error("Please sign in before saving job preferences.");
+
+    const res = await fetch(`${apiUrl}/api/v1/job-preferences/me`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Failed to save job preferences." }));
+      throw new Error(typeof err.detail === "string" ? err.detail : "Failed to save job preferences.");
+    }
+
+    const data = await res.json();
+    setJobPreferences(data);
+    setHasCompletedPreferences(!!data.has_completed_preferences);
+    return data;
+  };
+
   const normalizeResumeRecord = (record) => {
     if (!record) return null;
     return {
@@ -504,17 +569,17 @@ export function AppProvider({ children }) {
   };
 
   const ensureExtractionProfileReady = () => {
-    if (loadingAuth || loadingResume) return false;
+    if (loadingAuth || loadingResume || loadingPreferences) return false;
 
     const token = session?.access_token || localStorage.getItem('access_token');
     const hasResume = Boolean(parsedResume) || (Array.isArray(resumesList) && resumesList.length > 0);
 
-    if (!token || !user || !hasResume) {
+    if (!token || !user || !hasCompletedPreferences || !hasResume) {
       setLoading(false);
       setLoadingProgress(0);
-      setJobDetectionStatus("profile-incomplete");
+      setJobDetectionStatus(hasCompletedPreferences ? "profile-incomplete" : "onboarding-incomplete");
       setApiError(null);
-      navigate('/resume-detect');
+      navigate(hasCompletedPreferences ? '/resume-detect' : '/onboarding/job-preferences');
       return false;
     }
 
@@ -1871,6 +1936,11 @@ export function AppProvider({ children }) {
       subscription, setSubscription,
       usage, setUsage,
       fetchSubscription,
+      jobPreferences, setJobPreferences,
+      loadingPreferences,
+      hasCompletedPreferences,
+      fetchJobPreferences,
+      saveJobPreferences,
       isExtension,
       loadingResume,
       hasRedirectedOnStartup,

@@ -13,6 +13,7 @@ from api.v1.plans import router as plans_router
 from api.v1.subscription import router as subscription_router
 from api.v1.usage import router as usage_router
 from api.v1.admin_subscriptions import router as admin_subscriptions_router
+from api.v1.job_preferences import router as job_preferences_router
 from app.billing.routers.billing import router as billing_router
 
 api_router = APIRouter()
@@ -32,4 +33,5 @@ api_router.include_router(plans_router)
 api_router.include_router(subscription_router)
 api_router.include_router(usage_router)
 api_router.include_router(admin_subscriptions_router)
+api_router.include_router(job_preferences_router)
 api_router.include_router(billing_router)

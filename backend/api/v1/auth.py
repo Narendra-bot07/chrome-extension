@@ -8,6 +8,7 @@ from app.analytics.events.tracking.analytics_service import AnalyticsService
 from typing import Dict, Any
 from psycopg2.extras import RealDictCursor
 import datetime
+from repositories.job_preferences_repository import JobPreferencesRepository
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -94,6 +95,7 @@ async def login_user(
             
             session_id = session_service.create_session(user["id"], request, "email")
             access_token = auth_service.generate_custom_jwt(user, session_id)
+            has_completed_preferences = JobPreferencesRepository(conn).has_completed(user["id"])
 
             # Emit Analytics Event
             analytics_service = AnalyticsService(conn)
@@ -114,8 +116,10 @@ async def login_user(
                         "email": user["email"],
                         "full_name": user.get("full_name", ""),
                         "provider": user.get("provider", "email"),
-                        "created_at": user.get("created_at", datetime.datetime.utcnow()).isoformat() if isinstance(user.get("created_at"), datetime.datetime) else str(user.get("created_at", ""))
-                    }
+                        "created_at": user.get("created_at", datetime.datetime.utcnow()).isoformat() if isinstance(user.get("created_at"), datetime.datetime) else str(user.get("created_at", "")),
+                        "has_completed_preferences": has_completed_preferences
+                    },
+                    "has_completed_preferences": has_completed_preferences
                 }
             }
     except HTTPException:
@@ -152,6 +156,7 @@ async def google_login(
         session_id = session_service.create_session(user["id"], request, "google")
         
         access_token = auth_service.generate_custom_jwt(user, session_id)
+        has_completed_preferences = JobPreferencesRepository(conn).has_completed(user["id"])
         
         # Emit Analytics Event
         analytics_service = AnalyticsService(conn)
@@ -172,11 +177,13 @@ async def google_login(
                     "email": user["email"],
                     "full_name": user.get("full_name", ""),
                     "provider": user.get("provider", "google"),
-                    "avatar_url": user.get("avatar_url", ""),
-                    "created_at": user.get("created_at", datetime.datetime.utcnow()).isoformat() if isinstance(user.get("created_at"), datetime.datetime) else str(user.get("created_at", ""))
+                        "avatar_url": user.get("avatar_url", ""),
+                        "created_at": user.get("created_at", datetime.datetime.utcnow()).isoformat() if isinstance(user.get("created_at"), datetime.datetime) else str(user.get("created_at", "")),
+                        "has_completed_preferences": has_completed_preferences
+                    },
+                    "has_completed_preferences": has_completed_preferences
                 }
             }
-        }
     except ValueError as ve:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(ve))
     except Exception as e:
@@ -187,5 +194,13 @@ async def google_login(
 
 
 @router.get("/session")
-async def verify_session(user: Dict[str, Any] = Depends(verify_supabase_jwt)):
-    return {"status": "authenticated", "user": user}
+async def verify_session(
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    conn = Depends(get_db_connection)
+):
+    has_completed_preferences = JobPreferencesRepository(conn).has_completed(user["id"])
+    return {
+        "status": "authenticated",
+        "user": {**user, "has_completed_preferences": has_completed_preferences},
+        "has_completed_preferences": has_completed_preferences
+    }

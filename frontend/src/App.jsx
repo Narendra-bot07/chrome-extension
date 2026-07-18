@@ -27,6 +27,7 @@ import ContactSupportPage from './pages/ContactSupportPage';
 import NoJobDetectedPage from './pages/NoJobDetectedPage';
 import ManualJobEntryPage from './pages/ManualJobEntryPage';
 import SubscriptionPage from './pages/SubscriptionPage';
+import JobPreferencesPage from './pages/JobPreferencesPage';
 
 function ProtectedRoute({ children }) {
   const { user, loadingAuth } = useApp();
@@ -48,13 +49,30 @@ function ProtectedRoute({ children }) {
 }
 
 function AppRoutes() {
-  const { user, loadingAuth, loadingResume, parsedResume, hasRedirectedOnStartup, setHasRedirectedOnStartup, isExtension } = useApp();
+  const {
+    user,
+    loadingAuth,
+    loadingResume,
+    loadingPreferences,
+    hasCompletedPreferences,
+    parsedResume,
+    hasRedirectedOnStartup,
+    setHasRedirectedOnStartup,
+    isExtension
+  } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
 
   useEffect(() => {
-    if (!loadingAuth && !loadingResume && user) {
+    if (!loadingAuth && !loadingResume && !loadingPreferences && user) {
       const isExtensionLanding = isExtension && location.pathname === '/';
+      const isOnboardingRoute = location.pathname === '/onboarding/job-preferences';
+      const isSettingsPreferencesRoute = location.pathname === '/settings/job-preferences';
+
+      if (!hasCompletedPreferences && !isOnboardingRoute) {
+        navigate('/onboarding/job-preferences', { replace: true });
+        return;
+      }
 
       if (isExtensionLanding) {
         setHasRedirectedOnStartup(true);
@@ -76,14 +94,14 @@ function AppRoutes() {
             navigate('/tailor', { replace: true });
           }
         } else {
-          if (location.pathname === '/login' || location.pathname === '/register' || location.pathname === '/tailor') {
+          if (!isSettingsPreferencesRoute && (location.pathname === '/login' || location.pathname === '/register' || location.pathname === '/tailor')) {
             setHasRedirectedOnStartup(true);
             navigate('/resume-detect', { replace: true });
           }
         }
       }
     }
-  }, [loadingAuth, loadingResume, user, parsedResume, hasRedirectedOnStartup, location.pathname, navigate, setHasRedirectedOnStartup]);
+  }, [loadingAuth, loadingResume, loadingPreferences, user, hasCompletedPreferences, parsedResume, hasRedirectedOnStartup, location.pathname, navigate, setHasRedirectedOnStartup, isExtension]);
 
   return (
     <Routes>
@@ -110,6 +128,8 @@ function AppRoutes() {
         <Route path="/no-job-detected" element={<NoJobDetectedPage />} />
         <Route path="/manual-job-entry" element={<ManualJobEntryPage />} />
         <Route path="/subscription" element={<SubscriptionPage />} />
+        <Route path="/onboarding/job-preferences" element={<JobPreferencesPage />} />
+        <Route path="/settings/job-preferences" element={<JobPreferencesPage />} />
       </Route>
       <Route path="/print" element={<PrintLayout />} />
       <Route path="/print-cover-letter" element={<PrintCoverLetterLayout />} />

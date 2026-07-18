@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext';
 import { 
   Settings, Sun, Moon, AlertCircle, X, Menu, 
   LayoutDashboard, FileText, Briefcase, User, 
-  LogOut, Zap
+  LogOut, Zap, Target
 } from 'lucide-react';
 import { Button } from './ui/Button';
 import SettingsOverlay from './SettingsOverlay';
@@ -116,6 +116,7 @@ function Layout() {
       case '/download': return 'Tailoring Complete';
       case '/cover-letter': return 'Draft Cover Letter';
       case '/subscription': return 'Subscription';
+      case '/settings/job-preferences': return 'Job Preferences';
       default: return 'ApplyFlow';
     }
   };
@@ -203,6 +204,17 @@ function Layout() {
             >
               <Briefcase size={16} />
               Job Tracker
+            </Link>
+            <Link
+              to="/settings/job-preferences"
+              className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                currentPath === '/settings/job-preferences'
+                  ? darkMode ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-100 text-zinc-950'
+                  : darkMode ? 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-950' : 'text-zinc-650 hover:text-zinc-900 hover:bg-zinc-50'
+              }`}
+            >
+              <Target size={16} />
+              Job Preferences
             </Link>
           </nav>
         </div>
