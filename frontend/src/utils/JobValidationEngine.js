@@ -5,10 +5,10 @@
  */
 
 export function runDeterministicJobValidation({ text = '', title = '', url = '', company = '' }) {
-  console.group("🔍 [Job Validation Engine] Running Deterministic Validation Pipeline");
-  console.log("📍 Input URL:", url);
-  console.log("📌 Input Title:", title);
-  console.log("🏢 Input Company:", company);
+  console.group(" [Job Validation Engine] Running Deterministic Validation Pipeline");
+  console.log(" Input URL:", url);
+  console.log(" Input Title:", title);
+  console.log(" Input Company:", company);
 
   const cleanText = typeof text === 'string' ? text.trim() : '';
   const cleanTitle = typeof title === 'string' ? title.trim() : '';
@@ -18,7 +18,7 @@ export function runDeterministicJobValidation({ text = '', title = '', url = '',
   console.log(`[Validation Step 1: Text Length] Length: ${textLength} chars (Minimum required: 300)`);
   if (textLength < 300) {
     const reason = `Extracted text is too short (${textLength} characters). Minimum required is 300 readable characters.`;
-    console.warn(`❌ Rejection Reason: ${reason}`);
+    console.warn(` Rejection Reason: ${reason}`);
     console.log("Validation Decision: INVALID");
     console.groupEnd();
     return {
@@ -58,7 +58,7 @@ export function runDeterministicJobValidation({ text = '', title = '', url = '',
   console.log(`[Validation Step 2: Recommendation-Page Detection] Pattern Match: ${matchedRecPattern || "None"}`);
   if (matchedRecPattern) {
     const reason = `Page identified as a recommendation or search listing page (matched pattern '${matchedRecPattern}').`;
-    console.warn(`❌ Rejection Reason: ${reason}`);
+    console.warn(` Rejection Reason: ${reason}`);
     console.log("Validation Decision: INVALID");
     console.groupEnd();
     return {
@@ -91,7 +91,7 @@ export function runDeterministicJobValidation({ text = '', title = '', url = '',
   
   if (isMultiCompanyFeed) {
     const reason = `Multiple distinct company names or job cards detected near the top of the content (${distinctCompanies.size} companies / ${badgeMatches.length} badges), indicating a job board listing or feed rather than a single job posting.`;
-    console.warn(`❌ Rejection Reason: ${reason}`);
+    console.warn(` Rejection Reason: ${reason}`);
     console.log("Validation Decision: INVALID");
     console.groupEnd();
     return {
@@ -130,7 +130,7 @@ export function runDeterministicJobValidation({ text = '', title = '', url = '',
   console.log(`[Validation Step 4: Section Detection] Found required sections: ${foundSections.length > 0 ? foundSections.join(", ") : "None"}`);
   if (foundSections.length === 0) {
     const reason = "Missing required job description structure. No standard sections found (e.g. Description, Responsibilities, Qualifications, Requirements, About the role, or What you'll do).";
-    console.warn(`❌ Rejection Reason: ${reason}`);
+    console.warn(` Rejection Reason: ${reason}`);
     console.log("Validation Decision: INVALID");
     console.groupEnd();
     return {
@@ -149,7 +149,7 @@ export function runDeterministicJobValidation({ text = '', title = '', url = '',
   console.log(`[Validation Step 5: Navigation Title Check] Nav Title Match: ${isNavTitle} ('${cleanTitle}') | Complete Single JD Present: ${isCompleteJD}`);
   if (isNavTitle && !isCompleteJD) {
     const reason = `Page has a navigation/search title ('${cleanTitle}') and does not contain a complete, standalone single job description.`;
-    console.warn(`❌ Rejection Reason: ${reason}`);
+    console.warn(` Rejection Reason: ${reason}`);
     console.log("Validation Decision: INVALID");
     console.groupEnd();
     return {
@@ -160,7 +160,7 @@ export function runDeterministicJobValidation({ text = '', title = '', url = '',
 
   // 6. Produce ValidationResult
   const reason = "Passed all deterministic validation checks. Page represents a single valid job posting.";
-  console.log(`✅ Validation Decision: VALID (${reason})`);
+  console.log(` Validation Decision: VALID (${reason})`);
   console.groupEnd();
 
   return {
@@ -168,3 +168,5 @@ export function runDeterministicJobValidation({ text = '', title = '', url = '',
     reason
   };
 }
+
+

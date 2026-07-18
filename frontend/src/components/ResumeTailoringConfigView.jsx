@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check, Sparkles, ShieldCheck, ArrowRight, RefreshCw } from 'lucide-react';
+import { Check, Sparkles, ShieldCheck, ArrowRight, RefreshCw, FileText, CalendarDays, Clock3, History, Eye, Star, X, Upload } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 const sectionOptions = [
@@ -42,6 +42,17 @@ const loadingMessages = [
   "Please wait while your resume is being tailored."
 ];
 
+const formatDate = (value) => {
+  if (!value) return 'Never';
+  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+};
+
+const formatSize = (bytes) => {
+  if (!bytes) return 'Unknown size';
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
 function ResumeTailoringConfigView({
   selectedSections,
   onToggleSection,
@@ -50,12 +61,21 @@ function ResumeTailoringConfigView({
   onStartTailoring,
   onBack,
   loading,
+  activeResume,
+  resumesList = [],
+  onChangeResume,
+  onChooseResume,
+  onUploadResume,
   validationMessage
 }) {
-  const { isExtension } = useApp();
+  const { isExtension, apiUrl, session } = useApp();
   const selectedCount = selectedSections.length;
   const activeIntensity = intensityOptions.find(opt => opt.id === tailoringIntensity) || intensityOptions[1];
   const [loadingStep, setLoadingStep] = React.useState(0);
+  const [resumeModalOpen, setResumeModalOpen] = React.useState(false);
+  const [previewUrl, setPreviewUrl] = React.useState('');
+  const [previewName, setPreviewName] = React.useState('');
+  const hasActiveResume = Boolean(activeResume?.id);
 
   React.useEffect(() => {
     let interval;
@@ -74,6 +94,30 @@ function ResumeTailoringConfigView({
     }
     return () => clearInterval(interval);
   }, [loading]);
+
+  React.useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  const handlePreview = async (resume) => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token || !resume?.id) return;
+    const res = await fetch(`${apiUrl}/api/v1/resumes/${resume.id}/preview`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewName(resume.file_name || 'Resume');
+    setPreviewUrl(URL.createObjectURL(blob));
+  };
+
+  const handleSelectResume = async (resume) => {
+    await onChangeResume?.(resume.id);
+    setResumeModalOpen(false);
+  };
 
   return (
     <div className={`flex-1 flex flex-col justify-between select-none relative text-zinc-650 dark:text-zinc-350 font-sans mx-auto w-full ${
@@ -107,6 +151,58 @@ function ResumeTailoringConfigView({
         <div className="space-y-1">
           <h2 className="text-lg font-extrabold tracking-tight text-zinc-950 dark:text-zinc-50">Configure Tailoring</h2>
           <p className="text-xs text-zinc-400">Fine-tune how AI optimizes your resume details.</p>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-200/70 dark:border-zinc-800 bg-white dark:bg-zinc-900/30 p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 rounded-xl bg-[#00bda5]/10 text-[#00bda5] flex items-center justify-center">
+                <FileText size={17} />
+              </div>
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Using Resume</p>
+                <p className="text-sm font-black text-zinc-950 dark:text-white truncate max-w-[250px]">
+                  {hasActiveResume ? activeResume.file_name || 'Active resume' : 'No active resume selected'}
+                </p>
+              </div>
+            </div>
+            {hasActiveResume && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-1 text-[10px] font-black">
+                <Check size={12} /> Active
+              </span>
+            )}
+          </div>
+
+          {hasActiveResume ? (
+            <>
+              <div className="grid grid-cols-2 gap-2 text-[10px] text-zinc-500 dark:text-zinc-400">
+                <span className="inline-flex items-center gap-1.5"><CalendarDays size={12} /> Uploaded {formatDate(activeResume.created_at)}</span>
+                <span className="inline-flex items-center gap-1.5"><Clock3 size={12} /> Last used {formatDate(activeResume.last_used_at)}</span>
+                <span className="inline-flex items-center gap-1.5"><History size={12} /> Used {activeResume.times_used || activeResume.tailor_count || 0} times</span>
+                <span className="inline-flex items-center gap-1.5"><FileText size={12} /> {formatSize(activeResume.file_size)}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => handlePreview(activeResume)} className="py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 text-xs font-extrabold flex items-center justify-center gap-2 hover:bg-zinc-50 dark:hover:bg-zinc-900">
+                  <Eye size={14} /> Preview
+                </button>
+                <button type="button" onClick={() => setResumeModalOpen(true)} className="py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 text-xs font-extrabold flex items-center justify-center gap-2 hover:bg-zinc-50 dark:hover:bg-zinc-900">
+                  <RefreshCw size={14} /> Change Resume
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-xs font-semibold text-amber-700 dark:text-amber-400">No active resume selected. Choose or upload a resume before tailoring.</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={onChooseResume} className="py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 text-xs font-extrabold flex items-center justify-center gap-2 hover:bg-zinc-50 dark:hover:bg-zinc-900">
+                  <Star size={14} /> Choose Resume
+                </button>
+                <button type="button" onClick={onUploadResume} className="py-2 rounded-xl bg-[#00bda5] text-white text-xs font-extrabold flex items-center justify-center gap-2 hover:bg-[#00a894]">
+                  <Upload size={14} /> Upload Resume
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Section 1: Choose Sections (Interactive Pills Grid) */}
@@ -215,7 +311,7 @@ function ResumeTailoringConfigView({
         <button
           type="button"
           onClick={onStartTailoring}
-          disabled={loading || selectedSections.length === 0}
+          disabled={loading || selectedSections.length === 0 || !hasActiveResume}
           className="flex-2 py-3 bg-[#00bda5] hover:bg-[#00a894] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 border-none"
         >
           <Sparkles size={13} />
@@ -223,6 +319,61 @@ function ResumeTailoringConfigView({
           <ArrowRight size={13} />
         </button>
       </div>
+
+      {resumeModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-5">
+          <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 shadow-2xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-zinc-950 dark:text-white">Change active resume</h3>
+                <p className="text-xs text-zinc-500">Select the resume that should power tailoring.</p>
+              </div>
+              <button type="button" onClick={() => setResumeModalOpen(false)} className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-900">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="max-h-[360px] overflow-y-auto p-2">
+              {resumesList.map((resume) => {
+                const isActive = resume.id === activeResume?.id || resume.is_active;
+                return (
+                  <button key={resume.id} type="button" onClick={() => handleSelectResume(resume)} className={`w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left transition ${
+                    isActive ? 'bg-[#00bda5]/10 text-zinc-950 dark:text-white' : 'hover:bg-zinc-50 dark:hover:bg-zinc-900'
+                  }`}>
+                    <span className={`w-4 h-4 rounded-full border flex items-center justify-center ${isActive ? 'border-[#00bda5] bg-[#00bda5]' : 'border-zinc-300 dark:border-zinc-700'}`}>
+                      {isActive && <Check size={10} className="text-white" />}
+                    </span>
+                    <FileText size={16} className="text-zinc-400" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-black truncate">{resume.file_name || 'Resume.pdf'}</p>
+                      <p className="text-[11px] text-zinc-500">Uploaded {formatDate(resume.created_at)} · Used {resume.times_used || resume.tailor_count || 0} times</p>
+                    </div>
+                    <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); handlePreview(resume); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); handlePreview(resume); } }} className="p-2 rounded-lg hover:bg-white dark:hover:bg-zinc-800 text-zinc-500">
+                      <Eye size={15} />
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {previewUrl && (
+        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
+          <div className="w-full max-w-5xl h-[88vh] bg-white dark:bg-zinc-950 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+            <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <FileText size={16} className="text-zinc-400" />
+                <span className="text-sm font-black truncate">{previewName}</span>
+              </div>
+              <button type="button" onClick={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(''); setPreviewName(''); }} className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-900">
+                <X size={18} />
+              </button>
+            </div>
+            <iframe title="Resume Preview" src={previewUrl} className="flex-1 w-full bg-white" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

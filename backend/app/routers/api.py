@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Header, HTTPException, status
+from fastapi import APIRouter, UploadFile, File, Header, HTTPException, status, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import io
@@ -18,6 +18,9 @@ from app.schemas import (
 from app.parser import extract_text
 from app.groq_service import parse_resume, analyze_job_description, generate_tailoring_patch, apply_tailoring_patch, generate_cover_letter, refine_section_with_ai, calculate_resume_job_match_score
 from api.v1.resume import router as resume_manager_router
+from api.dependencies import get_resume_repository
+from core.security import verify_supabase_jwt
+from repositories.resume_repository import ResumeRepository
 
 
 from app.template_engine import template_engine
@@ -45,6 +48,7 @@ class JobAnalysisRequest(BaseModel):
     salary_range: Optional[str] = ""
 
 class CompareRequest(BaseModel):
+    resume_id: Optional[str] = None
     resume: Dict[str, Any]
     job: Dict[str, Any]
 
@@ -125,9 +129,17 @@ async def api_analyze_job(
 @router.post("/compare", response_model=TailoringReport)
 async def api_compare(
     request: CompareRequest,
-    x_groq_key: Optional[str] = Header(None)
+    x_groq_key: Optional[str] = Header(None),
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository)
 ):
     try:
+        if request.resume_id:
+            resume_record = repo.get_by_id(request.resume_id, user["id"])
+            if not resume_record:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
+            if not resume_record.get("is_active"):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected resume is not active.")
         resume = ResumeStructure(**normalize_resume_payload(request.resume))
         job = JobAnalysis(**normalize_job_payload(request.job))
         try:

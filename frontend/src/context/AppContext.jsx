@@ -39,22 +39,8 @@ export function AppProvider({ children }) {
           try {
             const resumes = await fetchResumesList(storedToken);
             if (resumes && resumes.length > 0) {
-              const latestResume = {
-                ...(resumes[0].parsed_content || resumes[0]),
-                id: resumes[0].id,
-                file_name: resumes[0].file_name,
-                file_size: resumes[0].file_size,
-                file_type: resumes[0].file_type,
-                created_at: resumes[0].created_at,
-                is_active: !!resumes[0].is_active
-              };
-              setParsedResume(latestResume);
-              const isExt = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local;
-              if (isExt) {
-                chrome.storage.local.set({ parsedResume: latestResume });
-              } else {
-                localStorage.setItem('parsed_resume', JSON.stringify(latestResume));
-              }
+              const latestResume = normalizeResumeRecord(resumes.find((resume) => resume.is_active) || resumes[0]);
+              persistParsedResume(latestResume);
             }
           } catch (rErr) {
             console.error("Failed to fetch resumes on startup:", rErr);
@@ -431,6 +417,49 @@ export function AppProvider({ children }) {
     }
   };
 
+  const normalizeResumeRecord = (record) => {
+    if (!record) return null;
+    return {
+      ...(record.parsed_content || record),
+      id: record.id,
+      file_name: record.file_name,
+      file_size: record.file_size,
+      file_type: record.file_type,
+      created_at: record.created_at,
+      updated_at: record.updated_at,
+      last_used_at: record.last_used_at,
+      times_used: record.times_used || record.tailor_count || 0,
+      tailor_count: record.tailor_count || record.times_used || 0,
+      upload_source: record.upload_source,
+      parsing_status: record.parsing_status || record.parsed_content?.parse_status,
+      is_active: !!record.is_active
+    };
+  };
+
+  const persistParsedResume = (resume) => {
+    setParsedResume(resume);
+    if (resume) {
+      if (isExtension) chrome.storage.local.set({ parsedResume: resume });
+      else localStorage.setItem('parsed_resume', JSON.stringify(resume));
+    } else {
+      if (isExtension) chrome.storage.local.remove('parsedResume');
+      else localStorage.removeItem('parsed_resume');
+    }
+  };
+
+  const refreshActiveResumeFromBackend = async () => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token) return null;
+    const res = await fetch(`${apiUrl}/api/v1/resumes/active`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) return null;
+    const record = await res.json();
+    const activeResume = normalizeResumeRecord(record);
+    persistParsedResume(activeResume);
+    return activeResume;
+  };
+
   const handleDeleteResume = async (resumeId) => {
     const token = session?.access_token || localStorage.getItem('access_token');
     if (!token) return;
@@ -443,22 +472,9 @@ export function AppProvider({ children }) {
         const updatedList = await fetchResumesList();
         if (updatedList && updatedList.length > 0) {
           const next = updatedList.find((resume) => resume.is_active) || updatedList[0];
-          const nextResume = {
-            ...(next.parsed_content || next),
-            id: next.id,
-            file_name: next.file_name,
-            file_size: next.file_size,
-            file_type: next.file_type,
-            created_at: next.created_at,
-            is_active: !!next.is_active
-          };
-          setParsedResume(nextResume);
-          if (isExtension) chrome.storage.local.set({ parsedResume: nextResume });
-          else localStorage.setItem('parsed_resume', JSON.stringify(nextResume));
+          persistParsedResume(normalizeResumeRecord(next));
         } else {
-          setParsedResume(null);
-          if (isExtension) chrome.storage.local.remove('parsedResume');
-          else localStorage.removeItem('parsed_resume');
+          persistParsedResume(null);
         }
       }
     } catch (err) {
@@ -477,18 +493,8 @@ export function AppProvider({ children }) {
       if (!res.ok) throw new Error("Failed to activate resume.");
       const activeRecord = await res.json();
       const updatedList = await fetchResumesList();
-      const activeResume = {
-        ...(activeRecord.parsed_content || activeRecord),
-        id: activeRecord.id,
-        file_name: activeRecord.file_name,
-        file_size: activeRecord.file_size,
-        file_type: activeRecord.file_type,
-        created_at: activeRecord.created_at,
-        is_active: true
-      };
-      setParsedResume(activeResume);
-      if (isExtension) chrome.storage.local.set({ parsedResume: activeResume });
-      else localStorage.setItem('parsed_resume', JSON.stringify(activeResume));
+      const activeResume = normalizeResumeRecord({ ...activeRecord, is_active: true });
+      persistParsedResume(activeResume);
       return { activeResume, resumes: updatedList };
     } catch (err) {
       console.error("Failed to activate resume:", err);
@@ -806,7 +812,7 @@ export function AppProvider({ children }) {
             (title && meaningfulDescription(text) && (hasApplyButton() || urlLooksJobLike || company)) ||
             (window.location.host.includes('linkedin.com') && Boolean(jobId) && meaningfulDescription(text));
 
-          console.log("⚡ [LetMeApply Page Script] Scraped -> Title:", title || "Software Engineer", "| Company:", company || "Target Company", "| Text chars:", text ? text.length : 0);
+          console.log(" [LetMeApply Page Script] Scraped -> Title:", title || "Software Engineer", "| Company:", company || "Target Company", "| Text chars:", text ? text.length : 0);
 
           return {
             title: title || 'Software Engineer',
@@ -928,12 +934,12 @@ export function AppProvider({ children }) {
           .replace(/At \w+, we strive for an environment[\s\S]*$/gi, '')
           .trim();
 
-        console.group("🚀 [LetMeApply Extraction] Scraped Page Content");
-        console.log("📍 URL:", url);
-        console.log("📌 Title:", cleanedTitle);
-        console.log("🏢 Company:", cleanedCompany);
-        console.log("📏 Text Length:", cleanedText.length, "characters");
-        console.log("📝 Scraped Text Preview:\n", cleanedText.substring(0, 600) + (cleanedText.length > 600 ? "\n[...truncated for console]" : ""));
+        console.group(" [LetMeApply Extraction] Scraped Page Content");
+        console.log(" URL:", url);
+        console.log(" Title:", cleanedTitle);
+        console.log(" Company:", cleanedCompany);
+        console.log(" Text Length:", cleanedText.length, "characters");
+        console.log(" Scraped Text Preview:\n", cleanedText.substring(0, 600) + (cleanedText.length > 600 ? "\n[...truncated for console]" : ""));
         console.groupEnd();
 
         if (url.includes('google.com/about/careers/applications/jobs/results/')) {
@@ -1057,16 +1063,16 @@ export function AppProvider({ children }) {
       const finalTitle = isValidText(analyzedJob?.job_title) ? analyzedJob.job_title : (isValidText(details.title) ? details.title : (isValidText(analyzedJob?.title) ? analyzedJob.title : (isValidText(jobTitle) ? jobTitle : 'Software Engineer')));
       const finalCompany = isValidText(analyzedJob?.company_name) ? analyzedJob.company_name : (isValidText(details.company) ? details.company : (isValidText(analyzedJob?.company) ? analyzedJob.company : (isValidText(companyName) ? companyName : 'Target Company')));
 
-      console.group("✨ [LetMeApply Extraction] AI Job Analysis Output");
-      console.log("🎯 Title:", finalTitle);
-      console.log("🏢 Company:", finalCompany);
-      console.log("📍 Location:", details.location || analyzedJob.location);
-      console.log("💰 Salary:", details.salary || analyzedJob.salary);
-      console.log("💼 Job Type:", details.job_type || analyzedJob.job_type);
-      console.log("🌟 Key Highlights:", details.highlights || analyzedJob.highlights);
-      console.log("🛠️ Required Skills:", details.required_skills || analyzedJob.required_skills);
-      console.log("🔑 ATS Keywords:", analyzedJob.ats_keywords || details.ats_keywords || details.keywords);
-      console.log("📦 Full Structured Output Object:", analyzedJob);
+      console.group(" [LetMeApply Extraction] AI Job Analysis Output");
+      console.log(" Title:", finalTitle);
+      console.log(" Company:", finalCompany);
+      console.log(" Location:", details.location || analyzedJob.location);
+      console.log(" Salary:", details.salary || analyzedJob.salary);
+      console.log(" Job Type:", details.job_type || analyzedJob.job_type);
+      console.log(" Key Highlights:", details.highlights || analyzedJob.highlights);
+      console.log(" Required Skills:", details.required_skills || analyzedJob.required_skills);
+      console.log(" ATS Keywords:", analyzedJob.ats_keywords || details.ats_keywords || details.keywords);
+      console.log(" Full Structured Output Object:", analyzedJob);
       console.groupEnd();
 
       if (extractIdentity !== activeExtractionIdentityRef.current) {
@@ -1149,20 +1155,8 @@ export function AppProvider({ children }) {
       const resumeRecord = await parseRes.json();
       const refreshedResumes = await fetchResumesList();
       const backendActiveResume = refreshedResumes?.find((resume) => resume.id === resumeRecord.id) || resumeRecord;
-      const currentResume = {
-        ...(backendActiveResume.parsed_content || backendActiveResume),
-        id: backendActiveResume.id,
-        file_name: backendActiveResume.file_name,
-        file_size: backendActiveResume.file_size,
-        file_type: backendActiveResume.file_type,
-        created_at: backendActiveResume.created_at,
-        is_active: !!backendActiveResume.is_active
-      };
-      setParsedResume(currentResume);
-
-      if (isExtension) {
-        chrome.storage.local.set({ parsedResume: currentResume });
-      }
+      const currentResume = normalizeResumeRecord(backendActiveResume);
+      persistParsedResume(currentResume);
 
       clearInterval(progressInterval);
       setLoadingProgress(100);
@@ -1202,22 +1196,15 @@ export function AppProvider({ children }) {
 
         if (parseRes.ok) {
           const updatedRecord = await parseRes.json();
-          activeParsed = {
-            ...(updatedRecord.parsed_content || updatedRecord),
-            id: updatedRecord.id,
-            file_name: updatedRecord.file_name,
-            file_size: updatedRecord.file_size,
-            file_type: updatedRecord.file_type,
-            created_at: updatedRecord.created_at
-          };
-          setParsedResume(activeParsed);
-          if (isExtension) chrome.storage.local.set({ parsedResume: activeParsed });
-          else localStorage.setItem('parsed_resume', JSON.stringify(activeParsed));
+          activeParsed = normalizeResumeRecord(updatedRecord);
+          persistParsedResume(activeParsed);
         }
       }
 
       const headers = {};
       if (apiKey) headers["x-groq-key"] = apiKey;
+      const token = session?.access_token || localStorage.getItem('access_token');
+      if (token) headers["Authorization"] = `Bearer ${token}`;
 
       const compareRes = await fetch(`${apiUrl}/api/compare`, {
         method: "POST",
@@ -1226,6 +1213,7 @@ export function AppProvider({ children }) {
           ...headers
         },
         body: JSON.stringify({
+          resume_id: activeParsed.id,
           resume: activeParsed,
           job: jobAnalysis
         })
@@ -1268,8 +1256,14 @@ export function AppProvider({ children }) {
     let activeParsed = parsedResume;
 
     try {
+      const backendActive = await refreshActiveResumeFromBackend();
+      if (!backendActive?.id) {
+        throw new Error("No active resume selected. Choose a resume before tailoring.");
+      }
+      activeParsed = backendActive;
+
       // Lazy parse if resume experience is empty and raw_text is present
-      if (parsedResume.id && (!parsedResume.experience || parsedResume.experience.length === 0) && parsedResume.raw_text) {
+      if (activeParsed.id && (!activeParsed.experience || activeParsed.experience.length === 0) && activeParsed.raw_text) {
         setLoadingMessage("Parsing Resume with AI for Tailoring...");
         setLoadingProgress(15);
 
@@ -1278,7 +1272,7 @@ export function AppProvider({ children }) {
         if (token) parseHeaders["Authorization"] = `Bearer ${token}`;
         if (apiKey) parseHeaders["x-groq-key"] = apiKey;
 
-        const parseRes = await fetch(`${apiUrl}/api/v1/resumes/${parsedResume.id}/parse`, {
+        const parseRes = await fetch(`${apiUrl}/api/v1/resumes/${activeParsed.id}/parse`, {
           method: "POST",
           headers: parseHeaders
         });
@@ -1288,20 +1282,8 @@ export function AppProvider({ children }) {
         }
 
         const updatedRecord = await parseRes.json();
-        activeParsed = {
-          ...(updatedRecord.parsed_content || updatedRecord),
-          id: updatedRecord.id,
-          file_name: updatedRecord.file_name,
-          file_size: updatedRecord.file_size,
-          file_type: updatedRecord.file_type,
-          created_at: updatedRecord.created_at
-        };
-        setParsedResume(activeParsed);
-        if (isExtension) {
-          chrome.storage.local.set({ parsedResume: activeParsed });
-        } else {
-          localStorage.setItem('parsed_resume', JSON.stringify(activeParsed));
-        }
+        activeParsed = normalizeResumeRecord(updatedRecord);
+        persistParsedResume(activeParsed);
 
         setLoadingMessage("AI Parsing Complete! Starting Gap Analysis...");
         setLoadingProgress(35);
@@ -1309,6 +1291,8 @@ export function AppProvider({ children }) {
 
       const headers = {};
       if (apiKey) headers["x-groq-key"] = apiKey;
+      const token = session?.access_token || localStorage.getItem('access_token');
+      if (token) headers["Authorization"] = `Bearer ${token}`;
 
       const compareRes = await fetch(`${apiUrl}/api/compare`, {
         method: "POST",
@@ -1317,6 +1301,7 @@ export function AppProvider({ children }) {
           ...headers
         },
         body: JSON.stringify({
+          resume_id: activeParsed.id,
           resume: activeParsed,
           job: jobAnalysis
         })
@@ -1328,6 +1313,19 @@ export function AppProvider({ children }) {
 
       const compResult = await compareRes.json();
       setComparison(compResult);
+      try {
+        const usedRes = await fetch(`${apiUrl}/api/v1/resumes/${activeParsed.id}/mark-used`, {
+          method: "POST",
+          headers: token ? { "Authorization": `Bearer ${token}` } : {}
+        });
+        if (usedRes.ok) {
+          const usedRecord = await usedRes.json();
+          persistParsedResume(normalizeResumeRecord(usedRecord));
+          await fetchResumesList();
+        }
+      } catch (usageErr) {
+        console.warn("Failed to update resume usage metadata:", usageErr);
+      }
 
       const list = [];
       let idCounter = 1;
@@ -1857,6 +1855,7 @@ export function AppProvider({ children }) {
       setHasRedirectedOnStartup,
       resumesList, setResumesList,
       fetchResumesList,
+      refreshActiveResumeFromBackend,
       handleDeleteResume,
       handleActivateResume,
       handleScanPage,
@@ -1880,3 +1879,5 @@ export function useApp() {
   if (!context) throw new Error("useApp must be used inside an AppProvider");
   return context;
 }
+
+

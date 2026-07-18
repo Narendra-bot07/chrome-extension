@@ -10,7 +10,8 @@ import {
   MapPin, 
   Clock, 
   AlertTriangle,
-  ChevronLeft
+  ChevronLeft,
+  Globe
 } from 'lucide-react';
 
 export default function SecurityPage() {
@@ -154,7 +155,7 @@ export default function SecurityPage() {
                       
                       <div className={`text-[13px] flex flex-wrap items-center gap-x-4 gap-y-1 ${darkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
                         <span className="flex items-center gap-1.5">
-                          <span className="w-4 h-4 text-center">🌍</span> 
+                          <Globe className="w-3.5 h-3.5" /> 
                           {s.browser} {s.browser_version}
                         </span>
                         <span className="flex items-center gap-1.5">
@@ -227,3 +228,4 @@ const Activity = ({ className }) => (
     <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
   </svg>
 );
+

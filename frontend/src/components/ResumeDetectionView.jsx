@@ -2,10 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CalendarDays,
   CheckCircle2,
+  Clock3,
   Eye,
   FileText,
   FolderOpen,
   HardDrive,
+  History,
   Star,
   Trash2,
   Upload,
@@ -34,6 +36,10 @@ function normalizeResume(resume) {
     file_type: resume.file_type,
     created_at: resume.created_at || resume.uploaded_at,
     uploaded_at: resume.uploaded_at || resume.created_at,
+    last_used_at: resume.last_used_at,
+    times_used: resume.times_used || resume.tailor_count || 0,
+    tailor_count: resume.tailor_count || resume.times_used || 0,
+    parsing_status: resume.parsing_status || resume.parsed_content?.parse_status || 'unknown',
     is_active: !!resume.is_active
   };
 }
@@ -170,11 +176,14 @@ export default function ResumeDetectionView({
       ) : (
         <div className="overflow-x-auto border-y border-slate-200 dark:border-slate-850">
           <div className="min-w-[900px]">
-            <div className="grid grid-cols-[minmax(260px,1.7fr)_170px_120px_130px_110px_150px_100px] items-center gap-3 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-50/70 dark:bg-slate-950/50">
+            <div className="grid grid-cols-[minmax(240px,1.7fr)_145px_120px_115px_115px_120px_110px_110px_140px_95px] items-center gap-3 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-50/70 dark:bg-slate-950/50">
               <span><FileText size={13} className="inline mr-1" /> Resume Name</span>
               <span><CalendarDays size={13} className="inline mr-1" /> Uploaded</span>
               <span><HardDrive size={13} className="inline mr-1" /> Size</span>
               <span>Status</span>
+              <span><Clock3 size={13} className="inline mr-1" /> Last Used</span>
+              <span><History size={13} className="inline mr-1" /> Times Used</span>
+              <span>Parsing</span>
               <span><Eye size={13} className="inline mr-1" /> Preview</span>
               <span><Star size={13} className="inline mr-1" /> Select</span>
               <span><Trash2 size={13} className="inline mr-1" /> Delete</span>
@@ -185,7 +194,7 @@ export default function ResumeDetectionView({
               return (
                 <div
                   key={resume.id}
-                  className={`grid grid-cols-[minmax(260px,1.7fr)_170px_120px_130px_110px_150px_100px] items-center gap-3 px-3 py-3 border-t border-slate-100 dark:border-slate-900 text-sm transition ${
+                  className={`grid grid-cols-[minmax(240px,1.7fr)_145px_120px_115px_115px_120px_110px_110px_140px_95px] items-center gap-3 px-3 py-3 border-t border-slate-100 dark:border-slate-900 text-sm transition ${
                     isActive ? 'bg-indigo-50/50 dark:bg-indigo-950/20' : 'hover:bg-slate-50 dark:hover:bg-slate-950/50'
                   }`}
                 >
@@ -208,6 +217,9 @@ export default function ResumeDetectionView({
                     {isActive ? <CheckCircle2 size={13} /> : <span className="h-2 w-2 rounded-full bg-slate-300" />}
                     {isActive ? 'Active' : 'Inactive'}
                   </span>
+                  <span className="text-slate-500 font-medium">{formatDate(resume.last_used_at)}</span>
+                  <span className="text-slate-500 font-black">{resume.times_used || resume.tailor_count || 0}</span>
+                  <span className="text-slate-500 font-medium capitalize">{resume.parsing_status || resume.parsed_content?.parse_status || 'unknown'}</span>
 
                   <button
                     type="button"
@@ -289,3 +301,4 @@ export default function ResumeDetectionView({
     </div>
   );
 }
+

@@ -86,6 +86,13 @@ async def list_resumes(
 ):
     return repo.list_by_user(user["id"])
 
+@router.get("/active")
+async def get_active_resume(
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository)
+):
+    return repo.get_active(user["id"]) or None
+
 @router.get("/{resume_id}/file")
 async def get_resume_file(
     resume_id: str,
@@ -127,6 +134,20 @@ async def activate_resume(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Resume not found."
+        )
+    return record
+
+@router.post("/{resume_id}/mark-used")
+async def mark_resume_used(
+    resume_id: str,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository)
+):
+    record = repo.mark_used(resume_id, user["id"])
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Resume not found, not active, or not owned by current user."
         )
     return record
 

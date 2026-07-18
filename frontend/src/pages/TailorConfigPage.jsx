@@ -8,8 +8,17 @@ function TailorConfigPage() {
   const {
     selectedSections, setSelectedSections,
     tailoringIntensity, setTailoringIntensity,
-    handleRunGapAnalysis, loading
+    handleRunGapAnalysis, loading,
+    parsedResume,
+    resumesList,
+    fetchResumesList,
+    handleActivateResume,
+    session
   } = useApp();
+
+  React.useEffect(() => {
+    fetchResumesList();
+  }, [session?.access_token]);
 
   const handleToggleSection = (sectionId) => {
     if (selectedSections.includes(sectionId)) {
@@ -39,6 +48,11 @@ function TailorConfigPage() {
       onStartTailoring={handleRunGapAnalysis}
       onBack={() => navigate('/tailor')}
       loading={loading}
+      activeResume={parsedResume}
+      resumesList={resumesList}
+      onChangeResume={handleActivateResume}
+      onChooseResume={() => navigate('/resume-detect')}
+      onUploadResume={() => navigate('/resume-detect')}
       validationMessage={selectedSections.length === 0 ? "Select at least one resume section to continue." : ""}
     />
   );

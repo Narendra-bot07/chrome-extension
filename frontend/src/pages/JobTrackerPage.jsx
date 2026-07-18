@@ -19,9 +19,9 @@ const WORKFLOW_STAGES = [
 ];
 
 const TERMINAL_STAGES = [
-  { id: 'Accepted', label: 'Accepted 🎉', color: '#059669' },
-  { id: 'Rejected', label: 'Rejected 🛑', color: '#ef4444' },
-  { id: 'Archived', label: 'Archived 📁', color: '#64748b' }
+  { id: 'Accepted', label: 'Accepted', color: '#059669' },
+  { id: 'Rejected', label: 'Rejected', color: '#ef4444' },
+  { id: 'Archived', label: 'Archived', color: '#64748b' }
 ];
 
 const STAGE_ORDER = {
@@ -1318,3 +1318,4 @@ export default function JobTrackerPage() {
     </JobTrackerErrorBoundary>
   );
 }
+

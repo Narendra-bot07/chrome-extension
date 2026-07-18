@@ -37,7 +37,9 @@ class ResumeRepository:
 
     def list_by_user(self, user_id: str) -> List[Dict[str, Any]]:
         query = """
-            SELECT *
+            SELECT *,
+                   COALESCE(times_used, tailor_count, 0) AS times_used,
+                   COALESCE(tailor_count, times_used, 0) AS tailor_count
             FROM public.resumes
             WHERE user_id = %s AND deleted_at IS NULL
             ORDER BY is_active DESC, created_at DESC
@@ -45,6 +47,20 @@ class ResumeRepository:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (user_id,))
             return cur.fetchall()
+
+    def get_active(self, user_id: str) -> Optional[Dict[str, Any]]:
+        query = """
+            SELECT *,
+                   COALESCE(times_used, tailor_count, 0) AS times_used,
+                   COALESCE(tailor_count, times_used, 0) AS tailor_count
+            FROM public.resumes
+            WHERE user_id = %s AND deleted_at IS NULL AND is_active = TRUE
+            ORDER BY created_at DESC
+            LIMIT 1
+        """
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query, (user_id,))
+            return cur.fetchone()
 
     def activate(self, resume_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -117,3 +133,21 @@ class ResumeRepository:
             cur.execute(query, (json.dumps(parsed_content), resume_id, user_id))
             self.conn.commit()
             return bool(cur.fetchone())
+
+    def mark_used(self, resume_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        query = """
+            UPDATE public.resumes
+            SET last_used_at = NOW(),
+                times_used = COALESCE(times_used, 0) + 1,
+                tailor_count = COALESCE(tailor_count, 0) + 1,
+                updated_at = NOW()
+            WHERE id = %s AND user_id = %s AND deleted_at IS NULL AND is_active = TRUE
+            RETURNING *,
+                      COALESCE(times_used, tailor_count, 0) AS times_used,
+                      COALESCE(tailor_count, times_used, 0) AS tailor_count
+        """
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query, (resume_id, user_id))
+            record = cur.fetchone()
+            self.conn.commit()
+            return record

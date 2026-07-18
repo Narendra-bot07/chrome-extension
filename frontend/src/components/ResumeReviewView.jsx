@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { RotateCcw, Sparkles } from 'lucide-react';
+import { Check, RotateCcw, Sparkles, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 function ResumeReviewView({
@@ -435,20 +435,8 @@ function ResumeReviewView({
                       + {s.skillName}
                       {isPending && (
                         <span className="flex items-center gap-1 border-l border-emerald-200/40 pl-1.5 ml-1 select-none">
-                          <span 
-                            className="text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300 cursor-pointer font-extrabold"
-                            onClick={() => onUpdateSuggestionStatus(s.id, 'accepted')}
-                            title="Accept Skill"
-                          >
-                            ✓
-                          </span>
-                          <span 
-                            className="text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-350 cursor-pointer font-extrabold"
-                            onClick={() => onUpdateSuggestionStatus(s.id, 'rejected')}
-                            title="Reject Skill"
-                          >
-                            ✕
-                          </span>
+                          <button className="text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300 cursor-pointer" onClick={() => onUpdateSuggestionStatus(s.id, 'accepted')} title="Accept Skill" aria-label="Accept skill"><Check size={13} /></button>
+                          <button className="text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 cursor-pointer" onClick={() => onUpdateSuggestionStatus(s.id, 'rejected')} title="Reject Skill" aria-label="Reject skill"><X size={13} /></button>
                         </span>
                       )}
                     </span>
@@ -486,3 +474,4 @@ function ResumeReviewView({
 }
 
 export default ResumeReviewView;
+

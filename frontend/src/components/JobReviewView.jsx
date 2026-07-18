@@ -4,7 +4,14 @@ import {
   FilePenLine,
   RefreshCw,
   Target,
-  X
+  X,
+  MapPin,
+  DollarSign,
+  Briefcase,
+  Building2,
+  Timer,
+  Tag,
+  Sparkles
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
@@ -323,33 +330,33 @@ function JobReviewView({
         {/* Gray badges list (Location, Salary, Job Type, Work Mode, Experience, Seniority) */}
         <div className="flex flex-wrap gap-1.5 text-xs">
           {location && (
-            <span className="px-2.5 py-1 bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 rounded-full font-bold border border-zinc-200/60 dark:border-zinc-800">
-              📍 {location}
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 rounded-full font-bold border border-zinc-200/60 dark:border-zinc-800">
+              <MapPin size={12} /> {location}
             </span>
           )}
           {salary && (
-            <span className="px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 rounded-full font-bold border border-emerald-200/60 dark:border-emerald-800">
-              💰 {salary}
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 rounded-full font-bold border border-emerald-200/60 dark:border-emerald-800">
+              <DollarSign size={12} /> {salary}
             </span>
           )}
           {jobType && (
-            <span className="px-2.5 py-1 bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 rounded-full font-bold border border-zinc-200/60 dark:border-zinc-800">
-              💼 {jobType}
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 rounded-full font-bold border border-zinc-200/60 dark:border-zinc-800">
+              <Briefcase size={12} /> {jobType}
             </span>
           )}
           {workMode && (
-            <span className="px-2.5 py-1 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 rounded-full font-bold border border-indigo-200/60 dark:border-indigo-800">
-              🏢 {workMode}
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 rounded-full font-bold border border-indigo-200/60 dark:border-indigo-800">
+              <Building2 size={12} /> {workMode}
             </span>
           )}
           {experienceRequired && (
-            <span className="px-2.5 py-1 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 rounded-full font-bold border border-amber-200/60 dark:border-amber-800">
-              ⏳ Exp: {experienceRequired}
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 rounded-full font-bold border border-amber-200/60 dark:border-amber-800">
+              <Timer size={12} /> Exp: {experienceRequired}
             </span>
           )}
           {seniority && (
-            <span className="px-2.5 py-1 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 rounded-full font-bold border border-purple-200/60 dark:border-purple-800">
-              🏷️ {seniority}
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 rounded-full font-bold border border-purple-200/60 dark:border-purple-800">
+              <Tag size={12} /> {seniority}
             </span>
           )}
         </div>
@@ -358,7 +365,7 @@ function JobReviewView({
         {highlightsList.length > 0 && (
           <div className="space-y-1.5">
             <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
-              <span>🌟 Key Highlights</span>
+              <Sparkles size={14} /><span>Key Highlights</span>
             </h3>
             <ul className="list-disc pl-5 space-y-1.5 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed font-semibold">
               {highlightsList.map((highlight, idx) => (
@@ -491,3 +498,4 @@ function JobReviewView({
 }
 
 export default JobReviewView;
+
