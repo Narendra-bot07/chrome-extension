@@ -20,6 +20,11 @@ class UsageService:
         self.subscription_service = SubscriptionService(conn)
 
     def get_feature_limit(self, subscription, feature_key):
+        # Temporary local/dev override: keep JD extraction available without a monthly cap.
+        # Usage events are still recorded, but quota checks treat this feature as unlimited.
+        if feature_key == "jd_extraction":
+            return True, None
+
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
                 SELECT pf.limit_value, pf.enabled

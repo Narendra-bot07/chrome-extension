@@ -41,6 +41,92 @@ def parse_resume(raw_text: str, api_key: Optional[str] = None) -> ResumeStructur
     chain = prompt | structured_llm
     return chain.invoke({"text": raw_text})
 
+def _unique_keep_order(items: List[str]) -> List[str]:
+    seen = set()
+    out = []
+    for item in items:
+        clean = re.sub(r"\s+", " ", str(item or "")).strip(" -•\t\n\r")
+        key = clean.lower()
+        if clean and key not in seen:
+            seen.add(key)
+            out.append(clean)
+    return out
+
+
+def _extract_section_items(text: str, heading: str) -> List[str]:
+    pattern = rf"{re.escape(heading)}:?\s*(.*?)(?=\n\s*(?:Minimum qualifications|Preferred qualifications|About the job|Responsibilities|Requirements|Qualifications|Benefits|Google is proud|Apply)\b|$)"
+    match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return []
+    section = match.group(1)
+    bullets = re.findall(r"(?:^|\n)\s*(?:[-•*]\s*)?(.+?)(?=\n\s*(?:[-•*]\s*)|\Z)", section.strip(), flags=re.DOTALL)
+    return _unique_keep_order([b for b in bullets if len(b.strip()) > 8])
+
+
+def _infer_skills_from_text(text: str) -> List[str]:
+    skill_patterns = [
+        r"\bPython\b", r"\bJavaScript\b", r"\bTypeScript\b", r"\bJava\b", r"\bC\+\+\b", r"\bC\b",
+        r"\bGo\b", r"\bGolang\b", r"\bRust\b", r"\bSQL\b", r"\bNoSQL\b",
+        r"\bReact\b", r"\bNode\.?js\b", r"\bSpring\b", r"\bDjango\b", r"\bFastAPI\b",
+        r"\bAWS\b", r"\bAzure\b", r"\bGoogle Cloud\b", r"\bGCP\b", r"\bKubernetes\b", r"\bDocker\b",
+        r"\bLinux\b", r"\bUnix\b", r"\bMachine Learning\b", r"\bML\b", r"\bAI\b", r"\bGenAI\b",
+        r"\bLLM'?s?\b", r"\bAgentic\b", r"\bNLP\b", r"\bdata structures\b", r"\balgorithms\b",
+        r"\bdistributed systems\b", r"\bcloud services\b", r"\bsecurity\b"
+    ]
+    found = []
+    for pattern in skill_patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            value = match.group(0)
+            if value.lower() == "gcp":
+                value = "Google Cloud"
+            elif value.lower() == "llm's":
+                value = "LLMs"
+            found.append(value)
+    return _unique_keep_order(found)
+
+
+def _infer_experience(text: str) -> str:
+    years = [int(y) for y in re.findall(r"\b(\d{1,2})\+?\s+years?\s+of\s+experience\b", text, flags=re.IGNORECASE)]
+    if not years:
+        return ""
+    max_years = max(years)
+    return f"{max_years}+ years" if "+" in text else f"{max_years} years"
+
+
+def _enrich_job_analysis(result: JobAnalysis, jd_text: str) -> JobAnalysis:
+    minimum = _extract_section_items(jd_text, "Minimum qualifications")
+    preferred = _extract_section_items(jd_text, "Preferred qualifications")
+
+    if not result.qualifications:
+        result.qualifications = _unique_keep_order(minimum + preferred)
+
+    inferred_skills = _infer_skills_from_text(jd_text)
+    if not result.required_skills:
+        result.required_skills = inferred_skills[:12]
+    else:
+        result.required_skills = _unique_keep_order(result.required_skills + inferred_skills[:8])
+
+    if not result.preferred_skills and preferred:
+        result.preferred_skills = _infer_skills_from_text("\n".join(preferred))
+
+    if not result.experience_required:
+        result.experience_required = _infer_experience(jd_text)
+
+    if not result.seniority and result.experience_required:
+        years_match = re.search(r"\d+", result.experience_required)
+        years = int(years_match.group(0)) if years_match else 0
+        result.seniority = "Senior" if years >= 5 else "Mid" if years >= 2 else "Entry"
+
+    if not result.skills_categories:
+        result.skills_categories = {}
+    if result.required_skills:
+        result.skills_categories["Required"] = result.required_skills
+    if result.preferred_skills:
+        result.skills_categories["Preferred"] = result.preferred_skills
+
+    return result
+
+
 def analyze_job_description(jd_text: str, api_key: Optional[str] = None, url: Optional[str] = "", page_title: Optional[str] = "", page_company: Optional[str] = "") -> JobAnalysis:
     llm = get_llm(api_key, temperature=0.0)
     structured_llm = llm.with_structured_output(JobAnalysis)
@@ -50,19 +136,23 @@ def analyze_job_description(jd_text: str, api_key: Optional[str] = None, url: Op
 Your responsibility is to extract exact structured fields from the provided single job posting text.
 
 The input text is the pre-validated, high-scoring main job container from the DOM.
-Always set is_job_related = true and extract:
-- job_title
-- company_name
+Always set is_job_related = true and extract these exact schema fields:
+- title
+- company
 - location
-- workplace_type (Remote, Hybrid, On-site)
-- employment_type (Full-time, Part-time, Contract, Internship)
-- experience_level (Entry, Mid, Senior, Lead, Executive)
-- summary
+- work_mode (Remote, Hybrid, On-site)
+- job_type (Full-time, Part-time, Contract, Internship)
+- experience_required (e.g. "2 years", "5+ years")
+- seniority (Entry, Mid, Senior, Lead, Executive)
+- highlights (list of strings)
 - responsibilities (list of strings)
 - qualifications (list of strings)
 - required_skills (list of strings)
 - preferred_skills (list of strings)
-- salary_range
+- skills_categories (object grouping Required/Preferred or technical categories)
+- salary
+- keywords
+- ats_keywords
 
 =========================================================
 RULES
@@ -70,6 +160,9 @@ RULES
 - Build the structured job object using ONLY information that actually exists in the provided text.
 - Never invent or hallucinate information.
 - Never fabricate missing fields. If a field is not stated, leave it empty/null/default.
+- Extract required_skills from programming languages, frameworks, platforms, tools, cloud, AI/ML, security, infrastructure, and domain skills mentioned inside qualifications or responsibilities.
+- Extract experience_required from phrases like "2 years of experience".
+- Do not leave skills empty when the JD explicitly names technologies.
 - Return valid JSON matching the exact schema only.
 - No markdown or explanations outside the JSON."""),
         ("human", "Page Title: {page_title}\nDetected Company: {page_company}\nURL: {url}\n\nMain Job Container Text:\n{text}")
@@ -83,7 +176,7 @@ RULES
         "page_company": page_company or ""
     })
     
-    return result
+    return _enrich_job_analysis(result, jd_text)
 
 def analyze_gaps(resume: ResumeStructure, job: JobAnalysis, api_key: Optional[str] = None) -> GapsAnalysis:
     llm = get_llm(api_key, temperature=0.0)
@@ -137,6 +230,108 @@ def edit_projects(project_item: Any, job: JobAnalysis, missing_keywords: List[st
     bullets_str = "\n".join([f"[{i}] {b}" for i, b in enumerate(project_item.description)])
     return (prompt | structured_llm).invoke({"bullets": bullets_str, "keywords": ", ".join(missing_keywords)})
 
+def _match_norm(value: Any) -> str:
+    return re.sub(r"[^a-z0-9+#.]+", " ", str(value or "").lower()).strip()
+
+def _match_compact(value: Any) -> str:
+    return re.sub(r"[^a-z0-9+#.]+", "", str(value or "").lower())
+
+def _flatten_values(value: Any) -> List[str]:
+    out: List[str] = []
+    if value is None:
+        return out
+    if isinstance(value, list):
+        for item in value:
+            out.extend(_flatten_values(item))
+    elif isinstance(value, dict):
+        for item in value.values():
+            out.extend(_flatten_values(item))
+    else:
+        text = str(value).strip()
+        if text:
+            out.append(text)
+    return out
+
+def _resume_search_text(resume: ResumeStructure) -> str:
+    parts = [
+        resume.summary,
+        resume.raw_text or "",
+        json.dumps([item.model_dump() for item in resume.experience], default=str),
+        json.dumps([item.model_dump() for item in resume.projects], default=str),
+        json.dumps(resume.skills, default=str),
+        json.dumps(resume.skills_categories or {}, default=str),
+        json.dumps([item.model_dump() for item in resume.certifications], default=str),
+        json.dumps(resume.achievements, default=str),
+    ]
+    return _match_norm(" ".join(parts))
+
+def _job_match_terms(job: JobAnalysis) -> List[str]:
+    explicit = []
+    explicit.extend(_flatten_values(job.required_skills))
+    explicit.extend(_flatten_values(job.preferred_skills))
+    explicit.extend(_flatten_values(job.skills_categories or {}))
+    explicit.extend(_flatten_values(job.ats_keywords))
+    explicit.extend(_flatten_values(job.keywords))
+
+    jd_text = " ".join(_flatten_values([
+        job.title,
+        job.experience_required,
+        job.qualifications,
+        job.responsibilities,
+        job.highlights,
+    ]))
+    known_terms = [
+        "python", "java", "javascript", "typescript", "c++", "c#", "sql", "react",
+        "node.js", "nodejs", "spring", "fastapi", "django", "aws", "azure",
+        "google cloud", "gcp", "docker", "kubernetes", "linux", "unix",
+        "machine learning", "ml", "ai", "genai", "llm", "llms", "nlp",
+        "data analysis", "risk management", "compliance", "communication",
+        "security", "distributed systems", "microservices", "backend", "frontend",
+        "api", "apis", "algorithms", "data structures",
+    ]
+    jd_norm = _match_norm(jd_text)
+    explicit.extend(term for term in known_terms if _match_norm(term) in jd_norm)
+
+    terms = []
+    seen = set()
+    for term in explicit:
+        clean = _match_norm(term)
+        key = _match_compact(clean)
+        if len(clean) >= 2 and key not in seen:
+            seen.add(key)
+            terms.append(clean)
+    return terms[:30]
+
+def calculate_resume_job_match_score(resume: ResumeStructure, job: JobAnalysis) -> int:
+    """Deterministic backend source of truth for active-resume vs extracted-JD match."""
+    resume_text = _resume_search_text(resume)
+    resume_compact = _match_compact(resume_text)
+    jd_terms = _job_match_terms(job)
+    if not resume_text or not jd_terms:
+        return 0
+
+    matched = 0
+    for term in jd_terms:
+        if _match_norm(term) in resume_text or _match_compact(term) in resume_compact:
+            matched += 1
+
+    skill_score = matched / len(jd_terms)
+    required_years = re.findall(r"\b(\d{1,2})\+?\s+years?\b", " ".join(_flatten_values([
+        job.experience_required,
+        job.qualifications,
+        job.responsibilities,
+    ])).lower())
+    has_experience_signal = bool(resume.experience or re.search(r"\b(19|20)\d{2}\b", resume_text))
+    experience_score = 1.0 if not required_years or has_experience_signal else 0.0
+    structure_score = sum([
+        bool(resume.summary),
+        bool(resume.experience),
+        bool(resume.projects),
+        bool(resume.skills or resume.skills_categories),
+    ]) / 4
+
+    return max(0, min(100, round((skill_score * 70) + (experience_score * 20) + (structure_score * 10))))
+
 def generate_tailoring_patch(resume: ResumeStructure, job: JobAnalysis, api_key: Optional[str] = None) -> TailoringReport:
     gaps = analyze_gaps(resume, job, api_key)
     
@@ -177,10 +372,13 @@ def generate_tailoring_patch(resume: ResumeStructure, job: JobAnalysis, api_key:
         projects=projects_patch
     )
     
+    ats_score_before = calculate_resume_job_match_score(resume, job)
+    ats_score_after = min(100, max(ats_score_before, ats_score_before + min(25, len(patch.skills_append) * 6 + len(experience_patch) * 5 + len(projects_patch) * 5)))
+
     return TailoringReport(
         changes_made=changes_made,
-        ats_score_before=70,
-        ats_score_after=95,
+        ats_score_before=ats_score_before,
+        ats_score_after=ats_score_after,
         patch=patch
     )
 
