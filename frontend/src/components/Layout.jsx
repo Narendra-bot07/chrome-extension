@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext';
 import { 
   Settings, Sun, Moon, AlertCircle, X, Menu, 
   LayoutDashboard, FileText, Briefcase, User, 
-  HelpCircle, ExternalLink, LogOut, ChevronDown, Zap
+  LogOut, Zap
 } from 'lucide-react';
 import { Button } from './ui/Button';
 import SettingsOverlay from './SettingsOverlay';
@@ -49,13 +49,13 @@ function Layout() {
     resume_count: 0
   });
 
-  const [dropdownOpen, setDropdownOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     if (typeof window !== 'undefined') {
       return window.innerWidth >= 768 && !isExtension;
     }
     return true;
   });
+  const [profileDropupOpen, setProfileDropupOpen] = useState(false);
 
   const [isHowItWorksOpen, setIsHowItWorksOpen] = useState(false);
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
@@ -204,33 +204,11 @@ function Layout() {
               <Briefcase size={16} />
               Job Tracker
             </Link>
-            <Link 
-              to="/profile" 
-              className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                currentPath === '/profile' 
-                  ? darkMode ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-100 text-zinc-950'
-                  : darkMode ? 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-950' : 'text-zinc-650 hover:text-zinc-900 hover:bg-zinc-50'
-              }`}
-            >
-              <User size={16} />
-              Account
-            </Link>
-            <Link
-              to="/subscription"
-              className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                currentPath === '/subscription'
-                  ? darkMode ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-100 text-zinc-950'
-                  : darkMode ? 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-950' : 'text-zinc-650 hover:text-zinc-900 hover:bg-zinc-50'
-              }`}
-            >
-              <Zap size={16} />
-              Subscription
-            </Link>
           </nav>
         </div>
 
-        {/* Plan Overview Card */}
-        <div className="p-6">
+        <div className="p-6 space-y-3">
+          {/* JD Extraction Status / Plan Overview Card */}
           <div className={`border rounded-xl p-4 flex flex-col gap-3 transition-colors ${
             darkMode ? 'bg-zinc-950 border-zinc-850' : 'bg-zinc-50 border-zinc-200/60'
           }`}>
@@ -269,6 +247,72 @@ function Layout() {
               </Button>
             </Link>
           </div>
+
+          {/* Bottom Profile Bar + Drop-up */}
+          <div className="relative">
+            {profileDropupOpen && (
+              <div className={`absolute bottom-full left-0 right-0 mb-2 rounded-2xl border shadow-xl overflow-hidden z-50 ${
+                darkMode ? 'bg-zinc-950 border-zinc-800 text-zinc-100' : 'bg-white border-zinc-200 text-zinc-900'
+              }`}>
+                <button
+                  onClick={() => {
+                    setProfileDropupOpen(false);
+                    navigate('/profile');
+                  }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-extrabold transition-colors ${
+                    darkMode ? 'hover:bg-zinc-900 text-zinc-300' : 'hover:bg-zinc-50 text-zinc-700'
+                  }`}
+                >
+                  <User size={15} />
+                  Account
+                </button>
+                <button
+                  onClick={() => {
+                    setProfileDropupOpen(false);
+                    navigate('/subscription');
+                  }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-extrabold transition-colors ${
+                    darkMode ? 'hover:bg-zinc-900 text-zinc-300' : 'hover:bg-zinc-50 text-zinc-700'
+                  }`}
+                >
+                  <Zap size={15} />
+                  Subscription
+                </button>
+                <div className={darkMode ? 'border-t border-zinc-800' : 'border-t border-zinc-100'} />
+                <button
+                  onClick={logout}
+                  className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-extrabold transition-colors ${
+                    darkMode ? 'hover:bg-zinc-900 text-zinc-300' : 'hover:bg-zinc-50 text-zinc-700'
+                  }`}
+                >
+                  <LogOut size={15} />
+                  Sign out
+                </button>
+              </div>
+            )}
+
+            <button
+              onClick={() => setProfileDropupOpen((open) => !open)}
+              className={`w-full border rounded-2xl p-3 flex items-center gap-3 text-left transition-colors ${
+                darkMode ? 'bg-zinc-950 border-zinc-850 hover:bg-zinc-900' : 'bg-zinc-50 border-zinc-200/60 hover:bg-zinc-100'
+              }`}
+            >
+              <div className="w-11 h-11 flex-shrink-0 rounded-2xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 text-white flex items-center justify-center font-black text-sm shadow-lg shadow-indigo-500/20">
+                {(profile.full_name || user?.metadata?.full_name || user?.email || 'N').charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className={`text-sm font-black truncate ${darkMode ? 'text-white' : 'text-zinc-900'}`}>
+                  {profile.full_name || user?.metadata?.full_name || 'Narendra'}
+                </p>
+                <p className={`text-[11px] font-semibold truncate mt-0.5 ${darkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                  {profile.email || user?.email || 'bandinarendra3333@gmail.com'}
+                </p>
+              </div>
+              <span className={`text-xs font-black transition-transform ${profileDropupOpen ? 'rotate-180' : ''} ${darkMode ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                ^
+              </span>
+            </button>
+          </div>
         </div>
 
       </aside>
@@ -305,7 +349,7 @@ function Layout() {
             </button>
             <button 
               onClick={() => {
-                navigate('/profile?tab=BILLING');
+                navigate('/subscription');
               }}
               className="hidden md:inline text-xs text-zinc-500 font-semibold cursor-pointer hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors"
             >
@@ -338,54 +382,6 @@ function Layout() {
               {darkMode ? <Sun size={14} /> : <Moon size={14} />}
             </button>
 
-
-            {/* Profile Dropdown */}
-            <div className="relative">
-              <button 
-                onClick={() => setDropdownOpen(!dropdownOpen)}
-                className={`flex items-center justify-center w-9 h-9 rounded-full border-2 transition-all focus:outline-none ${
-                  darkMode ? 'border-slate-700 hover:border-slate-500' : 'border-gray-200 hover:border-gray-300'
-                }`}
-              >
-                <div className="w-full h-full rounded-full bg-black text-white flex items-center justify-center font-extrabold text-sm overflow-hidden">
-                  {profile.full_name ? profile.full_name.charAt(0).toUpperCase() : 'N'}
-                </div>
-              </button>
-
-              {dropdownOpen && (
-                <div className={`absolute right-0 mt-2 w-72 rounded-2xl shadow-xl border animate-fadeIn z-40 overflow-hidden ${
-                  darkMode ? 'bg-zinc-900 border-zinc-800 text-white' : 'bg-white border-zinc-200 text-zinc-800'
-                }`}>
-                  <div className="flex items-center gap-3 p-4">
-                    <div className="w-9 h-9 flex-shrink-0 rounded-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center font-extrabold text-sm">
-                      {profile.full_name ? profile.full_name.charAt(0).toUpperCase() : 'N'}
-                    </div>
-                    <div className="flex flex-col">
-                      <p className={`text-[14px] font-medium leading-tight ${darkMode ? 'text-white' : 'text-zinc-900'}`}>
-                        {profile.full_name || user?.full_name || 'Narendra'}
-                      </p>
-                      <p className={`text-[13px] mt-0.5 truncate w-48 ${darkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
-                        {profile.email || user?.email || 'bandinarendra3333@gmail.com'}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div className={`border-t ${darkMode ? 'border-zinc-800' : 'border-zinc-100'}`} />
-
-                  <button 
-                    onClick={logout}
-                    className={`flex items-center gap-3 w-full px-4 py-3.5 text-[14px] transition-colors ${
-                      darkMode ? 'text-zinc-300 hover:bg-zinc-800/50' : 'text-zinc-600 hover:bg-zinc-50'
-                    }`}
-                  >
-                    <LogOut size={16} className={darkMode ? 'text-zinc-400' : 'text-zinc-500'} />
-                    Sign out
-                  </button>
-
-
-                </div>
-              )}
-            </div>
           </div>
         </header>
 
