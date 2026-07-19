@@ -46,6 +46,12 @@ templates_dir = os.path.join(os.path.dirname(__file__), "templates")
 os.makedirs(templates_dir, exist_ok=True)
 app.mount("/templates", StaticFiles(directory=templates_dir), name="templates")
 
+# Serve the production React build to Playwright. PDF generation must not
+# depend on a separately running Vite development server.
+frontend_dist_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
+if os.path.isfile(os.path.join(frontend_dist_dir, "index.html")):
+    app.mount("/__pdf_renderer", StaticFiles(directory=frontend_dist_dir, html=True), name="pdf-renderer")
+
 @app.get("/")
 async def root():
     return {

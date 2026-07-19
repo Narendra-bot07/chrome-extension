@@ -1777,8 +1777,42 @@ export function AppProvider({ children }) {
       setTailoredResume(tailoredResult);
       setLoading(false);
 
+      // Re-score the exact resume produced from the user's accepted changes.
+      // Do not persist the projected score for all suggested changes.
+      let exactTailoredScore = null;
+      try {
+        const scoreToken = session?.access_token || localStorage.getItem('access_token');
+        const scoreResponse = await fetch(`${apiUrl}/api/score`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(scoreToken ? { "Authorization": `Bearer ${scoreToken}` } : {})
+          },
+          body: JSON.stringify({ resume: tailoredResult, job: jobAnalysis })
+        });
+        if (scoreResponse.ok) {
+          const scoreResult = await scoreResponse.json();
+          const numericScore = Number(scoreResult.ats_score);
+          if (Number.isFinite(numericScore) && numericScore >= 0 && numericScore <= 100) {
+            exactTailoredScore = numericScore;
+            setComparison((previous) => ({ ...(previous || {}), ats_score_after: numericScore }));
+          }
+        } else {
+          console.warn("Strict ATS scoring failed", await scoreResponse.text());
+        }
+      } catch (scoreError) {
+        console.warn("Strict ATS scoring unavailable", scoreError);
+      }
+
       // Auto-create application session
       try {
+        const strictScore = (value) => {
+          if (value === null || value === undefined || value === '') return null;
+          const numeric = Number(value);
+          return Number.isFinite(numeric) && numeric >= 0 && numeric <= 100 ? numeric : null;
+        };
+        const tailoredAtsScore = strictScore(exactTailoredScore);
+        const baselineMatchScore = strictScore(comparison?.ats_score_before ?? comparison?.match_score ?? comparison?.score);
         const appData = {
           company_name: companyName || "Target Company",
           job_title: jobTitle || "Software Engineer",
@@ -1786,8 +1820,8 @@ export function AppProvider({ children }) {
           job_url: lastAnalyzedUrl || "",
           resume_version: "v1 (Tailored)",
           cover_letter_version: null,
-          ats_score: comparison?.ats_score || (comparison?.score ? parseFloat(comparison.score) : 85),
-          resume_match_score: comparison?.match_score || (comparison?.score ? parseFloat(comparison.score) : 80),
+          ats_score: tailoredAtsScore,
+          resume_match_score: baselineMatchScore,
           current_stage: "Ready To Apply",
           timeline: [
             { event: "JD Extracted", timestamp: new Date().toISOString() },

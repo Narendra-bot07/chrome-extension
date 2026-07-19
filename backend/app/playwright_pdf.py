@@ -1,8 +1,30 @@
 import os
 from typing import Optional
+from urllib.parse import urlencode
 from playwright.sync_api import sync_playwright
 
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
+PDF_RENDERER_URL = (
+    os.environ.get("PDF_RENDERER_URL")
+    or os.environ.get("FRONTEND_URL")
+    or "http://127.0.0.1:8000/__pdf_renderer/index.html"
+).rstrip("/")
+
+def _open_renderer(page, route: str, query: Optional[dict] = None):
+    fragment = f"#/{route.lstrip('/')}"
+    if query:
+        fragment += f"?{urlencode(query)}"
+    separator = "" if PDF_RENDERER_URL.lower().endswith(".html") else "/"
+    url = f"{PDF_RENDERER_URL}{separator}{fragment}"
+    try:
+        response = page.goto(url, wait_until="domcontentloaded", timeout=15000)
+    except Exception as exc:
+        raise RuntimeError(
+            f"PDF renderer is unavailable at {PDF_RENDERER_URL}. "
+            "Restart the backend after building frontend/dist, or set PDF_RENDERER_URL to a reachable frontend origin."
+        ) from exc
+    if response and response.status >= 400:
+        raise RuntimeError(f"PDF renderer returned HTTP {response.status} at {url}")
+    return response
 
 def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Optional[bytes]:
     """
@@ -18,10 +40,8 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
             )
             page = browser.new_page()
             
-            url = f"{FRONTEND_URL}/#/print?template={template_name}&format=a4"
-            
-            # Handle Vite dev server 504 by reloading if necessary
-            response = page.goto(url, wait_until="domcontentloaded")
+            # Handle a configured Vite server 504 by reloading if necessary.
+            response = _open_renderer(page, "print", {"template": template_name, "format": "a4"})
             if response and response.status == 504:
                 page.wait_for_timeout(1000)
                 page.reload(wait_until="domcontentloaded")
@@ -158,8 +178,7 @@ def generate_cover_letter_pdf_via_playwright(cover_letter_json_str: str) -> Opti
             )
             page = browser.new_page()
             
-            url = f"{FRONTEND_URL}/#/print-cover-letter"
-            page.goto(url, wait_until="networkidle")
+            _open_renderer(page, "print-cover-letter")
             
             page.evaluate("data => { window.__INJECTED_COVER_LETTER_DATA__ = JSON.parse(data); }", cover_letter_json_str)
             page.evaluate("window.dispatchEvent(new Event('coverLetterDataReady'));")

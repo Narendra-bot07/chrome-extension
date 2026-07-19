@@ -452,7 +452,7 @@ Best regards,
             </p>
             
             <div className="pt-1.5 border-t border-zinc-100 dark:border-zinc-800/40 flex justify-between items-center text-[7.5px] text-zinc-400 font-bold">
-              <span>ATS {Math.round(selectedApp?.ats_score || 85)}%</span>
+              <span>ATS {selectedApp?.ats_score != null ? `${Math.round(selectedApp.ats_score)}%` : '—'}</span>
               <span>{calculateDuration(selectedApp?.created_at)}</span>
             </div>
           </div>
@@ -550,7 +550,7 @@ Best regards,
                       <span className="text-[#00bda5] font-black">
                         {app.current_stage}
                       </span>
-                      <span>ATS {Math.round(app.ats_score || 85)}%</span>
+                      <span>ATS {app.ats_score != null ? `${Math.round(app.ats_score)}%` : '—'}</span>
                     </div>
 
                     <div className="text-[7.5px] text-zinc-400 font-bold flex justify-between uppercase mt-0.5">
@@ -603,7 +603,7 @@ Best regards,
                       {selectedApp?.current_stage}
                     </span>
                     <span className="text-[9px] bg-zinc-200/40 dark:bg-zinc-900 text-zinc-500 px-2 py-0.5 rounded font-black uppercase border border-zinc-200/50 dark:border-zinc-800">
-                      ATS {Math.round(selectedApp?.ats_score || 85)}%
+                      ATS {selectedApp?.ats_score != null ? `${Math.round(selectedApp.ats_score)}%` : '—'}
                     </span>
                     <span className="text-[9px] bg-zinc-200/40 dark:bg-zinc-900 text-zinc-500 px-2 py-0.5 rounded font-black uppercase border border-zinc-200/50 dark:border-zinc-800">
                       Res: {selectedApp?.resume_version || 'v1'}
@@ -724,7 +724,7 @@ Best regards,
                     </div>
                     <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-1">
                       <span className="text-[8.5px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest block">ATS Rating Match</span>
-                      <span className="text-base font-black text-[#00bda5]">{Math.round(selectedApp?.ats_score || 85)}%</span>
+                      <span className="text-base font-black text-[#00bda5]">{selectedApp?.ats_score != null ? `${Math.round(selectedApp.ats_score)}%` : '—'}</span>
                     </div>
                     <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-1">
                       <span className="text-[8.5px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest block">Last Activity Logged</span>

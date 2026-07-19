@@ -8,7 +8,7 @@ from app.repositories.audit_repo import AuditRepository
 from app.services.ai_service import AIService
 from app.services.pdf_service import PDFService
 from app.services.storage_service import StorageService
-from app.schemas import ResumeStructure
+from app.schemas import ResumeStructure, JobAnalysis
 
 class TailoringService:
     def __init__(
@@ -61,8 +61,15 @@ class TailoringService:
         )
         latency = int((time.time() - start_time) * 1000)
 
-        # Estimate ATS score improvement (mock scoring logic)
-        ats_score = 85.0
+        # Strictly score the materialized tailored resume against the stored JD.
+        # Invalid/missing comparison evidence produces 0, never a fabricated 85.
+        from app.groq_service import calculate_resume_job_match_score
+        try:
+            job_payload = job.get("normalized_content") or job.get("parsed_content") or {}
+            job_obj = JobAnalysis(**job_payload)
+            ats_score = float(calculate_resume_job_match_score(tailored_resume_obj, job_obj))
+        except (TypeError, ValueError):
+            ats_score = 0.0
 
         # Log AI Generation stats
         self.audit_repo.log_ai_generation(

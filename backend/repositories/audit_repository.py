@@ -35,7 +35,7 @@ class AuditRepository:
             self.conn.commit()
             return cur.fetchone() or {}
 
-    def log_download(self, user_id: str, tailored_resume_id: str, template_id: Optional[str], file_type: str, ats_score: float, company_name: str, job_title: str) -> Dict[str, Any]:
+    def log_download(self, user_id: str, tailored_resume_id: str, template_id: Optional[str], file_type: str, ats_score: Optional[float], company_name: str, job_title: str) -> Dict[str, Any]:
         query = """
             INSERT INTO public.downloads (user_id, tailored_resume_id, template_id, file_type, ats_score, company_name, job_title)
             VALUES (%s, %s, %s, %s, %s, %s, %s)

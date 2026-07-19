@@ -373,7 +373,10 @@ def generate_tailoring_patch(resume: ResumeStructure, job: JobAnalysis, api_key:
     )
     
     ats_score_before = calculate_resume_job_match_score(resume, job)
-    ats_score_after = min(100, max(ats_score_before, ats_score_before + min(25, len(patch.skills_append) * 6 + len(experience_patch) * 5 + len(projects_patch) * 5)))
+    # Score the materialized resume, not an estimated improvement based on the
+    # number of generated edits. Rejected/no-op changes therefore add nothing.
+    tailored_for_scoring = apply_tailoring_patch(resume, patch)
+    ats_score_after = calculate_resume_job_match_score(tailored_for_scoring, job)
 
     return TailoringReport(
         changes_made=changes_made,

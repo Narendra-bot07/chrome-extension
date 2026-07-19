@@ -86,7 +86,9 @@ async def download_pdf(
             tailored_resume_id=user["id"],
             template_id=None,
             file_type="pdf",
-            ats_score=85.0,
+            # A PDF download has no JD/resume comparison context of its own.
+            # Never fabricate an ATS score for the audit record.
+            ats_score=None,
             company_name=company_name,
             job_title="Software Engineer"
         )

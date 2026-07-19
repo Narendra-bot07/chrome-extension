@@ -318,7 +318,7 @@ def final_audit_node(state: AgentState) -> Dict[str, Any]:
     
     recruiter = state["recruiter_feedback"]
     hiring = state["hiring_feedback"]
-    avg_score = int((recruiter.score + hiring.score) / 2) if recruiter and hiring else 85
+    avg_score = int((recruiter.score + hiring.score) / 2) if recruiter and hiring else 0
     
     return {
         "optimized_resume": final_resume,

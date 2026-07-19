@@ -17,7 +17,8 @@ function SuccessView({
     updateApplicationStage, 
     fetchApplications, 
     session,
-    apiUrl 
+    apiUrl,
+    comparison
   } = useApp();
 
   const [appliedStatus, setAppliedStatus] = useState('Ready To Apply');
@@ -26,7 +27,7 @@ function SuccessView({
 
   const premiumMetrics = [
     { label: "AI Confidence", value: "98%", icon: Cpu },
-    { label: "ATS Match Score", value: "96/100", icon: Target },
+    { label: "ATS Match Score", value: comparison?.ats_score_after != null ? `${Math.round(comparison.ats_score_after)}/100` : "—", icon: Target },
     { label: "Resume Quality", value: "Excellent", icon: FileCheck },
     { label: "Recruiter Read Time", value: "6s", icon: Clock }
   ];

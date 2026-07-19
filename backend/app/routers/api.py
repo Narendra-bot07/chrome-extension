@@ -163,6 +163,16 @@ async def api_compare(
             detail=f"Failed to generate tailoring patch: {str(e)}"
         )
 
+@router.post("/score")
+async def api_score_resume(request: CompareRequest, user: Dict[str, Any] = Depends(verify_supabase_jwt)):
+    """Strict deterministic score for the exact resume payload against the JD."""
+    try:
+        resume = ResumeStructure(**normalize_resume_payload(request.resume))
+        job = JobAnalysis(**normalize_job_payload(request.job))
+        return {"ats_score": calculate_resume_job_match_score(resume, job)}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to calculate ATS score: {str(e)}")
+
 @router.post("/tailor", response_model=ResumeStructure)
 async def api_tailor(request: TailorRequest):
     try:
