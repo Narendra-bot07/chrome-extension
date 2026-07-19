@@ -1,5 +1,14 @@
 export async function runJobExtractionInPage() {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const NON_JOB_THRESHOLD = 0.45;
+  let traceStep = 0;
+  const traceRecords = [];
+  const trace = (name, details = {}) => {
+    traceStep += 1;
+    traceRecords.push({ step: traceStep, name, details });
+    console.log(`[ApplyFlow:PageExtraction ${String(traceStep).padStart(2, '0')}] ${name}`, details);
+  };
+  trace('Injected extractor started', { url: location.href, pageTitle: document.title, readyState: document.readyState });
 
   const normalizeInlineText = (value = '') =>
     String(value)
@@ -74,14 +83,22 @@ export async function runJobExtractionInPage() {
 
   const textFromSelector = (selectors) => {
     for (const selector of selectors) {
-      let el = null;
+      let elements = [];
       try {
-        el = document.querySelector(selector);
+        elements = Array.from(document.querySelectorAll(selector));
       } catch {
         continue;
       }
-      const value = visible(el) ? normalizeInlineText(el.innerText || el.textContent) : '';
-      if (value) return { value, selector };
+      const candidates = elements
+        .filter(visible)
+        .map((el) => ({ value: normalizeInlineText(el.innerText || el.textContent), selector, el }))
+        .filter((item) => item.value)
+        .sort((a, b) => b.value.length - a.value.length);
+      if (candidates.length) {
+        trace('Visible text selector matched', { selector, matches: elements.length, visibleMatches: candidates.length, selectedLength: candidates[0].value.length, preview: candidates[0].value.slice(0, 100) });
+        return candidates[0];
+      }
+      if (elements.length) trace('Text selector matched only hidden/empty nodes', { selector, matches: elements.length });
     }
     return { value: '', selector: '' };
   };
@@ -89,17 +106,30 @@ export async function runJobExtractionInPage() {
   const structuredTextFromSelector = (selectors) => {
     let best = { value: '', selector: '' };
     for (const selector of selectors) {
-      let el = null;
+      let elements = [];
       try {
-        el = document.querySelector(selector);
+        elements = Array.from(document.querySelectorAll(selector));
       } catch {
         continue;
       }
-      if (!visible(el)) continue;
-      const value = htmlToStructuredText(el);
-      if (value.length > best.value.length) best = { value, selector };
+      let visibleMatches = 0;
+      for (const el of elements) {
+        if (!visible(el)) continue;
+        visibleMatches += 1;
+        const value = htmlToStructuredText(el);
+        if (value.length > best.value.length) best = { value, selector, el };
+      }
+      if (elements.length) trace('Structured-text selector inspected', { selector, matches: elements.length, visibleMatches, bestLength: best.value.length });
     }
     return best;
+  };
+
+  const visibleElements = (selector) => {
+    try {
+      return Array.from(document.querySelectorAll(selector)).filter(visible);
+    } catch {
+      return [];
+    }
   };
 
   const parseJsonLd = () => {
@@ -120,7 +150,25 @@ export async function runJobExtractionInPage() {
         // malformed JSON-LD should never break extraction
       }
     });
+    trace('Structured data inspected', { jsonLdScripts: document.querySelectorAll('script[type="application/ld+json"]').length, jobPostingsFound: found.length });
     return found;
+  };
+
+  const asText = (value) => {
+    if (value == null) return '';
+    if (Array.isArray(value)) return value.map(asText).filter(Boolean).join(', ');
+    if (typeof value === 'object') return normalizeInlineText(value.name || value.value || value.text || '');
+    return normalizeInlineText(value);
+  };
+
+  const getSalaryText = (salary) => {
+    if (!salary) return '';
+    const value = salary.value || salary;
+    const min = value.minValue ?? value.value ?? '';
+    const max = value.maxValue ?? '';
+    const currency = salary.currency || value.currency || '';
+    const unit = value.unitText || '';
+    return normalizeInlineText(`${currency} ${min}${max ? ` - ${max}` : ''}${unit ? ` / ${unit}` : ''}`);
   };
 
   const stripHtml = (html = '') => {
@@ -141,12 +189,18 @@ export async function runJobExtractionInPage() {
   };
 
   const extractJsonLdJob = () => {
-    const job = parseJsonLd()[0];
-    if (!job) return { source: 'json-ld', result: {}, found: false };
+    const jobs = parseJsonLd();
+    const job = jobs[0];
+    if (!job) {
+      trace('JSON-LD JobPosting extraction completed', { found: false });
+      return { source: 'json-ld', result: {}, found: false, count: 0 };
+    }
+    trace('JSON-LD JobPosting extraction started', { title: asText(job.title), company: asText(job.hiringOrganization) });
     const identifier = typeof job.identifier === 'object' ? job.identifier.value || job.identifier.name : job.identifier;
     return {
       source: 'json-ld',
       found: true,
+      count: jobs.length,
       result: {
         title: normalizeInlineText(job.title),
         company: normalizeInlineText(job.hiringOrganization?.name),
@@ -155,8 +209,12 @@ export async function runJobExtractionInPage() {
         jobId: normalizeInlineText(identifier),
         employmentType: Array.isArray(job.employmentType) ? job.employmentType.join(', ') : normalizeInlineText(job.employmentType),
         workplaceType: normalizeInlineText(job.jobLocationType),
+        salary: getSalaryText(job.baseSalary || job.estimatedSalary),
+        skills: asText(job.skills || job.qualifications || job.experienceRequirements),
+        seniority: asText(job.experienceRequirements || job.occupationalCategory),
         postedDate: normalizeInlineText(job.datePosted),
-        jobUrl: normalizeInlineText(job.url || location.href)
+        validThrough: normalizeInlineText(job.validThrough),
+        jobUrl: normalizeInlineText(job.url || job.directApply || location.href)
       }
     };
   };
@@ -179,6 +237,12 @@ export async function runJobExtractionInPage() {
   };
 
   const extractLinkedInJob = async () => {
+    trace('LinkedIn adapter started', {
+      path: location.pathname,
+      currentJobId: new URL(location.href).searchParams.get('currentJobId'),
+      h1Nodes: document.querySelectorAll('h1').length,
+      detailContainers: document.querySelectorAll('.jobs-search__job-details--container, .jobs-details, [class*="jobs-description"], [class*="job-details"]').length
+    });
     const title = textFromSelector([
       '.job-details-jobs-unified-top-card__job-title h1',
       '.jobs-unified-top-card__job-title',
@@ -202,11 +266,15 @@ export async function runJobExtractionInPage() {
       '.jobs-description__content',
       '.jobs-description-content__text',
       '.jobs-box__html-content',
-      '.jobs-description'
+      '.jobs-description',
+      '.jobs-description__container',
+      '[class*="jobs-description"]',
+      '[class*="job-details"]'
     ];
 
     const getLinkedInBodyFallback = () => {
-      const panel = document.querySelector('.jobs-search__job-details--container, .jobs-details, main');
+      const panel = visibleElements('.jobs-search__job-details--container, .jobs-details, main')
+        .sort((a, b) => (b.innerText || b.textContent || '').length - (a.innerText || a.textContent || '').length)[0];
       if (!panel) return '';
       const panelText = normalizeMultilineText(panel.innerText || panel.textContent || '');
       const markers = ['About the job', 'Responsibilities', 'Qualifications', 'Requirements', 'Basic Qualifications', 'Preferred Qualifications'];
@@ -225,9 +293,10 @@ export async function runJobExtractionInPage() {
 
     let description = structuredTextFromSelector(descSelectors);
     for (let i = 0; i < 24 && !isMeaningfulDescription(description.value); i += 1) {
-      const panel = document.querySelector('.jobs-search__job-details--container, .jobs-details, main');
-      if (panel) panel.scrollBy(0, 450);
+      const panels = visibleElements('.jobs-search__job-details--container, .jobs-details, main');
+      panels.forEach((panel) => panel.scrollBy?.(0, 450));
       window.scrollBy(0, 450);
+      trace('LinkedIn lazy-load scroll attempt', { attempt: i + 1, visiblePanels: panels.length, currentDescriptionLength: description.value.length });
       await sleep(250);
       const next = structuredTextFromSelector(descSelectors);
       if (next.value.length > description.value.length) description = next;
@@ -249,6 +318,7 @@ export async function runJobExtractionInPage() {
     }
 
     const jobId = new URL(location.href).searchParams.get('currentJobId') || location.pathname.match(/\/jobs\/view\/(\d+)/i)?.[1] || '';
+    trace('LinkedIn fields extracted', { title: title.value, company: company.value, location: locationText.value, descriptionLength: description.value.length, descriptionSelector: description.selector, jobId });
     return {
       source: 'linkedin',
       result: {
@@ -263,6 +333,7 @@ export async function runJobExtractionInPage() {
   };
 
   const extractGoogleCareersJob = async () => {
+    trace('Google Careers adapter started');
     const main = document.querySelector('main, [role="main"]');
     const title = textFromSelector(['h1']);
     let raw = htmlToStructuredText(main || document.body);
@@ -284,22 +355,37 @@ export async function runJobExtractionInPage() {
       : raw;
     const headerText = normalizeMultilineText(document.querySelector('main, [role="main"]')?.innerText || document.body.innerText || '');
     const locationMatch = headerText.match(/Google\s*\n+([^\n]+(?:,\s*[A-Z]{2,}|,\s*[A-Za-z ]+)?)/i);
+    const jobId = location.pathname.match(/\/jobs\/results\/(\d+)(?:-|\/|$)/i)?.[1] || '';
+    const semanticLocation = textFromSelector([
+      '[data-location]', '[class*="job-location"]', '[class*="job_location"]',
+      '[class*="location"]', '[aria-label*="location" i]'
+    ]).value;
+    trace('Google Careers fields extracted', {
+      title: title.value || document.title,
+      company: 'Google',
+      location: semanticLocation || normalizeInlineText(locationMatch?.[1] || ''),
+      jobId,
+      descriptionLength: description.length,
+      detectedSections: positions.map((item) => item.name)
+    });
     return {
       source: 'google-careers',
       result: {
         title: title.value || document.title.replace(/\s*-\s*Google Careers.*$/i, ''),
         company: 'Google',
-        location: normalizeInlineText(locationMatch?.[1] || ''),
+        location: semanticLocation || normalizeInlineText(locationMatch?.[1] || ''),
         description: normalizeMultilineText(description)
           .replace(/Google is proud to be an equal opportunity workplace[\s\S]*$/i, '')
           .replace(/Privacy\s+Terms[\s\S]*$/i, '')
           .trim(),
+        jobId,
         jobUrl: location.href
       }
     };
   };
 
   const extractGenericAtsJob = () => {
+    trace('Semantic DOM extractor started', { hostname: location.hostname });
     const host = location.hostname;
     const title = textFromSelector([
       'h1.app-title',
@@ -313,7 +399,7 @@ export async function runJobExtractionInPage() {
       '[class*="company"]',
       'meta[property="og:site_name"]'
     ]);
-    const description = structuredTextFromSelector([
+    let description = structuredTextFromSelector([
       '#content',
       '#main',
       '[data-automation-id="jobPostingDescription"]',
@@ -324,19 +410,97 @@ export async function runJobExtractionInPage() {
       'main',
       'article'
     ]);
+    const sanitizedBodyText = htmlToStructuredText(document.body);
+    const bodyLower = sanitizedBodyText.toLowerCase();
+    const sectionStarts = [
+      'description', 'job description', 'key job responsibilities', 'about the role',
+      'about the job', 'responsibilities', 'basic qualifications', 'minimum qualifications'
+    ].map((label) => ({ label, index: bodyLower.indexOf(label) }))
+      .filter((item) => item.index >= 0)
+      .sort((a, b) => a.index - b.index);
+    if (sectionStarts.length) {
+      const start = sectionStarts[0].index;
+      const tail = sanitizedBodyText.slice(start);
+      const tailLower = tail.toLowerCase();
+      const stopIndexes = [
+        'related jobs', 'similar jobs', 'recommended jobs', 'share this job',
+        'find jobs in', 'amazon jobs home', 'join our talent community'
+      ].map((label) => tailLower.indexOf(label))
+        .filter((index) => index > 300)
+        .sort((a, b) => a - b);
+      const semanticSection = normalizeMultilineText(tail.slice(0, stopIndexes[0] ?? tail.length));
+      if (descriptionQuality(semanticSection) > descriptionQuality(description.value)) {
+        description = { value: semanticSection, selector: 'semantic-section-boundaries' };
+      }
+      trace('Semantic section-boundary fallback inspected', {
+        firstHeading: sectionStarts[0].label,
+        bodyLength: sanitizedBodyText.length,
+        candidateLength: semanticSection.length,
+        selected: description.selector === 'semantic-section-boundaries'
+      });
+    }
+    const locationText = textFromSelector([
+      '[data-automation-id="locations"]', '[data-test="location"]', '[class*="job-location"]',
+      '[class*="jobLocation"]', '.location', '[itemprop="jobLocation"]'
+    ]);
+    const companyMeta = document.querySelector('meta[property="og:site_name"]')?.getAttribute('content') || '';
+    const url = new URL(location.href);
+    const visibleMainText = normalizeMultilineText(document.querySelector('main, [role="main"]')?.innerText || document.body?.innerText || '');
+    const jobId = url.searchParams.get('jobId') || url.searchParams.get('job_id') || url.searchParams.get('gh_jid') ||
+      location.pathname.match(/\/(?:jobs?|positions?|openings?|requisitions?)\/(\d{4,})(?:\/|-|$)/i)?.[1] ||
+      visibleMainText.match(/\b(?:job|requisition|position)\s*(?:id|#|number)\s*[:#-]?\s*([A-Z0-9_-]{4,})\b/i)?.[1] || '';
+    trace('Semantic DOM fields extracted', { title: title.value, company: company.value || normalizeInlineText(companyMeta), location: locationText.value, jobId, descriptionLength: description.value.length, descriptionSelector: description.selector });
     return {
       source: host.includes('greenhouse') ? 'greenhouse' : host.includes('lever') ? 'lever' : host.includes('workday') ? 'workday' : 'semantic-dom',
       result: {
         title: title.value,
-        company: company.value,
+        company: company.value || normalizeInlineText(companyMeta),
+        location: locationText.value,
         description: description.value,
+        jobId,
+        jobUrl: location.href
+      }
+    };
+  };
+
+  const extractGlassdoorJob = () => {
+    trace('Glassdoor adapter started');
+    const title = textFromSelector([
+      '[data-test="job-title"]', '[data-test="jobTitle"]', '[class*="JobDetails_jobTitle"]',
+      '[class*="job-title"]', 'h1'
+    ]);
+    const company = textFromSelector([
+      '[data-test="employer-name"]', '[data-test="employerName"]', '[class*="EmployerProfile_employerName"]',
+      '[class*="employerName"]', '[class*="companyName"]'
+    ]);
+    const locationText = textFromSelector([
+      '[data-test="location"]', '[data-test="job-location"]', '[class*="JobDetails_location"]',
+      '[class*="location"]'
+    ]);
+    const description = structuredTextFromSelector([
+      '[data-test="jobDescriptionContent"]', '[data-test="job-description"]',
+      '[class*="JobDetails_jobDescription"]', '[class*="jobDescriptionContent"]',
+      '#JobDescriptionContainer', 'main article', 'main'
+    ]);
+    const salary = textFromSelector(['[data-test="detailSalary"]', '[class*="salary"]']);
+    trace('Glassdoor fields extracted', { title: title.value, company: company.value, location: locationText.value, salary: salary.value, descriptionLength: description.value.length, descriptionSelector: description.selector });
+    return {
+      source: 'glassdoor',
+      result: {
+        title: title.value,
+        company: company.value.replace(/\s+\d+(?:\.\d+)?\s*[★ stars]*$/i, '').trim(),
+        location: locationText.value,
+        description: description.value,
+        salary: salary.value,
+        jobId: new URL(location.href).searchParams.get('jobListingId') || location.pathname.match(/(?:jobListingId=|_JO)(\d+)/i)?.[1] || '',
         jobUrl: location.href
       }
     };
   };
 
   const mergeResults = (strategies) => {
-    const result = { title: '', company: '', location: '', description: '', jobId: '', employmentType: '', workplaceType: '', seniority: '', postedDate: '', jobUrl: location.href };
+    trace('Merging extractor results', { strategies: strategies.map((item) => item.source) });
+    const result = { title: '', company: '', location: '', description: '', jobId: '', employmentType: '', workplaceType: '', seniority: '', salary: '', skills: '', postedDate: '', validThrough: '', jobUrl: location.href };
     const descriptionCandidates = [];
     for (const strategy of strategies) {
       const item = strategy.result || {};
@@ -353,6 +517,7 @@ export async function runJobExtractionInPage() {
       result.description = selected.value;
       result.extractionSource = selected.source;
     }
+    trace('Merged job fields selected', { title: result.title, company: result.company, location: result.location, jobId: result.jobId, descriptionLength: result.description.length, extractionSource: result.extractionSource });
     return result;
   };
 
@@ -380,33 +545,118 @@ export async function runJobExtractionInPage() {
     return { valid: true, code: 'OK' };
   };
 
-  const detectPage = (result, hasJsonLd) => {
-    if (/linkedin\.com\/(feed|in|messaging|mynetwork)/i.test(location.href)) return 'NOT_A_JOB_PAGE';
-    if (hasJsonLd) return 'JOB_PAGE';
-    if (location.hostname.includes('google.com') && location.pathname.includes('/about/careers/applications/jobs/results/') && result.title && isMeaningfulDescription(result.description)) {
-      return 'JOB_PAGE';
+  const detectPage = (result, hasJsonLd, jsonLdJobCount = 0) => {
+    trace('Deterministic page classification started', { hasJsonLd, jsonLdJobCount, title: result.title, descriptionLength: result.description.length });
+    const visibleBody = normalizeMultilineText(document.body?.innerText || '').slice(0, 60000);
+    const lower = visibleBody.toLowerCase();
+    const headings = Array.from(document.querySelectorAll('h1,h2,h3,[role="heading"]'))
+      .filter(visible).map((el) => normalizeInlineText(el.innerText || el.textContent)).filter(Boolean).slice(0, 30);
+    const buttons = Array.from(document.querySelectorAll('button,a,[role="button"]'))
+      .filter(visible).map((el) => normalizeInlineText(el.innerText || el.textContent)).filter(Boolean).slice(0, 80);
+    const sectionPatterns = [
+      /responsibilit/i, /requirements?/i, /qualifications?/i, /about (?:the )?(?:job|role|position)/i,
+      /what you(?:'|’)ll do/i, /skills/i, /experience/i, /benefits?/i
+    ];
+    const sectionCount = sectionPatterns.filter((pattern) => pattern.test(result.description || visibleBody)).length;
+    const apply = buttons.some((text) => /^(?:easy )?apply(?: now)?$|submit application|apply for (?:this )?(?:job|position)/i.test(text));
+    const jobCards = document.querySelectorAll('[data-job-id], [data-jobid], [data-job-key], [class*="job-card"], [class*="JobCard"], [class*="jobCard"]').length;
+    const individualJobLinks = new Set(Array.from(document.querySelectorAll('a[href]'))
+      .map((link) => {
+        try { return new URL(link.href, location.href).pathname; } catch { return ''; }
+      })
+      .filter((path) => /\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?jobs\/\d+(?:\/|$)/i.test(path))).size;
+    const hasSpecificTitle = Boolean(result.title && !/^(?:jobs?|careers?|search jobs|job details)$/i.test(result.title));
+    const hasSelectedJobDetail = Boolean(
+      result.jobId &&
+      hasSpecificTitle &&
+      isMeaningfulDescription(result.description)
+    );
+    const hasJobDetailShell = Boolean(result.jobId && hasSpecificTitle);
+    const collectionRoute = /\/(?:content\/[^/]+\/)?(?:locations?|search)(?:\/|$)/i.test(location.pathname);
+    const searchResultsShell = jsonLdJobCount > 1 || collectionRoute || jobCards >= 2 || individualJobLinks >= 2 ||
+      /\b(?:\d+[,+]?\s+open jobs?|job search results|jobs for you|top job picks for you|recommended jobs|browse jobs|search jobs|filter jobs)\b/i.test((headings.slice(0, 8).join(' ') + ' ' + visibleBody.slice(0, 1500)));
+    // LinkedIn and some ATS products keep the results feed mounted beside a selected
+    // detail panel. A stable job id + meaningful JD + Apply action proves that the
+    // user has selected one concrete opening, so the surrounding feed is only shell UI.
+    const selectedJobId = new URL(location.href).searchParams.get('currentJobId');
+    const detailRouteIdentity = /\/(?:jobs?|positions?|openings?|requisitions?)\/\d{4,}(?:\/|-|$)/i.test(location.pathname) || Boolean(selectedJobId);
+    const selectedDetailIntent = Boolean(selectedJobId && result.jobId === selectedJobId);
+    const searchResults = searchResultsShell && !((hasSelectedJobDetail && detailRouteIdentity) || selectedDetailIntent);
+    const login = /\b(?:sign in|log in)\b/i.test(headings.slice(0, 4).join(' ')) && !result.description;
+    const captcha = /captcha|verify (?:that )?you are human|unusual traffic|security check/i.test(visibleBody.slice(0, 2000));
+    const negative = /privacy policy|terms (?:of use|and conditions)|documentation|cookie policy/i.test(document.title + ' ' + headings.slice(0, 4).join(' '));
+    const articleLike = /\/(?:blog|news|articles?|stories)(?:\/|$)/i.test(location.pathname) || /\b(?:how we hire|hiring guide|career advice)\b/i.test(document.title + ' ' + headings.slice(0, 3).join(' '));
+    let score = 0;
+    const positiveSignals = [];
+    const negativeSignals = [];
+    if (hasJsonLd) { score += 0.58; positiveSignals.push('schema.org JobPosting'); }
+    if (result.title && !/^(jobs?|careers?|search|opportunities)$/i.test(result.title)) { score += 0.1; positiveSignals.push('specific title'); }
+    if (result.company) { score += 0.05; positiveSignals.push('company'); }
+    if (result.location) { score += 0.04; positiveSignals.push('location'); }
+    if (isMeaningfulDescription(result.description)) { score += 0.3; positiveSignals.push('substantial description'); }
+    if (sectionCount >= 1) { score += Math.min(0.2, 0.1 + sectionCount * 0.05); positiveSignals.push(`${sectionCount} job sections`); }
+    if (apply) { score += 0.15; positiveSignals.push('application action'); }
+    if (result.jobId) { score += 0.15; positiveSignals.push('job identifier'); }
+    if (searchResults) { score -= 0.65; negativeSignals.push('multiple job/search results'); }
+    if (negative) { score -= 0.4; negativeSignals.push('non-job document'); }
+    if (articleLike) { score -= 0.4; negativeSignals.push('article/editorial content'); }
+    if (login) { score -= 0.35; negativeSignals.push('login required'); }
+    if (captcha) { score -= 0.7; negativeSignals.push('CAPTCHA/security check'); }
+    if (/linkedin\.com\/(feed|in|messaging|mynetwork)/i.test(location.href)) { score -= 0.8; negativeSignals.push('non-job LinkedIn route'); }
+    score = Math.max(0, Math.min(1, Number(score.toFixed(2))));
+    const extractionIncomplete = Boolean(hasJobDetailShell && !isMeaningfulDescription(result.description) && !captcha && !login);
+    const pageState = captcha ? 'captcha' : login ? 'login_required' : searchResults ? 'search_results' : extractionIncomplete ? 'extraction_incomplete' : null;
+    const hasStrongJobEvidence = Boolean(
+      (hasJsonLd && !searchResults) ||
+      (hasJobDetailShell && !searchResults) ||
+      (hasSpecificTitle && isMeaningfulDescription(result.description) && sectionCount >= 2 && !articleLike && !searchResults) ||
+      (hasSpecificTitle && isMeaningfulDescription(result.description) && (apply || result.company || result.location))
+    );
+    const classification = searchResults
+      ? 'non_job'
+      : !captcha && !login && hasStrongJobEvidence
+        ? 'job_listing'
+        : score < NON_JOB_THRESHOLD ? 'non_job' : 'uncertain';
+    trace('Deterministic page classification completed', { classification, confidence: score, pageState: pageState || classification, positiveSignals, negativeSignals, jobCards, individualJobLinks, jsonLdJobCount, collectionRoute, detailRouteIdentity, selectedDetailIntent, hasSelectedJobDetail, applyActionFound: apply });
+    return {
+      classification,
+      confidence: score,
+      pageState: pageState || classification,
+      reason: negativeSignals[0] || positiveSignals.join(', ') || 'Insufficient job-listing signals',
+      signals: { positive: positiveSignals, negative: negativeSignals },
+      snapshot: { pageTitle: document.title, hostname: location.hostname, path: location.pathname, headings, buttons: buttons.slice(0, 20) }
+    };
+  };
+
+  const fingerprint = (value = '') => {
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i += 1) {
+      hash ^= value.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
     }
-    if (result.title && isMeaningfulDescription(result.description) && (Array.from(document.querySelectorAll('button, a')).some((el) => /\bapply\b/i.test(el.innerText || '')) || result.jobId)) {
-      return 'JOB_PAGE';
-    }
-    return 'NOT_A_JOB_PAGE';
+    return `fnv1a-${(hash >>> 0).toString(16).padStart(8, '0')}`;
   };
 
   const startedAt = performance.now();
+  trace('Extraction strategies being selected', { hostname: location.hostname });
   const jsonLd = extractJsonLdJob();
   const strategies = [];
   const isLinkedIn = location.hostname.includes('linkedin.com');
+  const isGlassdoor = location.hostname.includes('glassdoor.');
   if (isLinkedIn) strategies.push(await extractLinkedInJob());
+  if (isGlassdoor) strategies.push(extractGlassdoorJob());
   if (location.hostname.includes('google.com') && location.pathname.includes('/about/careers/applications/jobs/results/')) strategies.push(await extractGoogleCareersJob());
   strategies.push(jsonLd);
   if (!isLinkedIn) strategies.push(extractGenericAtsJob());
 
   const result = mergeResults(strategies);
   const identity = getIdentity(result);
-  const pageType = detectPage(result, jsonLd.found);
-  const validation = pageType === 'JOB_PAGE' ? validateExtractedJob(result) : { valid: false, code: 'NOT_A_JOB_PAGE' };
+  const detection = detectPage(result, jsonLd.found, jsonLd.count);
+  const schemaValidation = detection.classification === 'job_listing' ? validateExtractedJob(result) : { valid: false, code: detection.pageState.toUpperCase() };
+  const validation = schemaValidation.valid ? schemaValidation : { ...schemaValidation, classification: detection.classification };
+  trace('Strict extracted-data validation completed', { valid: validation.valid, code: validation.code, detectedClassification: detection.classification });
 
-  return {
+  const finalResult = {
     title: result.title || '',
     company: result.company || '',
     location: result.location || '',
@@ -417,12 +667,27 @@ export async function runJobExtractionInPage() {
     employmentType: result.employmentType || '',
     workplaceType: result.workplaceType || '',
     seniority: result.seniority || '',
+    salary: result.salary || '',
+    skills: result.skills || '',
     postedDate: result.postedDate || '',
+    validThrough: result.validThrough || '',
     identity,
-    isJobPage: pageType === 'JOB_PAGE' && validation.valid,
+    classification: detection.classification,
+    confidence: detection.confidence,
+    reason: schemaValidation.valid ? detection.reason : `${detection.reason}; ${schemaValidation.code}`,
+    pageState: schemaValidation.valid ? 'job_listing' : detection.pageState,
+    signals: detection.signals,
+    classificationInput: detection.snapshot,
+    isJobPage: detection.classification === 'job_listing',
+    isExtractionReady: detection.classification === 'job_listing' && validation.valid,
     validation,
     extractionSource: result.extractionSource || strategies.find((item) => item.result?.description)?.source || 'unknown',
     durationMs: Math.round(performance.now() - startedAt),
+    extractedAt: new Date().toISOString(),
+    contentHash: fingerprint(`${location.href}\n${result.title}\n${result.description}`),
     url: location.href
   };
+  trace('Extraction pipeline finished', { classification: finalResult.classification, confidence: finalResult.confidence, isJobPage: finalResult.isJobPage, title: finalResult.title, company: finalResult.company, descriptionLength: finalResult.description.length, extractionSource: finalResult.extractionSource, contentHash: finalResult.contentHash, durationMs: finalResult.durationMs });
+  finalResult.trace = traceRecords;
+  return finalResult;
 }

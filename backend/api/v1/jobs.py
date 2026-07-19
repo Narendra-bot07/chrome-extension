@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import Dict, Any
 from core.security import verify_supabase_jwt
-from schemas.jobs import JobExtractRequest
+from schemas.jobs import JobExtractRequest, JobDetectionLogRequest
+from core.logging import logger
 from api.dependencies import get_job_repository
 from repositories.job_repository import JobRepository
 from services.ai.groq_service import GroqService
@@ -9,8 +10,62 @@ from app.analytics.events.tracking.analytics_service import AnalyticsService
 from core.database import get_db_connection
 from services.subscriptions.feature_gate_service import FeatureGateService
 from services.subscriptions.usage_service import UsageService
+from services.browser_intelligence.schemas import AstraPlannerRequest, AstraPlannerResponse
+from services.browser_intelligence.planner_service import AstraPlannerService, ASTRA_FREE_MODEL
+import asyncio
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+@router.post("/astra/plan", response_model=AstraPlannerResponse)
+async def create_astra_extraction_plan(
+    request: AstraPlannerRequest,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt)
+):
+    request_id = request.request_id or "no-request-id"
+    logger.info(
+        f"[ASTRA:{request_id}] planner.start user={user['id']} model={ASTRA_FREE_MODEL} "
+        f"candidates={len(request.context.get('candidates', []))} evidence={len(request.evidence)}"
+    )
+    try:
+        plan = await asyncio.wait_for(
+            asyncio.to_thread(AstraPlannerService().create_plan, request),
+            timeout=15
+        )
+        logger.info(
+            f"[ASTRA:{request_id}] planner.complete page_kind={plan.pageKind} "
+            f"confidence={plan.confidence} operations={len(plan.operations)} recovery={plan.requiresRecovery}"
+        )
+        return AstraPlannerResponse(model=ASTRA_FREE_MODEL, plan=plan, request_id=request.request_id)
+    except asyncio.TimeoutError:
+        logger.warning(f"[ASTRA:{request_id}] planner.timeout")
+        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail={"code": "ASTRA_PLANNER_TIMEOUT", "message": "ASTRA planner timed out."})
+    except ValueError as error:
+        logger.warning(f"[ASTRA:{request_id}] planner.configuration_error error={str(error)}")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail={"code": "ASTRA_PLANNER_UNAVAILABLE", "message": str(error)})
+    except Exception as error:
+        logger.exception(f"[ASTRA:{request_id}] planner.failed")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail={"code": "ASTRA_PLANNER_FAILED", "message": "ASTRA could not create a valid plan."})
+
+@router.post("/detection-log")
+async def log_job_detection(
+    request: JobDetectionLogRequest,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt)
+):
+    prefix = f"[JobDetection:{request.request_id or 'no-request-id'}]"
+    logger.info(f"{prefix} START user={user['id']} url={request.url}")
+    for item in request.trace[:30]:
+        step = item.get("step", "?")
+        name = str(item.get("name", "unknown"))[:120]
+        details = item.get("details", {})
+        logger.info(f"{prefix} STEP {step}: {name} | {details}")
+    logger.info(
+        f"{prefix} RESULT classification={request.classification} confidence={request.confidence} "
+        f"page_state={request.page_state} source={request.extraction_source} title={request.title!r} "
+        f"company={request.company!r} description_length={request.description_length} "
+        f"validation={request.validation} signals={request.signals} content_hash={request.content_hash}"
+    )
+    logger.info(f"{prefix} END")
+    return {"success": True, "request_id": request.request_id}
 
 @router.post("/extract")
 async def extract_job_details(
@@ -19,10 +74,30 @@ async def extract_job_details(
     repo: JobRepository = Depends(get_job_repository),
     conn = Depends(get_db_connection)
 ):
-    if not request.jd_text.strip():
+    clean_jd = request.jd_text.strip()
+    if not clean_jd:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Job text cannot be empty."
+        )
+    if request.classification in {"non_job", "uncertain"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "JOB_CLASSIFICATION_REQUIRED", "message": "Only a verified job listing or manually supplied JD can be tailored."}
+        )
+    word_count = len(clean_jd.split())
+    job_sections = sum(marker in clean_jd.lower() for marker in (
+        "responsibilities", "requirements", "qualifications", "about the role", "about the job", "experience", "skills"
+    ))
+    if len(clean_jd) < 300 or word_count < 50 or (request.classification != "manual" and job_sections < 1):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "INVALID_JOB_DESCRIPTION", "message": "A meaningful job title and complete job description are required."}
+        )
+    if not request.page_title.strip() or request.page_title.strip().lower() in {"jobs", "careers", "search jobs", "software engineer"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "INVALID_JOB_TITLE", "message": "A meaningful job title is required before tailoring."}
         )
 
     usage_service = UsageService(conn)
@@ -34,14 +109,14 @@ async def extract_job_details(
             feature_key="jd_extraction",
             quantity=1,
             request_id=request.request_id,
-            metadata={"url": request.url, "page_title": request.page_title}
+            metadata={"url": request.url, "page_title": request.page_title, "content_hash": request.content_hash}
         )
         usage_consumed = True
 
         AnalyticsService(conn).emit_event(
             user_id=user["id"],
             event_type="JD_EXTRACTION_STARTED",
-            metadata={"text_length": len(request.jd_text)}
+            metadata={"text_length": len(request.jd_text), "classification": request.classification, "detection_confidence": request.detection_confidence, "extraction_method": request.extraction_method}
         )
         
         ai = GroqService()

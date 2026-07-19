@@ -4,9 +4,23 @@ import { useApp } from '../context/AppContext';
 
 function NoJobDetectedPage() {
   const navigate = useNavigate();
-  const { handleScanPage } = useApp();
+  const { handleScanPage, jobDetectionStatus, setJobDetectionStatus, apiError } = useApp();
+
+  const states = {
+    uncertain: ['Uncertain Job Page', 'This page may contain a job description, but there was not enough evidence to verify it safely. Review the page, retry, or paste the JD manually.'],
+    'search-results': ['Job Search Results Detected', 'Open one individual job listing from these results, then try again.'],
+    'login-required': ['Login Required', 'Sign in to the job site and open the individual listing before retrying.'],
+    captcha: ['Security Check Detected', 'Complete the website security check, then retry extraction.'],
+    'page-inaccessible': ['Page Inaccessible', apiError || 'This browser page cannot be read by the extension.'],
+    'extraction-failed': ['Extraction Failed', apiError || 'The page could not be extracted. Retry or paste the JD manually.'],
+    'extraction-incomplete': ['Job Details Still Loading', 'A job was selected, but its title or description was not available after bounded recovery attempts. Wait for the detail panel to finish loading, then retry.'],
+    'non-job': ['Non-job Page Detected', 'This page does not appear to contain a job description. Open an individual job listing and try again.'],
+    'non-job-page': ['Non-job Page Detected', 'This page does not appear to contain a job description. Open an individual job listing and try again.']
+  };
+  const [heading, message] = states[jobDetectionStatus] || states['non-job'];
 
   const handleScanAgain = () => {
+    setJobDetectionStatus('checking');
     navigate('/tailor');
     handleScanPage(true);
   };
@@ -27,10 +41,10 @@ function NoJobDetectedPage() {
             </svg>
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white tracking-tight">
-            No Job Posting Detected
+            {heading}
           </h1>
           <p className="text-slate-600 dark:text-slate-400 text-sm sm:text-base leading-relaxed max-w-sm mx-auto">
-            We couldn't automatically identify a single job posting on this page.
+            {message}
           </p>
         </div>
 
@@ -54,7 +68,7 @@ function NoJobDetectedPage() {
             </li>
             <li className="flex items-start gap-3">
               <span className="text-indigo-500 font-bold mt-0.5">•</span>
-              <span><strong>Unsupported career portals</strong> or login-walled postings</span>
+              <span><strong>Login or security checks</strong> preventing visible access</span>
             </li>
           </ul>
         </div>

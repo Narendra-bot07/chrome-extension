@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Literal
 
 class JobAnalysis(BaseModel):
     is_job_related: bool = True
@@ -31,3 +31,23 @@ class JobExtractRequest(BaseModel):
     experience_level: Optional[str] = ""
     salary_range: Optional[str] = ""
     request_id: Optional[str] = None
+    classification: Optional[Literal["job_listing", "non_job", "uncertain", "manual"]] = None
+    detection_confidence: Optional[float] = None
+    detection_reason: Optional[str] = ""
+    extraction_method: Optional[str] = ""
+    content_hash: Optional[str] = ""
+
+class JobDetectionLogRequest(BaseModel):
+    url: Optional[str] = ""
+    request_id: Optional[str] = ""
+    classification: Optional[str] = "unknown"
+    confidence: Optional[float] = None
+    page_state: Optional[str] = ""
+    extraction_source: Optional[str] = ""
+    content_hash: Optional[str] = ""
+    title: Optional[str] = ""
+    company: Optional[str] = ""
+    description_length: int = 0
+    validation: Optional[Dict] = {}
+    signals: Optional[Dict] = {}
+    trace: List[Dict] = []

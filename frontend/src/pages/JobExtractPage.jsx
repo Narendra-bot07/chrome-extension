@@ -94,6 +94,16 @@ function JobExtractPage() {
     }
   }, [jobAnalysis, apiError, jobText]);
 
+  useEffect(() => {
+    const recoveryStates = new Set([
+      'non-job', 'non-job-page', 'uncertain', 'search-results', 'login-required',
+      'captcha', 'page-inaccessible', 'extraction-failed', 'extraction-incomplete'
+    ]);
+    if (recoveryStates.has(jobDetectionStatus)) {
+      navigate('/no-job-detected', { replace: true });
+    }
+  }, [jobDetectionStatus, navigate]);
+
   const backendMatchScore = comparison?.ats_score_before ?? comparison?.ats_score ?? comparison?.match_score ?? comparison?.score ?? null;
   const hasBackendMatchScore = backendMatchScore !== null && backendMatchScore !== undefined && Number.isFinite(Number(backendMatchScore));
 
