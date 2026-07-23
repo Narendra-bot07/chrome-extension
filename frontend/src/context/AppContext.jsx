@@ -1,7 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { compressResumeData } from '../utils/resumeCompression';
-import { collectJobSkills, isExtractableHttpUrl, validateJDResponse } from '../services/jdExtractionFlow';
+import {
+  captureActiveTabJobEvidence, collectJobSkills, isExtractableHttpUrl,
+  validateJDResponse
+} from '../services/jdExtractionFlow';
 
 const AppContext = createContext();
 
@@ -241,14 +244,21 @@ export function AppProvider({ children }) {
           const finishHydration = (activeUrl = '') => {
             const savedUrl = saved?.lastAnalyzedUrl || saved?.jobAnalysis?.source_url || '';
             const savedIdentity = getJobIdentityFromUrl(savedUrl);
-            const activeIdentity = isExtractableHttpUrl(activeUrl)
+            const activeIsJobPage = isExtractableHttpUrl(activeUrl);
+            const activeIsExtensionPage = /^chrome-extension:\/\//i.test(activeUrl);
+            const activeIdentity = activeIsJobPage
               ? getJobIdentityFromUrl(activeUrl)
               : '';
             const sessionMatchesActiveJob = Boolean(
               saved?.jobAnalysis
               && savedIdentity
-              && activeIdentity
-              && savedIdentity === activeIdentity
+              && (
+                (activeIdentity && savedIdentity === activeIdentity)
+                // Full-page extension routes cannot identify the originating
+                // browser tab. Retain the current browser-session JD while the
+                // user moves through tailoring, resume, and cover-letter steps.
+                || activeIsExtensionPage
+              )
             );
 
             if (sessionMatchesActiveJob) {
@@ -271,7 +281,8 @@ export function AppProvider({ children }) {
               console.info('[JD-EXTRACTION][FRONTEND] Stale extraction session rejected', {
                 savedIdentity,
                 activeIdentity,
-                activeUrl
+                activeUrl,
+                activeIsExtensionPage
               });
             }
             setJobSessionHydrated(true);
@@ -813,8 +824,33 @@ export function AppProvider({ children }) {
       extractionAbortControllerRef.current = abortController;
       const endpoint = `${apiUrl}/api/v1/jobs/extract-url`;
       setLoadingProgress(20);
-      setLoadingMessage("Backend processing job page...");
-      logExtraction('Extraction request sent', { requestId, url: activeUrl, endpoint });
+      setLoadingMessage("Capturing browser-visible job evidence...");
+      let browserEvidence = null;
+      try {
+        browserEvidence = await captureActiveTabJobEvidence(tab.id);
+        logExtraction('Browser evidence captured', {
+          requestId,
+          visibleTextLength: browserEvidence?.visible_text?.length || 0,
+          selectedPanelLength: browserEvidence?.selected_panel_text?.length || 0,
+          htmlLength: browserEvidence?.html?.length || 0,
+          jsonLdCount: browserEvidence?.jsonld?.length || 0,
+          selectedPanelSelector: browserEvidence?.selected_panel_selector || null,
+          candidateCount: browserEvidence?.capture?.candidate_count || 0,
+          jobTitleHint: browserEvidence?.job_title_hint || null,
+          companyHint: browserEvidence?.company_hint || null,
+          locationHint: browserEvidence?.location_hint || null
+        });
+      } catch (captureError) {
+        console.warn('[JD-EXTRACTION][FRONTEND] Browser evidence unavailable; backend fallback retained', {
+          requestId,
+          message: captureError?.message || String(captureError)
+        });
+      }
+      setLoadingMessage("Backend planning evidence sources...");
+      logExtraction('Extraction request sent', {
+        requestId, url: activeUrl, endpoint,
+        hasBrowserEvidence: Boolean(browserEvidence)
+      });
 
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -824,7 +860,8 @@ export function AppProvider({ children }) {
         },
         body: JSON.stringify({
           url: activeUrl,
-          request_id: requestId
+          request_id: requestId,
+          browser_evidence: browserEvidence
         }),
         signal: abortController.signal
       });
@@ -859,6 +896,10 @@ export function AppProvider({ children }) {
         pageType, classificationConfidence: confidence,
         hasExtractedJob: Boolean(data.extracted_job),
         needsManualReview: Boolean(data.needs_manual_review)
+      });
+      logExtraction('Hybrid evidence decision received', {
+        requestId: data.request_id,
+        ...data.execution_summary
       });
       const canonicalSkills = collectJobSkills(data.extracted_job || {});
       const compatibilitySkills = collectJobSkills(data.job || {});

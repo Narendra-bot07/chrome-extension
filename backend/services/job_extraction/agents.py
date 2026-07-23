@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import html as html_lib
 import re
 import time
 from datetime import datetime, timezone
@@ -30,7 +31,8 @@ PORTALS = {
 }
 BLOCK_SIGNALS = (
     "access denied", "verify you are human", "captcha", "security check",
-    "sign in to continue", "temporarily unavailable",
+    "sign in to continue", "temporarily unavailable", "too many requests",
+    "checking your browser", "enable javascript and cookies",
 )
 
 
@@ -48,6 +50,30 @@ def _event(state: JDState, agent: str, **details: Any) -> list[dict[str, Any]]:
 def _portal(url: str) -> str:
     host = (urlparse(url).hostname or "").lower()
     return next((name for name, (needle, _) in PORTALS.items() if needle in host), "generic")
+
+
+def _extension_rendered_html(evidence: dict[str, Any]) -> str:
+    """Prefer the focused panel while retaining extension-visible JSON-LD."""
+    panel = str(evidence.get("selected_panel_text") or "").strip()
+    visible = str(evidence.get("visible_text") or "").strip()
+    if panel or visible:
+        title_hint = html_lib.escape(str(evidence.get("job_title_hint") or "").strip())
+        company_hint = html_lib.escape(str(evidence.get("company_hint") or "").strip())
+        location_hint = html_lib.escape(str(evidence.get("location_hint") or "").strip())
+        scripts = ""
+        for item in (evidence.get("jsonld") or [])[:20]:
+            if isinstance(item, (dict, list)):
+                payload = json.dumps(item, ensure_ascii=False).replace("</", "<\\/")
+                scripts += f'<script type="application/ld+json">{payload}</script>'
+        return (
+            f"<html><head>{scripts}</head><body><main>"
+            f"<h1>{title_hint}</h1>"
+            f"<div data-field='employer'>{company_hint}</div>"
+            f"<div data-field='location'>{location_hint}</div>"
+            f"<section data-field='job-description'>{html_lib.escape(panel or visible)}</section>"
+            f"</main></body></html>"
+        )
+    return str(evidence.get("html") or "")
 
 
 def discovery_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
@@ -98,6 +124,45 @@ def browser_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             browser.close()
     except Exception as exc:
         logger.exception("%s Browser failed request_id=%s attempt=%s", LOG_PREFIX, state.request_id, attempt)
+        extension_html = str(state.extension_evidence.get("html") or "")
+        extension_text = str(
+            state.extension_evidence.get("selected_panel_text")
+            or state.extension_evidence.get("visible_text")
+            or ""
+        )
+        if len(extension_text) >= 250:
+            fallback_html = _extension_rendered_html(state.extension_evidence)
+            logger.info(
+                "%s Evidence fallback request_id=%s from=backend_playwright "
+                "to=extension_dom reason=browser_failed text_length=%s",
+                LOG_PREFIX, state.request_id, len(extension_text),
+            )
+            return {
+                "browser_attempts": attempt,
+                "raw_html": fallback_html,
+                "final_url": state.extension_evidence.get("url") or state.url,
+                "page_title": state.extension_evidence.get("title"),
+                "error": None,
+                "selected_evidence_source": "extension_selected_panel"
+                if state.extension_evidence.get("selected_panel_text") else "extension_dom",
+                "evidence_sources_discovered": [
+                    key for key, present in (
+                        ("extension_dom", bool(extension_html)),
+                        ("extension_selected_panel", bool(state.extension_evidence.get("selected_panel_text"))),
+                        ("extension_visible_text", bool(state.extension_evidence.get("visible_text"))),
+                        ("extension_jsonld", bool(state.extension_evidence.get("jsonld"))),
+                    ) if present
+                ],
+                "metadata": {
+                    "browser_errors": [str(exc)[:300]],
+                    "matched_selector": state.extension_evidence.get("selected_panel_selector"),
+                    "acquisition_fallback": "extension",
+                },
+                "execution_log": _event(
+                    state, "browser", attempt=attempt,
+                    fallback="extension_dom", backend_error=type(exc).__name__,
+                ),
+            }
         return {
             "browser_attempts": attempt,
             "error": {"code": "BROWSER_FAILED", "message": str(exc)[:500]},
@@ -106,6 +171,68 @@ def browser_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     duration = round((time.perf_counter() - started) * 1000)
     lower = html[:10000].lower()
     blocked = next((signal for signal in BLOCK_SIGNALS if signal in lower), None)
+    final_path = (urlparse(final_url).path or "").casefold()
+    auth_redirect = bool(
+        re.search(r"/(?:login|signin|sign-in|auth|checkpoint|challenge)(?:/|$)", final_path)
+        and not re.search(
+            r"/(?:login|signin|sign-in|auth|checkpoint|challenge)(?:/|$)",
+            (urlparse(state.url).path or "").casefold(),
+        )
+    )
+    if auth_redirect:
+        blocked = "login required"
+        logger.info(
+            "%s Backend authentication redirect detected request_id=%s "
+            "original_url=%s final_url=%s",
+            LOG_PREFIX, state.request_id, state.url, final_url,
+        )
+    extension_html = str(state.extension_evidence.get("html") or "")
+    extension_panel = str(state.extension_evidence.get("selected_panel_text") or "")
+    backend_text_length = len(BeautifulSoup(html, "lxml").get_text(" ", strip=True))
+    panel_job_signals = len(re.findall(
+        r"\b(?:job description|responsibilities|qualifications|requirements|"
+        r"what you.ll do|what to expect|apply now|easy apply)\b",
+        extension_panel,
+        flags=re.I,
+    ))
+    backend_looks_like_listing = bool(re.search(
+        r"\b(?:search results|job results|recommended jobs|jobs matching|filter jobs)\b",
+        BeautifulSoup(html, "lxml").get_text(" ", strip=True)[:20000],
+        flags=re.I,
+    ))
+    use_extension = bool(
+        (blocked or backend_text_length < 250)
+        and len(extension_panel or str(state.extension_evidence.get("visible_text") or "")) >= 250
+    ) or bool(
+        len(extension_panel) >= 500
+        and panel_job_signals >= 2
+        and backend_looks_like_listing
+    )
+    selected_source = "backend_playwright"
+    if use_extension:
+        html = _extension_rendered_html(state.extension_evidence)
+        title = state.extension_evidence.get("title") or title
+        final_url = state.extension_evidence.get("url") or final_url
+        selected_source = "extension_selected_panel" if extension_panel else "extension_dom"
+        logger.info(
+            "%s Evidence fallback request_id=%s from=backend_playwright to=%s "
+            "reason=%s backend_text_length=%s",
+            LOG_PREFIX, state.request_id, selected_source,
+            "blocked" if blocked else (
+                "selected_job_panel" if backend_looks_like_listing else "partial_render"
+            ),
+            backend_text_length,
+        )
+        blocked = None
+    discovered = ["backend_playwright"]
+    discovered.extend(
+        key for key, present in (
+            ("extension_dom", bool(extension_html)),
+            ("extension_selected_panel", bool(extension_panel)),
+            ("extension_visible_text", bool(state.extension_evidence.get("visible_text"))),
+            ("extension_jsonld", bool(state.extension_evidence.get("jsonld"))),
+        ) if present
+    )
     logger.info(
         "%s Browser completed request_id=%s final_url=%s html_length=%s duration_ms=%s selector=%s",
         LOG_PREFIX, state.request_id, final_url, len(html), duration, matched,
@@ -113,8 +240,14 @@ def browser_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     return {
         "browser_attempts": attempt, "raw_html": html, "final_url": final_url,
         "page_title": title, "blocked_reason": blocked, "error": None,
+        "selected_evidence_source": selected_source,
+        "evidence_sources_discovered": discovered,
         "metadata": {"browser_errors": errors, "matched_selector": matched, "load_duration_ms": duration},
-        "execution_log": _event(state, "browser", attempt=attempt, html_length=len(html), matched_selector=matched),
+        "execution_log": _event(
+            state, "browser", attempt=attempt, html_length=len(html),
+            matched_selector=matched, selected_source=selected_source,
+            sources_discovered=discovered,
+        ),
     }
 
 
@@ -143,10 +276,29 @@ def jsonld_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             _walk_jsonld(json.loads(script.string or script.get_text()), all_items, jobs)
         except (json.JSONDecodeError, TypeError):
             malformed += 1
-    logger.info("%s JSON-LD completed request_id=%s blocks=%s jobs=%s malformed=%s", LOG_PREFIX, state.request_id, len(all_items), len(jobs), malformed)
+    selected_is_extension = (state.selected_evidence_source or "").startswith("extension")
+    backend_job_count = 0 if selected_is_extension else len(jobs)
+    if not selected_is_extension:
+        for item in state.extension_evidence.get("jsonld", []) or []:
+            _walk_jsonld(item, all_items, jobs)
+    extension_job_count = len(jobs) - backend_job_count
+    selected_source = state.selected_evidence_source
+    if extension_job_count and not backend_job_count:
+        selected_source = "extension_jsonld"
+    logger.info(
+        "%s JSON-LD completed request_id=%s blocks=%s jobs=%s malformed=%s "
+        "backend_jobs=%s extension_jobs=%s selected_source=%s",
+        LOG_PREFIX, state.request_id, len(all_items), len(jobs), malformed,
+        backend_job_count, extension_job_count, selected_source,
+    )
     return {
         "jsonld": all_items, "jobposting_jsonld": jobs,
-        "execution_log": _event(state, "jsonld", blocks=len(all_items), job_postings=len(jobs), malformed=malformed),
+        "selected_evidence_source": selected_source,
+        "execution_log": _event(
+            state, "jsonld", blocks=len(all_items), job_postings=len(jobs),
+            malformed=malformed, backend_jobs=backend_job_count,
+            extension_jobs=extension_job_count, selected_source=selected_source,
+        ),
     }
 
 
@@ -197,17 +349,90 @@ def metadata_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     return {"metadata": metadata, "execution_log": _event(state, "metadata", headings=len(metadata["headings"]))}
 
 
+def block_detection_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
+    """Describe access restrictions separately from job-page classification."""
+    state = _state(value)
+    text = f"{state.page_title or ''} {state.markdown[:12000]}".casefold()
+    patterns = (
+        ("captcha", ("captcha", "verify you are human", "i'm not a robot")),
+        ("login_required", ("sign in to continue", "log in to continue", "login required")),
+        ("access_denied", ("access denied", "permission required", "not authorized")),
+        ("rate_limited", ("too many requests", "rate limit", "try again later")),
+        ("security_challenge", ("checking your browser", "security check", "cloudflare")),
+    )
+    restriction = next(
+        (kind for kind, signals in patterns if any(signal in text for signal in signals)),
+        None,
+    )
+    if not restriction and len(state.markdown) < 80:
+        restriction = (
+            "javascript_not_rendered"
+            if state.metadata.get("browser_errors")
+            else "empty_shell"
+        )
+    usable_extension = len(str(
+        state.extension_evidence.get("selected_panel_text")
+        or state.extension_evidence.get("visible_text")
+        or ""
+    )) >= 250
+    effective_restriction = (
+        None
+        if usable_extension and (state.selected_evidence_source or "").startswith("extension")
+        else restriction
+    )
+    logger.info(
+        "%s Block detection request_id=%s restriction=%s effective_restriction=%s "
+        "selected_source=%s extension_usable=%s",
+        LOG_PREFIX, state.request_id, restriction, effective_restriction,
+        state.selected_evidence_source, usable_extension,
+    )
+    return {
+        "restriction_type": effective_restriction,
+        "blocked_reason": effective_restriction,
+        "surface_type": (
+            "login" if effective_restriction == "login_required"
+            else ("blocked" if effective_restriction else state.surface_type)
+        ),
+        "execution_log": _event(
+            state, "block_detection", restriction=restriction,
+            effective_restriction=effective_restriction,
+            extension_usable=usable_extension,
+        ),
+    }
+
+
 def planner_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     state = _state(value)
     complete_jsonld = any(item.get("title") and item.get("description") for item in state.jobposting_jsonld)
+    selected = state.selected_evidence_source or "backend_playwright"
+    text_length = len(state.markdown)
+    readiness = "READY" if (
+        complete_jsonld
+        or text_length >= 500
+    ) else ("PARTIAL" if text_length >= 150 else "NOT_READY")
     plan = {
         "primary_source": "jobposting_jsonld" if complete_jsonld else "markdown",
         "supplementary_sources": ["markdown", "metadata"] if complete_jsonld else ["metadata", "jobposting_jsonld"],
         "browser_retry_required": len(state.markdown) < 250 and state.browser_attempts < state.max_browser_attempts,
         "strategy": "structured_first" if complete_jsonld else "evidence_fusion",
+        "selected_acquisition_source": selected,
+        "extraction_readiness": readiness,
     }
-    logger.info("%s Planner completed request_id=%s strategy=%s", LOG_PREFIX, state.request_id, plan["strategy"])
-    return {"plan": plan, "execution_log": _event(state, "planner", strategy=plan["strategy"])}
+    logger.info(
+        "%s Planner completed request_id=%s strategy=%s selected_source=%s "
+        "readiness=%s sources=%s restriction=%s",
+        LOG_PREFIX, state.request_id, plan["strategy"], selected, readiness,
+        state.evidence_sources_discovered, state.restriction_type,
+    )
+    return {
+        "plan": plan,
+        "extraction_readiness": readiness,
+        "execution_log": _event(
+            state, "planner", strategy=plan["strategy"],
+            selected_source=selected, readiness=readiness,
+            sources=state.evidence_sources_discovered,
+        ),
+    }
 
 
 def _deterministic_classification(state: JDState) -> ClassificationDecision:
@@ -309,8 +534,21 @@ def classifier_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     state = _state(value)
     decision = _deterministic_classification(state)
     logger.info("%s Classification completed request_id=%s page_type=%s confidence=%s reasons=%s", LOG_PREFIX, state.request_id, decision.page_type, decision.confidence, decision.reasons)
+    listing_surface = bool(
+        state.extension_evidence.get("selected_panel_text")
+        and re.search(
+            r"\b(?:search results|job results|recommended jobs|jobs matching|filter jobs)\b",
+            str(state.extension_evidence.get("visible_text") or ""),
+            flags=re.I,
+        )
+    )
+    surface_type = state.surface_type or (
+        "job_list" if listing_surface and decision.page_type == "job_detail"
+        else decision.page_type
+    )
     return {
         "page_type": decision.page_type, "classification_confidence": decision.confidence,
+        "surface_type": surface_type,
         "classification_reasons": decision.reasons,
         "classification_attempts": state.classification_attempts + 1,
         "plan": {**state.plan, "classification_action": decision.action},
@@ -336,6 +574,15 @@ def evidence_planner_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         "jobposting_jsonld": .95 if state.jobposting_jsonld else 0,
         "markdown": min(.85, len(state.markdown) / 5000),
         "metadata": .65 if state.metadata.get("title") else .25,
+        "extension_selected_panel": .92
+        if state.extension_evidence.get("selected_panel_text") else 0,
+        "extension_visible_text": min(
+            .8, len(str(state.extension_evidence.get("visible_text") or "")) / 6000
+        ),
+        "extension_jsonld": .96 if state.extension_evidence.get("jsonld") else 0,
+        "backend_playwright": .85
+        if state.selected_evidence_source == "backend_playwright" and len(state.markdown) >= 500
+        else 0,
     }
     hints = {
         "identity": "jobposting_jsonld or metadata",
@@ -362,6 +609,11 @@ def source_builder_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         "source_scores": state.source_scores,
         "field_source_hints": state.evidence.get("field_source_hints", {}),
         "metadata": {k: state.metadata.get(k) for k in ("title", "description", "apply_links", "portal")},
+        "browser_session_hints": {
+            "job_title": state.extension_evidence.get("job_title_hint"),
+            "company_name": state.extension_evidence.get("company_hint"),
+            "location": state.extension_evidence.get("location_hint"),
+        },
     }
     logger.info(
         "%s Source builder completed request_id=%s primary=%s size=%s "
@@ -385,6 +637,9 @@ Never invent factual values; use null/empty lists only when evidence is genuinel
 COMPANY IDENTITY:
 - company_name is the recognizable public employer brand supported by domain, metadata,
   page content, and structured hiringOrganization evidence.
+- A job marketplace or hosting platform is not the employer merely because its brand appears
+  in the URL, document title, metadata, or page chrome. Prefer the employer named in the
+  selected job top card, hiring organization, or browser_session_hints.company_name.
 - When a posting names a legal hiring subsidiary/entity but clearly belongs to a known
   parent/public employer brand on the same page, return the public brand.
 - Do not blindly copy legal suffixes or requisition/entity codes into company_name.
@@ -737,7 +992,20 @@ def final_response_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     duration = max(0, round((completed - started).total_seconds() * 1000))
     error = state.error
     if state.blocked_reason:
-        error = {"code": "PAGE_BLOCKED", "message": "The page could not be accessed."}
+        messages = {
+            "login_required": "The job page requires the user's signed-in browser session.",
+            "captcha": "The page is showing a human-verification challenge.",
+            "access_denied": "The job page denied access.",
+            "rate_limited": "The job platform is temporarily rate limiting access.",
+            "security_challenge": "The page is showing a security challenge.",
+            "empty_shell": "The page returned an empty application shell.",
+            "javascript_not_rendered": "The job content did not finish rendering.",
+            "permission_required": "Browser permission is required to read this page.",
+        }
+        error = {
+            "code": "PAGE_BLOCKED",
+            "message": messages.get(state.blocked_reason, "The page could not be accessed."),
+        }
     success = error is None
     extracted = state.extracted_job if state.page_type == "job_detail" else None
     response = {
@@ -750,6 +1018,12 @@ def final_response_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         "execution_summary": {
             "portal": state.detected_portal, "browser_attempts": state.browser_attempts,
             "repair_attempts": state.repair_attempts, "duration_ms": duration,
+            "surface_type": state.surface_type,
+            "extraction_readiness": state.extraction_readiness,
+            "restriction_type": state.restriction_type,
+            "evidence_sources_discovered": state.evidence_sources_discovered,
+            "selected_evidence_source": state.selected_evidence_source,
+            "source_scores": state.source_scores,
         },
     }
     if error:

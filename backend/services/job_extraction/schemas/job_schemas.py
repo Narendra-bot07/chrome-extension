@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class SalaryInfo(BaseModel):
@@ -32,11 +32,11 @@ class ExtractedJob(BaseModel):
     location: Optional[str] = Field(
         None, description="Evidence-supported job location, without unrelated locations."
     )
-    workplace_type: Literal["remote", "hybrid", "onsite", "unknown"] = "unknown"
-    employment_type: Literal[
-        "full_time", "part_time", "contract", "internship", "temporary",
-        "volunteer", "other", "unknown"
-    ] = "unknown"
+    # Keep the LLM tool boundary permissive: source pages commonly use labels
+    # such as "Full Time, Permanent". Validators below immediately convert
+    # those labels into the application's stable canonical values.
+    workplace_type: str = "unknown"
+    employment_type: str = "unknown"
     seniority: Optional[str] = None
     department: Optional[str] = None
     description: Optional[str] = Field(
@@ -76,6 +76,38 @@ class ExtractedJob(BaseModel):
     date_posted: Optional[str] = None
     valid_through: Optional[str] = None
     source_url: Optional[str] = None
+
+    @field_validator("workplace_type", mode="before")
+    @classmethod
+    def normalize_workplace_type(cls, value: Any) -> str:
+        text = str(value or "").strip().casefold().replace("-", " ").replace("_", " ")
+        if "hybrid" in text:
+            return "hybrid"
+        if "remote" in text or "work from home" in text:
+            return "remote"
+        if any(marker in text for marker in ("onsite", "on site", "in office", "office based")):
+            return "onsite"
+        return "unknown"
+
+    @field_validator("employment_type", mode="before")
+    @classmethod
+    def normalize_employment_type(cls, value: Any) -> str:
+        text = str(value or "").strip().casefold().replace("-", " ").replace("_", " ")
+        if "intern" in text:
+            return "internship"
+        if "part time" in text:
+            return "part_time"
+        if "full time" in text or text == "permanent":
+            return "full_time"
+        if "volunteer" in text:
+            return "volunteer"
+        if "temporary" in text or text == "temp":
+            return "temporary"
+        if any(marker in text for marker in ("contract", "freelance", "consultant")):
+            return "contract"
+        if text in {"other", "unknown", "", "not specified", "n/a"}:
+            return "unknown"
+        return "other"
 
 
 class ClassificationDecision(BaseModel):
@@ -133,6 +165,18 @@ class JDState(BaseModel):
     final_url: Optional[str] = None
     detected_portal: str = "generic"
     browser_strategy: dict[str, Any] = Field(default_factory=dict)
+    extension_evidence: dict[str, Any] = Field(default_factory=dict)
+    evidence_sources_discovered: list[str] = Field(default_factory=list)
+    selected_evidence_source: Optional[str] = None
+    surface_type: Optional[Literal[
+        "job_detail", "job_list", "career_home", "login", "blocked", "non_job"
+    ]] = None
+    extraction_readiness: Literal["READY", "PARTIAL", "NOT_READY"] = "NOT_READY"
+    restriction_type: Optional[Literal[
+        "login_required", "captcha", "access_denied", "rate_limited",
+        "security_challenge", "empty_shell", "javascript_not_rendered",
+        "permission_required", "unknown"
+    ]] = None
     browser_attempts: int = 0
     max_browser_attempts: int = 2
     classification_attempts: int = 0

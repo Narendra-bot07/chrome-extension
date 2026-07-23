@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from langgraph.graph import END, START, StateGraph
 
 from services.job_extraction.agents import (
-    browser_agent, classification_review_agent, classifier_agent, discovery_agent,
+    block_detection_agent, browser_agent, classification_review_agent, classifier_agent, discovery_agent,
     dom_cleaner_agent, evidence_planner_agent, extraction_agent,
     extraction_manual_review_agent, final_response_agent, jsonld_agent,
     markdown_agent, metadata_agent, planner_agent, repair_agent, reviewer_agent,
@@ -52,7 +52,8 @@ def build_job_intelligence_graph():
     nodes = {
         "discovery": discovery_agent, "browser": browser_agent, "jsonld": jsonld_agent,
         "dom_cleaner": dom_cleaner_agent, "markdown": markdown_agent,
-        "metadata": metadata_agent, "planner": planner_agent, "classifier": classifier_agent,
+        "metadata": metadata_agent, "block_detection": block_detection_agent,
+        "planner": planner_agent, "classifier": classifier_agent,
         "classification_review": classification_review_agent,
         "evidence_planner": evidence_planner_agent, "source_builder": source_builder_agent,
         "extraction": extraction_agent, "reviewer": reviewer_agent, "repair": repair_agent,
@@ -67,7 +68,8 @@ def build_job_intelligence_graph():
     graph.add_edge("jsonld", "dom_cleaner")
     graph.add_edge("dom_cleaner", "markdown")
     graph.add_edge("markdown", "metadata")
-    graph.add_edge("metadata", "planner")
+    graph.add_edge("metadata", "block_detection")
+    graph.add_edge("block_detection", "planner")
     graph.add_edge("planner", "classifier")
     graph.add_conditional_edges("classifier", route_after_classifier)
     graph.add_conditional_edges("classification_review", route_after_classification_review)
@@ -100,9 +102,16 @@ def validate_public_url(url: str) -> None:
         raise ValueError("Private network URLs are not permitted.")
 
 
-def run_job_intelligence(url: str, request_id: str) -> dict[str, Any]:
+def run_job_intelligence(
+    url: str, request_id: str, browser_evidence: dict[str, Any] | None = None
+) -> dict[str, Any]:
     validate_public_url(url)
-    initial = JDState(request_id=request_id, url=url, original_url=url)
+    initial = JDState(
+        request_id=request_id,
+        url=url,
+        original_url=url,
+        extension_evidence=browser_evidence or {},
+    )
     result = build_job_intelligence_graph().invoke(initial)
     validated = JDState.model_validate(result)
     return validated.final_response

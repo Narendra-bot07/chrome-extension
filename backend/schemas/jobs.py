@@ -24,5 +24,6 @@ class JobAnalysis(BaseModel):
 class JobUrlExtractRequest(BaseModel):
     url: str = Field(min_length=8)
     request_id: Optional[str] = None
+    browser_evidence: Optional[Dict[str, Any]] = None
 
 

@@ -21,12 +21,19 @@ async def extract_job_from_provided_url(
     """Run the autonomous graph for the complete current-tab URL."""
     request_id = request.request_id or str(uuid.uuid4())
     logger.info(
-        "[JD-EXTRACTION][BACKEND] Request received request_id=%s url=%s",
+        "[JD-EXTRACTION][BACKEND] Request received request_id=%s url=%s "
+        "extension_evidence=%s",
         request_id,
         request.url,
+        bool(request.browser_evidence),
     )
     try:
-        return await asyncio.to_thread(extract_job_from_url, request.url, request_id)
+        return await asyncio.to_thread(
+            extract_job_from_url,
+            request.url,
+            request_id,
+            request.browser_evidence,
+        )
     except ValueError as exc:
         logger.warning(
             "[JD-EXTRACTION][BACKEND] Request rejected request_id=%s error=%s",

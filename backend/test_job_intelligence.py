@@ -17,7 +17,20 @@ from services.job_extraction.graph import (
     route_after_reviewer,
     validate_public_url,
 )
-from services.job_extraction.schemas import JDState
+from services.job_extraction.schemas import ExtractedJob, JDState
+
+
+@pytest.mark.parametrize(
+    ("source_value", "canonical"),
+    [
+        ("Full Time, Permanent", "full_time"),
+        ("Part-time", "part_time"),
+        ("Contract / Freelance", "contract"),
+        ("Intern", "internship"),
+    ],
+)
+def test_source_employment_labels_are_normalized(source_value, canonical):
+    assert ExtractedJob(employment_type=source_value).employment_type == canonical
 
 
 def state(html="", url="https://example.com/jobs/123", **updates):
