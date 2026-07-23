@@ -5,7 +5,9 @@ import pytest
 
 from services.job_extraction.agents import (
     _deterministic_classification,
+    block_detection_agent,
     dom_cleaner_agent,
+    evidence_evaluation_agent,
     final_response_agent,
     jsonld_agent,
     markdown_agent,
@@ -15,6 +17,7 @@ from services.job_extraction.graph import (
     route_after_classification_review,
     route_after_classifier,
     route_after_reviewer,
+    route_after_evidence,
     validate_public_url,
 )
 from services.job_extraction.schemas import ExtractedJob, JDState
@@ -31,6 +34,121 @@ from services.job_extraction.schemas import ExtractedJob, JDState
 )
 def test_source_employment_labels_are_normalized(source_value, canonical):
     assert ExtractedJob(employment_type=source_value).employment_type == canonical
+
+
+def test_backend_login_wall_recovers_with_extension_selected_panel():
+    panel = (
+        "Senior Engineer\nJob description\nResponsibilities\nBuild reliable systems.\n"
+        "Requirements\nPython and SQL.\nFull-time\nApply now\n"
+    ) * 3
+    result = evidence_evaluation_agent(state(
+        backend_raw_html="<html><h1>Sign in</h1><p>Sign in to continue</p></html>",
+        backend_final_url="https://example.com/login?next=/jobs/123",
+        backend_page_title="Sign in",
+        extension_evidence={
+            "url": "https://example.com/jobs/123",
+            "title": "Senior Engineer",
+            "selected_panel_text": panel,
+            "job_title_hint": "Senior Engineer",
+            "company_hint": "Example",
+            "capture": {"portal_optimized_panel": False},
+        },
+    ))
+    assert result["primary_source"] == "extension_selected_panel"
+    assert result["page_access_status"] == "extension_accessible"
+    assert result["extraction_readiness"] == "READY"
+    assert "backend_playwright" in result["excluded_sources"]
+    assert "Sign in to continue" not in result["raw_html"]
+
+
+def test_backend_challenge_recovers_with_extension_jsonld():
+    posting = {
+        "@type": "JobPosting", "title": "Engineer",
+        "description": "Build systems", "hiringOrganization": {"name": "Example"},
+    }
+    result = evidence_evaluation_agent(state(
+        backend_raw_html="<html><p>Verify you are human</p></html>",
+        backend_final_url="https://example.com/challenge",
+        extension_evidence={"url": "https://example.com/jobs/1", "jsonld": [posting]},
+    ))
+    assert result["primary_source"] == "extension_jsonld"
+    assert result["extraction_readiness"] == "READY"
+    assert "Verify you are human" not in result["raw_html"]
+
+
+def test_all_restricted_sources_are_blocked_not_non_job():
+    result = evidence_evaluation_agent(state(
+        backend_raw_html="<html><p>Verify you are human captcha</p></html>",
+        backend_final_url="https://example.com/challenge",
+        extension_evidence={
+            "url": "https://example.com/jobs/1",
+            "visible_text": "Access denied. Verify you are human.",
+            "html": "<html><p>Access denied. Verify you are human.</p></html>",
+        },
+    ))
+    assert result["primary_source"] is None
+    assert result["page_access_status"] == "fully_blocked"
+    assert result["extraction_readiness"] == "BLOCKED"
+    routed = state(**result)
+    assert route_after_evidence(routed) == "final_response"
+    response = final_response_agent(routed)["final_response"]
+    assert response["status"] == "blocked"
+    assert response["page_type"] == "unknown"
+
+
+def test_normal_backend_jsonld_remains_extractable():
+    html = job_html("Public Employer")
+    result = evidence_evaluation_agent(state(
+        backend_raw_html=html,
+        backend_final_url="https://example.com/jobs/123",
+        backend_page_title="Senior Software Engineer",
+    ))
+    assert result["primary_source"] in {"backend_jsonld", "backend_playwright"}
+    assert result["page_access_status"] == "backend_accessible"
+    assert result["extraction_readiness"] == "READY"
+
+
+def test_conflicting_jobs_prefer_fresh_selected_panel_and_warn():
+    backend = job_html("Backend Employer").replace(
+        '"title": "Senior Software Engineer"',
+        '"title": "Different Backend Role"',
+    )
+    panel = (
+        "Selected Engineer\nJob description\nResponsibilities\nBuild APIs.\n"
+        "Requirements\nPython and SQL.\nApply now\n"
+    ) * 3
+    result = evidence_evaluation_agent(state(
+        url="https://example.com/jobs/11111",
+        backend_raw_html=backend,
+        backend_final_url="https://example.com/jobs/22222",
+        extension_evidence={
+            "url": "https://example.com/jobs/11111",
+            "selected_job_url": "https://example.com/jobs/11111",
+            "selected_panel_text": panel,
+            "job_title_hint": "Selected Engineer",
+            "capture": {"portal_optimized_panel": True, "dom_fingerprint": "abc"},
+        },
+    ))
+    assert result["primary_source"] == "extension_selected_panel"
+    assert result["extraction_readiness"] == "READY"
+    assert result["evidence_conflicts"]
+
+
+def test_restricted_primary_invariant_routes_to_manual_review():
+    invalid = state(
+        primary_source="backend_playwright",
+        selected_evidence_source="backend_playwright",
+        page_access_status="extension_accessible",
+        extraction_readiness="READY",
+        evidence_sources=[{
+            "source_type": "backend_playwright",
+            "restricted": True,
+            "usable": False,
+        }],
+    )
+    update = block_detection_agent(invalid)
+    assert update["needs_manual_review"] is True
+    assert update["extraction_readiness"] == "MANUAL_REVIEW"
 
 
 def state(html="", url="https://example.com/jobs/123", **updates):

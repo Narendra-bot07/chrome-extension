@@ -33,6 +33,24 @@ export async function captureActiveTabJobEvidence(tabId) {
         .trim()
         .slice(0, limit);
       const jobSignals = /\b(job description|responsibilities|qualifications|requirements|what you.ll do|what to expect|apply now|easy apply|full.time|part.time|experience)\b/gi;
+      const roots = [document];
+      const shadowRoots = [];
+      document.querySelectorAll('*').forEach((node) => {
+        if (node.shadowRoot) shadowRoots.push(node.shadowRoot);
+      });
+      roots.push(...shadowRoots);
+      const iframeEvidence = [];
+      document.querySelectorAll('iframe').forEach((frame) => {
+        try {
+          if (frame.contentDocument) {
+            roots.push(frame.contentDocument);
+            const frameText = cleanText(frame.contentDocument.body?.innerText, 30000);
+            if (frameText) iframeEvidence.push(frameText);
+          }
+        } catch {
+          // Cross-origin frames remain inaccessible by browser policy.
+        }
+      });
       const portalPanelSelectors = location.hostname.includes('linkedin.com')
         ? [
             '.jobs-description__content',
@@ -43,15 +61,15 @@ export async function captureActiveTabJobEvidence(tabId) {
           ]
         : [];
       const portalCandidates = portalPanelSelectors.flatMap((selector) =>
-        Array.from(document.querySelectorAll(selector)).map((node) => ({
+        roots.flatMap((root) => Array.from(root.querySelectorAll(selector))).map((node) => ({
           node,
           selector,
           portalOptimized: true
         }))
       );
-      const genericCandidates = Array.from(document.querySelectorAll(
+      const genericCandidates = roots.flatMap((root) => Array.from(root.querySelectorAll(
         '[role="dialog"], [role="main"], article, main, aside, section'
-      )).map((node) => ({ node, selector: null, portalOptimized: false }));
+      ))).map((node) => ({ node, selector: null, portalOptimized: false }));
       const candidates = [...portalCandidates, ...genericCandidates]
         .filter(({ node, portalOptimized }) => {
           const rect = node.getBoundingClientRect();
@@ -103,25 +121,43 @@ export async function captureActiveTabJobEvidence(tabId) {
           ])
         : '';
       const jsonld = [];
-      document.querySelectorAll('script[type="application/ld+json"]').forEach((script) => {
-        if (jsonld.length >= 20) return;
-        try {
-          jsonld.push(JSON.parse(script.textContent || ''));
-        } catch {
-          // Malformed page-owned structured data is ignored.
-        }
+      roots.forEach((root) => {
+        root.querySelectorAll('script[type="application/ld+json"]').forEach((script) => {
+          if (jsonld.length >= 20) return;
+          try {
+            jsonld.push(JSON.parse(script.textContent || ''));
+          } catch {
+            // Malformed page-owned structured data is ignored.
+          }
+        });
       });
       const clone = document.documentElement.cloneNode(true);
       clone.querySelectorAll(
         'script:not([type="application/ld+json"]), style, noscript, iframe, canvas, input, textarea, select'
       ).forEach((node) => node.remove());
+      const shadowText = cleanText(
+        shadowRoots.map((root) => root.textContent || '').join('\n'),
+        30000
+      );
+      const visibleText = cleanText([
+        document.body?.innerText,
+        shadowText,
+        ...iframeEvidence
+      ].join('\n'), 100000);
+      const fingerprintInput = `${location.href}|${document.title}|${visibleText.slice(0, 10000)}`;
+      let fingerprintHash = 2166136261;
+      for (let index = 0; index < fingerprintInput.length; index += 1) {
+        fingerprintHash ^= fingerprintInput.charCodeAt(index);
+        fingerprintHash = Math.imul(fingerprintHash, 16777619);
+      }
       return {
         url: location.href,
+        selected_job_url: location.href,
         title: document.title,
         job_title_hint: jobTitleHint,
         company_hint: companyHint,
         location_hint: locationHint,
-        visible_text: cleanText(document.body?.innerText, 80000),
+        visible_text: visibleText,
         selected_panel_text: selected?.text || '',
         selected_panel_selector: selected
           ? (selected.selector || `${selected.node.tagName.toLowerCase()}${selected.node.id ? `#${selected.node.id}` : ''}`)
@@ -133,11 +169,16 @@ export async function captureActiveTabJobEvidence(tabId) {
           selected_score: selected?.score || 0,
           portal_optimized_panel: Boolean(selected?.portalOptimized),
           captured_at: new Date().toISOString(),
-          viewport: { width: innerWidth, height: innerHeight }
+          viewport: { width: innerWidth, height: innerHeight },
+          portal_hint: location.hostname,
+          accessible_iframe_count: iframeEvidence.length,
+          shadow_root_count: shadowRoots.length,
+          dom_fingerprint: (fingerprintHash >>> 0).toString(16)
         }
       };
     }
   });
+  if (result && typeof result === 'object') result.active_tab_id = tabId;
   return result || null;
 }
 
@@ -170,6 +211,7 @@ export function assessBrowserJobEvidence(evidence = {}, sourceUrl = '') {
   const applyAction = /\b(?:apply now|apply for this job|easy apply|submit application|start application)\b/i.test(text);
   const employmentMetadata = /\b(?:full[ -]?time|part[ -]?time|contract|internship|temporary|remote|hybrid|on[ -]?site)\b/i.test(text);
   const hiringContext = /\b(?:we are hiring|join our team|successful candidate|ideal candidate|job duties|role will be responsible)\b/i.test(text);
+  const requiresRecoveryEvaluation = /\b(?:captcha|verify you are human|access denied|request blocked|checking your browser|security challenge|cloudflare)\b/i.test(text);
   const focusedPanel = Boolean(
     evidence.capture?.portal_optimized_panel
     && selected.length >= 250
@@ -194,6 +236,7 @@ export function assessBrowserJobEvidence(evidence = {}, sourceUrl = '') {
     : (score >= 2 ? 'PARTIAL' : 'NOT_READY');
   return {
     isLikelyJob: readiness !== 'NOT_READY',
+    requiresRecoveryEvaluation,
     readiness,
     score,
     signals: {
@@ -204,6 +247,7 @@ export function assessBrowserJobEvidence(evidence = {}, sourceUrl = '') {
       applyAction,
       employmentMetadata,
       hiringContext,
+      requiresRecoveryEvaluation,
       identityHints
     }
   };
@@ -260,6 +304,10 @@ export function validateJDResponse(data) {
 export function classifyJDResult(data) {
   const response = validateJDResponse(data);
   if (!response.success) {
+    if (response.status === "selection_required") return "job-list";
+    if (response.status === "non_job") return "non-job";
+    if (response.status === "manual_review") return "manual-review";
+    if (response.status === "insufficient_evidence") return "extraction-incomplete";
     return response.error?.code === "PAGE_BLOCKED" ? "blocked" : "extraction-failed";
   }
   if (response.needs_manual_review) return "manual-review";

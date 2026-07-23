@@ -155,6 +155,34 @@ class ReviewDecision(BaseModel):
     confidence: float = Field(default=0, ge=0, le=1)
 
 
+class EvidenceSource(BaseModel):
+    """One independently evaluated acquisition source."""
+
+    model_config = ConfigDict(extra="ignore")
+    source_type: str
+    access_status: Literal[
+        "available", "unavailable", "usable", "partial", "restricted",
+        "stale", "malformed", "empty", "failed"
+    ] = "unavailable"
+    available: bool = False
+    usable: bool = False
+    restricted: bool = False
+    restriction_type: Optional[str] = None
+    restriction_confidence: float = Field(default=0, ge=0, le=1)
+    restriction_signals: list[str] = Field(default_factory=list)
+    content_length: int = 0
+    job_signal_score: float = Field(default=0, ge=0, le=1)
+    quality_score: float = Field(default=0, ge=0, le=1)
+    freshness_score: float = Field(default=1, ge=0, le=1)
+    specificity_score: float = Field(default=0, ge=0, le=1)
+    selected_job_signal: bool = False
+    contains_security_challenge: bool = False
+    contains_login_wall: bool = False
+    content: Any = None
+    warnings: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class JDState(BaseModel):
     """The single serializable state passed through every LangGraph node."""
 
@@ -166,12 +194,29 @@ class JDState(BaseModel):
     detected_portal: str = "generic"
     browser_strategy: dict[str, Any] = Field(default_factory=dict)
     extension_evidence: dict[str, Any] = Field(default_factory=dict)
+    evidence_sources: list[dict[str, Any]] = Field(default_factory=list)
     evidence_sources_discovered: list[str] = Field(default_factory=list)
     selected_evidence_source: Optional[str] = None
+    primary_source: Optional[str] = None
+    source_selection_reason: Optional[str] = None
+    supplementary_sources: list[str] = Field(default_factory=list)
+    excluded_sources: list[str] = Field(default_factory=list)
+    source_restrictions: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    page_access_status: Optional[Literal[
+        "fully_accessible", "partially_accessible", "extension_accessible",
+        "backend_accessible", "evidence_available", "fully_blocked",
+        "insufficient_evidence", "unknown"
+    ]] = None
     surface_type: Optional[Literal[
         "job_detail", "job_list", "career_home", "login", "blocked", "non_job"
     ]] = None
-    extraction_readiness: Literal["READY", "PARTIAL", "NOT_READY"] = "NOT_READY"
+    extraction_readiness: Literal[
+        "READY", "PARTIAL", "NOT_READY", "BLOCKED", "MANUAL_REVIEW"
+    ] = "NOT_READY"
+    selected_job_detected: bool = False
+    selected_job_identity: Optional[dict[str, Any]] = None
+    evidence_conflicts: list[str] = Field(default_factory=list)
+    planner_warnings: list[str] = Field(default_factory=list)
     restriction_type: Optional[Literal[
         "login_required", "captcha", "access_denied", "rate_limited",
         "security_challenge", "empty_shell", "javascript_not_rendered",
@@ -182,6 +227,9 @@ class JDState(BaseModel):
     classification_attempts: int = 0
     max_classification_attempts: int = 1
     raw_html: str = ""
+    backend_raw_html: str = ""
+    backend_final_url: Optional[str] = None
+    backend_page_title: Optional[str] = None
     page_title: Optional[str] = None
     cleaned_html: str = ""
     markdown: str = ""

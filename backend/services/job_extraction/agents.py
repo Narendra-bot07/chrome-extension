@@ -16,7 +16,8 @@ from markdownify import markdownify
 from app.groq_service import get_llm
 from core.logging import logger
 from services.job_extraction.schemas import (
-    ClassificationDecision, ExtractedJob, JDState, ReviewDecision, SkillDecision,
+    ClassificationDecision, EvidenceSource, ExtractedJob, JDState, ReviewDecision,
+    SkillDecision,
 )
 
 LOG_PREFIX = "[JD-EXTRACTION][BACKEND]"
@@ -124,129 +125,416 @@ def browser_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             browser.close()
     except Exception as exc:
         logger.exception("%s Browser failed request_id=%s attempt=%s", LOG_PREFIX, state.request_id, attempt)
-        extension_html = str(state.extension_evidence.get("html") or "")
-        extension_text = str(
-            state.extension_evidence.get("selected_panel_text")
-            or state.extension_evidence.get("visible_text")
-            or ""
-        )
-        if len(extension_text) >= 250:
-            fallback_html = _extension_rendered_html(state.extension_evidence)
-            logger.info(
-                "%s Evidence fallback request_id=%s from=backend_playwright "
-                "to=extension_dom reason=browser_failed text_length=%s",
-                LOG_PREFIX, state.request_id, len(extension_text),
-            )
-            return {
-                "browser_attempts": attempt,
-                "raw_html": fallback_html,
-                "final_url": state.extension_evidence.get("url") or state.url,
-                "page_title": state.extension_evidence.get("title"),
-                "error": None,
-                "selected_evidence_source": "extension_selected_panel"
-                if state.extension_evidence.get("selected_panel_text") else "extension_dom",
-                "evidence_sources_discovered": [
-                    key for key, present in (
-                        ("extension_dom", bool(extension_html)),
-                        ("extension_selected_panel", bool(state.extension_evidence.get("selected_panel_text"))),
-                        ("extension_visible_text", bool(state.extension_evidence.get("visible_text"))),
-                        ("extension_jsonld", bool(state.extension_evidence.get("jsonld"))),
-                    ) if present
-                ],
-                "metadata": {
-                    "browser_errors": [str(exc)[:300]],
-                    "matched_selector": state.extension_evidence.get("selected_panel_selector"),
-                    "acquisition_fallback": "extension",
-                },
-                "execution_log": _event(
-                    state, "browser", attempt=attempt,
-                    fallback="extension_dom", backend_error=type(exc).__name__,
-                ),
-            }
         return {
             "browser_attempts": attempt,
+            "backend_raw_html": "",
+            "backend_final_url": None,
+            "backend_page_title": None,
+            "raw_html": "",
+            "final_url": None,
+            "page_title": None,
             "error": {"code": "BROWSER_FAILED", "message": str(exc)[:500]},
+            "metadata": {"browser_errors": [str(exc)[:300]]},
             "execution_log": _event(state, "browser", attempt=attempt, error=type(exc).__name__),
         }
     duration = round((time.perf_counter() - started) * 1000)
-    lower = html[:10000].lower()
-    blocked = next((signal for signal in BLOCK_SIGNALS if signal in lower), None)
-    final_path = (urlparse(final_url).path or "").casefold()
-    auth_redirect = bool(
-        re.search(r"/(?:login|signin|sign-in|auth|checkpoint|challenge)(?:/|$)", final_path)
-        and not re.search(
-            r"/(?:login|signin|sign-in|auth|checkpoint|challenge)(?:/|$)",
-            (urlparse(state.url).path or "").casefold(),
-        )
-    )
-    if auth_redirect:
-        blocked = "login required"
-        logger.info(
-            "%s Backend authentication redirect detected request_id=%s "
-            "original_url=%s final_url=%s",
-            LOG_PREFIX, state.request_id, state.url, final_url,
-        )
-    extension_html = str(state.extension_evidence.get("html") or "")
-    extension_panel = str(state.extension_evidence.get("selected_panel_text") or "")
-    backend_text_length = len(BeautifulSoup(html, "lxml").get_text(" ", strip=True))
-    panel_job_signals = len(re.findall(
-        r"\b(?:job description|responsibilities|qualifications|requirements|"
-        r"what you.ll do|what to expect|apply now|easy apply)\b",
-        extension_panel,
-        flags=re.I,
-    ))
-    backend_looks_like_listing = bool(re.search(
-        r"\b(?:search results|job results|recommended jobs|jobs matching|filter jobs)\b",
-        BeautifulSoup(html, "lxml").get_text(" ", strip=True)[:20000],
-        flags=re.I,
-    ))
-    use_extension = bool(
-        (blocked or backend_text_length < 250)
-        and len(extension_panel or str(state.extension_evidence.get("visible_text") or "")) >= 250
-    ) or bool(
-        len(extension_panel) >= 500
-        and panel_job_signals >= 2
-        and backend_looks_like_listing
-    )
-    selected_source = "backend_playwright"
-    if use_extension:
-        html = _extension_rendered_html(state.extension_evidence)
-        title = state.extension_evidence.get("title") or title
-        final_url = state.extension_evidence.get("url") or final_url
-        selected_source = "extension_selected_panel" if extension_panel else "extension_dom"
-        logger.info(
-            "%s Evidence fallback request_id=%s from=backend_playwright to=%s "
-            "reason=%s backend_text_length=%s",
-            LOG_PREFIX, state.request_id, selected_source,
-            "blocked" if blocked else (
-                "selected_job_panel" if backend_looks_like_listing else "partial_render"
-            ),
-            backend_text_length,
-        )
-        blocked = None
-    discovered = ["backend_playwright"]
-    discovered.extend(
-        key for key, present in (
-            ("extension_dom", bool(extension_html)),
-            ("extension_selected_panel", bool(extension_panel)),
-            ("extension_visible_text", bool(state.extension_evidence.get("visible_text"))),
-            ("extension_jsonld", bool(state.extension_evidence.get("jsonld"))),
-        ) if present
-    )
     logger.info(
         "%s Browser completed request_id=%s final_url=%s html_length=%s duration_ms=%s selector=%s",
         LOG_PREFIX, state.request_id, final_url, len(html), duration, matched,
     )
     return {
         "browser_attempts": attempt, "raw_html": html, "final_url": final_url,
-        "page_title": title, "blocked_reason": blocked, "error": None,
-        "selected_evidence_source": selected_source,
-        "evidence_sources_discovered": discovered,
+        "backend_raw_html": html,
+        "backend_final_url": final_url,
+        "backend_page_title": title,
+        "page_title": title, "blocked_reason": None, "error": None,
         "metadata": {"browser_errors": errors, "matched_selector": matched, "load_duration_ms": duration},
         "execution_log": _event(
             state, "browser", attempt=attempt, html_length=len(html),
-            matched_selector=matched, selected_source=selected_source,
-            sources_discovered=discovered,
+            matched_selector=matched, acquisition_only=True,
+        ),
+    }
+
+
+RESTRICTION_PATTERNS = (
+    ("captcha", .99, ("captcha", "verify you are human", "i'm not a robot", "recaptcha")),
+    ("cloudflare", .98, ("cloudflare ray id", "attention required! | cloudflare")),
+    ("security_challenge", .96, ("checking your browser", "security check", "challenge-platform")),
+    ("access_denied", .96, ("access denied", "request blocked", "not authorized", "forbidden")),
+    ("rate_limited", .95, ("too many requests", "rate limit exceeded", "temporarily rate limited")),
+    ("session_expired", .93, ("session expired", "your session has expired")),
+    ("employee_only", .92, ("employees only", "internal candidates only", "employee login")),
+    ("geo_restricted", .9, ("not available in your region", "not available in your country")),
+    ("cookie_wall", .86, ("accept cookies to continue", "cookie consent required")),
+    ("consent_wall", .84, ("consent required", "please provide consent")),
+    ("login_required", .9, ("sign in to continue", "log in to continue", "login required")),
+)
+
+
+def _content_text(content: Any) -> str:
+    if isinstance(content, str):
+        if "<" in content and ">" in content:
+            return BeautifulSoup(content, "lxml").get_text(" ", strip=True)
+        return content
+    return json.dumps(content, ensure_ascii=False, default=str)
+
+
+def _restriction_for_source(
+    content: Any, *, final_url: str = "", source_url: str = "", failed: bool = False
+) -> tuple[str | None, float, list[str]]:
+    if failed:
+        return "network_failure", .9, ["browser acquisition failed"]
+    text = _content_text(content).casefold()[:30000]
+    signals: list[str] = []
+    restriction = None
+    confidence = 0.0
+    final_path = (urlparse(final_url).path or "").casefold()
+    source_path = (urlparse(source_url).path or "").casefold()
+    auth_path = r"/(?:login|signin|sign-in|auth|checkpoint)(?:/|$)"
+    if re.search(auth_path, final_path) and not re.search(auth_path, source_path):
+        restriction, confidence = "login_required", .98
+        signals.append("authentication redirect")
+    challenge_path = r"/(?:challenge|captcha|security-check)(?:/|$)"
+    if re.search(challenge_path, final_path) and not re.search(challenge_path, source_path):
+        restriction, confidence = "security_challenge", .97
+        signals.append("security challenge redirect")
+    for kind, score, patterns in RESTRICTION_PATTERNS:
+        matched = [pattern for pattern in patterns if pattern in text]
+        if matched and score > confidence:
+            restriction, confidence = kind, score
+            signals = matched[:4]
+    if isinstance(content, str) and "<" in content and ">" in content:
+        soup = BeautifulSoup(content, "lxml")
+        visible = soup.get_text(" ", strip=True)
+        password_input = soup.find("input", attrs={"type": re.compile("^password$", re.I)})
+        if password_input and confidence < .92:
+            restriction, confidence = "login_required", .92
+            signals = ["password form"]
+        script_count = len(soup.find_all("script"))
+        if not restriction and len(visible) < 30 and script_count >= 2:
+            restriction, confidence = "javascript_shell", .78
+            signals = ["script-only application shell", f"visible_text_length={len(visible)}"]
+        elif not restriction and not visible and len(content) > 100:
+            restriction, confidence = "empty_shell", .8
+            signals = ["empty rendered body"]
+    return restriction, confidence, signals
+
+
+def _job_signal_score(content: Any, *, selected: bool = False, structured: bool = False) -> float:
+    if structured:
+        raw = json.dumps(content, ensure_ascii=False, default=str).casefold()
+        return 1.0 if "jobposting" in raw else 0.15
+    text = _content_text(content).casefold()[:40000]
+    sections = sum(
+        marker in text for marker in (
+            "job description", "responsibilities", "requirements",
+            "minimum qualifications", "preferred qualifications",
+            "what you'll do", "what you will do", "what to expect", "about the role",
+        )
+    )
+    apply = bool(re.search(r"\b(?:apply now|easy apply|apply for this job|submit application)\b", text))
+    employment = bool(re.search(
+        r"\b(?:full[ -]?time|part[ -]?time|contract|internship|remote|hybrid|on[ -]?site)\b",
+        text,
+    ))
+    score = min(1.0, sections * .16 + apply * .2 + employment * .1 + selected * .2)
+    return round(score, 3)
+
+
+def _make_evidence_source(
+    source_type: str,
+    content: Any,
+    *,
+    selected: bool = False,
+    structured: bool = False,
+    final_url: str = "",
+    source_url: str = "",
+    failed: bool = False,
+    freshness: float = 1.0,
+    metadata: dict[str, Any] | None = None,
+) -> EvidenceSource:
+    length = len(_content_text(content))
+    restriction, restriction_confidence, restriction_signals = _restriction_for_source(
+        content, final_url=final_url, source_url=source_url, failed=failed
+    )
+    available = content not in (None, "", [], {}) or failed
+    job_score = _job_signal_score(content, selected=selected, structured=structured)
+    min_length = 40 if structured else 150
+    usable = bool(available and not restriction and length >= min_length)
+    quality = min(1.0, length / (1800 if selected else 4500)) if available else 0
+    if structured and job_score >= .9:
+        quality = max(quality, .95)
+        usable = not restriction
+    specificity = .98 if selected else (.94 if structured and job_score >= .9 else min(.8, job_score + .15))
+    status = (
+        "failed" if failed else
+        "restricted" if restriction else
+        "empty" if not available or length == 0 else
+        "usable" if usable else
+        "partial"
+    )
+    return EvidenceSource(
+        source_type=source_type,
+        access_status=status,
+        available=available,
+        usable=usable,
+        restricted=bool(restriction),
+        restriction_type=restriction,
+        restriction_confidence=restriction_confidence,
+        restriction_signals=restriction_signals,
+        content_length=length,
+        job_signal_score=job_score,
+        quality_score=round(quality, 3),
+        freshness_score=freshness,
+        specificity_score=round(specificity, 3),
+        selected_job_signal=selected,
+        contains_security_challenge=restriction in {"captcha", "cloudflare", "security_challenge"},
+        contains_login_wall=restriction in {"login_required", "session_expired", "employee_only"},
+        content=content,
+        warnings=["Excluded from classification and extraction"] if restriction else [],
+        metadata=metadata or {},
+    )
+
+
+def _source_rank(source: EvidenceSource) -> float:
+    if not source.usable or source.restricted:
+        return -1
+    agreement_bonus = float(source.metadata.get("agreement_bonus", 0))
+    return round(
+        source.job_signal_score * .34
+        + source.quality_score * .27
+        + source.specificity_score * .25
+        + source.freshness_score * .14
+        + (.12 if source.selected_job_signal else 0)
+        + agreement_bonus,
+        4,
+    )
+
+
+def _explicit_job_id(url: str) -> str | None:
+    try:
+        parsed = urlparse(url)
+        for key in (
+            "currentJobId", "jobId", "job_id", "jobid", "jk", "gh_jid",
+            "requisitionId", "requisition_id", "postingId",
+        ):
+            values = dict(re.findall(r"([^=&?]+)=([^&]+)", parsed.query))
+            if values.get(key):
+                return values[key]
+        match = re.search(r"/(?:jobs?|positions?|openings?)/(?:view/)?(\d{4,})", parsed.path, re.I)
+        return match.group(1) if match else None
+    except Exception:
+        return None
+
+
+def evidence_evaluation_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
+    """Evaluate, sanitize, rank, and select evidence without portal branching."""
+    state = _state(value)
+    extension = state.extension_evidence
+    backend_html = state.backend_raw_html
+    backend_failed = bool(
+        (state.error and state.error.get("code") == "BROWSER_FAILED")
+        or (not backend_html and state.metadata.get("browser_errors"))
+    )
+    soup = BeautifulSoup(backend_html, "lxml") if backend_html else BeautifulSoup("", "lxml")
+    backend_jsonld: list[Any] = []
+    for script in soup.find_all("script", attrs={"type": re.compile("ld\\+json", re.I)}):
+        try:
+            backend_jsonld.append(json.loads(script.string or script.get_text()))
+        except (json.JSONDecodeError, TypeError):
+            pass
+    backend_metadata = {
+        "title": state.backend_page_title,
+        "final_url": state.backend_final_url,
+        "description": (soup.find("meta", attrs={"name": "description"}) or {}).get("content"),
+    }
+    extension_panel_text = extension.get("selected_panel_text")
+    extension_panel_selected = bool(
+        extension_panel_text
+        and (
+            (extension.get("capture") or {}).get("portal_optimized_panel")
+            or _job_signal_score(extension_panel_text) >= .35
+        )
+    )
+    sources = [
+        _make_evidence_source(
+            "extension_selected_panel", extension_panel_text,
+            selected=extension_panel_selected,
+            final_url=extension.get("url", ""), source_url=state.url,
+            metadata={
+                "captured_at": (extension.get("capture") or {}).get("captured_at"),
+                "selector": extension.get("selected_panel_selector"),
+            },
+        ),
+        _make_evidence_source(
+            "extension_jsonld", extension.get("jsonld") or [],
+            structured=True, final_url=extension.get("url", ""), source_url=state.url,
+        ),
+        _make_evidence_source(
+            "extension_dom", extension.get("html"),
+            final_url=extension.get("url", ""), source_url=state.url,
+        ),
+        _make_evidence_source(
+            "extension_visible_text", extension.get("visible_text"),
+            final_url=extension.get("url", ""), source_url=state.url,
+        ),
+        _make_evidence_source(
+            "backend_jsonld", backend_jsonld, structured=True,
+            final_url=state.backend_final_url or "", source_url=state.url,
+        ),
+        _make_evidence_source(
+            "backend_playwright", backend_html,
+            final_url=state.backend_final_url or "", source_url=state.url,
+            failed=backend_failed,
+            metadata={"final_url": state.backend_final_url, "title": state.backend_page_title},
+        ),
+        _make_evidence_source(
+            "backend_metadata", backend_metadata if any(backend_metadata.values()) else {},
+            final_url=state.backend_final_url or "", source_url=state.url,
+        ),
+        _make_evidence_source("cleaned_html", None),
+        _make_evidence_source("markdown", None),
+        _make_evidence_source("manual_input", None),
+    ]
+    rankings = {source.source_type: _source_rank(source) for source in sources}
+    usable = [source for source in sources if rankings[source.source_type] >= 0]
+    usable.sort(key=lambda source: rankings[source.source_type], reverse=True)
+    primary = usable[0] if usable else None
+    supplementary = [
+        source.source_type for source in usable[1:4]
+        if source.job_signal_score >= .25
+    ]
+    excluded = [
+        source.source_type for source in sources
+        if source.restricted or source.access_status in {"failed", "empty", "malformed", "stale"}
+    ]
+    restrictions = {
+        source.source_type: {
+            "restriction_type": source.restriction_type,
+            "confidence": source.restriction_confidence,
+            "signals": source.restriction_signals,
+        }
+        for source in sources if source.restricted or source.access_status == "failed"
+    }
+    conflicts: list[str] = []
+    extension_title = str(extension.get("job_title_hint") or "").casefold().strip()
+    backend_title = ""
+    for item in backend_jsonld:
+        candidates: list[dict[str, Any]] = []
+        _walk_jsonld(item, candidates, candidates)
+        backend_title = next(
+            (str(candidate.get("title") or "").casefold().strip() for candidate in candidates if candidate.get("title")),
+            backend_title,
+        )
+    if extension_title and backend_title and extension_title not in backend_title and backend_title not in extension_title:
+        conflicts.append("Extension selected-job title conflicts with backend structured title.")
+    extension_job_id = _explicit_job_id(str(extension.get("selected_job_url") or extension.get("url") or ""))
+    backend_job_id = _explicit_job_id(str(state.backend_final_url or ""))
+    if extension_job_id and backend_job_id and extension_job_id != backend_job_id:
+        conflicts.append("Extension and backend evidence refer to different explicit job IDs.")
+    if primary:
+        if primary.source_type.startswith("extension"):
+            page_access = "extension_accessible" if restrictions else "fully_accessible"
+        elif primary.source_type.startswith("backend"):
+            page_access = "backend_accessible"
+        else:
+            page_access = "evidence_available"
+        selected_job = primary.selected_job_signal or primary.job_signal_score >= .55
+        readiness = "READY" if selected_job else "PARTIAL"
+    else:
+        page_access = "fully_blocked" if restrictions else "insufficient_evidence"
+        selected_job = False
+        readiness = "BLOCKED" if restrictions else "NOT_READY"
+    warnings = list(conflicts)
+    if conflicts and primary and not primary.selected_job_signal:
+        readiness = "MANUAL_REVIEW"
+        warnings.append("Conflicting job identity could not be resolved safely.")
+
+    # Planner invariant repair: restricted/empty evidence can never be primary.
+    if primary and (primary.restricted or not primary.usable):
+        warnings.append(f"Invalid primary source {primary.source_type} was automatically removed.")
+        excluded.append(primary.source_type)
+        primary = next((candidate for candidate in usable if candidate.usable and not candidate.restricted), None)
+    if readiness == "READY" and not primary:
+        warnings.append("READY without usable evidence corrected to BLOCKED.")
+        readiness = "BLOCKED" if restrictions else "NOT_READY"
+
+    selected_html = ""
+    if primary:
+        if primary.source_type.startswith("extension"):
+            selected_html = _extension_rendered_html(extension)
+        elif primary.source_type == "backend_jsonld":
+            scripts = "".join(
+                f'<script type="application/ld+json">{json.dumps(item, ensure_ascii=False)}</script>'
+                for item in backend_jsonld
+            )
+            selected_html = f"<html><head>{scripts}</head><body></body></html>"
+        elif primary.source_type == "backend_metadata":
+            selected_html = (
+                f"<html><head><title>{html_lib.escape(str(state.backend_page_title or ''))}</title>"
+                f"<meta name='description' content='{html_lib.escape(str(backend_metadata.get('description') or ''))}'>"
+                f"</head><body></body></html>"
+            )
+        else:
+            selected_html = backend_html
+
+    if primary and primary.source_type.startswith("extension") and "backend_playwright" in restrictions:
+        reason = "backend_restricted_extension_job_evidence_available"
+    elif primary:
+        reason = f"selected_highest_ranked_usable_source:{primary.source_type}"
+    else:
+        reason = "no_usable_unrestricted_evidence_source_remains"
+    logger.info(
+        "%s Evidence evaluation request_id=%s source_status=%s restrictions=%s "
+        "ranking_scores=%s primary=%s supplementary=%s excluded=%s reason=%s "
+        "page_access=%s readiness=%s selected_job=%s conflicts=%s",
+        LOG_PREFIX, state.request_id,
+        {source.source_type: source.access_status for source in sources},
+        restrictions, rankings, primary.source_type if primary else None,
+        supplementary, excluded, reason, page_access, readiness,
+        selected_job, conflicts,
+    )
+    error = None if primary else {
+        "code": "ALL_EVIDENCE_UNUSABLE" if restrictions else "INSUFFICIENT_EVIDENCE",
+        "message": (
+            "The page could not be inspected using the available evidence sources."
+            if restrictions else
+            "The available page evidence is insufficient for job extraction."
+        ),
+    }
+    return {
+        "raw_html": selected_html,
+        "final_url": extension.get("url") if primary and primary.source_type.startswith("extension") else state.backend_final_url,
+        "page_title": extension.get("title") if primary and primary.source_type.startswith("extension") else state.backend_page_title,
+        "error": error,
+        "blocked_reason": None,
+        "evidence_sources": [source.model_dump(mode="json") for source in sources],
+        "evidence_sources_discovered": [source.source_type for source in sources if source.available],
+        "selected_evidence_source": primary.source_type if primary else None,
+        "primary_source": primary.source_type if primary else None,
+        "source_selection_reason": reason,
+        "supplementary_sources": supplementary,
+        "excluded_sources": list(dict.fromkeys(excluded)),
+        "source_restrictions": restrictions,
+        "source_scores": rankings,
+        "page_access_status": page_access,
+        "extraction_readiness": readiness,
+        "selected_job_detected": selected_job,
+        "selected_job_identity": {
+            "url": extension.get("selected_job_url") or extension.get("url") or state.url,
+            "job_id": extension_job_id or backend_job_id,
+            "title": extension.get("job_title_hint"),
+            "company": extension.get("company_hint"),
+            "dom_fingerprint": (extension.get("capture") or {}).get("dom_fingerprint"),
+        } if selected_job else None,
+        "evidence_conflicts": conflicts,
+        "planner_warnings": warnings,
+        "needs_manual_review": readiness == "MANUAL_REVIEW",
+        "execution_log": _event(
+            state, "evidence_evaluation", primary=primary.source_type if primary else None,
+            supplementary=supplementary, excluded=excluded, rankings=rankings,
+            selection_reason=reason, page_access=page_access,
+            readiness=readiness, conflicts=conflicts,
         ),
     }
 
@@ -283,8 +571,6 @@ def jsonld_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             _walk_jsonld(item, all_items, jobs)
     extension_job_count = len(jobs) - backend_job_count
     selected_source = state.selected_evidence_source
-    if extension_job_count and not backend_job_count:
-        selected_source = "extension_jsonld"
     logger.info(
         "%s JSON-LD completed request_id=%s blocks=%s jobs=%s malformed=%s "
         "backend_jobs=%s extension_jobs=%s selected_source=%s",
@@ -350,53 +636,42 @@ def metadata_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
 
 
 def block_detection_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
-    """Describe access restrictions separately from job-page classification."""
+    """Validate source-level restriction invariants after source selection."""
     state = _state(value)
-    text = f"{state.page_title or ''} {state.markdown[:12000]}".casefold()
-    patterns = (
-        ("captcha", ("captcha", "verify you are human", "i'm not a robot")),
-        ("login_required", ("sign in to continue", "log in to continue", "login required")),
-        ("access_denied", ("access denied", "permission required", "not authorized")),
-        ("rate_limited", ("too many requests", "rate limit", "try again later")),
-        ("security_challenge", ("checking your browser", "security check", "cloudflare")),
-    )
-    restriction = next(
-        (kind for kind, signals in patterns if any(signal in text for signal in signals)),
+    primary = state.primary_source or state.selected_evidence_source
+    primary_record = next(
+        (item for item in state.evidence_sources if item.get("source_type") == primary),
         None,
     )
-    if not restriction and len(state.markdown) < 80:
-        restriction = (
-            "javascript_not_rendered"
-            if state.metadata.get("browser_errors")
-            else "empty_shell"
-        )
-    usable_extension = len(str(
-        state.extension_evidence.get("selected_panel_text")
-        or state.extension_evidence.get("visible_text")
-        or ""
-    )) >= 250
-    effective_restriction = (
-        None
-        if usable_extension and (state.selected_evidence_source or "").startswith("extension")
-        else restriction
+    violation = bool(
+        primary_record
+        and (primary_record.get("restricted") or not primary_record.get("usable"))
     )
+    warnings = list(state.planner_warnings)
+    if violation:
+        warnings.append(
+            f"Selected source invariant violation detected for {primary}; "
+            "classification evidence was rejected."
+        )
     logger.info(
-        "%s Block detection request_id=%s restriction=%s effective_restriction=%s "
-        "selected_source=%s extension_usable=%s",
-        LOG_PREFIX, state.request_id, restriction, effective_restriction,
-        state.selected_evidence_source, usable_extension,
+        "%s Block detection request_id=%s source_restrictions=%s primary=%s "
+        "primary_usable=%s invariant_violation=%s page_access=%s",
+        LOG_PREFIX, state.request_id, state.source_restrictions, primary,
+        primary_record.get("usable") if primary_record else None,
+        violation, state.page_access_status,
     )
     return {
-        "restriction_type": effective_restriction,
-        "blocked_reason": effective_restriction,
-        "surface_type": (
-            "login" if effective_restriction == "login_required"
-            else ("blocked" if effective_restriction else state.surface_type)
-        ),
+        # Page-level restriction remains clear whenever at least one usable
+        # source survived evaluation. Source restrictions stay diagnostic.
+        "restriction_type": None,
+        "blocked_reason": None,
+        "planner_warnings": warnings,
+        "needs_manual_review": state.needs_manual_review or violation,
+        "extraction_readiness": "MANUAL_REVIEW" if violation else state.extraction_readiness,
         "execution_log": _event(
-            state, "block_detection", restriction=restriction,
-            effective_restriction=effective_restriction,
-            extension_usable=usable_extension,
+            state, "block_detection", primary=primary,
+            invariant_violation=violation,
+            source_restrictions=state.source_restrictions,
         ),
     }
 
@@ -406,10 +681,13 @@ def planner_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     complete_jsonld = any(item.get("title") and item.get("description") for item in state.jobposting_jsonld)
     selected = state.selected_evidence_source or "backend_playwright"
     text_length = len(state.markdown)
-    readiness = "READY" if (
-        complete_jsonld
-        or text_length >= 500
-    ) else ("PARTIAL" if text_length >= 150 else "NOT_READY")
+    # Evidence evaluation owns readiness. Structured JobPosting evidence may
+    # promote PARTIAL to READY, but text length alone can never do so.
+    readiness = (
+        "READY"
+        if complete_jsonld and state.extraction_readiness in {"READY", "PARTIAL"}
+        else state.extraction_readiness
+    )
     plan = {
         "primary_source": "jobposting_jsonld" if complete_jsonld else "markdown",
         "supplementary_sources": ["markdown", "metadata"] if complete_jsonld else ["metadata", "jobposting_jsonld"],
@@ -571,18 +849,10 @@ def classification_review_agent(value: JDState | dict[str, Any]) -> dict[str, An
 def evidence_planner_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     state = _state(value)
     scores = {
+        **state.source_scores,
         "jobposting_jsonld": .95 if state.jobposting_jsonld else 0,
         "markdown": min(.85, len(state.markdown) / 5000),
         "metadata": .65 if state.metadata.get("title") else .25,
-        "extension_selected_panel": .92
-        if state.extension_evidence.get("selected_panel_text") else 0,
-        "extension_visible_text": min(
-            .8, len(str(state.extension_evidence.get("visible_text") or "")) / 6000
-        ),
-        "extension_jsonld": .96 if state.extension_evidence.get("jsonld") else 0,
-        "backend_playwright": .85
-        if state.selected_evidence_source == "backend_playwright" and len(state.markdown) >= 500
-        else 0,
     }
     hints = {
         "identity": "jobposting_jsonld or metadata",
@@ -602,7 +872,24 @@ def source_builder_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     source = json.dumps(state.jobposting_jsonld, ensure_ascii=False) if primary == "jobposting_jsonld" else state.markdown
     payload = {
         "primary_source": primary,
-        "supplementary_sources": state.plan.get("supplementary_sources", []),
+        "acquisition_primary_source": state.primary_source,
+        "supplementary_sources": state.supplementary_sources,
+        "excluded_sources": state.excluded_sources,
+        "source_boundaries": [
+            {
+                "source_type": item.get("source_type"),
+                "access_status": item.get("access_status"),
+                "content_length": item.get("content_length"),
+                "job_signal_score": item.get("job_signal_score"),
+                "quality_score": item.get("quality_score"),
+                "specificity_score": item.get("specificity_score"),
+                "selected_job_signal": item.get("selected_job_signal"),
+            }
+            for item in state.evidence_sources
+            if item.get("usable") and item.get("source_type") not in state.excluded_sources
+        ],
+        "evidence_conflicts": state.evidence_conflicts,
+        "planner_warnings": state.planner_warnings,
         "detected_sections": state.detected_sections,
         "source_text": source[:30000],
         "source_urls": list(dict.fromkeys(filter(None, [state.original_url, state.final_url, state.metadata.get("canonical_url")]))),
@@ -990,31 +1277,97 @@ def final_response_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     completed = datetime.now(timezone.utc)
     started = datetime.fromisoformat(state.started_at)
     duration = max(0, round((completed - started).total_seconds() * 1000))
-    error = state.error
-    if state.blocked_reason:
-        messages = {
-            "login_required": "The job page requires the user's signed-in browser session.",
-            "captcha": "The page is showing a human-verification challenge.",
-            "access_denied": "The job page denied access.",
-            "rate_limited": "The job platform is temporarily rate limiting access.",
-            "security_challenge": "The page is showing a security challenge.",
-            "empty_shell": "The page returned an empty application shell.",
-            "javascript_not_rendered": "The job content did not finish rendering.",
-            "permission_required": "Browser permission is required to read this page.",
+    extracted = state.extracted_job if state.page_type == "job_detail" else None
+    missing_fields = []
+    if extracted:
+        missing_fields = [
+            field for field in ("job_title", "company_name", "description")
+            if not extracted.get(field)
+        ]
+    if extracted and not state.needs_manual_review:
+        status_name = "partial" if state.extraction_readiness == "PARTIAL" or missing_fields else "extracted"
+        success = True
+        error = None
+        public_page_type = state.page_type
+    elif state.needs_manual_review or state.extraction_readiness == "MANUAL_REVIEW":
+        status_name = "manual_review"
+        success = False
+        public_page_type = state.page_type or "unknown"
+        error = {
+            "code": "MANUAL_REVIEW_REQUIRED",
+            "message": "The available evidence is conflicting or incomplete and requires review.",
         }
+    elif (
+        state.page_access_status == "fully_blocked"
+        or state.extraction_readiness == "BLOCKED"
+        or state.blocked_reason
+    ):
+        status_name = "blocked"
+        success = False
+        public_page_type = "unknown"
+        restricted_details = [
+            details for details in state.source_restrictions.values()
+            if details.get("restriction_type")
+        ]
+        strongest_restriction = max(
+            restricted_details,
+            key=lambda details: float(details.get("confidence") or 0),
+            default={},
+        )
+        effective = (
+            strongest_restriction.get("restriction_type")
+            or state.blocked_reason
+            or "unknown_restriction"
+        )
         error = {
             "code": "PAGE_BLOCKED",
-            "message": messages.get(state.blocked_reason, "The page could not be accessed."),
+            "message": "The page could not be inspected using the available evidence sources.",
         }
-    success = error is None
-    extracted = state.extracted_job if state.page_type == "job_detail" else None
+    elif state.page_type == "job_list":
+        status_name = "selection_required"
+        success = False
+        public_page_type = "job_list"
+        effective = None
+        error = {
+            "code": "JOB_SELECTION_REQUIRED",
+            "message": "Open or select a specific job before extracting.",
+        }
+    elif state.page_type == "non_job":
+        status_name = "non_job"
+        success = False
+        public_page_type = "non_job"
+        effective = None
+        error = {
+            "code": "NON_JOB_PAGE",
+            "message": "The current page does not contain an extractable job description.",
+        }
+    else:
+        status_name = "insufficient_evidence"
+        success = False
+        public_page_type = state.page_type or "unknown"
+        effective = None
+        error = state.error or {
+            "code": "INSUFFICIENT_EVIDENCE",
+            "message": "The available evidence is insufficient for job extraction.",
+        }
+    if status_name not in {"blocked"}:
+        effective = None
     response = {
-        "success": success, "request_id": state.request_id,
-        "page_type": state.page_type if success else None,
+        "success": success, "status": status_name, "request_id": state.request_id,
+        "page_type": public_page_type,
+        "page_access_status": state.page_access_status or "unknown",
+        "readiness": state.extraction_readiness,
         "classification_confidence": state.classification_confidence,
         "classification_reasons": state.classification_reasons,
         "extracted_job": extracted, "review_issues": state.review_issues,
         "needs_manual_review": state.needs_manual_review,
+        "selected_source": state.primary_source or state.selected_evidence_source,
+        "source_selection_reason": state.source_selection_reason,
+        "supplementary_sources": state.supplementary_sources,
+        "excluded_sources": state.excluded_sources,
+        "warnings": state.planner_warnings,
+        "missing_fields": missing_fields,
+        "restriction": effective,
         "execution_summary": {
             "portal": state.detected_portal, "browser_attempts": state.browser_attempts,
             "repair_attempts": state.repair_attempts, "duration_ms": duration,
@@ -1024,6 +1377,16 @@ def final_response_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             "evidence_sources_discovered": state.evidence_sources_discovered,
             "selected_evidence_source": state.selected_evidence_source,
             "source_scores": state.source_scores,
+            "page_access_status": state.page_access_status,
+            "primary_source": state.primary_source,
+            "source_selection_reason": state.source_selection_reason,
+            "supplementary_sources": state.supplementary_sources,
+            "excluded_sources": state.excluded_sources,
+            "source_restrictions": state.source_restrictions,
+            "selected_job_detected": state.selected_job_detected,
+            "conflicts": state.evidence_conflicts,
+            "planner_warnings": state.planner_warnings,
+            "final_status": status_name,
         },
     }
     if error:
@@ -1031,17 +1394,23 @@ def final_response_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     # Temporary shape aliases consumed by the existing review/tailoring UI.
     response.update({
         "pageType": response["page_type"], "confidence": response["classification_confidence"],
-        "hasValidJobDescription": bool(extracted and state.is_valid and not state.needs_manual_review),
+        "hasValidJobDescription": bool(success and extracted and state.is_valid and not state.needs_manual_review),
         "job": _compat_job(extracted) if extracted else None,
         "reason": "; ".join(state.classification_reasons),
     })
     logger.info(
-        "%s Final response request_id=%s success=%s page_type=%s "
-        "skills_count=%s ui_required_skills_count=%s duration_ms=%s",
+        "%s Final response request_id=%s success=%s status=%s page_type=%s "
+        "page_access=%s readiness=%s primary=%s excluded=%s skills_count=%s "
+        "ui_required_skills_count=%s duration_ms=%s",
         LOG_PREFIX,
         state.request_id,
         success,
+        status_name,
         response["page_type"],
+        response["page_access_status"],
+        response["readiness"],
+        response["selected_source"],
+        response["excluded_sources"],
         len((extracted or {}).get("skills", [])),
         len((response.get("job") or {}).get("required_skills", [])),
         duration,

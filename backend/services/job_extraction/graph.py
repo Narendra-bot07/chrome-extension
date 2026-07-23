@@ -9,7 +9,8 @@ from urllib.parse import urlparse
 from langgraph.graph import END, START, StateGraph
 
 from services.job_extraction.agents import (
-    block_detection_agent, browser_agent, classification_review_agent, classifier_agent, discovery_agent,
+    block_detection_agent, browser_agent, classification_review_agent, classifier_agent,
+    discovery_agent, evidence_evaluation_agent,
     dom_cleaner_agent, evidence_planner_agent, extraction_agent,
     extraction_manual_review_agent, final_response_agent, jsonld_agent,
     markdown_agent, metadata_agent, planner_agent, repair_agent, reviewer_agent,
@@ -18,8 +19,14 @@ from services.job_extraction.agents import (
 from services.job_extraction.schemas import JDState
 
 
-def route_after_browser(state: JDState) -> Literal["jsonld", "final_response"]:
-    return "final_response" if state.error and state.browser_attempts >= state.max_browser_attempts else "jsonld"
+def route_after_evidence(state: JDState) -> Literal["jsonld", "final_response"]:
+    if state.error or state.extraction_readiness in {"BLOCKED", "NOT_READY", "MANUAL_REVIEW"}:
+        return "final_response"
+    return "jsonld"
+
+
+def route_after_block_detection(state: JDState) -> Literal["planner", "final_response"]:
+    return "final_response" if state.extraction_readiness == "MANUAL_REVIEW" else "planner"
 
 
 def route_after_classifier(state: JDState) -> Literal["classification_review", "evidence_planner", "final_response"]:
@@ -50,7 +57,8 @@ def route_after_reviewer(state: JDState) -> Literal["repair", "extraction_manual
 def build_job_intelligence_graph():
     graph = StateGraph(JDState)
     nodes = {
-        "discovery": discovery_agent, "browser": browser_agent, "jsonld": jsonld_agent,
+        "discovery": discovery_agent, "browser": browser_agent,
+        "evidence_evaluation": evidence_evaluation_agent, "jsonld": jsonld_agent,
         "dom_cleaner": dom_cleaner_agent, "markdown": markdown_agent,
         "metadata": metadata_agent, "block_detection": block_detection_agent,
         "planner": planner_agent, "classifier": classifier_agent,
@@ -64,12 +72,13 @@ def build_job_intelligence_graph():
         graph.add_node(name, node)
     graph.add_edge(START, "discovery")
     graph.add_edge("discovery", "browser")
-    graph.add_conditional_edges("browser", route_after_browser)
+    graph.add_edge("browser", "evidence_evaluation")
+    graph.add_conditional_edges("evidence_evaluation", route_after_evidence)
     graph.add_edge("jsonld", "dom_cleaner")
     graph.add_edge("dom_cleaner", "markdown")
     graph.add_edge("markdown", "metadata")
     graph.add_edge("metadata", "block_detection")
-    graph.add_edge("block_detection", "planner")
+    graph.add_conditional_edges("block_detection", route_after_block_detection)
     graph.add_edge("planner", "classifier")
     graph.add_conditional_edges("classifier", route_after_classifier)
     graph.add_conditional_edges("classification_review", route_after_classification_review)

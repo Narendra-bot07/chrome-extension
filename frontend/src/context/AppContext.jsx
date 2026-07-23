@@ -876,7 +876,11 @@ export function AppProvider({ children }) {
         requestId,
         ...browserAssessment
       });
-      if (browserEvidence && browserAssessment.readiness === 'NOT_READY') {
+      if (
+        browserEvidence
+        && browserAssessment.readiness === 'NOT_READY'
+        && !browserAssessment.requiresRecoveryEvaluation
+      ) {
         extractionVersionRef.current += 1;
         activeExtractionIdentityRef.current = expectedIdentity;
         setCurrentJobIdentity(expectedIdentity);
@@ -971,7 +975,7 @@ export function AppProvider({ children }) {
 
       if (!data.success) {
         const code = data.error?.code || "JD_EXTRACTION_FAILED";
-        const restriction = data.execution_summary?.restriction_type;
+        const restriction = data.restriction || data.execution_summary?.restriction_type;
         const restrictionStatus = {
           login_required: 'login-required',
           captcha: 'captcha',
@@ -982,10 +986,32 @@ export function AppProvider({ children }) {
           javascript_not_rendered: 'extraction-incomplete',
           permission_required: 'page-inaccessible'
         }[restriction];
-        setJobDetectionStatus(
-          restrictionStatus || (code === "PAGE_BLOCKED" ? "blocked" : "extraction-failed")
-        );
-        throw new Error(data.error?.message || "Job extraction failed.");
+        const outcomeStatus = {
+          selection_required: 'job-list',
+          non_job: 'non-job',
+          manual_review: 'manual-review',
+          insufficient_evidence: 'extraction-incomplete',
+          blocked: restrictionStatus || 'blocked'
+        }[data.status];
+        const nextStatus = outcomeStatus
+          || restrictionStatus
+          || (code === "JOB_SELECTION_REQUIRED" ? "job-list" : null)
+          || (code === "NON_JOB_PAGE" ? "non-job" : null)
+          || (code === "MANUAL_REVIEW_REQUIRED" ? "manual-review" : null)
+          || (code === "PAGE_BLOCKED" ? "blocked" : "extraction-failed");
+        setJobDetectionStatus(nextStatus);
+        setJobDetectionMeta({
+          classification: data.page_type || 'unknown',
+          confidence,
+          reason: data.error?.message || 'Job extraction did not complete.',
+          extractionMethod: 'hybrid_agentic_url',
+          pageAccessStatus: data.page_access_status,
+          readiness: data.readiness,
+          selectedSource: data.selected_source,
+          warnings: data.warnings || []
+        });
+        setApiError(data.error?.message || null);
+        return;
       }
 
       if (data.needs_manual_review) {

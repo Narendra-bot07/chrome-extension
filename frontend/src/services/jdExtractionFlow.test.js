@@ -11,6 +11,10 @@ test("maps every stable backend result state", () => {
   assert.equal(classifyJDResult({ ...base, page_type: "job_detail", extracted_job: {}, needs_manual_review: true }), "manual-review");
   assert.equal(classifyJDResult({ ...base, success: false, page_type: null, error: { code: "PAGE_BLOCKED" } }), "blocked");
   assert.equal(classifyJDResult({ ...base, success: false, page_type: null, error: { code: "JD_EXTRACTION_FAILED" } }), "extraction-failed");
+  assert.equal(classifyJDResult({ ...base, success: false, status: "selection_required", page_type: "job_list" }), "job-list");
+  assert.equal(classifyJDResult({ ...base, success: false, status: "non_job", page_type: "non_job" }), "non-job");
+  assert.equal(classifyJDResult({ ...base, success: false, status: "manual_review", page_type: "unknown" }), "manual-review");
+  assert.equal(classifyJDResult({ ...base, success: false, status: "insufficient_evidence", page_type: "unknown" }), "extraction-incomplete");
 });
 
 test("rejects malformed responses", () => {
@@ -51,6 +55,15 @@ test("allows coherent job evidence and split-panel job identity", () => {
     jsonld: []
   }, "https://example.com/search?currentJobId=123");
   assert.equal(splitPanel.readiness, "READY");
+});
+
+test("security challenges bypass the local non-job shortcut for recovery evaluation", () => {
+  const result = assessBrowserJobEvidence({
+    visible_text: "Access denied. Verify you are human. CAPTCHA required.",
+    jsonld: []
+  }, "https://example.com/challenge");
+  assert.equal(result.readiness, "NOT_READY");
+  assert.equal(result.requiresRecoveryEvaluation, true);
 });
 
 test("logging prefix is scoped and contains no secret value", () => {
