@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyJDResult, collectJobSkills, formatSalary, isExtractableHttpUrl, JD_LOG_PREFIX, validateJDResponse } from "./jdExtractionFlow.js";
+import { assessBrowserJobEvidence, classifyBrowserPageUrl, classifyJDResult, collectJobSkills, formatSalary, isExtractableHttpUrl, JD_LOG_PREFIX, validateJDResponse } from "./jdExtractionFlow.js";
 
 const base = { success: true, request_id: "req-1", classification_confidence: .9 };
 
@@ -16,6 +16,41 @@ test("maps every stable backend result state", () => {
 test("rejects malformed responses", () => {
   assert.throws(() => validateJDResponse({ success: true }), /Malformed/);
   assert.throws(() => validateJDResponse({ ...base, page_type: "unknown" }), /Malformed/);
+});
+
+test("classifies browser pages before backend extraction", () => {
+  assert.equal(classifyBrowserPageUrl("chrome://newtab/"), "browser-new-tab");
+  assert.equal(classifyBrowserPageUrl("edge://newtab/"), "browser-new-tab");
+  assert.equal(classifyBrowserPageUrl("chrome-extension://abc/index.html#/tailor"), "extension-internal");
+  assert.equal(classifyBrowserPageUrl("chrome://settings/"), "page-inaccessible");
+  assert.equal(classifyBrowserPageUrl("https://example.com/jobs/1"), "web");
+});
+
+test("rejects structurally non-job web pages without domain hardcoding", () => {
+  const result = assessBrowserJobEvidence({
+    visible_text: "Session expired. Please log in to continue the course.",
+    selected_panel_text: "Session expired",
+    jsonld: []
+  }, "https://example.com/learn/data-structures");
+  assert.equal(result.readiness, "NOT_READY");
+  assert.equal(result.isLikelyJob, false);
+});
+
+test("allows coherent job evidence and split-panel job identity", () => {
+  const traditional = assessBrowserJobEvidence({
+    visible_text: "Job description Responsibilities Requirements Full-time Apply now",
+    selected_panel_text: "Responsibilities Build services. Requirements Five years experience.",
+    jsonld: []
+  }, "https://example.com/careers/opening/123");
+  assert.equal(traditional.readiness, "READY");
+
+  const splitPanel = assessBrowserJobEvidence({
+    visible_text: "Recommended roles",
+    selected_panel_text: "A complete selected role description ".repeat(12),
+    capture: { portal_optimized_panel: true },
+    jsonld: []
+  }, "https://example.com/search?currentJobId=123");
+  assert.equal(splitPanel.readiness, "READY");
 });
 
 test("logging prefix is scoped and contains no secret value", () => {

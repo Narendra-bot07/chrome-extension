@@ -9,6 +9,18 @@ export function isExtractableHttpUrl(value) {
   }
 }
 
+export function classifyBrowserPageUrl(value) {
+  const url = String(value || '');
+  if (/^chrome-extension:\/\//i.test(url)) return 'extension-internal';
+  if (
+    /^chrome:\/\/(?:newtab|new-tab-page)\b/i.test(url)
+    || /^edge:\/\/newtab\b/i.test(url)
+    || /^about:(?:blank|newtab)\b/i.test(url)
+  ) return 'browser-new-tab';
+  if (/^(?:chrome|edge|about|file|view-source):/i.test(url)) return 'page-inaccessible';
+  return isExtractableHttpUrl(url) ? 'web' : 'page-inaccessible';
+}
+
 export async function captureActiveTabJobEvidence(tabId) {
   if (!tabId || !chrome?.scripting?.executeScript) return null;
   const [{ result } = {}] = await chrome.scripting.executeScript({
@@ -127,6 +139,74 @@ export async function captureActiveTabJobEvidence(tabId) {
     }
   });
   return result || null;
+}
+
+export function assessBrowserJobEvidence(evidence = {}, sourceUrl = '') {
+  const selected = String(evidence.selected_panel_text || '');
+  const visible = String(evidence.visible_text || '');
+  const text = `${selected}\n${visible.slice(0, 30000)}`.toLowerCase();
+  const jsonItems = Array.isArray(evidence.jsonld) ? evidence.jsonld : [];
+  const containsJobPosting = JSON.stringify(jsonItems).toLowerCase().includes('"jobposting"');
+  let parsedUrl = null;
+  try {
+    parsedUrl = new URL(sourceUrl || evidence.url || '');
+  } catch {
+    // URL validity is handled by the request gate.
+  }
+  const urlText = parsedUrl
+    ? `${parsedUrl.pathname} ${parsedUrl.search} ${parsedUrl.hash}`.toLowerCase()
+    : '';
+  const jobIdentityInUrl = /(?:^|[/?#&=_-])(job|jobs|career|careers|position|opening|vacancy|requisition|currentjobid|jobid|gh_jid)(?:[/?#&=_-]|$)/i.test(urlText);
+  const sectionPatterns = [
+    /\bjob description\b/i,
+    /\b(?:key )?responsibilities\b/i,
+    /\b(?:minimum|required|basic|preferred) qualifications\b/i,
+    /\brequirements\b/i,
+    /\bwhat (?:you.ll|you will) do\b/i,
+    /\bwhat to expect\b/i,
+    /\babout the role\b/i
+  ];
+  const sectionCount = sectionPatterns.filter((pattern) => pattern.test(text)).length;
+  const applyAction = /\b(?:apply now|apply for this job|easy apply|submit application|start application)\b/i.test(text);
+  const employmentMetadata = /\b(?:full[ -]?time|part[ -]?time|contract|internship|temporary|remote|hybrid|on[ -]?site)\b/i.test(text);
+  const hiringContext = /\b(?:we are hiring|join our team|successful candidate|ideal candidate|job duties|role will be responsible)\b/i.test(text);
+  const focusedPanel = Boolean(
+    evidence.capture?.portal_optimized_panel
+    && selected.length >= 250
+  );
+  const identityHints = Boolean(
+    String(evidence.job_title_hint || '').trim()
+    && String(evidence.company_hint || '').trim()
+  );
+
+  let score = 0;
+  if (containsJobPosting) score += 8;
+  if (jobIdentityInUrl) score += 2;
+  if (focusedPanel) score += 4;
+  score += Math.min(sectionCount, 4);
+  if (applyAction) score += 2;
+  if (employmentMetadata) score += 1;
+  if (hiringContext) score += 2;
+  if (identityHints && (sectionCount || applyAction || focusedPanel)) score += 1;
+
+  const readiness = score >= 4
+    ? 'READY'
+    : (score >= 2 ? 'PARTIAL' : 'NOT_READY');
+  return {
+    isLikelyJob: readiness !== 'NOT_READY',
+    readiness,
+    score,
+    signals: {
+      containsJobPosting,
+      jobIdentityInUrl,
+      focusedPanel,
+      sectionCount,
+      applyAction,
+      employmentMetadata,
+      hiringContext,
+      identityHints
+    }
+  };
 }
 
 export function formatSalary(value) {

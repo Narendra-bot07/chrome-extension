@@ -2,8 +2,8 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 import { useNavigate } from 'react-router-dom';
 import { compressResumeData } from '../utils/resumeCompression';
 import {
-  captureActiveTabJobEvidence, collectJobSkills, isExtractableHttpUrl,
-  validateJDResponse
+  assessBrowserJobEvidence, captureActiveTabJobEvidence, classifyBrowserPageUrl,
+  collectJobSkills, isExtractableHttpUrl, validateJDResponse
 } from '../services/jdExtractionFlow';
 
 const AppContext = createContext();
@@ -748,16 +748,41 @@ export function AppProvider({ children }) {
       const activeUrl = tab.url;
       logExtraction('Current tab URL captured', { url: activeUrl, timestamp: new Date().toISOString() });
       if (!isExtractableHttpUrl(activeUrl)) {
-        console.info('[JD-EXTRACTION][FRONTEND] Non-web extension tab skipped', {
+        const browserPageType = classifyBrowserPageUrl(activeUrl);
+        console.info('[JD-EXTRACTION][FRONTEND] Non-web page classified', {
           url: activeUrl,
-          sessionRetained: Boolean(jobAnalysis)
+          browserPageType,
+          sessionRetained: browserPageType === 'extension-internal' && Boolean(jobAnalysis)
         });
-        if (jobAnalysis) {
+        if (browserPageType === 'extension-internal' && jobAnalysis) {
           setJobDetectionStatus('ready');
           setApiError(null);
         } else {
-          setJobDetectionStatus('idle');
-          setApiError(null);
+          extractionAbortControllerRef.current?.abort();
+          extractionVersionRef.current += 1;
+          activeExtractionIdentityRef.current = '';
+          activeRequestIdRef.current = null;
+          setCurrentJobIdentity('');
+          setLastAnalyzedUrl('');
+          resetExtractedJobState('active tab is not a job-capable web page', {
+            url: activeUrl,
+            browserPageType
+          });
+          chrome.storage.session?.remove('jobExtractionSession');
+          setJobDetectionStatus(browserPageType);
+          setJobDetectionMeta({
+            classification: browserPageType,
+            confidence: 1,
+            reason: browserPageType === 'browser-new-tab'
+              ? 'The active tab is the browser New Tab page.'
+              : 'Browser security prevents extensions from reading this internal page.',
+            extractionMethod: 'client_page_gate'
+          });
+          setApiError(
+            browserPageType === 'browser-new-tab'
+              ? null
+              : 'This browser-internal page cannot be read by extensions.'
+          );
         }
         return;
       }
@@ -846,6 +871,32 @@ export function AppProvider({ children }) {
           message: captureError?.message || String(captureError)
         });
       }
+      const browserAssessment = assessBrowserJobEvidence(browserEvidence || {}, activeUrl);
+      logExtraction('Browser evidence readiness assessed', {
+        requestId,
+        ...browserAssessment
+      });
+      if (browserEvidence && browserAssessment.readiness === 'NOT_READY') {
+        extractionVersionRef.current += 1;
+        activeExtractionIdentityRef.current = expectedIdentity;
+        setCurrentJobIdentity(expectedIdentity);
+        resetExtractedJobState('browser evidence is clearly non-job', {
+          url: activeUrl,
+          assessment: browserAssessment
+        });
+        chrome.storage.session?.remove('jobExtractionSession');
+        setJobDetectionStatus('non-job');
+        setJobDetectionMeta({
+          classification: 'non_job',
+          confidence: 1,
+          reason: 'No coherent job identity, application action, job sections, or JobPosting data were found.',
+          extractionMethod: 'browser_evidence_gate',
+          readiness: browserAssessment.readiness,
+          signals: browserAssessment.signals
+        });
+        setApiError(null);
+        return;
+      }
       setLoadingMessage("Backend planning evidence sources...");
       logExtraction('Extraction request sent', {
         requestId, url: activeUrl, endpoint,
@@ -920,7 +971,20 @@ export function AppProvider({ children }) {
 
       if (!data.success) {
         const code = data.error?.code || "JD_EXTRACTION_FAILED";
-        setJobDetectionStatus(code === "PAGE_BLOCKED" ? "blocked" : "extraction-failed");
+        const restriction = data.execution_summary?.restriction_type;
+        const restrictionStatus = {
+          login_required: 'login-required',
+          captcha: 'captcha',
+          access_denied: 'blocked',
+          rate_limited: 'rate-limited',
+          security_challenge: 'security-challenge',
+          empty_shell: 'extraction-incomplete',
+          javascript_not_rendered: 'extraction-incomplete',
+          permission_required: 'page-inaccessible'
+        }[restriction];
+        setJobDetectionStatus(
+          restrictionStatus || (code === "PAGE_BLOCKED" ? "blocked" : "extraction-failed")
+        );
         throw new Error(data.error?.message || "Job extraction failed.");
       }
 
@@ -954,7 +1018,14 @@ export function AppProvider({ children }) {
         setApiError(null);
         logExtraction('Extraction success', { requestId: data.request_id, titlePresent: Boolean(title), companyPresent: Boolean(company) });
       } else {
-        const statusName = pageType === "job_list" ? "job-list" : "non-job";
+        const surfaceType = data.execution_summary?.surface_type;
+        const statusName = {
+          job_list: 'job-list',
+          career_home: 'career-home',
+          login: 'login-required',
+          blocked: 'blocked',
+          non_job: 'non-job'
+        }[surfaceType] || (pageType === "job_list" ? "job-list" : "non-job");
         setJobDetectionStatus(statusName);
         setJobDetectionMeta({
           classification: pageType || 'non_job', confidence,

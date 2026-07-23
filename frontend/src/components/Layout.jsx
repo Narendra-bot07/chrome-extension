@@ -12,7 +12,7 @@ import InvalidJdWarningModal from './InvalidJdWarningModal';
 import HowItWorksModal from './modals/HowItWorksModal';
 import FeedbackModal from './modals/FeedbackModal';
 import SupportModal from './modals/SupportModal';
-import { isExtractableHttpUrl } from '../services/jdExtractionFlow';
+import { classifyBrowserPageUrl } from '../services/jdExtractionFlow';
 
 function Layout() {
   const navigate = useNavigate();
@@ -41,7 +41,10 @@ function Layout() {
     usage,
     fetchSubscription,
     handleScanPage,
-    jobDetectionStatus
+    jobDetectionStatus,
+    loadingAuth,
+    loadingResume,
+    loadingPreferences
   } = useApp();
 
   const [profile, setProfile] = useState({
@@ -87,6 +90,7 @@ function Layout() {
 
   // Global active tab listener for extension side panel
   useEffect(() => {
+    if (loadingAuth || loadingResume || loadingPreferences) return;
     if (isExtension && typeof chrome !== 'undefined' && chrome.tabs) {
       let lastScannedUrl = '';
       let scanTimer = null;
@@ -94,7 +98,11 @@ function Layout() {
       let monitoredWindowId = null;
 
       const triggerScanForUrl = (targetUrl) => {
-        if (!isExtractableHttpUrl(targetUrl) || targetUrl === lastScannedUrl) return;
+        if (!targetUrl || targetUrl === lastScannedUrl) return;
+        // Full extension pages belong to the current workflow session. Every
+        // other active-tab type must be classified so New Tab/internal pages
+        // can end stale job sessions and show an accurate recovery state.
+        if (classifyBrowserPageUrl(targetUrl) === 'extension-internal') return;
         lastScannedUrl = targetUrl;
         if (scanTimer) clearTimeout(scanTimer);
         scanTimer = setTimeout(() => {
@@ -150,7 +158,7 @@ function Layout() {
         chrome.tabs.onActivated.removeListener(handleTabActivated);
       };
     }
-  }, [isExtension]);
+  }, [isExtension, loadingAuth, loadingResume, loadingPreferences]);
 
   // Route Synchronization: Auto switch between /tailor and /no-job-detected based on jobDetectionStatus
   useEffect(() => {
@@ -158,7 +166,9 @@ function Layout() {
     const recoveryStates = new Set([
       'non-job', 'non-job-page', 'uncertain', 'job-list', 'job-search', 'career-home',
       'company-page', 'profile', 'feed', 'article', 'login', 'login-required',
-      'search-results', 'captcha', 'page-inaccessible', 'extraction-failed', 'extraction-incomplete'
+      'search-results', 'captcha', 'security-challenge', 'rate-limited',
+      'browser-new-tab', 'manual-review', 'page-inaccessible',
+      'extraction-failed', 'extraction-incomplete'
     ]);
     if (recoveryStates.has(jobDetectionStatus) && currentPath === '/tailor') {
       navigate('/no-job-detected', { replace: true });

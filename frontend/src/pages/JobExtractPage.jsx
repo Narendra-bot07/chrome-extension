@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import UploaderView from '../components/UploaderView';
 import JobReviewView from '../components/JobReviewView';
 import ChecklistLoader from '../components/ChecklistLoader';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 
 function JobExtractPage() {
   const navigate = useNavigate();
@@ -12,6 +12,7 @@ function JobExtractPage() {
   const [autoExtractionStarted, setAutoExtractionStarted] = useState(false);
   const [awaitingAutoReview, setAwaitingAutoReview] = useState(false);
   const matchRequestKeyRef = useRef('');
+  const initialScanStartedRef = useRef(false);
   const {
     jobText, setJobText,
     companyName, setCompanyName,
@@ -25,6 +26,7 @@ function JobExtractPage() {
     handleScanPage, handleExtractJob, handleCompareActiveResumeToJob,
     jobDetectionStatus,
     loading, isExtension,
+    loadingAuth, loadingResume, loadingPreferences,
     subscription,
     apiError, setApiError
   } = useApp();
@@ -33,9 +35,15 @@ function JobExtractPage() {
   // The context suppresses a duplicate when the global tab listener already
   // started the same job request.
   useEffect(() => {
+    if (initialScanStartedRef.current) return;
+    if (loadingAuth || loadingResume || loadingPreferences) return;
+    initialScanStartedRef.current = true;
     if (isExtension) handleScanPage(true);
     else if (!jobText) handleScanPage();
-  }, []);
+  }, [
+    isExtension, jobText, loadingAuth, loadingResume, loadingPreferences,
+    handleScanPage
+  ]);
 
   // Auto-run job extraction as soon as jobText is scraped or pasted
   useEffect(() => {
@@ -82,6 +90,17 @@ function JobExtractPage() {
     !jobAnalysis &&
     !apiError &&
     (jobDetectionStatus === 'checking' || autoExtractionStarted || awaitingAutoReview);
+
+  const nonJobRecoveryStates = new Set([
+    'non-job', 'non-job-page', 'uncertain', 'job-list', 'job-search',
+    'career-home', 'company-page', 'profile', 'feed', 'article', 'login',
+    'login-required', 'search-results', 'captcha', 'security-challenge',
+    'rate-limited', 'browser-new-tab', 'manual-review', 'page-inaccessible',
+    'extraction-failed', 'extraction-incomplete'
+  ]);
+  if (nonJobRecoveryStates.has(jobDetectionStatus)) {
+    return <Navigate to="/no-job-detected" replace />;
+  }
 
   // Extraction success must never be hidden behind the optional ATS comparison.
   // JobReviewView already represents an unavailable score as a calculating state,

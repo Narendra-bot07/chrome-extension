@@ -7,6 +7,7 @@ function NoJobDetectedPage() {
   const { handleScanPage, jobDetectionStatus, setJobDetectionStatus, apiError } = useApp();
 
   const states = {
+    'browser-new-tab': ['No Job Page Open', 'Open an individual job posting in this tab, then TailorFlow will scan it automatically.'],
     'job-list': ['Job Listing Page Detected', 'This is a job listing page. Open a specific job to extract its description.'],
     'job-search': ['Job Search Results Detected', 'This is a job search results page. Open a specific job posting to extract details.'],
     'career-home': ['Company Careers Homepage', 'Open an individual job vacancy to continue.'],
@@ -17,7 +18,10 @@ function NoJobDetectedPage() {
     login: ['Login Required', 'Sign in to the job site and open the individual listing before retrying.'],
     'login-required': ['Login Required', 'Sign in to the job site and open the individual listing before retrying.'],
     captcha: ['Security Check Detected', 'Complete the website security check, then retry extraction.'],
+    'security-challenge': ['Security Check Detected', 'Complete the website security challenge in the current tab, then scan again.'],
+    'rate-limited': ['Job Site Temporarily Limited', 'The job platform is rate limiting access. Wait briefly and scan again, or enter the details manually.'],
     blocked: ['Access Blocked', 'This website blocked automated access or requires login verification. Enter job details manually.'],
+    'manual-review': ['Job Page Needs Review', apiError || 'Some job evidence was found, but it was not complete enough to extract safely.'],
     'page-inaccessible': ['Page Inaccessible', apiError || 'This browser page cannot be read by the extension.'],
     'extraction-failed': ['Extraction Failed', apiError || 'The page could not be extracted. Retry or paste the JD manually.'],
     'extraction-incomplete': ['Job Details Still Loading', 'A job was selected, but its description was not available after retries. Wait for the detail panel to finish loading, then retry.'],
