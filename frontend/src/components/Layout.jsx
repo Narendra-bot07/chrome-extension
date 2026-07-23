@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { 
@@ -12,6 +12,7 @@ import InvalidJdWarningModal from './InvalidJdWarningModal';
 import HowItWorksModal from './modals/HowItWorksModal';
 import FeedbackModal from './modals/FeedbackModal';
 import SupportModal from './modals/SupportModal';
+import { isExtractableHttpUrl } from '../services/jdExtractionFlow';
 
 function Layout() {
   const navigate = useNavigate();
@@ -38,7 +39,9 @@ function Layout() {
     applications,
     subscription,
     usage,
-    fetchSubscription
+    fetchSubscription,
+    handleScanPage,
+    jobDetectionStatus
   } = useApp();
 
   const [profile, setProfile] = useState({
@@ -61,6 +64,16 @@ function Layout() {
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [routeTitleOverride, setRouteTitleOverride] = useState('');
+  const handleScanPageRef = useRef(handleScanPage);
+  const fetchSubscriptionRef = useRef(fetchSubscription);
+
+  useEffect(() => {
+    handleScanPageRef.current = handleScanPage;
+  }, [handleScanPage]);
+
+  useEffect(() => {
+    fetchSubscriptionRef.current = fetchSubscription;
+  }, [fetchSubscription]);
 
   useEffect(() => {
     const handler = (event) => setRouteTitleOverride(event.detail?.title || '');
@@ -72,6 +85,88 @@ function Layout() {
     setRouteTitleOverride('');
   }, [currentPath]);
 
+  // Global active tab listener for extension side panel
+  useEffect(() => {
+    if (isExtension && typeof chrome !== 'undefined' && chrome.tabs) {
+      let lastScannedUrl = '';
+      let scanTimer = null;
+      let activeUrlCheckTimer = null;
+      let monitoredWindowId = null;
+
+      const triggerScanForUrl = (targetUrl) => {
+        if (!isExtractableHttpUrl(targetUrl) || targetUrl === lastScannedUrl) return;
+        lastScannedUrl = targetUrl;
+        if (scanTimer) clearTimeout(scanTimer);
+        scanTimer = setTimeout(() => {
+          handleScanPageRef.current();
+        }, 200);
+      };
+
+      chrome.tabs.query({ active: true, currentWindow: true }, ([activeTab]) => {
+        if (activeTab?.url) {
+          monitoredWindowId = activeTab.windowId;
+          triggerScanForUrl(activeTab.url);
+        }
+      });
+
+      const handleTabUpdate = (tabId, changeInfo, tab) => {
+        if (
+          tab?.active
+          && (monitoredWindowId === null || tab.windowId === monitoredWindowId)
+          && (changeInfo.url || changeInfo.status === 'complete')
+        ) {
+          triggerScanForUrl(changeInfo.url || tab.url);
+        }
+      };
+
+      const handleTabActivated = (activeInfo) => {
+        if (monitoredWindowId !== null && activeInfo.windowId !== monitoredWindowId) return;
+        chrome.tabs.get(activeInfo.tabId, (tab) => {
+          if (tab?.url) {
+            triggerScanForUrl(tab.url);
+          }
+        });
+      };
+
+      chrome.tabs.onUpdated.addListener(handleTabUpdate);
+      chrome.tabs.onActivated.addListener(handleTabActivated);
+
+      // SPA career portals can update history without a reliable completion
+      // event. This is a local URL identity check only; it never calls the
+      // backend unless the active HTTP(S) URL actually changed.
+      activeUrlCheckTimer = setInterval(() => {
+        chrome.tabs.query({ active: true, currentWindow: true }, ([activeTab]) => {
+          if (activeTab?.url) {
+            monitoredWindowId = activeTab.windowId;
+            triggerScanForUrl(activeTab.url);
+          }
+        });
+      }, 1500);
+
+      return () => {
+        if (scanTimer) clearTimeout(scanTimer);
+        if (activeUrlCheckTimer) clearInterval(activeUrlCheckTimer);
+        chrome.tabs.onUpdated.removeListener(handleTabUpdate);
+        chrome.tabs.onActivated.removeListener(handleTabActivated);
+      };
+    }
+  }, [isExtension]);
+
+  // Route Synchronization: Auto switch between /tailor and /no-job-detected based on jobDetectionStatus
+  useEffect(() => {
+    if (!isExtension) return;
+    const recoveryStates = new Set([
+      'non-job', 'non-job-page', 'uncertain', 'job-list', 'job-search', 'career-home',
+      'company-page', 'profile', 'feed', 'article', 'login', 'login-required',
+      'search-results', 'captcha', 'page-inaccessible', 'extraction-failed', 'extraction-incomplete'
+    ]);
+    if (recoveryStates.has(jobDetectionStatus) && currentPath === '/tailor') {
+      navigate('/no-job-detected', { replace: true });
+    } else if (jobDetectionStatus === 'ready' && currentPath === '/no-job-detected') {
+      navigate('/tailor', { replace: true });
+    }
+  }, [jobDetectionStatus, currentPath, navigate, isExtension]);
+
   useEffect(() => {
     const fetchProfileData = async () => {
       try {
@@ -80,17 +175,17 @@ function Layout() {
         const res = await fetch('http://localhost:8000/api/v1/profile/', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
-          if (res.ok) {
-            const data = await res.json();
-            setProfile(data);
-          }
-          fetchSubscription();
-        } catch (err) {
-          console.error("Failed to load layout profile:", err);
+        if (res.ok) {
+          const data = await res.json();
+          setProfile(data);
         }
+        await fetchSubscriptionRef.current();
+      } catch (err) {
+        console.error("Failed to load layout profile:", err);
+      }
     };
     fetchProfileData();
-  }, [currentPath]);
+  }, [currentPath, session?.access_token]);
 
   const isInvalidJdError = apiError && (
     apiError.toLowerCase().includes("invalid input") ||
@@ -126,8 +221,6 @@ function Layout() {
   const jdUsed = jdUsage?.used || 0;
   const jdRemaining = jdUsage?.remaining;
   const jdPercent = jdLimit ? Math.min(100, (jdUsed / jdLimit) * 100) : 0;
-
-
 
   return (
     <div className={`w-full h-screen flex overflow-hidden font-sans select-none transition-all duration-300 bg-grid-pattern ${
@@ -350,9 +443,6 @@ function Layout() {
           <div className="flex items-center gap-4">
             <button 
               onClick={() => {
-                // Tracking if api is available, though Context api object was not explicitly extracted above.
-                // It's recommended to just emit client side if there is an endpoint, or rely on page load events.
-                // We'll trust the backend emits for the ones with endpoints, but for client UI events we can log to console or fire a simple fetch if we had an analytics hook.
                 setIsHowItWorksOpen(true);
               }}
               className="hidden md:inline text-xs text-zinc-500 font-semibold cursor-pointer hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors"

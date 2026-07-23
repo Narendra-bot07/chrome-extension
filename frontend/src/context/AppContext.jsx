@@ -1,17 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { compressResumeData } from '../utils/resumeCompression';
-import { runJobExtractionInPage } from '../utils/jobExtractionEngine';
-import { BrowserIntelligenceOrchestrator } from '../browser-intelligence/core/orchestrator';
-import { LegacyExtractionAdapter } from '../browser-intelligence/adapters/legacyExtractionAdapter';
-import { collectBrowserContextInPage } from '../browser-intelligence/collector/browserContextCollector';
-import { buildPageEvidence } from '../browser-intelligence/evidence/evidenceEngine';
-import { classifyPage } from '../browser-intelligence/classification/pageClassifier';
-import { fingerprintContext } from '../browser-intelligence/cache/fingerprint';
-import { discoverJobCandidates, selectJobFields } from '../browser-intelligence/domains/job/jobCandidateEngine';
-import { normalizeJobOutcome, validateNormalizedJob } from '../browser-intelligence/domains/job/jobValidationEngine';
-import { StrategyCache } from '../browser-intelligence/cache/strategyCache';
-import { requestAstraPlan } from '../browser-intelligence/planning/plannerClient';
+import { collectJobSkills, isExtractableHttpUrl, validateJDResponse } from '../services/jdExtractionFlow';
 
 const AppContext = createContext();
 
@@ -97,8 +87,8 @@ export function AppProvider({ children }) {
     setTailoredResume(null);
     setCoverLetter(null);
     setJobText('');
-    setCompanyName('Company');
-    setJobTitle('Software Engineer');
+    setCompanyName('');
+    setJobTitle('');
     setJobPreferences(null);
     setHasCompletedPreferences(false);
     setLoadingPreferences(false);
@@ -122,8 +112,8 @@ export function AppProvider({ children }) {
   const [resumeFile, setResumeFile] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const [jobText, setJobText] = useState('');
-  const [companyName, setCompanyName] = useState('Company');
-  const [jobTitle, setJobTitle] = useState('Software Engineer');
+  const [companyName, setCompanyName] = useState('');
+  const [jobTitle, setJobTitle] = useState('');
   const [lastAnalyzedUrl, setLastAnalyzedUrl] = useState('');
   const [currentJobIdentity, setCurrentJobIdentity] = useState('');
 
@@ -131,6 +121,9 @@ export function AppProvider({ children }) {
   const [parsedResume, setParsedResume] = useState(null);
   const [resumesList, setResumesList] = useState([]);
   const [jobAnalysis, setJobAnalysis] = useState(null);
+  const [jobSessionHydrated, setJobSessionHydrated] = useState(
+    () => !(typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local)
+  );
   const [comparison, setComparison] = useState(null);
   const [tailoredResume, setTailoredResume] = useState(null);
   const [coverLetter, setCoverLetter] = useState(null);
@@ -169,24 +162,32 @@ export function AppProvider({ children }) {
   const isExtension = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local;
   const extractionVersionRef = useRef(0);
   const activeExtractionIdentityRef = useRef('');
-  const intelligenceOrchestratorRef = useRef(new BrowserIntelligenceOrchestrator({ maxAttempts: 3 }));
-  const astraStrategyCacheRef = useRef(new StrategyCache());
-  const astraPlannerCacheRef = useRef(new Map());
-
+  const extractionInFlightRef = useRef(false);
+  const activeRequestIdRef = useRef(null);
+  const extractionAbortControllerRef = useRef(null);
+  const lastSyncedResumeSignatureRef = useRef('');
   const logExtraction = (event, meta = {}) => {
-    console.log(`[ApplyFlow:Extraction] ${event}`, meta);
+    console.info(`[JD-EXTRACTION][FRONTEND] ${event}`, meta);
   };
 
   const getJobIdentityFromUrl = (url = '') => {
     try {
       const parsed = new URL(url);
-      const currentJobId = parsed.searchParams.get('currentJobId');
-      if (currentJobId) return `linkedin:${currentJobId}`;
+      const jobIdKeys = [
+        'currentJobId', 'jobId', 'job_id', 'jobid', 'jk',
+        'gh_jid', 'requisitionId', 'requisition_id', 'postingId'
+      ];
+      for (const key of jobIdKeys) {
+        const value = parsed.searchParams.get(key);
+        if (value) return `${parsed.hostname}:${key.toLowerCase()}:${value}`;
+      }
       const linkedInMatch = parsed.pathname.match(/\/jobs\/view\/(\d+)/i);
       if (linkedInMatch) return `linkedin:${linkedInMatch[1]}`;
-      const pathMatch = parsed.pathname.match(/\/(?:job|jobs|careers|career|opening|position|vacancy|details)\/?([^/?#]+)?/i);
-      if (pathMatch) return `${parsed.hostname}:${parsed.pathname}`;
-      return `${parsed.hostname}:${parsed.pathname}`;
+      const normalizedPath = parsed.pathname.replace(/\/+$/, '') || '/';
+      const jobHash = /job|position|opening|vacancy/i.test(parsed.hash)
+        ? parsed.hash
+        : '';
+      return `${parsed.hostname}:${normalizedPath}${jobHash}`;
     } catch {
       return url || '';
     }
@@ -197,8 +198,8 @@ export function AppProvider({ children }) {
     setJobText('');
     setJobAnalysis(null);
     setComparison(null);
-    setCompanyName('Company');
-    setJobTitle('Software Engineer');
+    setCompanyName('');
+    setJobTitle('');
     setJobDetectionMeta(null);
   };
 
@@ -223,18 +224,70 @@ export function AppProvider({ children }) {
   // Load configs & saved resume
   useEffect(() => {
     if (isExtension) {
-      chrome.storage.local.get(['groqApiKey', 'apiUrl', 'parsedResume', 'tailoredResume', 'selectedTemplate', 'jobAnalysis', 'jobText', 'companyName', 'jobTitle', 'comparison'], (result) => {
+      // Resume/configuration data is durable. Job extraction data is deliberately
+      // excluded: it belongs to the active-tab session and must never leak from
+      // a previously viewed job.
+      chrome.storage.local.get(['groqApiKey', 'apiUrl', 'parsedResume', 'tailoredResume', 'selectedTemplate'], (result) => {
         if (result.groqApiKey) setApiKey(result.groqApiKey);
         if (result.apiUrl) setApiUrl(result.apiUrl);
         if (result.parsedResume) setParsedResume(result.parsedResume);
         if (result.tailoredResume) setTailoredResume(result.tailoredResume);
         if (result.selectedTemplate) setSelectedTemplate(result.selectedTemplate);
-        if (result.jobAnalysis) setJobAnalysis(result.jobAnalysis);
-        if (result.jobText) setJobText(result.jobText);
-        if (result.companyName) setCompanyName(result.companyName);
-        if (result.jobTitle) setJobTitle(result.jobTitle);
-        if (result.comparison) setComparison(result.comparison);
       });
+      const sessionStore = chrome.storage.session;
+      if (sessionStore) {
+        sessionStore.get(['jobExtractionSession'], (result) => {
+          const saved = result.jobExtractionSession;
+          const finishHydration = (activeUrl = '') => {
+            const savedUrl = saved?.lastAnalyzedUrl || saved?.jobAnalysis?.source_url || '';
+            const savedIdentity = getJobIdentityFromUrl(savedUrl);
+            const activeIdentity = isExtractableHttpUrl(activeUrl)
+              ? getJobIdentityFromUrl(activeUrl)
+              : '';
+            const sessionMatchesActiveJob = Boolean(
+              saved?.jobAnalysis
+              && savedIdentity
+              && activeIdentity
+              && savedIdentity === activeIdentity
+            );
+
+            if (sessionMatchesActiveJob) {
+            setJobAnalysis(saved.jobAnalysis);
+            setJobText(saved.jobText || saved.jobAnalysis.description || '');
+            setCompanyName(saved.companyName || saved.jobAnalysis.company || saved.jobAnalysis.company_name || '');
+            setJobTitle(saved.jobTitle || saved.jobAnalysis.title || saved.jobAnalysis.job_title || '');
+            setLastAnalyzedUrl(savedUrl);
+            activeExtractionIdentityRef.current = savedIdentity;
+            setCurrentJobIdentity(savedIdentity);
+            setJobDetectionMeta(saved.jobDetectionMeta || null);
+            setJobDetectionStatus('ready');
+            setApiError(null);
+            console.info('[JD-EXTRACTION][FRONTEND] Extraction session restored', {
+              sourceUrl: savedUrl,
+              hasJob: true
+            });
+            } else if (saved?.jobAnalysis) {
+              sessionStore.remove('jobExtractionSession');
+              console.info('[JD-EXTRACTION][FRONTEND] Stale extraction session rejected', {
+                savedIdentity,
+                activeIdentity,
+                activeUrl
+              });
+            }
+            setJobSessionHydrated(true);
+          };
+
+          if (chrome.tabs) {
+            chrome.tabs.query({ active: true, currentWindow: true }, ([activeTab]) => {
+              finishHydration(activeTab?.url || '');
+            });
+          } else {
+            finishHydration('');
+          }
+        });
+      } else {
+        setJobSessionHydrated(true);
+      }
     } else {
       const savedKey = localStorage.getItem('groq_api_key');
       const savedUrl = localStorage.getItem('fastapi_api_url');
@@ -351,6 +404,34 @@ export function AppProvider({ children }) {
     return () => chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
   }, [isExtension]);
 
+  // Keep the side panel and any full extension tab aligned when the active
+  // resume changes in either context.
+  useEffect(() => {
+    if (!isExtension || !chrome.storage?.onChanged) return;
+
+    const handleStorageChange = (changes, areaName) => {
+      if (areaName !== 'local' || !changes.parsedResume) return;
+      const nextResume = changes.parsedResume.newValue || null;
+      const signature = JSON.stringify({
+        id: nextResume?.id || null,
+        updatedAt: nextResume?.updated_at || null,
+        parsingStatus: nextResume?.parsing_status || null,
+        isActive: nextResume?.is_active || false
+      });
+      if (lastSyncedResumeSignatureRef.current === signature) return;
+      lastSyncedResumeSignatureRef.current = signature;
+      setParsedResume(nextResume);
+      fetchResumesList();
+      console.info('[RESUME][FRONTEND] Active resume synchronized across extension views', {
+        resumeId: nextResume?.id || null,
+        fileName: nextResume?.file_name || null
+      });
+    };
+
+    chrome.storage.onChanged.addListener(handleStorageChange);
+    return () => chrome.storage.onChanged.removeListener(handleStorageChange);
+  }, [isExtension]);
+
   // Save/Remove resume context storage
   useEffect(() => {
     if (parsedResume) {
@@ -368,10 +449,28 @@ export function AppProvider({ children }) {
     }
   }, [parsedResume]);
 
-  // Save/Remove job analysis context storage so full browser tabs open cleanly with extracted job.
-  // Extension side panel intentionally does not persist job data globally; it must represent the active tab.
+  // Preserve the active extraction while navigating between extension routes,
+  // the side panel, and a full extension tab. Chrome clears storage.session
+  // when the browser session ends.
   useEffect(() => {
-    if (isExtension) return;
+    if (isExtension) {
+      if (!jobSessionHydrated || !chrome.storage.session) return;
+      if (jobAnalysis) {
+        chrome.storage.session.set({
+          jobExtractionSession: {
+            jobAnalysis,
+            jobText,
+            companyName,
+            jobTitle,
+            lastAnalyzedUrl,
+            jobDetectionMeta
+          }
+        });
+      } else {
+        chrome.storage.session.remove('jobExtractionSession');
+      }
+      return;
+    }
     if (jobAnalysis) {
       localStorage.setItem('job_analysis', JSON.stringify(jobAnalysis));
       if (jobText) localStorage.setItem('job_text', jobText);
@@ -383,7 +482,7 @@ export function AppProvider({ children }) {
       localStorage.removeItem('company_name');
       localStorage.removeItem('job_title');
     }
-  }, [jobAnalysis, jobText, companyName, jobTitle]);
+  }, [jobAnalysis, jobText, companyName, jobTitle, lastAnalyzedUrl, jobDetectionMeta, jobSessionHydrated, isExtension]);
 
   // Save/Remove tailored resume context storage
   useEffect(() => {
@@ -424,6 +523,20 @@ export function AppProvider({ children }) {
     if (!token) return [];
     setLoadingResume(true);
     try {
+      const reconcileRes = await fetch(`${apiUrl}/api/v1/resumes/reconcile-local`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (reconcileRes.ok) {
+        const reconciliation = await reconcileRes.json();
+        if (reconciliation.recovered > 0) {
+          console.info('[RESUME][FRONTEND] Orphaned resume files recovered', reconciliation);
+        }
+      } else {
+        console.warn('[RESUME][FRONTEND] Resume reconciliation skipped', {
+          status: reconcileRes.status
+        });
+      }
       const res = await fetch(`${apiUrl}/api/v1/resumes/`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -601,662 +714,254 @@ export function AppProvider({ children }) {
   };
 
   // Scan Active Page content
-  const handleScanPage = async (isManual = false) => {
-    logExtraction('01 scan requested', { isManual });
+  const handleScanPage = async (forceRescan = false) => {
     if (!ensureExtractionProfileReady()) return;
-    logExtraction('02 access/profile validation passed');
+    logExtraction('Extraction request started', { forceRescan, timestamp: new Date().toISOString() });
 
-    let currentTabUrl = '';
-    if (isExtension && chrome.tabs) {
-      try {
-        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (activeTab && activeTab.url) {
-          currentTabUrl = activeTab.url;
-        }
-      } catch (e) {
-        console.warn("Could not query active tab URL:", e);
-      }
-    }
-
-    if (isManual) {
-      setLastAnalyzedUrl('');
-      resetExtractedJobState('manual rescan');
-    }
-    
     if (!isExtension) {
-      setCompanyName("Target Company");
-      setJobTitle("Hello");
-      setJobText("Hello Dummy Description for non-extension environment.");
+      logExtraction('Current-tab capture unavailable outside extension');
       return;
     }
 
+    let requestId = null;
+    let expectedIdentity = '';
+
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab) throw new Error("No active browser window or tab found.");
-      logExtraction('03 active tab resolved', { tabId: tab.id, url: tab.url, status: tab.status });
-      
-      const url = tab.url || currentTabUrl || '';
-      const scanVersion = extractionVersionRef.current + 1;
-      extractionVersionRef.current = scanVersion;
-      const expectedIdentity = getJobIdentityFromUrl(url);
-      const previousIdentity = activeExtractionIdentityRef.current || currentJobIdentity;
-      activeExtractionIdentityRef.current = expectedIdentity;
-      setCurrentJobIdentity(expectedIdentity);
-      setJobDetectionStatus("checking");
-      logExtraction('04 extraction identity created', { tabId: tab.id, url, jobIdentity: expectedIdentity, navigationVersion: scanVersion });
-
-      const persistedPageChanged = Boolean(lastAnalyzedUrl && getJobIdentityFromUrl(lastAnalyzedUrl) !== expectedIdentity);
-      if ((previousIdentity && previousIdentity !== expectedIdentity) || persistedPageChanged) {
-        resetExtractedJobState('job identity changed', { from: previousIdentity, to: expectedIdentity });
-        setLastAnalyzedUrl(url);
-      }
-
-      if (url.includes('linkedin.com/in/') || 
-          url.includes('linkedin.com/feed/') || 
-          url.includes('linkedin.com/messaging/') || 
-          url.includes('linkedin.com/mynetwork/')) {
-        resetExtractedJobState('not a job page', { url, navigationVersion: scanVersion });
-        setLastAnalyzedUrl(url);
-        setJobDetectionStatus("not-job");
-        logExtraction('page classified', { tabId: tab.id, url, pageType: 'NOT_A_JOB_PAGE', reason: 'LinkedIn non-job route' });
+      if (!tab || !tab.url) {
+        setJobDetectionStatus("page-inaccessible");
+        setApiError("The current tab URL could not be captured.");
         return;
       }
-      
-      logExtraction('05 injecting extraction engine', { tabId: tab.id });
-      const adapter = new LegacyExtractionAdapter({
-        executeExtraction: async () => {
-          const contextResults = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: collectBrowserContextInPage
-          });
-          const astraContext = contextResults?.find((entry) => entry.frameId === 0)?.result || contextResults?.[0]?.result;
-          const astraEvidence = astraContext ? buildPageEvidence(astraContext) : [];
-          const astraClassification = astraContext ? classifyPage(astraContext, astraEvidence) : null;
-          const astraFingerprint = astraContext ? fingerprintContext(astraContext) : '';
-          const astraCandidates = astraContext ? discoverJobCandidates(astraContext) : {};
-          const astraFields = selectJobFields(astraCandidates);
-          const astraJob = astraContext ? normalizeJobOutcome(astraFields, astraContext, astraClassification, astraFingerprint) : null;
-          const astraValidation = astraJob ? validateNormalizedJob(astraJob) : null;
-          const cachedStrategy = astraContext ? await astraStrategyCacheRef.current.get({ hostname: astraContext.url.hostname, domFingerprint: astraFingerprint, pageKind: astraClassification?.primary }) : null;
-          logExtraction('ASTRA browser context collected', {
-            schemaVersion: astraContext?.schemaVersion,
-            hostname: astraContext?.url?.hostname,
-            headings: astraContext?.headings?.length || 0,
-            actions: astraContext?.actions?.length || 0,
-            candidates: astraContext?.candidates?.length || 0,
-            textBlocks: astraContext?.stats?.textBlockCount || 0,
-            textChars: astraContext?.stats?.textChars || 0,
-            jsonLd: astraContext?.jsonLd?.map((item) => item.type),
-            loadingIndicators: astraContext?.loading?.length || 0,
-            shadowRoots: astraContext?.shadowRoots?.length || 0,
-            frames: astraContext?.frames?.length || 0
-          });
-          logExtraction('ASTRA evidence and classification completed', {
-            fingerprint: astraFingerprint,
-            pageKind: astraClassification?.primary,
-            confidence: astraClassification?.confidence,
-            reason: astraClassification?.reason,
-            composite: astraClassification?.composite,
-            evidence: astraEvidence.map((item) => ({ kind: item.kind, polarity: item.polarity, confidence: item.confidence, reason: item.reason })),
-            candidateCounts: Object.fromEntries(Object.entries(astraCandidates).map(([field, items]) => [field, items.length])),
-            validation: astraValidation,
-            strategyCacheHit: Boolean(cachedStrategy)
-          });
-          const shouldInvokePlanner = Boolean(
-            astraContext && !cachedStrategy &&
-            (astraClassification?.primary === 'UNKNOWN' || (astraClassification?.primary === 'JOB_DETAIL' && !astraValidation?.valid))
-          );
-          if (shouldInvokePlanner) {
-            const plannerKey = `${astraContext.url.hostname}|${astraFingerprint}|${astraClassification.primary}`;
-            let plannerResult = astraPlannerCacheRef.current.get(plannerKey);
-            if (!plannerResult) {
-              const plannerRequestId = (crypto?.randomUUID && crypto.randomUUID()) || `astra-${Date.now()}`;
-              logExtraction('ASTRA LLM planner requested', { requestId: plannerRequestId, pageKind: astraClassification.primary, fingerprint: astraFingerprint, model: 'openai/gpt-oss-20b' });
-              try {
-                const token = session?.access_token || localStorage.getItem('access_token');
-                plannerResult = await requestAstraPlan({
-                  apiUrl, token, context: astraContext, evidence: astraEvidence,
-                  classification: astraClassification, fingerprint: astraFingerprint,
-                  requestId: plannerRequestId
-                });
-                astraPlannerCacheRef.current.set(plannerKey, plannerResult);
-                await astraStrategyCacheRef.current.recordSuccess(
-                  { hostname: astraContext.url.hostname, domFingerprint: astraFingerprint, pageKind: plannerResult.plan.pageKind },
-                  plannerResult.plan, plannerResult.plan.confidence
-                );
-                logExtraction('ASTRA LLM plan accepted', { requestId: plannerRequestId, model: plannerResult.model, pageKind: plannerResult.plan.pageKind, confidence: plannerResult.plan.confidence, operations: plannerResult.plan.operations, rationale: plannerResult.plan.rationale, requiresRecovery: plannerResult.plan.requiresRecovery });
-              } catch (plannerError) {
-                logExtraction('ASTRA LLM planner fallback', { error: plannerError.message, action: 'continue deterministic extraction' });
-              }
-            } else {
-              logExtraction('ASTRA LLM plan memory-cache hit', { pageKind: plannerResult.plan.pageKind, operations: plannerResult.plan.operations.length });
-            }
-          }
-          const attemptResults = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: runJobExtractionInPage
-          });
-          return attemptResults?.find((entry) => entry.frameId === 0)?.result || attemptResults?.[0]?.result;
-        },
-        waitForProgress: async (sessionInfo, decision, delayMs) => {
-          logExtraction('recovery waiting for page progress', { sessionId: sessionInfo.sessionId, attempt: sessionInfo.attemptId, reason: decision.reason, delayMs });
-          await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            args: [delayMs],
-            func: (waitMs) => new Promise((resolve) => {
-              let settled = false;
-              const finish = (reason) => {
-                if (settled) return;
-                settled = true;
-                observer.disconnect();
-                clearTimeout(timer);
-                resolve({ reason, bodyLength: document.body?.innerText?.length || 0 });
-              };
-              const observer = new MutationObserver(() => finish('dom_mutation'));
-              observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
-              const timer = setTimeout(() => finish('timeout'), Math.max(250, waitMs));
-            })
-          });
-        }
-      });
-      const orchestration = await intelligenceOrchestratorRef.current.run({ tabId: tab.id, url, navigationKey: expectedIdentity }, adapter);
-      if (orchestration.status === 'cancelled' || !orchestration.result) return;
-      const results = [{ frameId: 0, result: orchestration.result }];
-      logExtraction('06 extraction engine returned', { frames: (results || []).map((entry) => ({ frameId: entry.frameId, classification: entry.result?.classification, confidence: entry.result?.confidence, title: entry.result?.title, company: entry.result?.company, descriptionLength: entry.result?.description?.length || 0, validation: entry.result?.validation })) });
 
-      const primaryPageResult = results?.find((entry) => entry.frameId === 0)?.result || results?.[0]?.result;
-      if (primaryPageResult) {
-        const detectionRequestId = (crypto?.randomUUID && crypto.randomUUID()) || `detect-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        const token = session?.access_token || localStorage.getItem('access_token');
-        logExtraction('06b sending detection trace to backend', { requestId: detectionRequestId, steps: primaryPageResult.trace?.length || 0 });
-        try {
-          const traceResponse = await fetch(`${apiUrl}/api/v1/jobs/detection-log`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(token ? { Authorization: `Bearer ${token}` } : {})
-            },
-            body: JSON.stringify({
-              url: primaryPageResult.url || url,
-              request_id: detectionRequestId,
-              classification: primaryPageResult.classification,
-              confidence: primaryPageResult.confidence,
-              page_state: primaryPageResult.pageState,
-              extraction_source: primaryPageResult.extractionSource,
-              content_hash: primaryPageResult.contentHash,
-              title: primaryPageResult.title,
-              company: primaryPageResult.company,
-              description_length: primaryPageResult.description?.length || 0,
-              validation: primaryPageResult.validation,
-              signals: primaryPageResult.signals,
-              trace: primaryPageResult.trace || []
-            })
-          });
-          logExtraction('06c backend detection trace stored', { requestId: detectionRequestId, status: traceResponse.status, ok: traceResponse.ok });
-        } catch (traceError) {
-          console.warn('[ApplyFlow:Extraction] Backend detection logging failed', { requestId: detectionRequestId, error: traceError.message });
-        }
-      }
-
-      if (false) await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        args: [runJobExtractionInPage.toString()],
-        func: async (engineSource) => {
-          const runExtraction = (0, eval)(`(${engineSource})`);
-          return await runExtraction();
-
-          let title = '';
-          let company = '';
-          let text = '';
-          const clean = (value) => (value || '').replace(/\s+/g, ' ').trim();
-          const meaningfulDescription = (value) => {
-            const normalized = clean(value);
-            if (normalized.length < 120) return false;
-            if (/^0 notifications$/i.test(normalized)) return false;
-            if (/^(apply|save|share|view job|show more|see more)$/i.test(normalized)) return false;
-            return /(responsibilit|qualification|requirement|experience|skills|about the job|minimum qualifications|preferred qualifications|what you)/i.test(normalized);
-          };
-          const hasJobPostingJsonLd = () => {
-            const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
-            return scripts.some((script) => {
-              try {
-                const parsed = JSON.parse(script.textContent || '{}');
-                const items = Array.isArray(parsed) ? parsed : [parsed, ...(parsed['@graph'] || [])];
-                return items.some((item) => {
-                  const type = item?.['@type'];
-                  return Array.isArray(type) ? type.includes('JobPosting') : type === 'JobPosting';
-                });
-              } catch {
-                return false;
-              }
-            });
-          };
-          const hasApplyButton = () => Array.from(document.querySelectorAll('button, a'))
-            .some((el) => /\bapply\b/i.test(el.innerText || el.textContent || ''));
-          const urlLooksJobLike = /\/(job|jobs|careers|career|opening|position|vacancy|details)(\/|\?|#|$)/i.test(window.location.pathname);
-
-          if (window.location.host.includes('linkedin.com')) {
-            const readText = (selector) => {
-              const el = document.querySelector(selector);
-              return el ? clean(el.innerText || el.textContent) : '';
-            };
-            const usefulDescription = (value) => {
-              const normalized = clean(value);
-              return normalized.length > 120 && !/^0 notifications$/i.test(normalized);
-            };
-            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-            const descriptionSelectors = [
-              '#job-details',
-              '.jobs-description__content',
-              '.jobs-description-content__text',
-              '.jobs-box__html-content',
-              '.jobs-description',
-              '[class*="jobs-description"]',
-              '[class*="job-details"]'
-            ];
-
-            const titleSelectors = [
-              '.job-details-jobs-unified-top-card__job-title h1',
-              '.job-details-jobs-unified-top-card__job-title',
-              '.jobs-unified-top-card__job-title',
-              'h1'
-            ];
-            for (const selector of titleSelectors) {
-              title = readText(selector);
-              if (title) break;
-            }
-
-            const companySelectors = [
-              '.job-details-jobs-unified-top-card__company-name a',
-              '.job-details-jobs-unified-top-card__company-name',
-              '.jobs-unified-top-card__company-name a',
-              '.jobs-unified-top-card__company-name',
-              '.jobs-unified-top-card__primary-description a'
-            ];
-            for (const selector of companySelectors) {
-              company = readText(selector);
-              if (company) break;
-            }
-
-            for (let attempt = 0; attempt < 18 && !usefulDescription(text); attempt += 1) {
-              for (const selector of descriptionSelectors) {
-                const candidate = readText(selector);
-                if (candidate.length > text.length) text = candidate;
-                if (usefulDescription(text)) break;
-              }
-
-              if (usefulDescription(text)) break;
-
-              const detailsPanel = document.querySelector('.jobs-search__job-details--container, .jobs-details, main');
-              if (detailsPanel) detailsPanel.scrollBy(0, 450);
-              window.scrollBy(0, 450);
-              await sleep(250);
-            }
-
-            const showMore = Array.from(document.querySelectorAll('button'))
-              .find((button) => /show more|see more/i.test(button.innerText || button.textContent || ''));
-            if (showMore) {
-              showMore.click();
-              await sleep(150);
-              for (const selector of descriptionSelectors) {
-                const candidate = readText(selector);
-                if (candidate.length > text.length) text = candidate;
-              }
-            }
-
-            if (!usefulDescription(text) && document.body) {
-              const bodyText = clean(document.body.innerText);
-              const starts = ['About the job', 'Job description', 'Responsibilities', 'Minimum qualifications', 'What you will do'];
-              for (const marker of starts) {
-                const idx = bodyText.toLowerCase().indexOf(marker.toLowerCase());
-                if (idx !== -1) {
-                  const candidate = bodyText.slice(idx);
-                  if (candidate.length > text.length) text = candidate;
-                }
-              }
-            }
-          } else if (
-            window.location.host.includes('google.com') &&
-            window.location.pathname.includes('/about/careers/applications/jobs/results/')
-          ) {
-            const readText = (selector) => {
-              const el = document.querySelector(selector);
-              return el ? (el.innerText || el.textContent || '').trim() : '';
-            };
-            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-            title = readText('h1') || document.title.replace(/\s*-\s*Google Careers.*$/i, '').trim();
-            company = 'Google';
-
-            const collectGoogleJobText = () => {
-              const mainText = readText('main') || readText('[role="main"]') || document.body.innerText || '';
-              const normalized = mainText.replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
-              const sectionNames = [
-                'Minimum qualifications',
-                'Preferred qualifications',
-                'About the job',
-                'Responsibilities'
-              ];
-              const lower = normalized.toLowerCase();
-              const positions = sectionNames
-                .map((name) => ({ name, index: lower.indexOf(name.toLowerCase()) }))
-                .filter((section) => section.index >= 0)
-                .sort((a, b) => a.index - b.index);
-
-              if (positions.length === 0) return normalized;
-
-              const chunks = [];
-              for (let i = 0; i < positions.length; i += 1) {
-                const start = positions[i].index;
-                const end = positions[i + 1]?.index ?? normalized.length;
-                const chunk = normalized.slice(start, end).trim();
-                if (chunk) chunks.push(chunk);
-              }
-
-              return chunks.join('\n\n')
-                .replace(/\n?Apply\s*$/i, '')
-                .replace(/\n?Share\s*$/i, '')
-                .trim();
-            };
-
-            for (let attempt = 0; attempt < 6; attempt += 1) {
-              text = collectGoogleJobText();
-              if (/Minimum qualifications|Preferred qualifications|About the job|Responsibilities/i.test(text) && text.length > 500) {
-                break;
-              }
-              window.scrollBy(0, 700);
-              await sleep(200);
-            }
-          } else if (window.location.host.includes('indeed.com')) {
-            const titleEl = document.querySelector('.jobsearch-JobInfoHeader-title, h1');
-            if (titleEl) title = titleEl.innerText.trim();
-            const companyEl = document.querySelector('[data-company-name="true"], .jobsearch-CompanyInfoContainer, .jobsearch-InlineCompanyRating');
-            if (companyEl) company = companyEl.innerText.trim();
-            const descEl = document.querySelector('#jobDescriptionText, .jobsearch-JobComponent-description');
-            if (descEl) text = descEl.innerText.trim();
-          } else if (window.location.host.includes('mail.google.com')) {
-            const subjectEl = document.querySelector('h2.hP');
-            if (subjectEl) title = subjectEl.innerText.trim();
-            const bodies = document.querySelectorAll('.a3s');
-            if (bodies.length > 0) {
-              const activeBody = bodies[bodies.length - 1];
-              text = activeBody.innerText.trim();
-            }
-          } else if (window.location.host.includes('greenhouse.io')) {
-            const titleEl = document.querySelector('h1.app-title, .app-title');
-            if (titleEl) title = titleEl.innerText.trim();
-            const companyEl = document.querySelector('.company-name');
-            if (companyEl) {
-              company = companyEl.innerText.replace('at ', '').trim();
-            }
-            const descEl = document.querySelector('#content, #main');
-            if (descEl) text = descEl.innerText.trim();
-          } else if (window.location.host.includes('lever.co')) {
-            const titleEl = document.querySelector('.posting-header h2, h2');
-            if (titleEl) title = titleEl.innerText.trim();
-            const companyEl = document.querySelector('.posting-header img, .logo img');
-            if (companyEl) {
-              company = companyEl.getAttribute('alt') || 'Lever Company';
-            }
-            const descEl = document.querySelector('.posting-description, .section.page-centered');
-            if (descEl) text = descEl.innerText.trim();
-          } else if (window.location.host.includes('myworkdayjobs.com')) {
-            const titleEl = document.querySelector('[data-automation-id="jobPostingHeader"], h2');
-            if (titleEl) title = titleEl.innerText.trim();
-            const descEl = document.querySelector('[data-automation-id="jobPostingDescription"], .job-description');
-            if (descEl) text = descEl.innerText.trim();
-          }
-          
-          if (!title) {
-            const mainHeading = document.querySelector('h1, h2.job-title, .job-title, [class*="jobTitle"], [class*="job-title"], .app-title');
-            if (mainHeading) title = mainHeading.innerText.trim();
-          }
-          
-          if (!company || company === 'Target Company') {
-            const ogSiteEl = document.querySelector('meta[property="og:site_name"]');
-            if (ogSiteEl && ogSiteEl.getAttribute('content')) {
-              company = ogSiteEl.getAttribute('content').trim();
-            } else {
-              const authorEl = document.querySelector('meta[name="author"]');
-              if (authorEl && authorEl.getAttribute('content')) {
-                company = authorEl.getAttribute('content').trim();
-              }
-            }
-          }
-
-          if ((!title || title === 'Software Engineer' || !company || company === 'Target Company') && document.title && document.title.includes('| LinkedIn')) {
-            const parts = document.title.split('|')[0].trim();
-            if (parts.includes(' hiring at ')) {
-              const [t, c] = parts.split(' hiring at ');
-              title = t.trim();
-              company = c.trim();
-            } else if (parts.includes(' at ')) {
-              const [t, c] = parts.split(' at ');
-              title = t.trim();
-              company = c.trim();
-            }
-          }
-
-          if (!text && document.body) {
-            text = document.body.innerText.trim();
-          }
-
-          const jobId = new URL(window.location.href).searchParams.get('currentJobId') ||
-            (window.location.pathname.match(/\/jobs\/view\/(\d+)/i)?.[1] || '');
-          const isJobPage = hasJobPostingJsonLd() ||
-            (title && meaningfulDescription(text) && (hasApplyButton() || urlLooksJobLike || company)) ||
-            (window.location.host.includes('linkedin.com') && Boolean(jobId) && meaningfulDescription(text));
-
-          console.log(" [LetMeApply Page Script] Scraped -> Title:", title || "Software Engineer", "| Company:", company || "Target Company", "| Text chars:", text ? text.length : 0);
-
-          return {
-            title: title || 'Software Engineer',
-            company: company || 'Target Company',
-            text: text || '',
-            isJobPage,
-            jobId,
-            url: window.location.href
-          };
-        }
-      });
-      
-      let activeResult = null;
-      if (results && results.length > 0) {
-        const validFrames = results
-          .map(r => r.result)
-          .filter(r => r && r.classification === 'job_listing' && r.isJobPage && r.text && r.text.length > 100);
-          
-        if (validFrames.length > 0) {
-          validFrames.sort((a, b) => b.text.length - a.text.length);
-          activeResult = validFrames[0];
-        } else {
-          activeResult = results[0].result;
-        }
-      }
-      logExtraction('07 best extraction result selected', activeResult ? { classification: activeResult.classification, confidence: activeResult.confidence, title: activeResult.title, company: activeResult.company, descriptionLength: activeResult.text?.length || 0, source: activeResult.extractionSource } : { selected: false });
-
-      if (activeResult) {
-        const resultIdentity = activeResult.identity?.identityKey || getJobIdentityFromUrl(activeResult.url || url);
-        const [latestTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        const latestUrl = latestTab?.url || '';
-        const latestIdentity = getJobIdentityFromUrl(latestUrl);
-        logExtraction('08 stale result guard checked', { expectedIdentity, resultIdentity, latestIdentity, scanVersion, currentVersion: extractionVersionRef.current });
-
-        if (scanVersion !== extractionVersionRef.current || expectedIdentity !== activeExtractionIdentityRef.current || latestIdentity !== expectedIdentity) {
-          logExtraction('stale result discarded', {
-            tabId: tab.id,
-            url,
-            latestUrl,
-            expectedIdentity,
-            resultIdentity,
-            latestIdentity,
-            navigationVersion: scanVersion,
-            currentVersion: extractionVersionRef.current
-          });
-          return;
-        }
-        if (!activeResult.isJobPage) {
-          resetExtractedJobState('not a job page', { url, jobIdentity: expectedIdentity, navigationVersion: scanVersion });
-          setLastAnalyzedUrl(url);
-          const rejectedState = activeResult.pageState || activeResult.classification || 'non_job';
-          setJobDetectionStatus(rejectedState.replaceAll('_', '-'));
-          setJobDetectionMeta({
-            classification: activeResult.classification,
-            confidence: activeResult.confidence,
-            reason: activeResult.reason,
-            contentHash: activeResult.contentHash,
-            extractionMethod: activeResult.extractionSource
-          });
+      const activeUrl = tab.url;
+      logExtraction('Current tab URL captured', { url: activeUrl, timestamp: new Date().toISOString() });
+      if (!isExtractableHttpUrl(activeUrl)) {
+        console.info('[JD-EXTRACTION][FRONTEND] Non-web extension tab skipped', {
+          url: activeUrl,
+          sessionRetained: Boolean(jobAnalysis)
+        });
+        if (jobAnalysis) {
+          setJobDetectionStatus('ready');
           setApiError(null);
-          logExtraction('page classified', {
-            tabId: tab.id,
-            url,
-            pageType: activeResult.classification || 'non_job',
-            confidence: activeResult.confidence,
-            reason: activeResult.reason,
-            signals: activeResult.signals
-          });
-          return;
+        } else {
+          setJobDetectionStatus('idle');
+          setApiError(null);
         }
-        if (!activeResult.isExtractionReady) {
-          resetExtractedJobState('job page extraction incomplete', { url, jobIdentity: expectedIdentity, navigationVersion: scanVersion });
-          setLastAnalyzedUrl(url);
-          setJobDetectionStatus('extraction-incomplete');
-          setJobDetectionMeta({
-            classification: 'job_listing',
-            confidence: activeResult.confidence,
-            reason: activeResult.reason,
-            contentHash: activeResult.contentHash,
-            extractionMethod: activeResult.extractionSource
-          });
-          logExtraction('job page confirmed but JD unavailable', { title: activeResult.title, company: activeResult.company, jobId: activeResult.jobId, reason: activeResult.reason });
-          return;
-        }
-        logExtraction('09 verified job classification accepted', { confidence: activeResult.confidence, reason: activeResult.reason, signals: activeResult.signals });
+        return;
+      }
 
-        const { title, company, text } = activeResult;
-        const cleanedTitle = title
-          .replace(/\(verified job\)/i, '')
-          .replace(/\(remote\)/i, '')
-          .replace(/\(hybrid\)/i, '')
-          .replace(/\(on-site\)/i, '')
-          .split('•')[0]
-          .split('-')[0]
-          .split('–')[0]
-          .trim();
-          
-        const cleanedCompany = company
-          .replace(/•.*$/g, '')
-          .split('-')[0]
-          .split('–')[0]
-          .trim();
-          
-        let cleanedText = text;
-        logExtraction('10 fields normalized', { title: cleanedTitle, company: cleanedCompany, descriptionLength: cleanedText.length });
-        const noiseDividers = [
-          "About the company",
-          "Trending employee content",
-          "Put your best foot forward",
-          "Fraud Awareness",
-          "E-Verify",
-          "US Only",
-          "Illinois: Click here",
-          "Equal Opportunity Employer",
-          "Fraud Privacy Policy",
-          "We value your privacy",
-          "Interested in working with us",
-          "Members who share that",
-          "Hire a resume writer",
-          "Get a resume review",
-          "Job search faster with Premium",
-          "Access company insights",
-          "Set alert for similar jobs"
-        ];
-        
-        for (const divider of noiseDividers) {
-          const matchIdx = cleanedText.toLowerCase().indexOf(divider.toLowerCase());
-          if (matchIdx !== -1 && matchIdx > 200) {
-            cleanedText = cleanedText.substring(0, matchIdx);
-          }
-        }
+      expectedIdentity = getJobIdentityFromUrl(activeUrl);
+      const previousIdentity = (
+        activeExtractionIdentityRef.current
+        || currentJobIdentity
+        || getJobIdentityFromUrl(lastAnalyzedUrl)
+      );
+      const identityChanged = Boolean(previousIdentity && previousIdentity !== expectedIdentity);
 
-        if (cleanedText.trim().length < 100 || /^0 notifications$/i.test(cleanedText.trim())) {
-          console.warn("[LetMeApply Extraction] Rejected invalid scrape:", {
-            url,
-            title: cleanedTitle,
-            company: cleanedCompany,
-            textLength: cleanedText.trim().length,
-            preview: cleanedText.trim()
-          });
-          setJobText('');
-          setCompanyName(cleanedCompany);
-          setJobTitle(cleanedTitle);
-          setLastAnalyzedUrl(url);
-          setJobDetectionStatus("not-job");
-          setApiError("Couldn't read the job description from this page yet. Scroll the job details panel once, then click Scan Again.");
-          logExtraction('extraction rejected', { tabId: tab.id, url, jobIdentity: expectedIdentity, navigationVersion: scanVersion, descriptionLength: cleanedText.trim().length });
-          return;
-        }
-        
-        cleanedText = cleanedText
-          .replace(/At \w+, we strive for an environment[\s\S]*$/gi, '')
-          .trim();
-
-        console.group(" [LetMeApply Extraction] Scraped Page Content");
-        console.log(" URL:", url);
-        console.log(" Title:", cleanedTitle);
-        console.log(" Company:", cleanedCompany);
-        console.log(" Text Length:", cleanedText.length, "characters");
-        console.log(" Scraped Text Preview:\n", cleanedText.substring(0, 600) + (cleanedText.length > 600 ? "\n[...truncated for console]" : ""));
-        console.groupEnd();
-
-        if (url.includes('google.com/about/careers/applications/jobs/results/')) {
-          cleanedText = cleanedText
-            .replace(/Google is proud to be an equal opportunity workplace[\s\S]*$/i, '')
-            .replace(/See also[\s\S]*$/i, '')
-            .replace(/Related information[\s\S]*$/i, '')
-            .replace(/Privacy\s+Terms[\s\S]*$/i, '')
-            .trim();
-        }
-
-        setJobText(cleanedText);
-        setCompanyName(cleanedCompany);
-        setJobTitle(cleanedTitle);
-        setLastAnalyzedUrl(url);
-        setCurrentJobIdentity(expectedIdentity);
-        setJobDetectionStatus("ready");
-        logExtraction('11 extracted job committed to UI state', { title: cleanedTitle, company: cleanedCompany, descriptionLength: cleanedText.length, contentHash: activeResult.contentHash });
-        setJobDetectionMeta({
-          classification: 'job_listing',
-          confidence: activeResult.confidence,
-          reason: activeResult.reason,
-          contentHash: activeResult.contentHash,
-          extractionMethod: activeResult.extractionSource,
-          extractedAt: activeResult.extractedAt
-        });
-        logExtraction('extraction succeeded', {
-          tabId: tab.id,
-          url,
+      if (extractionInFlightRef.current && !identityChanged) {
+        logExtraction('Duplicate request ignored', {
+          reason: 'same_job_request_in_flight',
           jobIdentity: expectedIdentity,
-          navigationVersion: scanVersion,
-          descriptionLength: cleanedText.length,
-          source: activeResult.extractionSource || 'semantic-dom',
-          confidence: activeResult.confidence,
-          contentHash: activeResult.contentHash
+          forceRescan
+        });
+        return;
+      }
+
+      if (!identityChanged && jobAnalysis && !forceRescan) {
+        logExtraction('Existing extraction session retained', {
+          jobIdentity: expectedIdentity,
+          url: activeUrl
+        });
+        setJobDetectionStatus('ready');
+        setApiError(null);
+        return;
+      }
+
+      if (identityChanged) {
+        extractionAbortControllerRef.current?.abort();
+        resetExtractedJobState('active job changed', {
+          from: previousIdentity,
+          to: expectedIdentity
+        });
+        if (chrome.storage.session) {
+          chrome.storage.session.remove('jobExtractionSession');
+        }
+        logExtraction('Previous extraction session ended', {
+          previousIdentity,
+          nextIdentity: expectedIdentity
         });
       }
-    } catch (error) {
-      console.warn("Auto-scan page error:", error.message);
-      const inaccessible = /Cannot access|chrome:\/\/|edge:\/\/|permission|The extensions gallery cannot be scripted/i.test(error.message || '');
+
+      extractionInFlightRef.current = true;
+      setApiError(null);
+      setJobDetectionStatus("checking");
+      setLoadingType("extraction");
+      setLoadingProgress(8);
+      setLoadingMessage("Capturing current job URL...");
+
+      const scanVersion = extractionVersionRef.current + 1;
+      extractionVersionRef.current = scanVersion;
+      activeExtractionIdentityRef.current = expectedIdentity;
+      setCurrentJobIdentity(expectedIdentity);
+      setLastAnalyzedUrl(activeUrl);
+
+      const token = session?.access_token || localStorage.getItem('access_token');
+      requestId = (crypto?.randomUUID && crypto.randomUUID()) || `req-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+      activeRequestIdRef.current = requestId;
+      const abortController = new AbortController();
+      extractionAbortControllerRef.current = abortController;
+      const endpoint = `${apiUrl}/api/v1/jobs/extract-url`;
+      setLoadingProgress(20);
+      setLoadingMessage("Backend processing job page...");
+      logExtraction('Extraction request sent', { requestId, url: activeUrl, endpoint });
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          url: activeUrl,
+          request_id: requestId
+        }),
+        signal: abortController.signal
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        const failure = body?.detail?.error || body?.error || {};
+        console.error("[JD-EXTRACTION][FRONTEND] Extraction failed", {
+          requestId, status: response.status,
+          message: failure.message || "Backend extraction failed",
+          errorCode: failure.code || "JD_EXTRACTION_FAILED"
+        });
+        throw new Error(failure.message || `Backend extraction error (${response.status})`);
+      }
+
+      const data = validateJDResponse(await response.json());
+      if (
+        activeRequestIdRef.current !== requestId
+        || activeExtractionIdentityRef.current !== expectedIdentity
+      ) {
+        logExtraction('Stale extraction response discarded', {
+          requestId,
+          responseIdentity: expectedIdentity,
+          activeIdentity: activeExtractionIdentityRef.current
+        });
+        return;
+      }
+      const pageType = data.page_type;
+      const confidence = data.classification_confidence || 0;
+      logExtraction('Backend response received', {
+        requestId: data.request_id, status: response.status, success: data.success,
+        pageType, classificationConfidence: confidence,
+        hasExtractedJob: Boolean(data.extracted_job),
+        needsManualReview: Boolean(data.needs_manual_review)
+      });
+      const canonicalSkills = collectJobSkills(data.extracted_job || {});
+      const compatibilitySkills = collectJobSkills(data.job || {});
+      logExtraction('Backend extraction field counts', {
+        requestId: data.request_id,
+        canonicalSkillsCount: canonicalSkills.explicit.length,
+        canonicalSuggestedSkillsCount: canonicalSkills.suggested.length,
+        compatibilitySkillsCount: compatibilitySkills.explicit.length,
+        responsibilitiesCount: data.extracted_job?.responsibilities?.length || 0,
+        requirementsCount: data.extracted_job?.requirements?.length || 0,
+        preferredQualificationsCount: data.extracted_job?.preferred_qualifications?.length || 0,
+        benefitsCount: data.extracted_job?.benefits?.length || 0
+      });
+      logExtraction('Explicit skills received', {
+        requestId: data.request_id,
+        skills: canonicalSkills.explicit
+      });
+
+      if (!data.success) {
+        const code = data.error?.code || "JD_EXTRACTION_FAILED";
+        setJobDetectionStatus(code === "PAGE_BLOCKED" ? "blocked" : "extraction-failed");
+        throw new Error(data.error?.message || "Job extraction failed.");
+      }
+
+      if (data.needs_manual_review) {
+        console.warn("[JD-EXTRACTION][FRONTEND] Manual review required", {
+          requestId: data.request_id, reviewIssues: data.review_issues || []
+        });
+        setJobDetectionStatus("manual-review");
+        setJobDetectionMeta({ classification: pageType, confidence, reason: (data.review_issues || []).join("; "), extractionMethod: "agentic_url" });
+        setApiError("The page needs manual review before tailoring.");
+      } else if (pageType === "job_detail" && data.extracted_job) {
+        const job = data.job || data.extracted_job;
+        const { title, company, description } = job;
+        setJobText(description || '');
+        setJobTitle(title || '');
+        setCompanyName(company || '');
+        setJobAnalysis(job);
+        const displayedSkills = collectJobSkills(job);
+        logExtraction('Job state prepared for rendering', {
+          requestId: data.request_id,
+          explicitSkillsCount: displayedSkills.explicit.length,
+          suggestedSkillsCount: displayedSkills.suggested.length,
+          explicitSkills: displayedSkills.explicit
+        });
+        setJobDetectionStatus('ready');
+        setJobDetectionMeta({
+          classification: pageType, confidence,
+          reason: (data.classification_reasons || []).join("; "),
+          extractionMethod: 'agentic_url'
+        });
+        setApiError(null);
+        logExtraction('Extraction success', { requestId: data.request_id, titlePresent: Boolean(title), companyPresent: Boolean(company) });
+      } else {
+        const statusName = pageType === "job_list" ? "job-list" : "non-job";
+        setJobDetectionStatus(statusName);
+        setJobDetectionMeta({
+          classification: pageType || 'non_job', confidence,
+          reason: (data.classification_reasons || []).join("; "),
+          extractionMethod: 'agentic_url'
+        });
+        setApiError(null);
+        console.warn(`[JD-EXTRACTION][FRONTEND] ${pageType === "job_list" ? "Job-list page" : "Non-job page"} detected`, {
+          requestId: data.request_id, url: activeUrl, confidence
+        });
+      }
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        logExtraction('Previous job extraction request cancelled', {
+          requestId,
+          jobIdentity: expectedIdentity
+        });
+        return;
+      }
+      console.error('[JD-EXTRACTION][FRONTEND] Extraction failed', {
+        requestId, message: err.message, errorCode: "JD_EXTRACTION_FAILED"
+      });
+      const inaccessible = /Cannot access|chrome:\/\/|edge:\/\/|permission|The extensions gallery cannot be scripted/i.test(err.message || '');
       setJobDetectionStatus(inaccessible ? 'page-inaccessible' : 'extraction-failed');
       setApiError(inaccessible
         ? 'This browser page cannot be read by extensions. Open an individual job listing in a regular tab.'
-        : 'Page extraction failed. Retry the scan or paste the job description manually.');
+        : (err.message || 'Page extraction failed. Retry the scan.'));
+    } finally {
+      if (!requestId || activeRequestIdRef.current === requestId) {
+        extractionInFlightRef.current = false;
+        extractionAbortControllerRef.current = null;
+        setLoadingProgress(0);
+      }
     }
   };
 
   // Perform Job Description Extraction (Step 1)
   const handleExtractJob = async () => {
+    if (jobAnalysis) return;
+    if (isExtension) {
+      await handleScanPage(true);
+      if (!jobAnalysis) return;
+    }
+    if (!isExtension) {
+      setApiError("Open the Chrome extension on an individual job page to extract its complete URL.");
+      setJobDetectionStatus("idle");
+      return;
+    }
     if (!ensureExtractionProfileReady()) return;
 
     if (!jobText) {
@@ -1298,7 +1003,15 @@ export function AppProvider({ children }) {
       let analyzedJob;
       try {
         const requestId = (crypto?.randomUUID && crypto.randomUUID()) || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        logExtraction('13 sending backend extraction request', { requestId, endpoint: '/api/v1/jobs/extract', descriptionLength: jobText.length, contentHash: jobDetectionMeta?.contentHash });
+        logExtraction('04 backend request payload', {
+          requestId,
+          url: lastAnalyzedUrl,
+          jd_text_length: jobText.length,
+          page_title: jobTitle,
+          page_company: companyName,
+          classification: jobDetectionMeta?.classification || "manual"
+        });
+
         const jobRes = await fetch(`${apiUrl}/api/v1/jobs/extract`, {
           method: "POST",
           headers: {
@@ -1334,12 +1047,20 @@ export function AppProvider({ children }) {
           throw new Error(errData?.detail?.message || errData?.detail || "V1 extract route returned error or not found");
         }
         const jobPayload = await jobRes.json();
-        logExtraction('14 backend extraction response parsed', { requestId, status: jobRes.status, hasData: Boolean(jobPayload?.data || jobPayload), usage: jobPayload?.usage });
+        analyzedJob = jobPayload?.analysis || jobPayload?.data || jobPayload;
+        const respDetails = analyzedJob?.analysis || analyzedJob?.normalized_content || analyzedJob;
+        logExtraction('05 backend response payload', {
+          requestId,
+          status: jobRes.status,
+          title: respDetails?.title || respDetails?.job_title,
+          company: respDetails?.company || respDetails?.company_name,
+          location: respDetails?.location,
+          employmentType: respDetails?.job_type
+        });
         if (jobPayload?.usage) {
           setUsage(prev => ({ ...(prev || {}), jd_extraction: jobPayload.usage }));
           await fetchSubscription();
         }
-        analyzedJob = jobPayload?.data || jobPayload;
       } catch (err) {
         if (err.skipLegacyFallback) throw err;
         const jobResFallback = await fetch(`${apiUrl}/api/analyze-job`, {
@@ -1358,21 +1079,23 @@ export function AppProvider({ children }) {
       }
 
       const isValidText = (str) => typeof str === 'string' && str.trim() !== '' && str.trim().toLowerCase() !== 'not available' && str.trim().toLowerCase() !== 'n/a' && str.trim().toLowerCase() !== 'unspecified';
-      const details = analyzedJob?.normalized_content || analyzedJob || {};
-      const finalTitle = isValidText(analyzedJob?.job_title) ? analyzedJob.job_title : (isValidText(details.title) ? details.title : (isValidText(analyzedJob?.title) ? analyzedJob.title : (isValidText(jobTitle) ? jobTitle : 'Software Engineer')));
-      const finalCompany = isValidText(analyzedJob?.company_name) ? analyzedJob.company_name : (isValidText(details.company) ? details.company : (isValidText(analyzedJob?.company) ? analyzedJob.company : (isValidText(companyName) ? companyName : 'Target Company')));
+      const INVALID_TITLE_NOISE = /^(?:people you can reach out to|about the job|about the company|job description|responsibilities|qualifications|requirements|minimum qualifications|preferred qualifications|similar jobs|recommended jobs|explore options|meet the hiring team|your profile and resume|privacy policy|terms of use|apply|easy apply|save|share|follow|show more|see more|search results|jobs for you|0 notifications|skip navigation|sign in|log in|target company)$/i;
 
-      console.group(" [LetMeApply Extraction] AI Job Analysis Output");
-      console.log(" Title:", finalTitle);
-      console.log(" Company:", finalCompany);
-      console.log(" Location:", details.location || analyzedJob.location);
-      console.log(" Salary:", details.salary || analyzedJob.salary);
-      console.log(" Job Type:", details.job_type || analyzedJob.job_type);
-      console.log(" Key Highlights:", details.highlights || analyzedJob.highlights);
-      console.log(" Required Skills:", details.required_skills || analyzedJob.required_skills);
-      console.log(" ATS Keywords:", analyzedJob.ats_keywords || details.ats_keywords || details.keywords);
-      console.log(" Full Structured Output Object:", analyzedJob);
-      console.groupEnd();
+      const isValidTitleString = (str) => isValidText(str) && !INVALID_TITLE_NOISE.test(str.trim()) && str.trim().length >= 2 && str.trim().length <= 120;
+      
+      const details = analyzedJob?.analysis || analyzedJob?.normalized_content || analyzedJob || {};
+      const rawTitle = [details?.title, details?.job_title, analyzedJob?.job_title, analyzedJob?.title, jobTitle].find(isValidTitleString) || '';
+      const rawCompany = [details?.company, details?.company_name, analyzedJob?.company_name, analyzedJob?.company, companyName].find((str) => isValidText(str) && !INVALID_TITLE_NOISE.test(str.trim()) && str.trim().toLowerCase() !== rawTitle.toLowerCase()) || '';
+
+      const finalTitle = rawTitle;
+      const finalCompany = rawCompany;
+
+      logExtraction('06 frontend state immediately after API response', {
+        finalTitle,
+        finalCompany,
+        stateJobTitle: finalTitle,
+        stateCompanyName: finalCompany
+      });
 
       if (extractIdentity !== activeExtractionIdentityRef.current) {
         clearInterval(progressInterval);
@@ -1452,8 +1175,27 @@ export function AppProvider({ children }) {
         throw new Error("Resume parse error: " + (await parseRes.json()).detail);
       }
       const resumeRecord = await parseRes.json();
+      const optimisticRecord = {
+        ...resumeRecord,
+        is_active: true,
+        parsing_status: resumeRecord.parsing_status || resumeRecord.parsed_content?.parse_status || 'pending'
+      };
+      setResumesList((previous) => [
+        optimisticRecord,
+        ...previous
+          .filter((resume) => resume.id !== optimisticRecord.id)
+          .map((resume) => ({ ...resume, is_active: false }))
+      ]);
+      const optimisticResume = normalizeResumeRecord(optimisticRecord);
+      persistParsedResume(optimisticResume);
+      console.info('[RESUME][FRONTEND] New resume uploaded and activated', {
+        resumeId: optimisticRecord.id,
+        fileName: optimisticRecord.file_name,
+        parsingStatus: optimisticRecord.parsing_status
+      });
+
       const refreshedResumes = await fetchResumesList();
-      const backendActiveResume = refreshedResumes?.find((resume) => resume.id === resumeRecord.id) || resumeRecord;
+      const backendActiveResume = refreshedResumes?.find((resume) => resume.id === resumeRecord.id) || optimisticRecord;
       const currentResume = normalizeResumeRecord(backendActiveResume);
       persistParsedResume(currentResume);
 
@@ -1518,7 +1260,16 @@ export function AppProvider({ children }) {
         })
       });
 
-      if (!compareRes.ok) return null;
+      if (!compareRes.ok) {
+        const errorBody = await compareRes.json().catch(() => ({}));
+        const message = errorBody?.detail || `Comparison failed (${compareRes.status})`;
+        console.error("[JD-EXTRACTION][FRONTEND] Resume comparison failed", {
+          status: compareRes.status,
+          message
+        });
+        setApiError(typeof message === "string" ? message : "Resume comparison failed.");
+        return null;
+      }
       const compResult = await compareRes.json();
       setComparison(compResult);
       return compResult;
@@ -1814,8 +1565,8 @@ export function AppProvider({ children }) {
         const tailoredAtsScore = strictScore(exactTailoredScore);
         const baselineMatchScore = strictScore(comparison?.ats_score_before ?? comparison?.match_score ?? comparison?.score);
         const appData = {
-          company_name: companyName || "Target Company",
-          job_title: jobTitle || "Software Engineer",
+          company_name: companyName || "",
+          job_title: jobTitle || "",
           location: jobAnalysis?.location || "Remote",
           job_url: lastAnalyzedUrl || "",
           resume_version: "v1 (Tailored)",

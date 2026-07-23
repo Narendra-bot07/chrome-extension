@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { collectJobSkills, formatSalary } from '../services/jdExtractionFlow';
 import { 
   Heart,
   FilePenLine,
@@ -198,14 +199,36 @@ function JobReviewView({
   // Normalize data from normalized_content if nested (from API V1 or DB)
   const details = jobAnalysis?.normalized_content || jobAnalysis || {};
   
-  const title = getValidString(jobAnalysis?.job_title, details?.title, jobAnalysis?.title, jobTitle, 'Software Engineer');
-  const company = getValidString(jobAnalysis?.company_name, details?.company, jobAnalysis?.company, companyName, 'Target Company');
+  const INVALID_TITLE_NOISE = /^(?:people you can reach out to|about the job|about the company|job description|responsibilities|qualifications|requirements|minimum qualifications|preferred qualifications|similar jobs|recommended jobs|explore options|meet the hiring team|your profile and resume|privacy policy|terms of use|apply|easy apply|save|share|follow|show more|see more|search results|jobs for you|0 notifications|skip navigation|sign in|log in|target company)$/i;
+
+  const title = [jobAnalysis?.job_title, details?.title, jobAnalysis?.title, jobTitle]
+    .find((str) => str && typeof str === 'string' && !isNotAvailable(str) && !INVALID_TITLE_NOISE.test(str.trim())) || null;
+
+  const company = [jobAnalysis?.company_name, details?.company, jobAnalysis?.company, companyName]
+    .find((str) => str && typeof str === 'string' && !isNotAvailable(str) && !INVALID_TITLE_NOISE.test(str.trim()) && str.trim().toLowerCase() !== (title || '').toLowerCase()) || null;
+
   const location = !isNotAvailable(details.location) ? details.location : (!isNotAvailable(jobAnalysis?.location) ? jobAnalysis.location : null);
-  const salary = !isNotAvailable(details.salary) ? details.salary : (!isNotAvailable(jobAnalysis?.salary) ? jobAnalysis.salary : null);
+  const salaryValue = !isNotAvailable(details.salary) ? details.salary : (!isNotAvailable(jobAnalysis?.salary) ? jobAnalysis.salary : null);
+  const salary = formatSalary(salaryValue);
   const jobType = !isNotAvailable(details.job_type) ? details.job_type : (!isNotAvailable(jobAnalysis?.job_type) ? jobAnalysis.job_type : (!isNotAvailable(jobAnalysis?.keywords) && jobAnalysis.keywords.includes('Full-time') ? 'Full-time' : null));
   const workMode = !isNotAvailable(details.work_mode) ? details.work_mode : (!isNotAvailable(jobAnalysis?.work_mode) ? jobAnalysis.work_mode : null);
   const experienceRequired = !isNotAvailable(details.experience_required) ? details.experience_required : (!isNotAvailable(jobAnalysis?.experience_required) ? jobAnalysis.experience_required : null);
   const seniority = !isNotAvailable(details.seniority) ? details.seniority : (!isNotAvailable(jobAnalysis?.seniority) ? jobAnalysis.seniority : null);
+
+  useEffect(() => {
+    console.log('[ApplyFlow:Trace 07] Props passed into JobReviewView', {
+      jobAnalysis,
+      jobTitle,
+      companyName
+    });
+    console.log('[ApplyFlow:Trace 08] Final component render values', {
+      title,
+      company,
+      location,
+      jobType,
+      workMode
+    });
+  }, [jobAnalysis, jobTitle, companyName, title, company, location, jobType, workMode]);
 
   const highlightsList = !isNotAvailable(details.highlights) 
     ? (Array.isArray(details.highlights) ? details.highlights : [details.highlights])
@@ -219,14 +242,31 @@ function JobReviewView({
     ? (Array.isArray(details.qualifications) ? details.qualifications : [details.qualifications])
     : (!isNotAvailable(jobAnalysis?.qualifications) ? (Array.isArray(jobAnalysis.qualifications) ? jobAnalysis.qualifications : [jobAnalysis.qualifications]) : []);
 
-  const skillsCategories = details.skills_categories || jobAnalysis?.skills_categories || {};
-  const requiredSkills = !isNotAvailable(details.required_skills) ? (Array.isArray(details.required_skills) ? details.required_skills : [details.required_skills]) : (!isNotAvailable(jobAnalysis?.required_skills) ? (Array.isArray(jobAnalysis.required_skills) ? jobAnalysis.required_skills : [jobAnalysis.required_skills]) : []);
-  const preferredSkills = !isNotAvailable(details.preferred_skills) ? (Array.isArray(details.preferred_skills) ? details.preferred_skills : [details.preferred_skills]) : (!isNotAvailable(jobAnalysis?.preferred_skills) ? (Array.isArray(jobAnalysis.preferred_skills) ? jobAnalysis.preferred_skills : [jobAnalysis.preferred_skills]) : []);
+  const normalizedSkills = collectJobSkills(details);
+  const requiredSkills = normalizedSkills.explicit;
+  const preferredSkills = normalizedSkills.suggested;
+  const providedCategories = details.skills_categories || jobAnalysis?.skills_categories || {};
+  const skillsCategories = Object.keys(providedCategories).length > 0
+    ? providedCategories
+    : {
+        ...(requiredSkills.length > 0 ? { Explicit: requiredSkills } : {}),
+        ...(preferredSkills.length > 0 ? { Suggested: preferredSkills } : {})
+      };
 
   const allSkills = [
     ...requiredSkills,
     ...preferredSkills
   ].filter(skill => skill && skill.toLowerCase() !== 'not available');
+
+  useEffect(() => {
+    console.info('[JD-EXTRACTION][FRONTEND] Job review skills prepared', {
+      explicitSkillsCount: requiredSkills.length,
+      suggestedSkillsCount: preferredSkills.length,
+      categoryCount: Object.keys(skillsCategories).length,
+      explicitSkills: requiredSkills,
+      suggestedSkills: preferredSkills
+    });
+  }, [jobAnalysis]);
 
   const atsKeywordsList = !isNotAvailable(jobAnalysis?.ats_keywords) ? (Array.isArray(jobAnalysis.ats_keywords) ? jobAnalysis.ats_keywords : [jobAnalysis.ats_keywords]) : (!isNotAvailable(details.ats_keywords) ? (Array.isArray(details.ats_keywords) ? details.ats_keywords : [details.ats_keywords]) : []);
 

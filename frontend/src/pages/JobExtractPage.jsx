@@ -26,56 +26,15 @@ function JobExtractPage() {
     jobDetectionStatus,
     loading, isExtension,
     subscription,
-    apiError
+    apiError, setApiError
   } = useApp();
 
-  // Auto-run scanning on side panel mount and listen to active tab updates/switches
+  // Opening the extraction screen validates the active tab with one fresh scan.
+  // The context suppresses a duplicate when the global tab listener already
+  // started the same job request.
   useEffect(() => {
-    if (isExtension && chrome.tabs) {
-      const timer = setTimeout(() => {
-        handleScanPage();
-      }, 150);
-
-      const handleTabUpdate = (tabId, changeInfo, tab) => {
-        if (changeInfo.status === 'complete') {
-          chrome.tabs.query({ active: true, currentWindow: true }, ([activeTab]) => {
-            if (activeTab && activeTab.id === tabId) {
-              handleScanPage();
-            }
-          });
-        }
-      };
-
-      const handleTabActivated = (activeInfo) => {
-        handleScanPage();
-      };
-
-      const pollActiveTabUrl = setInterval(() => {
-        chrome.tabs.query({ active: true, currentWindow: true }, ([activeTab]) => {
-          const nextUrl = activeTab?.url || '';
-          if (!nextUrl || nextUrl === lastSeenTabUrlRef.current) return;
-          const previousUrl = lastSeenTabUrlRef.current;
-          lastSeenTabUrlRef.current = nextUrl;
-          console.log('[ApplyFlow:Extraction] navigation detected', { previousUrl, nextUrl });
-          if (scanDebounceRef.current) clearTimeout(scanDebounceRef.current);
-          scanDebounceRef.current = setTimeout(() => {
-            handleScanPage();
-          }, 450);
-        });
-      }, 700);
-
-      chrome.tabs.onUpdated.addListener(handleTabUpdate);
-      chrome.tabs.onActivated.addListener(handleTabActivated);
-
-      return () => {
-        clearInterval(pollActiveTabUrl);
-        if (scanDebounceRef.current) clearTimeout(scanDebounceRef.current);
-        chrome.tabs.onUpdated.removeListener(handleTabUpdate);
-        chrome.tabs.onActivated.removeListener(handleTabActivated);
-      };
-    } else {
-      handleScanPage();
-    }
+    if (isExtension) handleScanPage(true);
+    else if (!jobText) handleScanPage();
   }, []);
 
   // Auto-run job extraction as soon as jobText is scraped or pasted
@@ -95,19 +54,6 @@ function JobExtractPage() {
   }, [jobAnalysis, apiError, jobText]);
 
   useEffect(() => {
-    const recoveryStates = new Set([
-      'non-job', 'non-job-page', 'uncertain', 'search-results', 'login-required',
-      'captcha', 'page-inaccessible', 'extraction-failed', 'extraction-incomplete'
-    ]);
-    if (recoveryStates.has(jobDetectionStatus)) {
-      navigate('/no-job-detected', { replace: true });
-    }
-  }, [jobDetectionStatus, navigate]);
-
-  const backendMatchScore = comparison?.ats_score_before ?? comparison?.ats_score ?? comparison?.match_score ?? comparison?.score ?? null;
-  const hasBackendMatchScore = backendMatchScore !== null && backendMatchScore !== undefined && Number.isFinite(Number(backendMatchScore));
-
-  useEffect(() => {
     if (!jobAnalysis || !parsedResume) return;
 
     const matchKey = JSON.stringify({
@@ -120,7 +66,15 @@ function JobExtractPage() {
     if (matchRequestKeyRef.current === matchKey) return;
     matchRequestKeyRef.current = matchKey;
     setComparison?.(null);
-    handleCompareActiveResumeToJob?.();
+    console.info('[JD-EXTRACTION][FRONTEND] Starting background resume comparison', {
+      matchKey
+    });
+    Promise.resolve(handleCompareActiveResumeToJob?.()).then((result) => {
+      console.info('[JD-EXTRACTION][FRONTEND] Background resume comparison finished', {
+        matchKey,
+        hasResult: Boolean(result)
+      });
+    });
   }, [jobAnalysis, parsedResume]);
 
   const isAutoExtractionPending =
@@ -129,9 +83,10 @@ function JobExtractPage() {
     !apiError &&
     (jobDetectionStatus === 'checking' || autoExtractionStarted || awaitingAutoReview);
 
-  const isMatchScorePending = Boolean(jobAnalysis && parsedResume && !hasBackendMatchScore && !apiError);
-
-  if (jobAnalysis && (!parsedResume || hasBackendMatchScore)) {
+  // Extraction success must never be hidden behind the optional ATS comparison.
+  // JobReviewView already represents an unavailable score as a calculating state,
+  // while the comparison continues once in the background.
+  if (jobAnalysis) {
     return (
       <JobReviewView
         jobAnalysis={jobAnalysis}
@@ -146,11 +101,11 @@ function JobExtractPage() {
     );
   }
 
-  if ((loadingProgress > 0 && loadingProgress < 100) || isAutoExtractionPending || isMatchScorePending) {
-    const progress = isMatchScorePending ? 92 : (loadingProgress > 0 ? loadingProgress : (jobDetectionStatus === 'checking' ? 12 : 24));
-    const message = isMatchScorePending ? 'Comparing active resume with extracted JD...' : (loadingMessage || (jobDetectionStatus === 'checking'
+  if ((loadingProgress > 0 && loadingProgress < 100) || isAutoExtractionPending) {
+    const progress = loadingProgress > 0 ? loadingProgress : (jobDetectionStatus === 'checking' ? 12 : 24);
+    const message = loadingMessage || (jobDetectionStatus === 'checking'
       ? 'Scanning current job page...'
-      : 'Preparing job details extraction...'));
+      : 'Preparing job details extraction...');
 
     return (
       <ChecklistLoader
@@ -187,6 +142,8 @@ function JobExtractPage() {
       loading={loading}
       isExtension={isExtension}
       subscription={subscription}
+      apiError={apiError}
+      setApiError={setApiError}
     />
   );
 }

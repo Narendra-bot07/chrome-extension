@@ -69,10 +69,88 @@ def normalize_job_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     else:
         job = {**payload}
 
-    if payload.get("job_title") and not job.get("title"):
-        job["title"] = payload["job_title"]
-    if payload.get("company_name") and not job.get("company"):
-        job["company"] = payload["company_name"]
+    # The autonomous JD engine uses a richer schema than the legacy tailoring
+    # model. Normalize only at this direct integration boundary.
+    aliases = {
+        "job_title": "title",
+        "company_name": "company",
+        "employment_type": "job_type",
+        "workplace_type": "work_mode",
+        "requirements": "qualifications",
+        "skills": "required_skills",
+        "suggested_skills": "preferred_skills",
+    }
+    for source, target in aliases.items():
+        value = payload.get(source)
+        if value not in (None, "", []) and job.get(target) in (None, "", []):
+            job[target] = value
+
+    salary = job.get("salary")
+    if isinstance(salary, dict):
+        raw = salary.get("raw")
+        if raw:
+            job["salary"] = str(raw)
+        else:
+            minimum = salary.get("minimum", salary.get("min"))
+            maximum = salary.get("maximum", salary.get("max"))
+            currency = salary.get("currency") or ""
+            period = salary.get("period") or ""
+            if minimum is not None and maximum is not None:
+                amount = f"{minimum:g} - {maximum:g}" if all(
+                    isinstance(value, (int, float)) for value in (minimum, maximum)
+                ) else f"{minimum} - {maximum}"
+            elif minimum is not None:
+                amount = str(minimum)
+            elif maximum is not None:
+                amount = str(maximum)
+            else:
+                amount = ""
+            job["salary"] = " ".join(
+                part for part in (currency, amount, period) if part
+            )
+    elif salary is None:
+        job["salary"] = ""
+
+    # ExtractedJob intentionally represents absent facts as null. The existing
+    # tailoring model predates that contract and requires concrete strings.
+    legacy_string_fields = (
+        "reason",
+        "title",
+        "company",
+        "location",
+        "salary",
+        "job_type",
+        "work_mode",
+        "experience_required",
+        "seniority",
+    )
+    for field in legacy_string_fields:
+        if job.get(field) is None:
+            job[field] = ""
+
+    legacy_list_fields = (
+        "highlights",
+        "qualifications",
+        "required_skills",
+        "preferred_skills",
+        "responsibilities",
+        "keywords",
+        "ats_keywords",
+    )
+    for field in legacy_list_fields:
+        if not isinstance(job.get(field), list):
+            job[field] = []
+
+    # Keep explicit and suggested skills separate while supplying the legacy
+    # category shape expected by tailoring and ATS scoring.
+    required_skills = job.get("required_skills")
+    preferred_skills = job.get("preferred_skills")
+    if not isinstance(job.get("skills_categories"), dict):
+        job["skills_categories"] = {
+            "Required": required_skills,
+            "Suggested": preferred_skills,
+        }
+
     return job
 
 @router.post("/parse-resume", response_model=ResumeStructure)

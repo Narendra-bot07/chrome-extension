@@ -7,15 +7,24 @@ function NoJobDetectedPage() {
   const { handleScanPage, jobDetectionStatus, setJobDetectionStatus, apiError } = useApp();
 
   const states = {
-    uncertain: ['Uncertain Job Page', 'This page may contain a job description, but there was not enough evidence to verify it safely. Review the page, retry, or paste the JD manually.'],
-    'search-results': ['Job Search Results Detected', 'Open one individual job listing from these results, then try again.'],
+    'job-list': ['Job Listing Page Detected', 'This is a job listing page. Open a specific job to extract its description.'],
+    'job-search': ['Job Search Results Detected', 'This is a job search results page. Open a specific job posting to extract details.'],
+    'career-home': ['Company Careers Homepage', 'Open an individual job vacancy to continue.'],
+    'company-page': ['Company Page Detected', 'Open an individual job posting on this company site to extract details.'],
+    profile: ['Profile Page Detected', 'This is a profile page, not a job description. Open an individual job details page and try again.'],
+    feed: ['Social Feed Page Detected', 'This is a social feed. Open a specific job posting to extract details.'],
+    article: ['Article Page Detected', 'This is an article or blog post. Open an active job vacancy to continue.'],
+    login: ['Login Required', 'Sign in to the job site and open the individual listing before retrying.'],
     'login-required': ['Login Required', 'Sign in to the job site and open the individual listing before retrying.'],
     captcha: ['Security Check Detected', 'Complete the website security check, then retry extraction.'],
+    blocked: ['Access Blocked', 'This website blocked automated access or requires login verification. Enter job details manually.'],
     'page-inaccessible': ['Page Inaccessible', apiError || 'This browser page cannot be read by the extension.'],
     'extraction-failed': ['Extraction Failed', apiError || 'The page could not be extracted. Retry or paste the JD manually.'],
-    'extraction-incomplete': ['Job Details Still Loading', 'A job was selected, but its title or description was not available after bounded recovery attempts. Wait for the detail panel to finish loading, then retry.'],
-    'non-job': ['Non-job Page Detected', 'This page does not appear to contain a job description. Open an individual job listing and try again.'],
-    'non-job-page': ['Non-job Page Detected', 'This page does not appear to contain a job description. Open an individual job listing and try again.']
+    'extraction-incomplete': ['Job Details Still Loading', 'A job was selected, but its description was not available after retries. Wait for the detail panel to finish loading, then retry.'],
+    loading: ['Job Details Still Loading', 'Wait for the detail panel to finish loading, then try scanning again.'],
+    uncertain: ['Uncertain Job Page', 'This page does not appear to contain a verified job description. Open an individual job details page and try again.'],
+    'non-job': ['Non-Job Page Detected', 'This page does not appear to contain a job description. Open an individual job details page and try again.'],
+    'non-job-page': ['Non-Job Page Detected', 'This page does not appear to contain a job description. Open an individual job details page and try again.']
   };
   const [heading, message] = states[jobDetectionStatus] || states['non-job'];
 
@@ -87,12 +96,13 @@ function NoJobDetectedPage() {
           
           <button
             onClick={handleScanAgain}
-            className="sm:w-36 py-3 px-5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl transition-all duration-150 flex items-center justify-center gap-2 text-sm"
+            disabled={jobDetectionStatus === 'checking'}
+            className={`sm:w-36 py-3 px-5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl transition-all duration-150 flex items-center justify-center gap-2 text-sm ${jobDetectionStatus === 'checking' ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className={`w-4 h-4 ${jobDetectionStatus === 'checking' ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-            <span>Scan Again</span>
+            <span>{jobDetectionStatus === 'checking' ? 'Scanning...' : 'Scan Again'}</span>
           </button>
         </div>
 

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test:extraction": "node --test src/utils/jobExtractionEngine.test.js src/browser-intelligence/core/orchestrator.test.js src/browser-intelligence/astra.test.js",
+    "test:extraction": "node --test src/services/jdExtractionFlow.test.js",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },

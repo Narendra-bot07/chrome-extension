@@ -20,13 +20,15 @@ from app.schemas import (
 )
 
 def get_llm(api_key: Optional[str] = None, temperature: float = 0.0) -> ChatGroq:
-    key = api_key or os.environ.get("GROQ_API_KEY")
+    from core.config import settings
+    key = api_key or settings.GROQ_API_KEY or os.environ.get("GROQ_API_KEY")
     if not key:
         raise ValueError("Groq API Key is missing. Please provide it in the request header or environment variables.")
     return ChatGroq(
         temperature=temperature,
         groq_api_key=key,
-        model_name="llama-3.3-70b-versatile"
+        model_name="llama-3.3-70b-versatile",
+        max_retries=5
     )
 
 def parse_resume(raw_text: str, api_key: Optional[str] = None) -> ResumeStructure:
@@ -159,6 +161,8 @@ RULES
 =========================================================
 - Build the structured job object using ONLY information that actually exists in the provided text.
 - Never invent or hallucinate information.
+- Never use section headings (such as "People you can reach out to", "About the job", "Similar jobs", "Job description", "Responsibilities", "Qualifications") as the job title.
+- Never substitute company name into title or title into company name.
 - Never fabricate missing fields. If a field is not stated, leave it empty/null/default.
 - Extract required_skills from programming languages, frameworks, platforms, tools, cloud, AI/ML, security, infrastructure, and domain skills mentioned inside qualifications or responsibilities.
 - Extract experience_required from phrases like "2 years of experience".
@@ -333,48 +337,57 @@ def calculate_resume_job_match_score(resume: ResumeStructure, job: JobAnalysis) 
     return max(0, min(100, round((skill_score * 70) + (experience_score * 20) + (structure_score * 10))))
 
 def generate_tailoring_patch(resume: ResumeStructure, job: JobAnalysis, api_key: Optional[str] = None) -> TailoringReport:
-    gaps = analyze_gaps(resume, job, api_key)
-    
-    summary_out = edit_summary(resume.summary, job, gaps.missing_keywords, api_key)
-    skills_out = edit_skills(resume.skills, job, api_key)
-    
-    experience_patch = {}
+    llm = get_llm(api_key, temperature=0.1)
+    structured_llm = llm.with_structured_output(ResumePatch)
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", """You are an expert ATS Resume Tailoring AI.
+Analyze the provided user resume and target job description in one single pass and produce an optimal ResumePatch JSON.
+
+Rules:
+1. summary: Naturally weave missing target keywords into the summary. Keep original tone and profession. Do not invent experience.
+2. skills_append: List missing technical skills and keywords from the JD that should be appended to the user's skill list. Never remove existing skills.
+3. experience: A dict mapping experience item index (as a string "0", "1", ...) to a dict mapping bullet index (as a string "0", "1", ...) to the updated bullet text. Only include bullets that were improved or naturally incorporated keywords.
+4. projects: A dict mapping project item index (as a string "0", "1", ...) to a dict mapping bullet index (as a string "0", "1", ...) to the updated bullet text.
+5. NEVER invent metrics, companies, titles, or dates that do not exist in the resume."""),
+        ("human", "RESUME:\n{resume}\n\nJOB DESCRIPTION:\n{job}")
+    ])
+
+    try:
+        chain = prompt | structured_llm
+        patch = chain.invoke({
+            "resume": resume.model_dump_json(include={"summary", "skills", "experience", "projects"}),
+            "job": job.model_dump_json(include={"title", "company", "required_skills", "preferred_skills", "qualifications", "responsibilities", "keywords", "ats_keywords"})
+        })
+    except Exception as err:
+        print(f"[GroqService] Single-pass tailoring patch failed: {err}")
+        patch = ResumePatch()
+
     changes_made = []
-    
-    if summary_out.updated_summary and summary_out.updated_summary != resume.summary:
+    if patch.summary and patch.summary != resume.summary:
         changes_made.append("✓ Improved Summary")
         
-    if skills_out.skills_to_append:
-        for skill in skills_out.skills_to_append:
+    if patch.skills_append:
+        for skill in patch.skills_append:
             changes_made.append(f"✓ Added keyword '{skill}'")
             
-    for i, exp in enumerate(resume.experience):
-        exp_out = edit_experience(exp, job, gaps.missing_keywords, api_key)
-        if exp_out.updates:
-            experience_patch[str(i)] = {}
-            for update in exp_out.updates:
-                experience_patch[str(i)][str(update.bullet_index)] = update.updated_bullet
-                changes_made.append(f"✓ Improved Experience '{exp.company}' Bullet #{update.bullet_index + 1}")
+    for i_str, bullets in (patch.experience or {}).items():
+        try:
+            exp_item = resume.experience[int(i_str)]
+            for b_str, updated in bullets.items():
+                changes_made.append(f"✓ Improved Experience '{exp_item.company}' Bullet #{int(b_str) + 1}")
+        except (IndexError, ValueError):
+            pass
                 
-    projects_patch = {}
-    for i, proj in enumerate(resume.projects):
-        proj_out = edit_projects(proj, job, gaps.missing_keywords, api_key)
-        if proj_out.updates:
-            projects_patch[str(i)] = {}
-            for update in proj_out.updates:
-                projects_patch[str(i)][str(update.bullet_index)] = update.updated_bullet
-                changes_made.append(f"✓ Improved Project '{proj.name}' Bullet #{update.bullet_index + 1}")
-                
-    patch = ResumePatch(
-        summary=summary_out.updated_summary,
-        skills_append=skills_out.skills_to_append,
-        experience=experience_patch,
-        projects=projects_patch
-    )
-    
+    for i_str, bullets in (patch.projects or {}).items():
+        try:
+            proj_item = resume.projects[int(i_str)]
+            for b_str, updated in bullets.items():
+                changes_made.append(f"✓ Improved Project '{proj_item.name}' Bullet #{int(b_str) + 1}")
+        except (IndexError, ValueError):
+            pass
+
     ats_score_before = calculate_resume_job_match_score(resume, job)
-    # Score the materialized resume, not an estimated improvement based on the
-    # number of generated edits. Rejected/no-op changes therefore add nothing.
     tailored_for_scoring = apply_tailoring_patch(resume, patch)
     ats_score_after = calculate_resume_job_match_score(tailored_for_scoring, job)
 

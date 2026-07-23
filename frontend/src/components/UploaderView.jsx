@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, Layers, Building2, Briefcase } from 'lucide-react';
+import { Sparkles, Layers, Building2, Briefcase, AlertCircle, X } from 'lucide-react';
 
 function UploaderView({
   jobText,
@@ -12,7 +12,9 @@ function UploaderView({
   handleAnalyzeAndMatch,
   loading,
   isExtension,
-  subscription
+  subscription,
+  apiError,
+  setApiError
 }) {
   const jdUsage = subscription?.usage?.jd_extraction;
   const quotaExhausted = jdUsage?.enabled && jdUsage?.remaining !== null && jdUsage?.remaining <= 0;
@@ -32,6 +34,25 @@ function UploaderView({
             Scan or paste the target job description to match your qualifications against.
           </p>
         </div>
+
+        {/* API Error Alert Banner */}
+        {apiError && (
+          <div className="rounded-xl border border-rose-200 bg-rose-50 dark:bg-rose-950/40 dark:border-rose-900/60 p-3.5 text-xs text-rose-800 dark:text-rose-300 flex items-start justify-between gap-2 animate-fadeIn">
+            <div className="flex items-start gap-2">
+              <AlertCircle size={15} className="mt-0.5 flex-shrink-0 text-rose-600 dark:text-rose-400" />
+              <span className="font-semibold leading-relaxed">{apiError}</span>
+            </div>
+            {setApiError && (
+              <button 
+                type="button"
+                onClick={() => setApiError(null)} 
+                className="text-rose-500 hover:text-rose-700 dark:hover:text-rose-300 cursor-pointer p-0.5 border-none bg-transparent"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        )}
 
         {subscription?.plan && (
           <div className="rounded-xl border border-zinc-200/70 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-3 text-[11px] font-bold text-zinc-500 dark:text-zinc-400">

@@ -1,6 +1,10 @@
 from psycopg2.extras import RealDictCursor
 import json
+import logging
+from datetime import datetime
 from typing import Dict, Any, List, Optional
+
+logger = logging.getLogger("app")
 
 class ResumeRepository:
     def __init__(self, conn):
@@ -46,14 +50,33 @@ class ResumeRepository:
             cur.execute(query, (user_id, file_path, file_name, file_size, file_type, json.dumps(parsed_content)))
             record = cur.fetchone()
             
-            # Increment count
+            # The optional profile counter must never roll back the durable
+            # resume insert. PostgreSQL keeps a transaction aborted after any
+            # statement error, so isolate this call behind a savepoint.
+            cur.execute("SAVEPOINT resume_count_increment")
             try:
                 cur.execute("SELECT public.increment_resume_count(%s)", (user_id,))
-            except Exception:
-                # Ignore if the Postgres RPC does not exist
-                pass
+                cur.execute("RELEASE SAVEPOINT resume_count_increment")
+            except Exception as exc:
+                cur.execute("ROLLBACK TO SAVEPOINT resume_count_increment")
+                cur.execute("RELEASE SAVEPOINT resume_count_increment")
+                logger.warning(
+                    "[RESUME][BACKEND] Optional resume counter update skipped "
+                    "user_id=%s error=%s",
+                    user_id,
+                    str(exc),
+                )
             self.conn.commit()
-            return self._with_metadata_defaults(record) or {}
+            created = self._with_metadata_defaults(record) or {}
+            logger.info(
+                "[RESUME][BACKEND] Resume database record committed "
+                "user_id=%s resume_id=%s file_name=%s active=%s",
+                user_id,
+                created.get("id"),
+                created.get("file_name"),
+                created.get("is_active"),
+            )
+            return created
 
     def get_by_id(self, resume_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         query = "SELECT * FROM public.resumes WHERE id = %s AND user_id = %s AND deleted_at IS NULL"
@@ -71,6 +94,57 @@ class ResumeRepository:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (user_id,))
             return [self._with_metadata_defaults(record) for record in cur.fetchall()]
+
+    def all_file_paths(self, user_id: str) -> set[str]:
+        """Return all known paths, including soft-deleted rows, for safe recovery."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT file_path FROM public.resumes WHERE user_id = %s",
+                (user_id,),
+            )
+            return {row[0] for row in cur.fetchall() if row and row[0]}
+
+    def recover_local_file(
+        self,
+        user_id: str,
+        file_path: str,
+        file_name: str,
+        file_size: int,
+        file_type: str,
+        parsed_content: Dict[str, Any],
+        uploaded_at: datetime,
+    ) -> Optional[Dict[str, Any]]:
+        """Register one orphaned local file without disturbing active state."""
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT id FROM public.resumes WHERE user_id = %s AND file_path = %s",
+                (user_id, file_path),
+            )
+            if cur.fetchone():
+                return None
+            cur.execute(
+                """
+                INSERT INTO public.resumes (
+                    user_id, file_path, file_name, file_size, file_type,
+                    parsed_content, is_active, created_at, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, FALSE, %s, %s)
+                RETURNING *
+                """,
+                (
+                    user_id,
+                    file_path,
+                    file_name,
+                    file_size,
+                    file_type,
+                    json.dumps(parsed_content),
+                    uploaded_at,
+                    uploaded_at,
+                ),
+            )
+            record = cur.fetchone()
+            self.conn.commit()
+            return self._with_metadata_defaults(record)
 
     def get_active(self, user_id: str) -> Optional[Dict[str, Any]]:
         query = """

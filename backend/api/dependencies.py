@@ -44,8 +44,9 @@ def get_ai_service() -> GroqService:
     return GroqService()
 
 def get_storage_service() -> FileService:
+    from core.config import BASE_DIR
     from services.storage.local_storage import LocalStorageService
-    return LocalStorageService("local_uploads")
+    return LocalStorageService(str(BASE_DIR / "local_uploads"))
 
 def get_tailoring_service(
     tailor_repo: TailoringRepository = Depends(get_tailoring_repository),
