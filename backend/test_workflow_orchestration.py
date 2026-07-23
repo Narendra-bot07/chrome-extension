@@ -91,6 +91,12 @@ class ConfirmationNode(WorkflowNode):
     metadata = NodeMetadata(name="confirmation", version="1.0.0")
 
     def execute(self, state: WorkflowState):
+        if state.user_confirmation is True:
+            return {
+                "user_confirmation_required": False,
+                "waiting_reason": None,
+                "user_confirmation": None,
+            }
         return {
             "user_confirmation_required": True,
             "waiting_reason": "Approval is required to continue",

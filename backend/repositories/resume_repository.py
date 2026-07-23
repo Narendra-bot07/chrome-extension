@@ -36,18 +36,44 @@ class ResumeRepository:
         )
         return normalized
 
-    def create(self, user_id: str, file_path: str, file_name: str, file_size: int, file_type: str, parsed_content: Dict[str, Any]) -> Dict[str, Any]:
+    def create(
+        self,
+        user_id: str,
+        file_path: str,
+        file_name: str,
+        file_size: int,
+        file_type: str,
+        parsed_content: Dict[str, Any],
+        source_fingerprint: str | None = None,
+    ) -> Dict[str, Any]:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 "UPDATE public.resumes SET is_active = FALSE WHERE user_id = %s AND deleted_at IS NULL",
                 (user_id,)
             )
             query = """
-                INSERT INTO public.resumes (user_id, file_path, file_name, file_size, file_type, parsed_content, is_active)
-                VALUES (%s, %s, %s, %s, %s, %s, TRUE)
+                INSERT INTO public.resumes (
+                    user_id, file_path, file_name, file_size, file_type,
+                    parsed_content, is_active, resume_version,
+                    source_fingerprint, fingerprint_algorithm, fingerprinted_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, TRUE, 1, %s, 'sha256',
+                        CASE WHEN %s IS NULL THEN NULL ELSE NOW() END)
                 RETURNING *
             """
-            cur.execute(query, (user_id, file_path, file_name, file_size, file_type, json.dumps(parsed_content)))
+            cur.execute(
+                query,
+                (
+                    user_id,
+                    file_path,
+                    file_name,
+                    file_size,
+                    file_type,
+                    json.dumps(parsed_content),
+                    source_fingerprint,
+                    source_fingerprint,
+                ),
+            )
             record = cur.fetchone()
             
             # The optional profile counter must never roll back the durable
@@ -84,6 +110,48 @@ class ResumeRepository:
             cur.execute(query, (resume_id, user_id))
             return self._with_metadata_defaults(cur.fetchone())
 
+    def get_selected_snapshot(
+        self, resume_id: str, user_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Load exactly one selected resume; never enumerates sibling resumes."""
+        query = """
+            SELECT id, user_id, file_path, file_name, file_size, file_type,
+                   parsed_content, metadata, created_at, updated_at, deleted_at,
+                   is_active, resume_version, source_fingerprint,
+                   fingerprint_algorithm, fingerprinted_at
+            FROM public.resumes
+            WHERE id = %s AND user_id = %s AND deleted_at IS NULL
+            LIMIT 1
+        """
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query, (resume_id, user_id))
+            return self._with_metadata_defaults(cur.fetchone())
+
+    def set_source_fingerprint_if_missing(
+        self,
+        resume_id: str,
+        user_id: str,
+        fingerprint: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Atomically initialize, but never replace, a selected source fingerprint."""
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE public.resumes
+                SET source_fingerprint = %s,
+                    fingerprint_algorithm = 'sha256',
+                    fingerprinted_at = NOW(),
+                    updated_at = NOW()
+                WHERE id = %s AND user_id = %s AND deleted_at IS NULL
+                  AND source_fingerprint IS NULL
+                RETURNING *
+                """,
+                (fingerprint, resume_id, user_id),
+            )
+            record = cur.fetchone()
+            self.conn.commit()
+            return self._with_metadata_defaults(record) if record else self.get_selected_snapshot(resume_id, user_id)
+
     def list_by_user(self, user_id: str) -> List[Dict[str, Any]]:
         query = """
             SELECT *
@@ -113,6 +181,7 @@ class ResumeRepository:
         file_type: str,
         parsed_content: Dict[str, Any],
         uploaded_at: datetime,
+        source_fingerprint: str | None = None,
     ) -> Optional[Dict[str, Any]]:
         """Register one orphaned local file without disturbing active state."""
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -126,9 +195,12 @@ class ResumeRepository:
                 """
                 INSERT INTO public.resumes (
                     user_id, file_path, file_name, file_size, file_type,
-                    parsed_content, is_active, created_at, updated_at
+                    parsed_content, is_active, created_at, updated_at,
+                    resume_version, source_fingerprint,
+                    fingerprint_algorithm, fingerprinted_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, FALSE, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, FALSE, %s, %s, 1, %s,
+                        'sha256', CASE WHEN %s IS NULL THEN NULL ELSE NOW() END)
                 RETURNING *
                 """,
                 (
@@ -140,6 +212,8 @@ class ResumeRepository:
                     json.dumps(parsed_content),
                     uploaded_at,
                     uploaded_at,
+                    source_fingerprint,
+                    source_fingerprint,
                 ),
             )
             record = cur.fetchone()
@@ -221,7 +295,9 @@ class ResumeRepository:
     def update_parsed_content(self, resume_id: str, user_id: str, parsed_content: Dict[str, Any]) -> bool:
         query = """
             UPDATE public.resumes 
-            SET parsed_content = %s 
+            SET parsed_content = %s,
+                resume_version = COALESCE(resume_version, 1) + 1,
+                updated_at = NOW()
             WHERE id = %s AND user_id = %s AND deleted_at IS NULL
             RETURNING id
         """

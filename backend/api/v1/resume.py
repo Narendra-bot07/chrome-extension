@@ -15,8 +15,92 @@ from services.ai.groq_service import GroqService
 from app.analytics.events.tracking.analytics_service import AnalyticsService
 from core.database import get_db_connection
 from core.logging import logger
+from schemas.resume_intelligence import (
+    SelectedResumeConfirmationRequest,
+    SelectedResumeIntelligenceRequest,
+)
+from services.resume_intelligence.models import Phase2Output
+from services.resume_intelligence.semantic import GroqSemanticAnalyzer
+from services.resume_intelligence.service import SelectedResumeIntelligenceService
+from services.workflow.checkpoints import PostgresCheckpointStore
+from core.config import settings
 
 router = APIRouter(prefix="/resumes", tags=["resumes"])
+
+
+def _resume_intelligence_service(
+    *,
+    user_id: str,
+    repo: ResumeRepository,
+    storage: FileService,
+    conn,
+    api_key: str | None,
+) -> SelectedResumeIntelligenceService:
+    parser_service = GroqService(api_key=api_key) if api_key else None
+    semantic_analyzer = GroqSemanticAnalyzer(api_key) if api_key else None
+    return SelectedResumeIntelligenceService(
+        repository=repo,
+        storage=storage,
+        checkpoint_store=PostgresCheckpointStore(conn, owner_id=user_id),
+        structured_parser=parser_service.parse_resume if parser_service else None,
+        semantic_analyzer=semantic_analyzer,
+    )
+
+
+@router.post("/{resume_id}/intelligence", response_model=Phase2Output)
+def build_selected_resume_intelligence(
+    resume_id: str,
+    payload: SelectedResumeIntelligenceRequest,
+    x_groq_key: str = Header(None),
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository),
+    storage: FileService = Depends(get_storage_service),
+    conn=Depends(get_db_connection),
+):
+    api_key = x_groq_key or settings.GROQ_API_KEY
+    service = _resume_intelligence_service(
+        user_id=user["id"],
+        repo=repo,
+        storage=storage,
+        conn=conn,
+        api_key=api_key,
+    )
+    return service.run(
+        request_id=payload.request_id,
+        user_id=user["id"],
+        selected_resume_id=resume_id,
+        user_confirmed=payload.user_confirmed,
+        selected_resume_version=payload.selected_resume_version,
+        selected_resume_fingerprint=payload.selected_resume_fingerprint,
+    )
+
+
+@router.post(
+    "/{resume_id}/intelligence/{workflow_id}/confirm",
+    response_model=Phase2Output,
+)
+def confirm_selected_resume_intelligence(
+    resume_id: str,
+    workflow_id: str,
+    payload: SelectedResumeConfirmationRequest,
+    x_groq_key: str = Header(None),
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository),
+    storage: FileService = Depends(get_storage_service),
+    conn=Depends(get_db_connection),
+):
+    service = _resume_intelligence_service(
+        user_id=user["id"],
+        repo=repo,
+        storage=storage,
+        conn=conn,
+        api_key=x_groq_key or settings.GROQ_API_KEY,
+    )
+    return service.confirm(
+        workflow_id=workflow_id,
+        selected_resume_id=resume_id,
+        confirmed=payload.confirmed,
+    )
 
 @router.post("/upload")
 async def upload_and_parse(
@@ -65,7 +149,8 @@ async def upload_and_parse(
         file_name=file.filename,
         file_size=len(content),
         file_type=ext,
-        parsed_content=parsed_res
+        parsed_content=parsed_res,
+        source_fingerprint=hashlib.sha256(content).hexdigest(),
     )
     logger.info(
         "[RESUME][BACKEND] Resume upload completed user_id=%s resume_id=%s "
@@ -171,6 +256,7 @@ async def reconcile_local_resumes(
             file_type=local_file.suffix.lstrip(".").upper() or "PDF",
             parsed_content={"raw_text": raw_text, "parse_status": "pending"},
             uploaded_at=uploaded_at,
+            source_fingerprint=content_hash,
         )
         if record:
             recovered.append(record)

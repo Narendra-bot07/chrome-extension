@@ -126,9 +126,6 @@ class MasterOrchestrator:
                 "current_node": next_node,
                 "next_node": next_node,
                 "updated_at": now,
-                "user_confirmation_required": False,
-                "waiting_reason": None,
-                "user_confirmation": None,
             },
             deep=True,
         )

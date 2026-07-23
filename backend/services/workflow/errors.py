@@ -34,6 +34,10 @@ class FatalWorkflowError(WorkflowError):
     code = "fatal_workflow_error"
 
 
+class BlockedWorkflowError(WorkflowError):
+    code = "workflow_blocked"
+
+
 class CheckpointError(WorkflowError):
     code = "checkpoint_error"
 

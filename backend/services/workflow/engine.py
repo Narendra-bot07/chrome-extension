@@ -11,6 +11,7 @@ from langgraph.graph import END, START, StateGraph
 from .checkpoints import CheckpointStore
 from .config import WorkflowSettings, workflow_settings
 from .errors import (
+    BlockedWorkflowError,
     FatalWorkflowError,
     NodeExecutionError,
     RepairableError,
@@ -244,12 +245,16 @@ class WorkflowEngine:
             updated = self._apply_result(running, result)
             duration = (time.perf_counter() - started) * 1000
             completed = list(updated.completed_nodes)
-            if node_name not in completed:
+            if not updated.user_confirmation_required and node_name not in completed:
                 completed.append(node_name)
             updated = updated.model_copy(
                 update={
                     "completed_nodes": completed,
-                    "last_successful_node": node_name,
+                    "last_successful_node": (
+                        node_name
+                        if not updated.user_confirmation_required
+                        else state.last_successful_node
+                    ),
                     "route_outcome": RouteOutcome.CONTINUE,
                     "updated_at": utc_now(),
                     "execution_time_ms": updated.execution_time_ms + duration,
@@ -493,7 +498,11 @@ class WorkflowEngine:
             details=error.details,
         )
         node = self.registry.get(node_name)
-        if (
+        if isinstance(error, BlockedWorkflowError):
+            outcome = RouteOutcome.STOP
+            status = WorkflowStatus.BLOCKED
+            retry_history = state.retry_history
+        elif (
             error.retryable
             and state.retry_count < min(
                 state.max_retry_count, node.metadata.retry_policy.max_attempts
@@ -523,7 +532,7 @@ class WorkflowEngine:
             status = WorkflowStatus.FAILED
             retry_history = state.retry_history
         failed_nodes = list(state.failed_nodes)
-        if status == WorkflowStatus.FAILED and node_name not in failed_nodes:
+        if status in {WorkflowStatus.FAILED, WorkflowStatus.BLOCKED} and node_name not in failed_nodes:
             failed_nodes.append(node_name)
         updated = state.model_copy(
             update={
@@ -533,7 +542,11 @@ class WorkflowEngine:
                 "retry_history": retry_history,
                 "errors": [*state.errors, record],
                 "failed_nodes": failed_nodes,
-                "finished_at": utc_now() if status == WorkflowStatus.FAILED else None,
+                "finished_at": (
+                    utc_now()
+                    if status in {WorkflowStatus.FAILED, WorkflowStatus.BLOCKED}
+                    else None
+                ),
                 "updated_at": utc_now(),
                 "execution_time_ms": state.execution_time_ms + duration,
             },
@@ -561,10 +574,13 @@ class WorkflowEngine:
             ]
             if state.current_node not in failed_nodes:
                 failed_nodes.append(state.current_node)
+        blocked = isinstance(error, BlockedWorkflowError)
         return state.model_copy(
             update={
-                "workflow_status": WorkflowStatus.FAILED,
-                "route_outcome": RouteOutcome.FAIL,
+                "workflow_status": (
+                    WorkflowStatus.BLOCKED if blocked else WorkflowStatus.FAILED
+                ),
+                "route_outcome": RouteOutcome.STOP if blocked else RouteOutcome.FAIL,
                 "finished_at": utc_now(),
                 "updated_at": utc_now(),
                 "errors": [
