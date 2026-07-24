@@ -207,7 +207,8 @@ function Layout() {
   const getHeaderTitle = () => {
     if (currentPath === '/profile' && routeTitleOverride) return routeTitleOverride;
     switch (currentPath) {
-      case '/': return 'Dashboard';
+      case '/':
+      case '/dashboard': return 'Dashboard';
       case '/tailor': return 'Extract Job Details';
       case '/job-tracker': return 'Job Tracker';
       case '/profile': return 'Account Settings';
@@ -257,7 +258,7 @@ function Layout() {
         <div className="flex flex-col gap-6 p-6">
           {/* Logo Header */}
           <div className="flex items-center justify-between">
-            <Link to="/" className="flex items-center gap-2">
+            <Link to="/dashboard" className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 text-white font-black text-sm">
                 AF
               </div>
@@ -276,9 +277,9 @@ function Layout() {
           {/* Nav Items */}
           <nav className="flex flex-col gap-1">
             <Link 
-              to="/" 
+              to="/dashboard" 
               className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                currentPath === '/' 
+                currentPath === '/dashboard' || currentPath === '/'
                   ? darkMode ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-100 text-zinc-950'
                   : darkMode ? 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-950' : 'text-zinc-650 hover:text-zinc-900 hover:bg-zinc-50'
               }`}
@@ -566,7 +567,7 @@ function Layout() {
         {/* FOOTER WIZARD STEPS */}
         <footer className="px-6 py-4 border-t border-zinc-200 dark:border-zinc-800 flex justify-between items-center bg-white dark:bg-zinc-950/20 flex-shrink-0">
           <span className="text-[9px] text-zinc-500 dark:text-zinc-500 font-bold uppercase tracking-widest">
-            {currentPath === '/' && "Step: Dashboard Overview"}
+            {(currentPath === '/' || currentPath === '/dashboard') && "Step: Dashboard Overview"}
             {currentPath === '/job-tracker' && "Step: Job Tracking Overview"}
             {currentPath === '/tailor' && "Step 1: Extract Job Description"}
             {currentPath === '/resume-detect' && "Step 2: Resume Source"}

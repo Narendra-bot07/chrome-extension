@@ -53,14 +53,8 @@ class CompareRequest(BaseModel):
     job: Dict[str, Any]
 
 def normalize_resume_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    parsed = payload.get("parsed_content")
-    if isinstance(parsed, dict):
-        merged = {**parsed}
-        for key in ("id", "file_name", "file_size", "file_type", "created_at"):
-            if key in payload and key not in merged:
-                merged[key] = payload[key]
-        return merged
-    return payload
+    from services.resume.renderable import project_renderable_resume
+    return project_renderable_resume(payload)
 
 def normalize_job_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     normalized = payload.get("normalized_content")
@@ -270,22 +264,35 @@ async def api_download_pdf(request: DownloadPDFRequest, company_name: Optional[s
     try:
         from app.playwright_pdf import generate_pdf_via_playwright
         from fastapi.concurrency import run_in_threadpool
-        
-        resume_json_str = request.resume.json()
-        
-        pdf_bytes = await run_in_threadpool(
-            generate_pdf_via_playwright, 
-            resume_json_str, 
-            request.template_name
+        from services.resume.export_workflow import (
+            ExportWorkflowError,
+            export_resume_pdf,
         )
-        
-        if not pdf_bytes:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Playwright failed to generate PDF."
+
+        async def renderer(payload, template):
+            import json
+            return await run_in_threadpool(
+                generate_pdf_via_playwright, json.dumps(payload), template
             )
+
+        original = request.original_resume or request.resume
+        try:
+            pdf_bytes, final_document, workflow_state = await export_resume_pdf(
+                original_resume=original.model_dump(mode="json"),
+                composed_resume=request.resume.model_dump(mode="json"),
+                intentional_removals=request.intentional_removals,
+                approved_additions=request.approved_additions,
+                template_name=request.template_name,
+                renderer=renderer,
+            )
+        except ExportWorkflowError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=exc.safe_detail(),
+            ) from exc
         
-        user_name = request.resume.personal_info.name or "User"
+        render_resume = final_document.render_payload()
+        user_name = (render_resume.get("personal_info") or {}).get("name") or "User"
         clean_user = "".join([c if c.isalnum() or c == '_' else '_' for c in user_name.replace(" ", "_")])
         clean_company = "".join([c if c.isalnum() or c == '_' else '_' for c in company_name.replace(" ", "_")])
         filename = f"{clean_user}_{clean_company}_Resume.pdf"
@@ -295,16 +302,29 @@ async def api_download_pdf(request: DownloadPDFRequest, company_name: Optional[s
             media_type="application/pdf",
             headers={
                 "Content-Disposition": f"attachment; filename={filename}",
-                "Access-Control-Expose-Headers": "Content-Disposition"
+                "Access-Control-Expose-Headers": "Content-Disposition, X-Request-ID",
+                "X-Request-ID": workflow_state.request_id,
             }
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
+        import logging
+        import uuid
+        request_id = str(uuid.uuid4())
+        logging.getLogger(__name__).exception(
+            "[RESUME-EXPORT] unexpected failure request_id=%s", request_id
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate PDF resume: {str(e)}\n\n{tb}"
-        )
+            detail={
+                "message": (
+                    "The PDF service is temporarily unavailable. Your original "
+                    "resume data is safe. Please retry shortly."
+                ),
+                "request_id": request_id,
+            },
+        ) from e
 
 @router.post("/cover-letter", response_model=CoverLetterResult)
 async def api_cover_letter(

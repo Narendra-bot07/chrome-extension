@@ -80,28 +80,35 @@ export default function PrintLayout() {
           // Try next compression level
           const nextLevel = compressionLevel + 1;
           setCompressionLevel(nextLevel);
-          // Apply data truncation if needed (levels 3+)
+          // Preserve the complete data model; only CSS density changes.
           setActiveResumeData(compressResumeData(originalResumeData, nextLevel));
         } else {
-          // WE EXHAUSTED ALL TRUNCATION AND FONTS, BUT IT STILL OVERFLOWS!
-          // Fallback: Aspect ratio width expansion.
-          // By dynamically widening the container, text wraps less and height shrinks.
-          // Playwright's native scale-to-fit-width handles the actual scaling.
-          let currentWidth = isA4 ? 8.27 : 8.5;
-          el.style.width = `${currentWidth}in`;
-          let hInches = el.scrollHeight / 96;
-          const targetRatio = isA4 ? 1.41 : 1.29; // Aspect ratios for target page format
-          
-          while (hInches / currentWidth > targetRatio && currentWidth < 13) {
-             currentWidth += 0.1;
-             el.style.width = `${currentWidth}in`;
-             hInches = el.scrollHeight / 96;
+          // The one-page target was exhausted. Keep the real page width and
+          // allow Chromium to paginate the complete resume onto page 2+.
+          // For a two-page document, choose a real section boundary that
+          // balances both pages and prevents a tiny orphaned continuation.
+          if (currentHeight <= MAX_HEIGHT * 2) {
+            const resumeLayout = (el as HTMLElement).dataset.resumeLayout
+              || (el.querySelector('[data-resume-layout]') as HTMLElement | null)?.dataset.resumeLayout
+              || 'single-column';
+            const sections = resumeLayout === 'single-column'
+              ? Array.from(el.querySelectorAll('[data-section]')) as HTMLElement[]
+              : [];
+            const candidates = sections
+              .map(section => ({ section, offset: section.offsetTop }))
+              .filter(({ offset }) => offset > 0 && offset <= MAX_HEIGHT && currentHeight - offset <= MAX_HEIGHT);
+            if (candidates.length > 0) {
+              const balancedTarget = currentHeight / 2;
+              const selected = candidates.reduce((best, candidate) =>
+                Math.abs(candidate.offset - balancedTarget) < Math.abs(best.offset - balancedTarget)
+                  ? candidate
+                  : best
+              );
+              selected.section.style.breakBefore = 'page';
+              selected.section.style.pageBreakBefore = 'always';
+              selected.section.dataset.compositionBreak = 'balanced-page-2';
+            }
           }
-          
-          // Force height to grow naturally
-          el.style.height = 'auto';
-          el.style.minHeight = 'auto';
-          
           setFittingComplete(true);
         }
       }
@@ -125,7 +132,9 @@ export default function PrintLayout() {
     >
       <TemplateComponent 
         resume={activeResumeData} 
-        layoutLevel={activeResumeData.layout_level !== undefined ? activeResumeData.layout_level : 5}
+        layoutLevel={activeResumeData.layout_level !== undefined
+          ? activeResumeData.layout_level
+          : Math.max(0, 5 - compressionLevel)}
       />
       {/* Invisible div to signal Playwright that Auto-Fit is done */}
       {fittingComplete && <div id="resume-print-ready" style={{ display: 'none' }}></div>}

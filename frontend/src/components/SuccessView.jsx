@@ -13,12 +13,10 @@ function SuccessView({
 }) {
   const { 
     isExtension, 
-    activeApplicationId, 
-    updateApplicationStage, 
     fetchApplications, 
     session,
-    apiUrl,
-    comparison
+    comparison,
+    syncCurrentJobToTracker
   } = useApp();
 
   const [appliedStatus, setAppliedStatus] = useState('Ready To Apply');
@@ -36,24 +34,12 @@ function SuccessView({
     setSaving(true);
     try {
       const token = session?.access_token || localStorage.getItem('access_token');
-      if (token && activeApplicationId) {
-        // First update stage
-        await updateApplicationStage(activeApplicationId, appliedStatus);
-        
-        // Then update notes if present
-        if (quickNotes.trim()) {
-          await fetch(`${apiUrl}/api/v1/applications/${activeApplicationId}`, {
-            method: "PUT",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${token}`
-            },
-            body: JSON.stringify({
-              notes: quickNotes
-            })
-          });
+      if (token) {
+        const syncedApplication = await syncCurrentJobToTracker(appliedStatus, quickNotes);
+        const syncedApplicationId = syncedApplication?.id;
+        if (!syncedApplicationId) {
+          throw new Error("Job tracker sync did not return an application.");
         }
-        
         // Refresh application state
         await fetchApplications();
       }
@@ -157,7 +143,7 @@ function SuccessView({
           disabled={saving}
           className="w-full py-3 bg-[#00bda5] hover:bg-[#00a894] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-1 cursor-pointer border-none shadow-md"
         >
-          {saving ? "Updating..." : "Save & Sync Dashboard"}
+          {saving ? "Syncing..." : "Save & Sync Job Tracker"}
           <ArrowRight size={13} className="ml-1" />
         </button>
         

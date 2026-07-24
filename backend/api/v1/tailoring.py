@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 import io
 
 from core.security import verify_supabase_jwt
-from schemas.tailoring import TailorRequest, DownloadPDFRequest
+from schemas.tailoring import TailorRequest, DownloadPDFRequest, PreservationRequest
 from api.dependencies import get_tailoring_service, get_storage_service, get_audit_repository, get_tailoring_repository
 from services.resume.tailoring_service import TailoringService
 from services.storage.file_service import FileService
@@ -14,6 +14,69 @@ from app.analytics.events.tracking.analytics_service import AnalyticsService
 from core.database import get_db_connection
 
 router = APIRouter(prefix="/tailor", tags=["tailor"])
+
+
+@router.post("/preservation")
+async def validate_resume_preservation(
+    request: PreservationRequest,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+):
+    """Run the Phase 7.1 blocking integrity gate without invoking an LLM."""
+    from services.resume.preservation import preserve_resume
+
+    result = preserve_resume(
+        request.original_resume,
+        request.current_resume,
+        candidate_evidence=request.candidate_evidence,
+        approved_removals=request.approved_removals,
+        auto_repair=request.auto_repair,
+    )
+    payload = {
+        "valid": result.valid,
+        "lossless_resume": result.lossless_resume,
+        "preservation_report": {
+            "score": result.score,
+            "confidence": result.confidence,
+            "compared_elements": result.compared_elements,
+            "counts": result.counts,
+            "states": {
+                element_id: state.value for element_id, state in result.states.items()
+            },
+            "issues": [
+                {
+                    "code": issue.code,
+                    "severity": issue.severity,
+                    "element_id": issue.element_id,
+                    "path": issue.path,
+                    "message": issue.message,
+                    "repairable": issue.repairable,
+                }
+                for issue in result.issues
+            ],
+        },
+        "warnings": result.warnings,
+        "repair_actions": [
+            {
+                "action": action.action,
+                "element_id": action.element_id,
+                "path": action.path,
+                "reason": action.reason,
+                "responsible_agent": action.responsible_agent,
+                "timestamp": action.timestamp,
+                "applied": action.applied,
+            }
+            for action in result.repair_actions
+        ],
+    }
+    if not result.valid:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "message": "Resume preservation validation failed. Pipeline continuation is blocked.",
+                **payload,
+            },
+        )
+    return payload
 
 @router.post("/")
 async def tailor_resume(
@@ -64,18 +127,32 @@ async def download_pdf(
     try:
         from app.playwright_pdf import generate_pdf_via_playwright
         from fastapi.concurrency import run_in_threadpool
-        
-        pdf_bytes = await run_in_threadpool(
-            generate_pdf_via_playwright,
-            request.resume.json(),
-            request.template_name
+        from services.resume.export_workflow import (
+            ExportWorkflowError,
+            export_resume_pdf,
         )
-        
-        if not pdf_bytes:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Playwright failed to generate PDF."
+
+        async def renderer(payload, template):
+            import json
+            return await run_in_threadpool(
+                generate_pdf_via_playwright, json.dumps(payload), template
             )
+
+        original = request.original_resume or request.resume
+        try:
+            pdf_bytes, final_document, workflow_state = await export_resume_pdf(
+                original_resume=original.model_dump(mode="json"),
+                composed_resume=request.resume.model_dump(mode="json"),
+                intentional_removals=request.intentional_removals,
+                approved_additions=request.approved_additions,
+                template_name=request.template_name,
+                renderer=renderer,
+            )
+        except ExportWorkflowError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=exc.safe_detail(),
+            ) from exc
         
         import uuid
         file_path = f"{user['id']}/{uuid.uuid4()}_{company_name}_Resume.pdf".replace(" ", "_")
@@ -107,14 +184,29 @@ async def download_pdf(
             media_type="application/pdf",
             headers={
                 "Content-Disposition": f"attachment; filename={filename}",
-                "Access-Control-Expose-Headers": "Content-Disposition"
+                "Access-Control-Expose-Headers": "Content-Disposition, X-Request-ID",
+                "X-Request-ID": workflow_state.request_id,
             }
         )
+    except HTTPException:
+        raise
     except Exception as e:
+        import logging
+        import uuid
+        request_id = str(uuid.uuid4())
+        logging.getLogger(__name__).exception(
+            "[RESUME-EXPORT] unexpected failure request_id=%s", request_id
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate and download PDF: {str(e)}"
-        )
+            detail={
+                "message": (
+                    "The PDF service is temporarily unavailable. Your original "
+                    "resume data is safe. Please retry shortly."
+                ),
+                "request_id": request_id,
+            },
+        ) from e
 
 @router.get("/history")
 async def get_tailoring_history(

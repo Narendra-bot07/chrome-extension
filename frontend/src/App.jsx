@@ -109,6 +109,7 @@ function AppRoutes() {
       <Route path="/register" element={<RegisterPage />} />
       <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route path="/" element={<DashboardPage />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/tailor" element={<JobExtractPage />} />
         <Route path="/job-tracker" element={<JobTrackerPage />} />
         <Route path="/profile" element={<ProfilePage />} />

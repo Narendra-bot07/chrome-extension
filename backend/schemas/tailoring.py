@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
-from schemas.resume import ResumeStructure
+from schemas.resume import RenderableResume, ResumeStructure
 from schemas.jobs import JobAnalysis
 
 class MissingSkillSuggestion(BaseModel):
@@ -30,7 +30,10 @@ class ComparisonResult(BaseModel):
 
 
 class DownloadPDFRequest(BaseModel):
-    resume: ResumeStructure
+    resume: RenderableResume
+    original_resume: Optional[RenderableResume] = None
+    intentional_removals: List[str] = []
+    approved_additions: List[str] = []
     template_name: str = "modern"
 
 class CoverLetterResult(BaseModel):
@@ -83,5 +86,13 @@ class ProjectEditorOutput(BaseModel):
     updates: List[BulletUpdate] = []
 
 class TailorRequest(BaseModel):
-    resume: ResumeStructure
+    resume: RenderableResume
     patch: ResumePatch
+
+
+class PreservationRequest(BaseModel):
+    original_resume: Dict[str, Any]
+    current_resume: Dict[str, Any]
+    candidate_evidence: List[str] = []
+    approved_removals: List[str] = []
+    auto_repair: bool = True

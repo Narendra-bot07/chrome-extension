@@ -1,7 +1,69 @@
 import React, { useEffect } from 'react';
-import { Mail, Phone, MapPin, Linkedin, Github, Globe } from 'lucide-react';
+import { Mail, Phone, MapPin, Linkedin, Github, Globe, Code2, Folder } from 'lucide-react';
 import { categorizeSkills } from '../../utils/skillCategorizer';
+import {
+  canonicalContactIdentity,
+  normalizeDetailedRecords,
+  normalizePersonName,
+  professionalLink
+} from '../../utils/resumePresentation';
 import { TEMPLATE_CONFIGS, TemplateConfig } from '../../templates/templates_config';
+import { getTemplateSectionLayout } from '../../utils/templateSectionLayout';
+
+const sectionLabel = (value: string) => value
+  .replace(/_/g, ' ')
+  .replace(/\b\w/g, char => char.toUpperCase());
+
+const linkHref = (kind: string, value: string) => {
+  const clean = String(value || '').trim();
+  if (!clean) return '';
+  if (kind === 'email') return clean.startsWith('mailto:') ? clean : `mailto:${clean}`;
+  if (kind === 'phone') return clean.startsWith('tel:') ? clean : `tel:${clean.replace(/[^\d+]/g, '')}`;
+  if (/^[a-z][a-z\d+.-]*:/i.test(clean)) return clean;
+  return `https://${clean.replace(/^\/+/, '')}`;
+};
+
+const renderScalar = (value: any, key = ''): React.ReactNode => {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'string') {
+    const isLink = /(?:url|link|website|github|linkedin|portfolio)/i.test(key) || /^(?:https?:\/\/|www\.)/i.test(value);
+    return isLink
+      ? <a href={linkHref(key, value)} className="underline text-black">
+          {professionalLink(key, value).label}
+        </a>
+      : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item, index) => (
+      <React.Fragment key={index}>
+        {index > 0 ? ' · ' : ''}
+        {renderScalar(item, key)}
+      </React.Fragment>
+    ));
+  }
+  if (typeof value === 'object') {
+    return Object.entries(value).map(([nestedKey, nestedValue], index) => (
+      <React.Fragment key={nestedKey}>
+        {index > 0 ? ' · ' : ''}
+        <span className="font-semibold">{sectionLabel(nestedKey)}: </span>
+        {renderScalar(nestedValue, nestedKey)}
+      </React.Fragment>
+    ));
+  }
+  return String(value);
+};
+
+const renderTextWithLinks = (value: any): React.ReactNode => {
+  const text = String(value ?? '');
+  const parts = text.split(/((?:https?:\/\/|www\.)[^\s<>\])},;]+)/gi);
+  return parts.map((part, index) =>
+    /^(?:https?:\/\/|www\.)/i.test(part)
+      ? <a key={index} href={linkHref('link', part)} className="underline text-black">
+          {professionalLink('link', part).label}
+        </a>
+      : part
+  );
+};
 
 export interface LayoutParams {
   paddingX: number;
@@ -20,12 +82,12 @@ export function getParamsForLevel(level: number): LayoutParams {
   const t = Math.max(0, Math.min(10, level)) / 10;
   return {
     paddingX: Math.round(36 + (64 - 36) * t),
-    paddingY: Math.round(28 + (60 - 28) * t),
-    sectionGap: Math.round(8 + (28 - 8) * t),
-    itemGap: Math.round(5 + (18 - 5) * t),
-    bulletGap: Math.round(1.5 + (6 - 1.5) * t),
-    lineHeight: 1.25 + (1.6 - 1.25) * t,
-    fontSize: 9.2 + (12 - 9.2) * t,
+    paddingY: Math.round(20 + (60 - 20) * t),
+    sectionGap: Math.round(6 + (28 - 6) * t),
+    itemGap: Math.round(4 + (18 - 4) * t),
+    bulletGap: 1 + (6 - 1) * t,
+    lineHeight: 1.2 + (1.6 - 1.2) * t,
+    fontSize: 8.8 + (12 - 8.8) * t,
     nameSize: Math.round(18 + (30 - 18) * t),
     sectionTitleSize: Math.round(10.5 + (14 - 10.5) * t)
   };
@@ -68,11 +130,16 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
   } = resume;
 
   const categorizedSkills = categorizeSkills(skills, skills_categories);
+  const candidateName = normalizePersonName(personal_info.name);
+  const achievementRecords = normalizeDetailedRecords(achievements, 'achievement');
+  const certificationRecords = normalizeDetailedRecords(certifications, 'certification');
 
-  const activeOrder = (resume.section_order || sectionOrder || [
+  const defaultOrder = [
     'summary',
+    'objective',
     'education',
     'experience',
+    'internships',
     'skills',
     'projects',
     'certifications',
@@ -81,8 +148,17 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     'publications',
     'languages',
     'awards',
-    'interests'
-  ]).filter((s: string) => s !== 'personal_info');
+    'interests',
+    'open_source',
+    'leadership',
+    'extracurricular_activities',
+    'custom_sections'
+  ];
+  // section_order controls ordering, not destructive filtering. Only
+  // explicitly supported content sections can reach this renderer.
+  const requestedOrder = resume.section_order || sectionOrder || defaultOrder;
+  const activeOrder = Array.from(new Set([...requestedOrder, ...defaultOrder]))
+    .filter((s: string) => s !== 'personal_info');
 
   const hasData = (sectionId: string): boolean => {
     switch (sectionId) {
@@ -99,7 +175,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
       case 'certifications':
         return certifications && certifications.length > 0;
       case 'achievements':
-        return (achievements && achievements.length > 0) || (awards && awards.length > 0);
+        return achievements && achievements.length > 0;
       case 'volunteer':
         return volunteer_experience && volunteer_experience.length > 0;
       case 'publications':
@@ -110,33 +186,62 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
         return awards && awards.length > 0;
       case 'interests':
         return interests && interests.length > 0;
+      case 'objective':
+        return !!resume.objective && resume.objective.trim() !== '';
+      case 'internships':
+      case 'open_source':
+      case 'leadership':
+      case 'extracurricular_activities':
+      case 'custom_sections':
+        return Array.isArray(resume[sectionId]) && resume[sectionId].length > 0;
       default:
         return false;
     }
   };
 
   const renderContactInfo = (inline = false) => {
+    const iconFor = (type: string) => ({
+      linkedin: <Linkedin size={10} />,
+      github: <Github size={10} />,
+      code: <Code2 size={10} />,
+      folder: <Folder size={10} />,
+      website: <Globe size={10} />
+    }[type] || <Globe size={10} />);
+    const linkedItem = (key: string, val: any) => {
+      const presentation = professionalLink(key, String(val || ''));
+      return { key, val: String(val || ''), display: presentation.label, icon: iconFor(presentation.type) };
+    };
+    const seenContactValues = new Set<string>();
     const items = [
-      { key: 'phone', val: personal_info.phone, icon: <Phone size={11} /> },
-      { key: 'email', val: personal_info.email, icon: <Mail size={11} /> },
-      { key: 'linkedin', val: personal_info.linkedin, icon: <Linkedin size={11} /> },
-      { key: 'github', val: personal_info.github, icon: <Github size={11} /> },
-      { key: 'website', val: personal_info.website || resume.portfolio || resume.portfolio_url, icon: <Globe size={11} /> },
-      { key: 'location', val: personal_info.location, icon: <MapPin size={11} /> }
-    ].filter(item => !!item.val);
+      { key: 'phone', val: personal_info.phone, display: personal_info.phone, icon: <Phone size={10} /> },
+      { key: 'email', val: personal_info.email, display: personal_info.email, icon: <Mail size={10} /> },
+      linkedItem('linkedin', personal_info.linkedin),
+      linkedItem('github', personal_info.github),
+      linkedItem('portfolio', personal_info.website || resume.portfolio || resume.portfolio_url),
+      { key: 'location', val: personal_info.location, display: personal_info.location, icon: <MapPin size={10} /> },
+      ...Object.entries(resume.links || {}).map(([key, val]) => linkedItem(key, val)),
+      ...Object.entries(personal_info.coding_profiles || {}).map(([key, val]) => linkedItem(key, val))
+    ].filter(item => {
+      if (!item.val) return false;
+      const identity = canonicalContactIdentity(item.key, item.val);
+      if (seenContactValues.has(identity)) return false;
+      seenContactValues.add(identity);
+      return true;
+    });
 
     if (inline) {
       const isCentered = config.headerStyle === 'centered';
       return (
         <div 
+          data-contact-links="true"
           className={`flex flex-wrap gap-x-4 gap-y-1.5 text-black font-semibold mt-2.5 ${isCentered ? 'justify-center' : 'justify-start'}`}
           style={{ fontSize: `${params.fontSize - 0.5}px` }}
         >
           {items.map((item, i) => (
-            <span key={i} className="flex items-center gap-1">
-              {config.icons && <span className={config.secondaryColor}>{item.icon}</span>}
-              <span>{item.val.replace(/^(https?:\/\/)?(www\.)?/, '')}</span>
-            </span>
+            <a key={i} href={item.key === 'location' ? undefined : linkHref(item.key, item.val)} className="flex items-center gap-1">
+              <span className="text-black/75">{item.icon}</span>
+              <span>{item.display}</span>
+            </a>
           ))}
         </div>
       );
@@ -144,14 +249,15 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
 
     return (
       <div 
+        data-contact-links="true"
         className="flex flex-col mb-6 text-black font-semibold"
         style={{ gap: `${params.bulletGap}px`, fontSize: `${params.fontSize - 0.5}px` }}
       >
         {items.map((item, i) => (
-          <div key={i} className="flex items-center gap-2">
-            {config.icons && <span className={config.secondaryColor}>{item.icon}</span>}
-            <span className="truncate">{item.val.replace(/^(https?:\/\/)?(www\.)?/, '')}</span>
-          </div>
+          <a key={i} href={item.key === 'location' ? undefined : linkHref(item.key, item.val)} className="flex items-center gap-2">
+            <span className="text-black/75">{item.icon}</span>
+            <span className="truncate">{item.display}</span>
+          </a>
         ))}
       </div>
     );
@@ -174,13 +280,14 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
           className={sectionTitleStyle}
           style={{ 
             fontSize: `${params.sectionTitleSize}px`,
-            marginBottom: `${params.itemGap / 2}px`
+            marginBottom: `${params.itemGap / 2}px`,
+            breakAfter: 'avoid-page'
           }}
         >
           {sectionId === 'volunteer' ? 'Leadership & Volunteering' : 
            sectionId === 'publications' ? 'Publications & Research' : 
            sectionId === 'achievements' ? 'Achievements & Awards' : 
-           sectionId.replace('_', ' ')}
+           sectionLabel(sectionId)}
         </h2>
 
         {/* Section Content mapping dynamic spacing variables */}
@@ -192,7 +299,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
                   className="text-black" 
                   style={{ fontSize: `${params.fontSize}px`, lineHeight: params.lineHeight }}
                 >
-                  {summary}
+                  {renderTextWithLinks(summary)}
                 </p>
               );
 
@@ -254,7 +361,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
                           style={{ fontSize: `${params.fontSize - 0.5}px`, lineHeight: params.lineHeight, marginTop: `${params.bulletGap / 2}px` }}
                         >
                           {exp.description.map((bullet: string, j: number) => (
-                            <li key={j} className="pl-0.5" style={{ marginBottom: `${params.bulletGap}px` }}>{bullet}</li>
+                            <li key={j} className="pl-0.5" style={{ marginBottom: `${params.bulletGap}px` }}>{renderTextWithLinks(bullet)}</li>
                           ))}
                         </ul>
                       )}
@@ -269,7 +376,11 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
                   {projects.map((proj: any, i: number) => (
                     <div key={i}>
                       <div className="flex justify-between items-baseline" style={{ fontSize: `${params.fontSize}px` }}>
-                        <h3 className="font-bold text-black">{proj.name}</h3>
+                        <h3 className="font-bold text-black">
+                          {proj.link || proj.url
+                            ? <a href={linkHref('link', proj.link || proj.url)} className="underline">{proj.name}</a>
+                            : proj.name}
+                        </h3>
                         {proj.role && <span className="text-[9.5px] text-black font-bold uppercase shrink-0 ml-4">{proj.role}</span>}
                       </div>
                       {proj.technology_stack && proj.technology_stack.length > 0 && (
@@ -283,7 +394,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
                           style={{ fontSize: `${params.fontSize - 0.5}px`, lineHeight: params.lineHeight, marginTop: `${params.bulletGap / 2}px` }}
                         >
                           {proj.description.map((bullet: string, j: number) => (
-                            <li key={j} className="pl-0.5" style={{ marginBottom: `${params.bulletGap}px` }}>{bullet}</li>
+                            <li key={j} className="pl-0.5" style={{ marginBottom: `${params.bulletGap}px` }}>{renderTextWithLinks(bullet)}</li>
                           ))}
                         </ul>
                       )}
@@ -330,12 +441,20 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
             case 'certifications':
               return (
                 <div className="flex flex-col" style={{ gap: `${params.itemGap}px` }}>
-                  {certifications.map((cert: any, i: number) => (
-                    <div key={i} style={{ fontSize: `${params.fontSize}px` }}>
-                      <div className="font-semibold text-black">{cert.name}</div>
-                      <div className="text-black font-semibold mt-0.5" style={{ fontSize: `${params.fontSize - 1.5}px` }}>
-                        {cert.issuing_organization} {cert.issue_date && `| ${cert.issue_date}`}
-                      </div>
+                  {certificationRecords.map((cert: any) => (
+                    <div key={cert.id} className="break-inside-avoid" style={{ fontSize: `${params.fontSize}px` }}>
+                      {cert.title && <div className="font-bold text-black">{cert.title}</div>}
+                      {cert.description && (
+                        <div className="text-black mt-0.5 pl-3 relative">
+                          <span className="absolute left-0">•</span>{renderTextWithLinks(cert.description)}
+                        </div>
+                      )}
+                      {(cert.organization || cert.date || cert.url) && (
+                        <div className="text-black/75 mt-0.5" style={{ fontSize: `${params.fontSize - 1.25}px` }}>
+                          {[cert.organization, cert.date].filter(Boolean).join(' · ')}
+                          {cert.url && <a href={linkHref('link', cert.url)} className="underline ml-1">Credential</a>}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -347,8 +466,12 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
                   className="list-disc pl-4 text-black font-medium"
                   style={{ fontSize: `${params.fontSize}px`, lineHeight: params.lineHeight }}
                 >
-                  {(achievements || []).map((ach: string, i: number) => (
-                    <li key={i} style={{ marginBottom: `${params.bulletGap}px` }}>{ach}</li>
+                  {achievementRecords.map((ach: any) => (
+                    <li key={ach.id} className="break-inside-avoid" style={{ marginBottom: `${params.bulletGap}px` }}>
+                      {ach.title && <span className="font-bold">{ach.title}: </span>}
+                      {renderTextWithLinks(ach.description)}
+                      {ach.url && <> <a href={linkHref('link', ach.url)} className="underline">Evidence</a></>}
+                    </li>
                   ))}
                   {(awards || []).map((award: any, i: number) => (
                     <li key={i} className="leading-relaxed" style={{ marginBottom: `${params.bulletGap}px` }}>
@@ -376,7 +499,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
                           style={{ lineHeight: params.lineHeight, marginTop: `${params.bulletGap / 2}px` }}
                         >
                           {vol.description.map((b: string, j: number) => (
-                            <li key={j} style={{ marginBottom: `${params.bulletGap}px` }}>{b}</li>
+                            <li key={j} style={{ marginBottom: `${params.bulletGap}px` }}>{renderTextWithLinks(b)}</li>
                           ))}
                         </ul>
                       )}
@@ -393,7 +516,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
                       <span className="font-bold text-black">{pub.title}</span>
                       {pub.publisher && <span className="italic">, Published by {pub.publisher}</span>}
                       {pub.date && <span className="text-black"> ({pub.date})</span>}
-                      {pub.url && <a href={pub.url} target="_blank" rel="noreferrer" className="text-indigo-600 underline ml-2 hover:underline">Link</a>}
+                      {pub.url && <a href={linkHref('link', pub.url)} target="_blank" rel="noreferrer" className="text-indigo-600 underline ml-2 hover:underline">Link</a>}
                     </div>
                   ))}
                 </div>
@@ -422,7 +545,35 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
               );
 
             default:
-              return null;
+              const content = resume[sectionId];
+              const items = Array.isArray(content) ? content : [content];
+              return (
+                <div className="flex flex-col" style={{ gap: `${params.itemGap}px`, fontSize: `${params.fontSize}px` }}>
+                  {items.map((item: any, index: number) => {
+                    if (typeof item !== 'object' || item === null) {
+                      return <div key={index}>{renderScalar(item, sectionId)}</div>;
+                    }
+                    const title = item.title || item.name || item.role || item.organization;
+                    const bullets = item.description || item.bullets || item.highlights;
+                    return (
+                      <div key={index}>
+                        {title && <div className="font-bold">{renderScalar(title, 'title')}</div>}
+                        {Object.entries(item)
+                          .filter(([key]) => !['title', 'name', 'role', 'organization', 'description', 'bullets', 'highlights'].includes(key))
+                          .map(([key, value]) => {
+                            const rendered = renderScalar(value, key);
+                            return rendered ? <div key={key}><span className="font-semibold">{sectionLabel(key)}: </span>{rendered}</div> : null;
+                          })}
+                        {Array.isArray(bullets) && (
+                          <ul className="list-disc pl-4">
+                            {bullets.map((bullet: any, bulletIndex: number) => <li key={bulletIndex}>{renderScalar(bullet)}</li>)}
+                          </ul>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
           }
         })()}
       </section>
@@ -468,9 +619,9 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
           <div className="flex-1 space-y-1.5 text-left">
             <h1 
               className={`font-black uppercase tracking-tight ${config.primaryColor} leading-none`}
-              style={{ fontSize: `${params.nameSize}px` }}
+              style={{ fontSize: `${params.nameSize}px`, letterSpacing: '0' }}
             >
-              {personal_info.name}
+              {candidateName}
             </h1>
             {(personal_info.job_title || personal_info.title) && (
               <div 
@@ -500,9 +651,9 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
           <div className="flex-1 space-y-1.5 text-left">
             <h1 
               className={`font-extrabold uppercase tracking-tight ${config.primaryColor}`}
-              style={{ fontSize: `${params.nameSize}px` }}
+              style={{ fontSize: `${params.nameSize}px`, letterSpacing: '0' }}
             >
-              {personal_info.name}
+              {candidateName}
             </h1>
             {(personal_info.job_title || personal_info.title) && (
               <div 
@@ -523,9 +674,9 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
       <header className={`border-b ${config.borderColor} ${isCentered ? 'text-center' : 'text-left'}`} style={{ paddingBottom: `${params.sectionGap}px` }}>
         <h1 
           className={`font-extrabold uppercase tracking-tight ${config.primaryColor}`}
-          style={{ fontSize: `${params.nameSize}px` }}
+          style={{ fontSize: `${params.nameSize}px`, letterSpacing: '0' }}
         >
-          {personal_info.name}
+          {candidateName}
         </h1>
         {(personal_info.job_title || personal_info.title) && (
           <div 
@@ -543,6 +694,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
   const renderSingleColumnLayout = () => {
     return (
       <div 
+        data-resume-layout={config.layout}
         className={`${config.fontFamily} bg-white text-black`}
         style={{ 
           width: '816px', 
@@ -555,7 +707,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
         }}
       >
         {renderHeader()}
-        <div className="mt-6 flex flex-col">
+        <div className="mt-6 block">
           {activeOrder.map(sectionId => renderSection(sectionId))}
         </div>
       </div>
@@ -563,11 +715,13 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
   };
 
   const renderTwoColumnLayout = () => {
-    const leftSections = ['skills', 'education', 'certifications', 'languages', 'interests'];
-    const rightSections = ['summary', 'experience', 'projects', 'achievements', 'volunteer', 'publications'];
+    const templateLayout = getTemplateSectionLayout(config, activeOrder, resume);
+    const leftSections = templateLayout.primary;
+    const rightSections = templateLayout.secondary;
 
     return (
       <div 
+        data-resume-layout={config.layout}
         className={`${config.fontFamily} bg-white text-black`}
         style={{ 
           width: '816px', 
@@ -594,18 +748,15 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
   };
 
   const renderSidebarLayout = () => {
-    const isAlta = config.id === 'AltaATS';
-    const sidebarSections = isAlta 
-      ? ['skills', 'certifications', 'languages', 'interests']
-      : ['skills', 'education', 'certifications', 'languages', 'interests'];
-    const mainSections = isAlta
-      ? ['experience', 'projects', 'education', 'achievements', 'volunteer', 'publications']
-      : ['summary', 'experience', 'projects', 'achievements', 'volunteer', 'publications'];
+    const templateLayout = getTemplateSectionLayout(config, activeOrder);
+    const sidebarSections = templateLayout.primary;
+    const mainSections = templateLayout.secondary;
 
     const hasTopHeader = config.headerStyle === 'banner';
 
     return (
       <div 
+        data-resume-layout={config.layout}
         className={`${config.fontFamily} bg-white text-black flex flex-col`}
         style={{ 
           width: '816px', 
@@ -631,9 +782,9 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
                 <div>
                   <h1 
                     className={`font-black uppercase leading-tight ${config.primaryColor}`}
-                    style={{ fontSize: `${params.nameSize * 0.9}px` }}
+                    style={{ fontSize: `${params.nameSize * 0.9}px`, letterSpacing: '0' }}
                   >
-                    {personal_info.name}
+                    {candidateName}
                   </h1>
                   {(personal_info.job_title || personal_info.title) && (
                     <div 
@@ -667,11 +818,13 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
   };
 
   const renderMarissaLayout = () => {
-    const mainSections = ['summary', 'experience', 'projects', 'achievements', 'volunteer', 'publications'];
-    const sidebarSections = ['skills', 'education', 'certifications', 'languages', 'interests'];
+    const templateLayout = getTemplateSectionLayout(config, activeOrder);
+    const sidebarSections = templateLayout.primary;
+    const mainSections = templateLayout.secondary;
 
     return (
       <div 
+        data-resume-layout={config.layout}
         className={`${config.fontFamily} bg-white text-black`}
         style={{ 
           width: '816px', 

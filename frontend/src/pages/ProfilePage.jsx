@@ -208,7 +208,7 @@ export default function ProfilePage() {
       <div className="flex flex-col md:flex-row h-full">
         <div className={`w-full md:w-[260px] flex-shrink-0 flex flex-col p-6 border-r ${darkMode ? 'bg-[#0a0a0a] border-zinc-800' : 'bg-[#FCFCFD] border-[#E5E7EB]'}`}>
           <div className="mb-8">
-            <Link to="/" className={`inline-flex items-center gap-2 text-[12px] font-semibold ${darkMode ? 'text-[#9CA3AF] hover:text-white' : 'text-[#6B7280] hover:text-[#111827]'}`}>
+            <Link to="/dashboard" className={`inline-flex items-center gap-2 text-[12px] font-semibold ${darkMode ? 'text-[#9CA3AF] hover:text-white' : 'text-[#6B7280] hover:text-[#111827]'}`}>
               <ChevronLeft className="w-4 h-4" />
               Back to Dashboard
             </Link>

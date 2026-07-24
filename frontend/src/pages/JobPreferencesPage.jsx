@@ -181,7 +181,7 @@ export default function JobPreferencesPage() {
         setIsEditing(false);
         setStep(7);
       } else {
-        navigate('/', { replace: true });
+        navigate('/dashboard', { replace: true });
       }
     } catch (err) {
       setError(err.message || 'Failed to save job preferences.');

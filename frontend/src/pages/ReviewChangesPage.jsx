@@ -1,7 +1,12 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import ResumeReviewView from '../components/ResumeReviewView';
 import { useNavigate } from 'react-router-dom';
+import {
+  mergeReviewResume,
+  reviewProgress,
+  validateWorkingResume
+} from '../utils/resumeReviewMerge';
 
 function ReviewChangesPage() {
   const navigate = useNavigate();
@@ -10,6 +15,27 @@ function ReviewChangesPage() {
     reviewSuggestions, setReviewSuggestions,
     handleGenerateFinalResume, loading
   } = useApp();
+
+  const reviewState = useMemo(
+    () => mergeReviewResume(parsedResume, reviewSuggestions),
+    [parsedResume, reviewSuggestions]
+  );
+  const progress = useMemo(
+    () => reviewProgress(reviewSuggestions),
+    [reviewSuggestions]
+  );
+  const validation = useMemo(() => {
+    const result = validateWorkingResume(
+      reviewState.originalResume,
+      reviewState.workingResume,
+      reviewState.operations
+    );
+    const targetIssues = reviewState.invalidOperations.map(issue => issue.reason);
+    return {
+      valid: result.valid && targetIssues.length === 0,
+      issues: [...result.issues, ...targetIssues]
+    };
+  }, [reviewState]);
 
   const handleUpdateSuggestionStatus = (id, newStatus) => {
     setReviewSuggestions(reviewSuggestions.map(s => 
@@ -27,12 +53,20 @@ function ReviewChangesPage() {
 
   return (
     <ResumeReviewView
-      parsedResume={parsedResume}
+      parsedResume={reviewState.workingResume}
+      originalResume={reviewState.originalResume}
       suggestions={reviewSuggestions}
+      reviewOperations={reviewState.operations}
+      reviewProgress={progress}
+      validation={validation}
       onUpdateSuggestionStatus={handleUpdateSuggestionStatus}
       onAcceptAll={handleAcceptAll}
       onRejectAll={handleRejectAll}
-      onGenerateResume={handleGenerateFinalResume}
+      onGenerateResume={() => handleGenerateFinalResume(
+        reviewState.workingResume,
+        reviewState.operations,
+        validation
+      )}
       onBack={() => navigate('/tailor-config')}
       loading={loading}
     />

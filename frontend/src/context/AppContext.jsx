@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { compressResumeData } from '../utils/resumeCompression';
+import { toRenderableResume } from '../utils/renderableResume';
+import { mergeReviewResume, validateWorkingResume } from '../utils/resumeReviewMerge';
 import {
   assessBrowserJobEvidence, captureActiveTabJobEvidence, classifyBrowserPageUrl,
   collectJobSkills, isExtractableHttpUrl, validateJDResponse
@@ -204,6 +206,9 @@ export function AppProvider({ children }) {
     setCompanyName('');
     setJobTitle('');
     setJobDetectionMeta(null);
+    // Tracker linkage belongs to the previous job session. A newly extracted
+    // JD must remain unsynced until the user explicitly chooses to sync it.
+    setActiveApplicationId(null);
   };
 
   const fetchSubscription = async () => {
@@ -239,7 +244,10 @@ export function AppProvider({ children }) {
       });
       const sessionStore = chrome.storage.session;
       if (sessionStore) {
-        sessionStore.get(['jobExtractionSession'], (result) => {
+        sessionStore.get(['jobExtractionSession', 'resumeReviewSession'], (result) => {
+          if (Array.isArray(result.resumeReviewSession?.suggestions)) {
+            setReviewSuggestions(result.resumeReviewSession.suggestions);
+          }
           const saved = result.jobExtractionSession;
           const finishHydration = (activeUrl = '') => {
             const savedUrl = saved?.lastAnalyzedUrl || saved?.jobAnalysis?.source_url || '';
@@ -309,6 +317,7 @@ export function AppProvider({ children }) {
       const savedJobText = localStorage.getItem('job_text');
       const savedCompany = localStorage.getItem('company_name');
       const savedTitle = localStorage.getItem('job_title');
+      const savedReview = sessionStorage.getItem('resume_review_session');
       if (savedKey) setApiKey(savedKey);
       if (savedUrl) setApiUrl(savedUrl);
       if (savedResume) {
@@ -338,6 +347,14 @@ export function AppProvider({ children }) {
       if (savedJobText) setJobText(savedJobText);
       if (savedCompany) setCompanyName(savedCompany);
       if (savedTitle) setJobTitle(savedTitle);
+      if (savedReview) {
+        try {
+          const review = JSON.parse(savedReview);
+          if (Array.isArray(review?.suggestions)) setReviewSuggestions(review.suggestions);
+        } catch (error) {
+          console.warn('Unable to restore resume review session', error);
+        }
+      }
     }
   }, []);
 
@@ -494,6 +511,24 @@ export function AppProvider({ children }) {
       localStorage.removeItem('job_title');
     }
   }, [jobAnalysis, jobText, companyName, jobTitle, lastAnalyzedUrl, jobDetectionMeta, jobSessionHydrated, isExtension]);
+
+  // Review decisions are workflow state: survive route changes and refreshes, but
+  // expire with the browser session instead of becoming a durable resume copy.
+  useEffect(() => {
+    const payload = {
+      resumeId: parsedResume?.id || null,
+      jobIdentity: currentJobIdentity || null,
+      suggestions: reviewSuggestions
+    };
+    if (isExtension && chrome.storage.session) {
+      if (reviewSuggestions.length) chrome.storage.session.set({ resumeReviewSession: payload });
+      else chrome.storage.session.remove('resumeReviewSession');
+    } else if (reviewSuggestions.length) {
+      sessionStorage.setItem('resume_review_session', JSON.stringify(payload));
+    } else {
+      sessionStorage.removeItem('resume_review_session');
+    }
+  }, [reviewSuggestions, parsedResume?.id, currentJobIdentity, isExtension]);
 
   // Save/Remove tailored resume context storage
   useEffect(() => {
@@ -1088,6 +1123,90 @@ export function AppProvider({ children }) {
     }
   };
 
+  const syncCurrentJobToTracker = async (currentStage = "Ready To Apply", notes = "") => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token || !jobAnalysis) {
+      throw new Error("A signed-in user and active job session are required to sync.");
+    }
+    const strictScore = (value) => {
+      if (value === null || value === undefined || value === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) && numeric >= 0 && numeric <= 100 ? numeric : null;
+    };
+    const freshResponse = await fetch(`${apiUrl}/api/v1/applications/`, {
+      headers: { "Authorization": `Bearer ${token}` }
+    });
+    const freshApplications = freshResponse.ok ? await freshResponse.json() : applications;
+    const normalizedUrl = String(lastAnalyzedUrl || '').replace(/\/+$/, '').toLowerCase();
+    const existing = (freshApplications || []).find(application => {
+      const sameUrl = normalizedUrl && String(application.job_url || '')
+        .replace(/\/+$/, '').toLowerCase() === normalizedUrl;
+      const hasIdentity = Boolean(String(companyName || '').trim() && String(jobTitle || '').trim());
+      const sameIdentity = hasIdentity && String(application.company_name || '').trim().toLowerCase()
+        === String(companyName || '').trim().toLowerCase()
+        && String(application.job_title || '').trim().toLowerCase()
+        === String(jobTitle || '').trim().toLowerCase();
+      return sameUrl || sameIdentity;
+    });
+    if (existing?.id) {
+      const updatedTimeline = [
+        ...(existing.timeline || []),
+        { event: "Synced to Job Tracker", timestamp: new Date().toISOString() }
+      ];
+      const updateResponse = await fetch(`${apiUrl}/api/v1/applications/${existing.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          current_stage: currentStage,
+          notes: notes.trim() || existing.notes || null,
+          timeline: updatedTimeline
+        })
+      });
+      if (!updateResponse.ok) throw new Error("Failed to update the synced tracker job.");
+      const updated = await updateResponse.json();
+      setActiveApplicationId(existing.id);
+      await fetchApplications();
+      return updated;
+    }
+    const appData = {
+      company_name: companyName || "",
+      job_title: jobTitle || "",
+      location: jobAnalysis?.location || "Remote",
+      job_url: lastAnalyzedUrl || "",
+      resume_version: tailoredResume ? "v1 (Tailored)" : null,
+      cover_letter_version: coverLetter ? "v1" : null,
+      ats_score: strictScore(comparison?.ats_score_after),
+      resume_match_score: strictScore(
+        comparison?.ats_score_before ?? comparison?.match_score ?? comparison?.score
+      ),
+      current_stage: currentStage,
+      notes: notes.trim() || null,
+      timeline: [{
+        event: "Synced to Job Tracker",
+        timestamp: new Date().toISOString()
+      }]
+    };
+    const response = await fetch(`${apiUrl}/api/v1/applications/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify(appData)
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || "Failed to sync job to tracker.");
+    }
+    const created = await response.json();
+    setActiveApplicationId(created.id);
+    await fetchApplications();
+    return created;
+  };
+
   // Perform Job Description Extraction (Step 1)
   const handleExtractJob = async () => {
     if (jobAnalysis) return;
@@ -1393,7 +1512,7 @@ export function AppProvider({ children }) {
         },
         body: JSON.stringify({
           resume_id: activeParsed.id,
-          resume: activeParsed,
+          resume: toRenderableResume(activeParsed),
           job: jobAnalysis
         })
       });
@@ -1477,6 +1596,28 @@ export function AppProvider({ children }) {
         setLoadingProgress(35);
       }
 
+      // Deterministically recover descriptions and actual PDF annotation URLs
+      // from the immutable source file. This is intentionally not an AI call.
+      if (activeParsed.id && activeParsed.source_preservation_version !== '7.3') {
+        setLoadingMessage("Preserving original descriptions and links...");
+        const recoveryToken = session?.access_token || localStorage.getItem('access_token');
+        const recoveryRes = await fetch(
+          `${apiUrl}/api/v1/resumes/${activeParsed.id}/recover-source`,
+          {
+            method: "POST",
+            headers: recoveryToken ? { "Authorization": `Bearer ${recoveryToken}` } : {}
+          }
+        );
+        if (!recoveryRes.ok) {
+          const recoveryError = await recoveryRes.json().catch(() => ({}));
+          throw new Error(
+            recoveryError.detail || "Original resume source recovery failed."
+          );
+        }
+        activeParsed = normalizeResumeRecord(await recoveryRes.json());
+        persistParsedResume(activeParsed);
+      }
+
       const headers = {};
       if (apiKey) headers["x-groq-key"] = apiKey;
       const token = session?.access_token || localStorage.getItem('access_token');
@@ -1490,7 +1631,7 @@ export function AppProvider({ children }) {
         },
         body: JSON.stringify({
           resume_id: activeParsed.id,
-          resume: activeParsed,
+          resume: toRenderableResume(activeParsed),
           job: jobAnalysis
         })
       });
@@ -1516,12 +1657,12 @@ export function AppProvider({ children }) {
       }
 
       const list = [];
-      let idCounter = 1;
       const patch = compResult.patch;
 
       if (selectedSections.includes('summary') && patch.summary) {
         list.push({
-          id: `change-${idCounter++}`,
+          id: 'summary:0',
+          change_id: 'summary:0',
           category: 'Professional Summary',
           status: 'pending',
           original: activeParsed.summary || '',
@@ -1544,7 +1685,8 @@ export function AppProvider({ children }) {
             const suggested = bulletsPatch[bulletIdxStr];
             const originalText = activeParsed.experience[itemIdx]?.description[bulletIdx] || '';
             list.push({
-              id: `change-${idCounter++}`,
+              id: `experience:${itemIdx}:bullet:${bulletIdx}`,
+              change_id: `experience:${itemIdx}:bullet:${bulletIdx}`,
               category: 'Work Experience',
               status: 'pending',
               original: originalText,
@@ -1569,7 +1711,8 @@ export function AppProvider({ children }) {
             const suggested = bulletsPatch[bulletIdxStr];
             const originalText = activeParsed.projects[itemIdx]?.description[bulletIdx] || '';
             list.push({
-              id: `change-${idCounter++}`,
+              id: `projects:${itemIdx}:bullet:${bulletIdx}`,
+              change_id: `projects:${itemIdx}:bullet:${bulletIdx}`,
               category: 'Projects',
               status: 'pending',
               original: originalText,
@@ -1588,7 +1731,8 @@ export function AppProvider({ children }) {
       if (selectedSections.includes('skills') && patch.skills_append && patch.skills_append.length > 0) {
         patch.skills_append.forEach(skill => {
           list.push({
-            id: `change-${idCounter++}`,
+            id: `skills:${String(skill).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+            change_id: `skills:${String(skill).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
             category: 'Skills',
             status: 'pending',
             original: '(Skill not present)',
@@ -1618,53 +1762,29 @@ export function AppProvider({ children }) {
     }
   };
 
-  const handleGenerateFinalResume = async () => {
-    // Build final patch from accepted suggestions
-    const finalPatch = {
-      summary: null,
-      skills_append: [],
-      experience: {},
-      projects: {}
-    };
-
-    reviewSuggestions.forEach((s) => {
-      if (s.status === 'accepted') {
-        if (s.sectionType === 'summary') {
-          finalPatch.summary = s.suggested;
-        } else if (s.sectionType === 'experience') {
-          if (!finalPatch.experience[s.itemIndex]) finalPatch.experience[s.itemIndex] = {};
-          finalPatch.experience[s.itemIndex][s.bulletIndex] = s.suggested;
-        } else if (s.sectionType === 'projects') {
-          if (!finalPatch.projects[s.itemIndex]) finalPatch.projects[s.itemIndex] = {};
-          finalPatch.projects[s.itemIndex][s.bulletIndex] = s.suggested;
-        } else if (s.sectionType === 'skills') {
-          finalPatch.skills_append.push(s.skillName);
-        }
-      }
-    });
-
+  const handleGenerateFinalResume = async (workingResumeOverride, operationsOverride, validationOverride) => {
     try {
       setLoading(true);
-      setLoadingMessage("Applying tailored changes...");
-      const tailorResponse = await fetch(`${apiUrl}/api/tailor`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(apiKey ? { "x-groq-key": apiKey } : {})
-        },
-        body: JSON.stringify({
-          resume: parsedResume,
-          patch: finalPatch
-        })
-      });
-
-      if (!tailorResponse.ok) {
-        throw new Error("Tailoring error: " + (await tailorResponse.json()).detail);
+      setLoadingMessage("Validating complete reviewed resume...");
+      const merged = workingResumeOverride
+        ? { workingResume: toRenderableResume(workingResumeOverride), operations: operationsOverride || [] }
+        : mergeReviewResume(parsedResume, reviewSuggestions);
+      const validation = validationOverride || validateWorkingResume(
+        parsedResume,
+        merged.workingResume,
+        merged.operations
+      );
+      if (!validation.valid) {
+        console.error("[RESUME-EXPORT] Pre-export integrity check failed", {
+          issues: validation.issues
+        });
+        throw new Error(
+          "We could not finalize the resume automatically. Your original resume data is safe. Please retry or review the highlighted sections."
+        );
       }
-
-      const tailoredResult = await tailorResponse.json();
+      const tailoredResult = merged.workingResume;
+      if (!tailoredResult) throw new Error('The complete reviewed resume is unavailable.');
       setTailoredResume(tailoredResult);
-      setLoading(false);
 
       // Re-score the exact resume produced from the user's accepted changes.
       // Do not persist the projected score for all suggested changes.
@@ -1693,56 +1813,7 @@ export function AppProvider({ children }) {
         console.warn("Strict ATS scoring unavailable", scoreError);
       }
 
-      // Auto-create application session
-      try {
-        const strictScore = (value) => {
-          if (value === null || value === undefined || value === '') return null;
-          const numeric = Number(value);
-          return Number.isFinite(numeric) && numeric >= 0 && numeric <= 100 ? numeric : null;
-        };
-        const tailoredAtsScore = strictScore(exactTailoredScore);
-        const baselineMatchScore = strictScore(comparison?.ats_score_before ?? comparison?.match_score ?? comparison?.score);
-        const appData = {
-          company_name: companyName || "",
-          job_title: jobTitle || "",
-          location: jobAnalysis?.location || "Remote",
-          job_url: lastAnalyzedUrl || "",
-          resume_version: "v1 (Tailored)",
-          cover_letter_version: null,
-          ats_score: tailoredAtsScore,
-          resume_match_score: baselineMatchScore,
-          current_stage: "Ready To Apply",
-          timeline: [
-            { event: "JD Extracted", timestamp: new Date().toISOString() },
-            { event: "Resume Tailored", timestamp: new Date().toISOString() }
-          ]
-        };
-        const token = session?.access_token || localStorage.getItem('access_token');
-        if (token) {
-          const res = await fetch(`${apiUrl}/api/v1/applications/`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${token}`
-            },
-            body: JSON.stringify(appData)
-          });
-          if (res.ok) {
-            const data = await res.json();
-            setActiveApplicationId(data.id);
-            // Refresh list
-            const freshRes = await fetch(`${apiUrl}/api/v1/applications/`, {
-              headers: { "Authorization": `Bearer ${token}` }
-            });
-            if (freshRes.ok) {
-              setApplications(await freshRes.json());
-            }
-          }
-        }
-      } catch (err) {
-        console.error("Failed to automatically create application session:", err);
-      }
-
+      setLoading(false);
       navigate('/templates');
     } catch (err) {
       console.error(err);
@@ -1756,32 +1827,95 @@ export function AppProvider({ children }) {
     if (!activeRes) return;
 
     let finalRes = { ...activeRes };
-    if (layoutLevel !== undefined) {
-      const pruneLevel = Math.max(0, 5 - Math.floor(layoutLevel / 2));
-      finalRes = compressResumeData(activeRes, pruneLevel);
-      finalRes.layout_level = layoutLevel;
-    }
+    let originalForAudit = parsedResume || activeRes;
 
     setLoading(true);
     setLoadingProgress(50);
-    setLoadingMessage("Generating high-quality PDF...");
+    setLoadingMessage("Finalizing resume structure...");
 
     try {
+      // Existing tailored state may predate the latest deterministic source
+      // repair. Refresh it immediately at export and replace only sections the
+      // tailoring workflow never edits.
+      if (parsedResume?.id && parsedResume.source_preservation_version !== '7.3') {
+        setLoadingMessage("Repairing original achievement and certification evidence...");
+        const recoveryToken = session?.access_token || localStorage.getItem('access_token');
+        const recoveryResponse = await fetch(
+          `${apiUrl}/api/v1/resumes/${parsedResume.id}/recover-source`,
+          {
+            method: "POST",
+            headers: recoveryToken ? { "Authorization": `Bearer ${recoveryToken}` } : {}
+          }
+        );
+        if (!recoveryResponse.ok) {
+          const recoveryError = await recoveryResponse.json().catch(() => ({}));
+          throw new Error(recoveryError.detail || "Original resume evidence repair failed.");
+        }
+        const recoveredRecord = normalizeResumeRecord(await recoveryResponse.json());
+        const recoveredContent = toRenderableResume(recoveredRecord);
+        originalForAudit = recoveredRecord;
+        finalRes = {
+          ...finalRes,
+          achievements: recoveredContent.achievements,
+          certifications: recoveredContent.certifications,
+          awards: recoveredContent.awards,
+          links: recoveredContent.links,
+          personal_info: {
+            ...(finalRes.personal_info || {}),
+            linkedin: recoveredContent.personal_info?.linkedin || finalRes.personal_info?.linkedin,
+            github: recoveredContent.personal_info?.github || finalRes.personal_info?.github,
+            website: recoveredContent.personal_info?.website || finalRes.personal_info?.website,
+            coding_profiles: recoveredContent.personal_info?.coding_profiles || finalRes.personal_info?.coding_profiles
+          }
+        };
+        persistParsedResume(recoveredRecord);
+        setTailoredResume(finalRes);
+      }
+      if (layoutLevel !== undefined) {
+        setLoadingMessage("Refining page layout...");
+        const pruneLevel = Math.max(0, 5 - Math.floor(layoutLevel / 2));
+        finalRes = compressResumeData(finalRes, pruneLevel);
+        finalRes.layout_level = layoutLevel;
+      }
       const response = await fetch(`${apiUrl}/api/download-pdf?company_name=${encodeURIComponent(companyName || 'Company')}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          resume: finalRes,
+          resume: toRenderableResume(finalRes),
+          original_resume: toRenderableResume(originalForAudit),
+          intentional_removals: [],
+          approved_additions: reviewSuggestions
+            .filter(suggestion =>
+              suggestion.status === 'accepted'
+              && suggestion.sectionType === 'skills'
+              && suggestion.skillName
+            )
+            .map(suggestion => suggestion.skillName),
           template_name: selectedTemplate || 'ExecutiveATS'
         })
       });
 
       if (!response.ok) {
-        throw new Error("Failed to generate PDF from server.");
+        const errorPayload = await response.json().catch(() => ({}));
+        const detail = errorPayload.detail;
+        const requestId = typeof detail === 'object' ? detail?.request_id : null;
+        console.error("[RESUME-EXPORT] Export failed", {
+          status: response.status,
+          requestId,
+          // Retained only in developer tools; never rendered to the user.
+          detail
+        });
+        const safeMessage = typeof detail === 'object' && detail?.message
+          ? detail.message
+          : "We could not finalize the resume automatically. Your original resume data is safe. Please retry.";
+        throw new Error(
+          requestId ? `${safeMessage} Support ID: ${requestId}` : safeMessage
+        );
       }
 
+      setLoadingMessage("Validating the final document...");
       const blob = await response.blob();
       const rawName = activeRes.personal_info?.name || 'User';
       const cleanUser = rawName.replace(/\s+/g, '_');
@@ -1964,7 +2098,7 @@ export function AppProvider({ children }) {
           ...headers
         },
         body: JSON.stringify({
-          resume: activeParsed,
+          resume: toRenderableResume(activeParsed),
           job: jobAnalysis
         })
       });
@@ -2053,7 +2187,7 @@ export function AppProvider({ children }) {
       applications, setApplications,
       activeApplicationId, setActiveApplicationId,
       pendingApplicationSubmitted, setPendingApplicationSubmitted,
-      fetchApplications, updateApplicationStage,
+      fetchApplications, updateApplicationStage, syncCurrentJobToTracker,
       selectedSkills, setSelectedSkills,
       selectedRewrites, setSelectedRewrites,
       acceptSummary, setAcceptSummary,

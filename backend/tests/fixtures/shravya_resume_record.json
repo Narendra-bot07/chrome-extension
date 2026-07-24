@@ -1,0 +1,72 @@
+{
+  "id": "internal-resume-id",
+  "user_id": "internal-user-id",
+  "created_at": "2026-07-24T00:00:00Z",
+  "updated_at": "2026-07-24T01:00:00Z",
+  "file_name": "Shravya_6641_Resume.pdf",
+  "file_size": 216335,
+  "file_type": "application/pdf",
+  "is_active": true,
+  "parse_status": "complete",
+  "parsing_status": "complete",
+  "upload_source": "dashboard",
+  "parsed_content": {
+    "personal_info": {
+      "name": "KOTHA SHRAVYA YADAV",
+      "email": "yadavshravya383@gmail.com",
+      "phone": "+91-8897423911",
+      "linkedin": "https://linkedin.com/in/shravya-yadav-0568b525a/",
+      "github": "https://github.com/shravya-yadav"
+    },
+    "education": [
+      {
+        "institution": "CVR College of Engineering",
+        "degree": "B.Tech",
+        "field_of_study": "C.S.E (AI&ML)",
+        "end_date": "July 2026",
+        "gpa": "9.42 CGPA"
+      }
+    ],
+    "experience": [
+      {
+        "company": "Amazon",
+        "role": "Software Dev Engineer Intern",
+        "start_date": "July 2024",
+        "end_date": "August 2024",
+        "description": [
+          "Designed high-level and low-level project documentation with system architecture for DesignInspect.",
+          "Analyzed delays in transitioning payee status from blocked to unblocked and documented actions that expedited the process.",
+          "Streamed TimeTakenToUnblockOverall metrics to Kibana using CloudWatch and LiveTail."
+        ]
+      }
+    ],
+    "skills": ["Java", "Python", "JavaScript", "ReactJS", "NodeJS", "LangGraph"],
+    "projects": [
+      {
+        "name": "BRO – Balance and Routine Optimizer",
+        "technology_stack": ["LangGraph", "Pinecone", "FastAPI", "React"],
+        "link": "https://github.com/shravya-yadav",
+        "description": [
+          "Developed a multi-agent AI system to intelligently plan and optimize daily routines.",
+          "Integrated contextual memory retrieval for persistent task awareness and smarter scheduling.",
+          "Designed a dynamic dashboard for visualizing tasks and user routines in real time."
+        ]
+      }
+    ],
+    "achievements": [],
+    "certifications": [
+      "Crayon’d Hackathon Finalist — Selected as one of 25 participants for company tasks and deep-dive sessions.",
+      "$300 Zscaler voucher for completing Zero Trust Architecture training and related learning resources.",
+      "Competitive Programming — Solved 500+ problems and achieved LeetCode Top 18%.",
+      "CSI Student Chapter leadership — Increased membership and participation by 40%.",
+      "EPAM Scholarship — Selected among the top 100 candidates in India.",
+      "TTPOC Student Volunteer — Volunteered at CareerNexus Summit 2024 and 2025."
+    ],
+    "custom_sections": [
+      {
+        "title": "Professional Development",
+        "description": ["Find Leader in You scholar through Competitiveness Mindset Institute, USA."]
+      }
+    ]
+  }
+}

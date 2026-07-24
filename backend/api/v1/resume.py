@@ -11,6 +11,7 @@ from api.dependencies import get_resume_repository, get_storage_service
 from repositories.resume_repository import ResumeRepository
 from services.storage.file_service import FileService
 from services.resume.parser import ResumeParser
+from services.resume.source_preservation import restore_source_evidence
 from services.ai.groq_service import GroqService
 from app.analytics.events.tracking.analytics_service import AnalyticsService
 from core.database import get_db_connection
@@ -127,6 +128,7 @@ async def upload_and_parse(
 
     # Text extraction
     raw_text = ResumeParser.extract_text(content, file.filename)
+    source_links = ResumeParser.extract_links(content, file.filename)
 
     # Save to storage
     import uuid
@@ -142,7 +144,11 @@ async def upload_and_parse(
     )
 
     # Save to database before AI parsing so uploaded files are never lost from the Resume Manager.
-    parsed_res = {"raw_text": raw_text, "parse_status": "pending"}
+    parsed_res = {
+        "raw_text": raw_text,
+        "links": source_links,
+        "parse_status": "pending",
+    }
     record = resume_repo.create(
         user_id=user["id"],
         file_path=unique_path,
@@ -365,7 +371,8 @@ async def parse_existing_resume(
     x_groq_key: str = Header(None),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository),
-    conn = Depends(get_db_connection)
+    conn = Depends(get_db_connection),
+    storage: FileService = Depends(get_storage_service),
 ):
     record = repo.get_by_id(resume_id, user["id"])
     if not record:
@@ -388,6 +395,18 @@ async def parse_existing_resume(
     
     # Save back to database
     updated_content = parsed_res.dict()
+    source_links = dict(parsed_content.get("links") or {})
+    if record.get("file_path") and str(record.get("file_type") or "").lower() == "pdf":
+        try:
+            source_bytes = storage.download_file("original-resumes", record["file_path"])
+            source_links.update(ResumeParser.extract_links_from_pdf(source_bytes))
+        except Exception as exc:
+            logger.warning(
+                "[RESUME][BACKEND] Source link recovery unavailable resume_id=%s error=%s",
+                resume_id,
+                exc,
+            )
+    updated_content = restore_source_evidence(updated_content, raw_text, source_links)
     updated_content["raw_text"] = raw_text
     updated_content["parse_status"] = "parsed"
     
@@ -408,4 +427,46 @@ async def parse_existing_resume(
         
     # Return updated record format
     record["parsed_content"] = updated_content
+    return record
+
+
+@router.post("/{resume_id}/recover-source")
+async def recover_resume_source_details(
+    resume_id: str,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository),
+    storage: FileService = Depends(get_storage_service),
+):
+    """Backfill lossless descriptions and PDF annotation URLs without an LLM."""
+    record = repo.get_by_id(resume_id, user["id"])
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
+    parsed_content = record.get("parsed_content") or {}
+    if not isinstance(parsed_content, dict):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Stored resume content is invalid.",
+        )
+    raw_text = str(parsed_content.get("raw_text") or "")
+    source_links = dict(parsed_content.get("links") or {})
+    if record.get("file_path") and str(record.get("file_type") or "").lower() == "pdf":
+        source_bytes = storage.download_file("original-resumes", record["file_path"])
+        source_links.update(ResumeParser.extract_links_from_pdf(source_bytes))
+    recovered = restore_source_evidence(parsed_content, raw_text, source_links)
+    recovered["source_preservation_version"] = "7.3"
+    if not repo.update_parsed_content(resume_id, user["id"], recovered):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to persist recovered resume source details.",
+        )
+    record["parsed_content"] = recovered
+    record["parsing_status"] = record.get("parsing_status") or recovered.get("parse_status")
+    logger.info(
+        "[RESUME-PRESERVATION] Source recovery completed resume_id=%s links=%s "
+        "achievements=%s certifications=%s",
+        resume_id,
+        len(source_links),
+        len(recovered.get("achievements") or []),
+        len(recovered.get("certifications") or []),
+    )
     return record

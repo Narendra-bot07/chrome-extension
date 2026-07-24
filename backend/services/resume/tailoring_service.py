@@ -56,6 +56,26 @@ class TailoringService:
             jd_text=job["raw_text"]
         )
         tailored_resume_obj = ResumeStructure(**agent_res["tailored_content"])
+        from services.resume.preservation import preserve_resume
+        parsed_source = resume.get("parsed_content") or {}
+        preservation = preserve_resume(
+            resume_obj.model_dump(mode="json", exclude={"raw_text"}),
+            tailored_resume_obj.model_dump(mode="json", exclude={"raw_text"}),
+            candidate_evidence=[
+                parsed_source.get("raw_text", "") if isinstance(parsed_source, dict) else ""
+            ],
+            auto_repair=True,
+        )
+        if not preservation.valid:
+            blocking = [
+                issue.message for issue in preservation.issues
+                if issue.severity == "critical"
+            ]
+            raise ValueError(
+                "Resume preservation validation failed; tailoring stopped: "
+                + " ".join(blocking)
+            )
+        tailored_resume_obj = ResumeStructure(**preservation.lossless_resume)
         latency = int((time.time() - start_time) * 1000)
 
         # Retrieve ATS score from agent feedback evaluations
@@ -88,4 +108,24 @@ class TailoringService:
         # Log usage activity
         self.audit_repo.log_activity(user_id, "tailor", {"tailored_resume_id": tailored_record["id"]})
 
+        tailored_record["preservation_report"] = {
+            "valid": preservation.valid,
+            "score": preservation.score,
+            "confidence": preservation.confidence,
+            "compared_elements": preservation.compared_elements,
+            "counts": preservation.counts,
+            "warnings": preservation.warnings,
+            "repair_actions": [
+                {
+                    "action": action.action,
+                    "element_id": action.element_id,
+                    "path": action.path,
+                    "reason": action.reason,
+                    "responsible_agent": action.responsible_agent,
+                    "timestamp": action.timestamp,
+                    "applied": action.applied,
+                }
+                for action in preservation.repair_actions
+            ],
+        }
         return tailored_record

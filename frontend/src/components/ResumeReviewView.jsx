@@ -1,10 +1,60 @@
 import React, { useState, useMemo } from 'react';
-import { Check, RotateCcw, Sparkles, X } from 'lucide-react';
+import {
+  Check, Code2, Folder, Github, Globe, Linkedin, Mail, MapPin, Phone,
+  RotateCcw, Sparkles, X
+} from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import {
+  canonicalContactIdentity,
+  normalizePersonName,
+  professionalLink
+} from '../utils/resumePresentation';
+import { hasReviewOperation } from '../utils/resumeReviewMerge';
+
+const labelFor = (value) => String(value || '')
+  .replace(/_/g, ' ')
+  .replace(/\b\w/g, char => char.toUpperCase());
+
+const isUrl = value => typeof value === 'string' && /^(https?:\/\/|mailto:)/i.test(value);
+const contactHref = (key, value) => {
+  const text = String(value || '').trim();
+  if (!text || key === 'location') return undefined;
+  if (key === 'email') return /^mailto:/i.test(text) ? text : `mailto:${text}`;
+  if (key === 'phone') return /^tel:/i.test(text) ? text : `tel:${text.replace(/[^\d+]/g, '')}`;
+  if (/^[a-z][a-z\d+.-]*:/i.test(text)) return text;
+  return `https://${text.replace(/^\/+/, '')}`;
+};
+const hasVisibleValue = value => {
+  if (value === null || value === undefined || value === '') return false;
+  if (Array.isArray(value)) return value.some(hasVisibleValue);
+  if (typeof value === 'object') return Object.values(value).some(hasVisibleValue);
+  return true;
+};
+const displayValue = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  if (isUrl(value)) {
+    return <a href={value} target="_blank" rel="noreferrer" className="text-[#00a894] underline">{value}</a>;
+  }
+  if (Array.isArray(value)) {
+    return value.filter(hasVisibleValue).map((nested, index) => (
+      <React.Fragment key={index}>{index > 0 ? ', ' : ''}{displayValue(nested)}</React.Fragment>
+    ));
+  }
+  if (typeof value === 'object') {
+    return Object.entries(value).filter(([, nested]) => hasVisibleValue(nested)).map(([key, nested], index) => (
+      <React.Fragment key={key}>{index > 0 ? ' | ' : ''}{labelFor(key)}: {displayValue(nested)}</React.Fragment>
+    ));
+  }
+  return String(value);
+};
 
 function ResumeReviewView({
   parsedResume,
+  originalResume,
   suggestions,
+  reviewOperations,
+  reviewProgress,
+  validation,
   onUpdateSuggestionStatus,
   onAcceptAll,
   onRejectAll,
@@ -12,10 +62,55 @@ function ResumeReviewView({
   onBack,
   loading
 }) {
-  const { darkMode, apiUrl, apiKey, jobAnalysis, setReviewSuggestions, comparison } = useApp();
+  const { darkMode, apiUrl, apiKey, jobAnalysis, setReviewSuggestions, comparison, selectedSections } = useApp();
   const [activeEditSection, setActiveEditSection] = useState(null);
   const [customPrompt, setCustomPrompt] = useState("");
   const [refining, setRefining] = useState(false);
+  const summarySuggestions = useMemo(
+    () => suggestions.filter(suggestion => suggestion.sectionType === 'summary'),
+    [suggestions]
+  );
+  const skillSuggestions = useMemo(
+    () => suggestions.filter(suggestion => suggestion.sectionType === 'skills'),
+    [suggestions]
+  );
+  const contactItems = useMemo(() => {
+    const personal = parsedResume.personal_info || {};
+    const iconFor = type => ({
+      linkedin: Linkedin,
+      github: Github,
+      code: Code2,
+      folder: Folder,
+      website: Globe
+    }[type] || Globe);
+    const professionalItem = (key, value) => {
+      const presentation = professionalLink(key, value);
+      return {
+        key,
+        value,
+        label: presentation.label,
+        Icon: iconFor(presentation.type)
+      };
+    };
+    const candidates = [
+      { key: 'email', value: personal.email, label: personal.email, Icon: Mail },
+      { key: 'phone', value: personal.phone, label: personal.phone, Icon: Phone },
+      { key: 'location', value: personal.location, label: personal.location, Icon: MapPin },
+      professionalItem('linkedin', personal.linkedin),
+      professionalItem('github', personal.github),
+      professionalItem('portfolio', personal.website || parsedResume.portfolio || parsedResume.portfolio_url),
+      ...Object.entries(parsedResume.links || {}).map(([key, value]) => professionalItem(key, value)),
+      ...Object.entries(personal.coding_profiles || {}).map(([key, value]) => professionalItem(key, value))
+    ];
+    const seen = new Set();
+    return candidates.filter(item => {
+      if (!item.value) return false;
+      const identity = canonicalContactIdentity(item.key, item.value);
+      if (!identity || seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    });
+  }, [parsedResume]);
 
   const handleRefineSection = async (sectionType) => {
     if (!customPrompt.trim()) return;
@@ -158,6 +253,14 @@ function ResumeReviewView({
 
   // Statistics
   const stats = useMemo(() => {
+    if (reviewProgress) {
+      const reviewed = reviewProgress.accepted + reviewProgress.rejected;
+      return {
+        ...reviewProgress,
+        reviewed,
+        progressPercent: reviewProgress.total > 0 ? Math.round((reviewed / reviewProgress.total) * 100) : 0
+      };
+    }
     const total = suggestions.length;
     const accepted = suggestions.filter(s => s.status === 'accepted').length;
     const pending = suggestions.filter(s => s.status === 'pending').length;
@@ -165,7 +268,7 @@ function ResumeReviewView({
     const reviewed = accepted + rejected;
     const progressPercent = total > 0 ? Math.round((reviewed / total) * 100) : 0;
     return { total, accepted, pending, rejected, reviewed, progressPercent };
-  }, [suggestions]);
+  }, [suggestions, reviewProgress]);
 
   // Render a modified element inline: Original on top, Suggested below
   const renderInlineDiff = (sectionType, originalText, itemIndex, bulletIndex) => {
@@ -229,6 +332,83 @@ function ResumeReviewView({
       </span>
     );
   };
+
+  const renderReadOnlySection = (title, data, sectionKey) => {
+    if (!hasVisibleValue(data)) return null;
+    const items = Array.isArray(data) ? data : [data];
+    return (
+      <div className="space-y-2" data-review-section={sectionKey}>
+        <div className="border-b border-zinc-150 dark:border-zinc-850 pb-1">
+          <h2 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest font-sans">
+            {title}
+          </h2>
+        </div>
+        <div className="space-y-2 text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-350">
+          {items.map((item, index) => {
+            if (typeof item !== 'object' || item === null) {
+              return <div key={index}>• {displayValue(item)}</div>;
+            }
+            const heading = item.title || item.name || item.role || item.degree || item.organization || item.institution;
+            const subheading = [
+              item.company,
+              item.issuing_organization,
+              item.publisher,
+              item.field_of_study,
+              item.location
+            ].filter(Boolean).join(' · ');
+            const dates = [item.start_date || item.issue_date || item.date, item.end_date].filter(Boolean).join(' - ');
+            const bullets = item.description || item.bullet_points || item.bullets || item.highlights;
+            const remaining = Object.entries(item).filter(([key, value]) =>
+              !['title', 'name', 'role', 'degree', 'organization', 'institution', 'company',
+                'issuing_organization', 'publisher', 'field_of_study', 'location', 'start_date',
+                'end_date', 'issue_date', 'date', 'description', 'bullet_points', 'bullets',
+                'highlights'].includes(key) && hasVisibleValue(value)
+            );
+            return (
+              <div key={index} className="space-y-0.5">
+                {(heading || dates) && (
+                  <div className="flex justify-between gap-4 font-extrabold text-zinc-850 dark:text-zinc-200 font-sans">
+                    <span>{heading}</span>
+                    {dates && <span className="text-zinc-400 dark:text-zinc-500 shrink-0">{dates}</span>}
+                  </div>
+                )}
+                {subheading && <div className="font-semibold">{subheading}</div>}
+                {hasVisibleValue(bullets) && !Array.isArray(bullets) && (
+                  <div>{displayValue(bullets)}</div>
+                )}
+                {remaining.map(([key, value]) => (
+                  <div key={key}>
+                    <span className="font-semibold">{labelFor(key)}:</span> {displayValue(value)}
+                  </div>
+                ))}
+                {Array.isArray(bullets) && bullets.length > 0 && (
+                  <ul className="list-disc pl-4">
+                    {bullets.map((bullet, bulletIndex) => <li key={bulletIndex}>{displayValue(bullet)}</li>)}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const sectionRegistry = [
+    ['Internships', 'internships'],
+    ['Education', 'education'],
+    ['Certifications', 'certifications'],
+    ['Achievements', 'achievements'],
+    ['Awards', 'awards'],
+    ['Publications & Research', 'publications'],
+    ['Languages', 'languages'],
+    ['Leadership & Volunteering', 'volunteer_experience'],
+    ['Leadership', 'leadership'],
+    ['Open Source', 'open_source'],
+    ['Extracurricular Activities', 'extracurricular_activities'],
+    ['Interests', 'interests'],
+    ['Links', 'links']
+  ];
 
   return (
     <div className="flex-1 flex flex-col justify-between h-full bg-zinc-50 dark:bg-zinc-950 select-text font-sans">
@@ -298,20 +478,49 @@ function ResumeReviewView({
           {/* Header Info */}
           <div className="text-center space-y-1.5 pb-4 border-b border-zinc-100 dark:border-zinc-850 font-sans select-none">
             <h1 className="text-base font-extrabold text-zinc-950 dark:text-white tracking-tight leading-none">
-              {parsedResume.personal_info?.name || 'Your Name'}
+              {normalizePersonName(parsedResume.personal_info?.name) || 'Your Name'}
             </h1>
-            <p className="text-[10px] text-zinc-400 dark:text-zinc-500 font-bold">
-              {parsedResume.personal_info?.email} | {parsedResume.personal_info?.phone} | {parsedResume.personal_info?.location}
-            </p>
+            {(parsedResume.personal_info?.job_title || parsedResume.personal_info?.title) && (
+              <p className="text-[10px] text-zinc-700 dark:text-zinc-300 font-extrabold uppercase tracking-wider">
+                {parsedResume.personal_info.job_title || parsedResume.personal_info.title}
+              </p>
+            )}
+            <div
+              data-contact-links="true"
+              className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10px] text-zinc-500 dark:text-zinc-400 font-bold"
+            >
+              {contactItems.map(({ key, value, label, Icon }) => (
+                <a
+                  key={canonicalContactIdentity(key, value)}
+                  href={contactHref(key, value)}
+                  target={key === 'location' ? undefined : '_blank'}
+                  rel={key === 'location' ? undefined : 'noreferrer'}
+                  className="inline-flex items-center gap-1 text-zinc-500 dark:text-zinc-400 no-underline"
+                >
+                  <Icon size={10} strokeWidth={1.8} aria-hidden="true" />
+                  <span>{label}</span>
+                </a>
+              ))}
+            </div>
+            {Object.entries(parsedResume.personal_info || {})
+              .filter(([key, value]) => ![
+                'name', 'job_title', 'title', 'email', 'phone', 'location',
+                'linkedin', 'github', 'website', 'photo_url', 'coding_profiles'
+              ].includes(key) && value !== null && value !== undefined && value !== '')
+              .map(([key, value]) => (
+                <p key={key} className="text-[9px] text-zinc-400 dark:text-zinc-500">
+                  <span className="font-bold">{labelFor(key)}:</span> {displayValue(value)}
+                </p>
+              ))}
           </div>
 
           {/* Professional Summary */}
-          <div className="space-y-1.5">
+          {(hasVisibleValue(parsedResume.summary) || hasReviewOperation(suggestions, 'summary')) && <div className="space-y-1.5">
             <div className="flex justify-between items-center border-b border-zinc-150 dark:border-zinc-850 pb-1">
               <h2 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest font-sans">
                 Professional Summary
               </h2>
-              <button
+              {selectedSections?.includes('summary') && <button
                 onClick={() => {
                   setActiveEditSection(activeEditSection === 'summary' ? null : 'summary');
                   setCustomPrompt('');
@@ -319,13 +528,26 @@ function ResumeReviewView({
                 className="flex items-center gap-1 text-[8px] bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 text-[#00bda5] px-2 py-0.5 rounded font-extrabold uppercase tracking-wider transition cursor-pointer border-none"
               >
                 <Sparkles size={8} /> Edit with AI
-              </button>
+              </button>}
             </div>
             <div className="text-[11px] leading-relaxed text-justify text-zinc-600 dark:text-zinc-350">
-              {renderInlineDiff('summary', parsedResume.summary, 0, 0)}
+              {renderInlineDiff('summary', parsedResume.summary || '', 0, 0)}
             </div>
             {activeEditSection === 'summary' && renderRefinePanel('summary')}
-          </div>
+          </div>}
+
+          {parsedResume.objective && (
+            <div className="space-y-1.5" data-review-section="objective">
+              <div className="border-b border-zinc-150 dark:border-zinc-850 pb-1">
+                <h2 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest font-sans">
+                  Career Objective
+                </h2>
+              </div>
+              <div className="text-[11px] leading-relaxed text-justify text-zinc-600 dark:text-zinc-350">
+                {displayValue(parsedResume.objective)}
+              </div>
+            </div>
+          )}
 
           {/* Work Experience */}
           {parsedResume.experience?.length > 0 && (
@@ -334,7 +556,7 @@ function ResumeReviewView({
                 <h2 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest font-sans">
                   Work Experience
                 </h2>
-                <button
+                {selectedSections?.includes('experience') && <button
                   onClick={() => {
                     setActiveEditSection(activeEditSection === 'experience' ? null : 'experience');
                     setCustomPrompt('');
@@ -342,7 +564,7 @@ function ResumeReviewView({
                   className="flex items-center gap-1 text-[8px] bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 text-[#00bda5] px-2 py-0.5 rounded font-extrabold uppercase tracking-wider transition cursor-pointer border-none"
                 >
                   <Sparkles size={8} /> Edit with AI
-                </button>
+                </button>}
               </div>
               {activeEditSection === 'experience' && renderRefinePanel('experience')}
               {parsedResume.experience.map((exp, idx) => (
@@ -351,6 +573,14 @@ function ResumeReviewView({
                     <span>{exp.role} — {exp.company}</span>
                     <span className="font-bold text-zinc-400 dark:text-zinc-500">{exp.start_date} - {exp.end_date}</span>
                   </div>
+                  {Object.entries(exp).filter(([key, value]) =>
+                    !['role', 'company', 'start_date', 'end_date', 'description'].includes(key)
+                    && hasVisibleValue(value)
+                  ).map(([key, value]) => (
+                    <div key={key} className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                      <span className="font-semibold">{labelFor(key)}:</span> {displayValue(value)}
+                    </div>
+                  ))}
                   <ul className="list-disc pl-4 space-y-2">
                     {exp.description?.map((bullet, bIdx) => (
                       <li key={bIdx} className="text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-350">
@@ -370,7 +600,7 @@ function ResumeReviewView({
                 <h2 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest font-sans">
                   Projects
                 </h2>
-                <button
+                {selectedSections?.includes('projects') && <button
                   onClick={() => {
                     setActiveEditSection(activeEditSection === 'projects' ? null : 'projects');
                     setCustomPrompt('');
@@ -378,7 +608,7 @@ function ResumeReviewView({
                   className="flex items-center gap-1 text-[8px] bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 text-[#00bda5] px-2 py-0.5 rounded font-extrabold uppercase tracking-wider transition cursor-pointer border-none"
                 >
                   <Sparkles size={8} /> Edit with AI
-                </button>
+                </button>}
               </div>
               {activeEditSection === 'projects' && renderRefinePanel('projects')}
               {parsedResume.projects.map((proj, idx) => (
@@ -386,6 +616,13 @@ function ResumeReviewView({
                   <div className="flex justify-between font-extrabold text-[11px] text-zinc-850 dark:text-zinc-200 font-sans">
                     <span>{proj.name}</span>
                   </div>
+                  {Object.entries(proj).filter(([key, value]) =>
+                    !['name', 'description'].includes(key) && hasVisibleValue(value)
+                  ).map(([key, value]) => (
+                    <div key={key} className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                      <span className="font-semibold">{labelFor(key)}:</span> {displayValue(value)}
+                    </div>
+                  ))}
                   <ul className="list-disc pl-4 space-y-2">
                     {proj.description?.map((bullet, bIdx) => (
                       <li key={bIdx} className="text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-350">
@@ -399,13 +636,13 @@ function ResumeReviewView({
           )}
 
           {/* Skills */}
-          {parsedResume.skills?.length > 0 && (
+          {(parsedResume.skills?.length > 0 || hasReviewOperation(suggestions, 'skills')) && (
             <div className="space-y-2">
               <div className="flex justify-between items-center border-b border-zinc-150 dark:border-zinc-850 pb-1">
                 <h2 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest font-sans">
                   Skills
                 </h2>
-                <button
+                {selectedSections?.includes('skills') && <button
                   onClick={() => {
                     setActiveEditSection(activeEditSection === 'skills' ? null : 'skills');
                     setCustomPrompt('');
@@ -413,31 +650,46 @@ function ResumeReviewView({
                   className="flex items-center gap-1 text-[8px] bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 text-[#00bda5] px-2 py-0.5 rounded font-extrabold uppercase tracking-wider transition cursor-pointer border-none"
                 >
                   <Sparkles size={8} /> Edit with AI
-                </button>
+                </button>}
               </div>
               {activeEditSection === 'skills' && renderRefinePanel('skills')}
               <div className="flex flex-wrap gap-1.5 leading-relaxed text-[11px] font-sans text-zinc-650 dark:text-zinc-350">
-                {parsedResume.skills.join(', ')}
+                {(parsedResume.skills || [])
+                  .filter(skill => !skillSuggestions.some(suggestion =>
+                    suggestion.status === 'accepted'
+                    && String(suggestion.skillName || '').toLowerCase() === String(skill).toLowerCase()
+                  ))
+                  .join(', ')}
                 
                 {/* Inline suggested skills additions */}
-                {suggestions.filter(s => s.sectionType === 'skills').map(s => {
-                  if (s.status === 'rejected') return null;
+                {skillSuggestions.map(s => {
                   const isPending = s.status === 'pending';
+                  const isAccepted = s.status === 'accepted';
                   return (
                     <span 
                       key={s.id} 
                       className={`px-2 py-0.5 rounded-lg border text-[9px] font-bold flex items-center gap-1.5 transition-all ${
                         isPending 
                           ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200/50 dark:border-emerald-900/30 text-emerald-600 dark:text-emerald-400' 
-                          : 'bg-zinc-100 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400'
+                          : isAccepted
+                            ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 text-emerald-700 dark:text-emerald-300'
+                            : 'bg-rose-50/60 dark:bg-rose-950/20 border-rose-200/60 text-rose-500 line-through'
                       }`}
                     >
-                      + {s.skillName}
-                      {isPending && (
+                      {isAccepted ? <Check size={11} /> : '+'} {s.skillName}
+                      {isPending ? (
                         <span className="flex items-center gap-1 border-l border-emerald-200/40 pl-1.5 ml-1 select-none">
                           <button className="text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300 cursor-pointer" onClick={() => onUpdateSuggestionStatus(s.id, 'accepted')} title="Accept Skill" aria-label="Accept skill"><Check size={13} /></button>
                           <button className="text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 cursor-pointer" onClick={() => onUpdateSuggestionStatus(s.id, 'rejected')} title="Reject Skill" aria-label="Reject skill"><X size={13} /></button>
                         </span>
+                      ) : (
+                        <button
+                          className="no-underline text-[8px] uppercase tracking-wider ml-1 cursor-pointer"
+                          onClick={() => onUpdateSuggestionStatus(s.id, 'pending')}
+                          title="Undo skill decision"
+                        >
+                          Undo
+                        </button>
                       )}
                     </span>
                   );
@@ -445,11 +697,22 @@ function ResumeReviewView({
               </div>
             </div>
           )}
+
+          {/* Unchanged source sections are still part of the reviewed document. */}
+          {sectionRegistry.map(([title, key]) => (
+            <React.Fragment key={key}>{renderReadOnlySection(title, parsedResume[key], key)}</React.Fragment>
+          ))}
+          {renderReadOnlySection('Custom Sections', parsedResume.custom_sections, 'custom_sections')}
         </div>
       </div>
 
       {/* Bottom Sticky Action Bar */}
       <div className="py-4 px-4 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex gap-3 flex-shrink-0 select-none">
+        {!validation?.valid && (
+          <div role="alert" className="text-[10px] text-rose-600 self-center max-w-xs">
+            Generation blocked: {validation?.issues?.join(' ')}
+          </div>
+        )}
         <button
           type="button"
           onClick={onBack}
@@ -462,7 +725,7 @@ function ResumeReviewView({
         <button
           type="button"
           onClick={onGenerateResume}
-          disabled={loading}
+          disabled={loading || !validation?.valid}
           className="flex-2 py-3 bg-[#00bda5] hover:bg-[#00a894] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer active:scale-95"
         >
           <Sparkles size={13} />

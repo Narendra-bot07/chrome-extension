@@ -2,13 +2,28 @@ import React, { useState } from 'react';
 import { 
   Check, RefreshCw, GripVertical, ChevronDown, ChevronRight, Plus, Trash2, Download, Sparkles, Eye, 
   User, FileText, GraduationCap, Wrench, Briefcase, FolderGit2, Award, Trophy, Languages, Heart, 
-  BookOpen, CheckCircle2, Circle 
+  BookOpen, CheckCircle2, Circle, Undo2, Redo2, Activity
 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useApp } from '../../context/AppContext';
+import { TEMPLATE_CONFIGS } from '../../templates/templates_config';
+import { getTemplateSectionLayout } from '../../utils/templateSectionLayout';
 
 const CORE_SECTIONS = ['personal_info', 'summary', 'education', 'skills', 'experience', 'projects'];
 const OPTIONAL_SECTIONS = ['certifications', 'achievements', 'awards', 'languages', 'volunteer_experience', 'publications'];
+const SECTION_INTELLIGENCE = {
+  summary: { importance: 'High', ats: 'Keywords' },
+  experience: { importance: 'Critical', ats: 'Evidence' },
+  projects: { importance: 'High', ats: 'Technical' },
+  skills: { importance: 'Critical', ats: 'Matching' },
+  education: { importance: 'High', ats: 'Eligibility' },
+  certifications: { importance: 'Medium', ats: 'Credentials' },
+  achievements: { importance: 'Medium', ats: 'Impact' },
+  awards: { importance: 'Medium', ats: 'Impact' },
+  volunteer_experience: { importance: 'Supporting', ats: 'Leadership' },
+  publications: { importance: 'Supporting', ats: 'Authority' },
+  languages: { importance: 'Supporting', ats: 'Requirements' }
+};
 
 // Map section to premium Lucide icons
 const getSectionIcon = (section) => {
@@ -35,10 +50,15 @@ export default function ResumeEditorView({
   onUploadDifferent,
   loading,
   reorderOnly = false,
-  onPreview
+  onPreview,
+  onUndo,
+  onRedo,
+  canUndo = false,
+  canRedo = false,
+  quality
 }) {
   const { darkMode, selectedTemplate } = useApp();
-  const isTwoColumn = ['CreativeTwoColumn', 'ModernTwoColumn', 'SidebarATS'].includes(selectedTemplate);
+  const templateConfig = TEMPLATE_CONFIGS[selectedTemplate] || TEMPLATE_CONFIGS.ExecutiveATS;
 
   const [expandedSections, setExpandedSections] = useState(
     [...CORE_SECTIONS, ...OPTIONAL_SECTIONS].reduce((acc, sec) => ({ ...acc, [sec]: false }), {})
@@ -60,11 +80,9 @@ export default function ResumeEditorView({
     return active;
   });
 
-  const leftAllowed = ['skills', 'education', 'certifications', 'languages', 'interests'];
-  const rightAllowed = ['summary', 'experience', 'projects', 'achievements', 'volunteer_experience', 'publications'];
-
-  const leftSections = activeSections.filter(s => leftAllowed.includes(s) && s !== 'personal_info');
-  const rightSections = activeSections.filter(s => rightAllowed.includes(s) && s !== 'personal_info');
+  const sectionLayout = getTemplateSectionLayout(templateConfig, activeSections, parsedResume);
+  const leftSections = sectionLayout.primary;
+  const rightSections = sectionLayout.secondary;
 
   const toggleSection = (section) => {
     if (reorderOnly) return;
@@ -107,7 +125,7 @@ export default function ResumeEditorView({
   };
 
   const handleUpdateField = (section, index, field, value) => {
-    const updated = { ...parsedResume };
+    const updated = structuredClone(parsedResume);
     if (index === null) {
       if (typeof updated[section] === 'object' && !Array.isArray(updated[section])) {
         updated[section] = { ...updated[section], [field]: value };
@@ -117,6 +135,22 @@ export default function ResumeEditorView({
     } else {
       updated[section][index] = { ...updated[section][index], [field]: value };
     }
+    setParsedResume(updated);
+  };
+
+  const handleUpdateBullet = (section, itemIndex, bulletIndex, value) => {
+    const updated = structuredClone(parsedResume);
+    const field = Array.isArray(updated[section]?.[itemIndex]?.description) ? 'description' : 'bullets';
+    if (!Array.isArray(updated[section][itemIndex][field])) updated[section][itemIndex][field] = [];
+    updated[section][itemIndex][field][bulletIndex] = value;
+    setParsedResume(updated);
+  };
+
+  const addBullet = (section, itemIndex) => {
+    const updated = structuredClone(parsedResume);
+    const field = Array.isArray(updated[section]?.[itemIndex]?.description) ? 'description' : 'description';
+    if (!Array.isArray(updated[section][itemIndex][field])) updated[section][itemIndex][field] = [];
+    updated[section][itemIndex][field].push('');
     setParsedResume(updated);
   };
 
@@ -153,15 +187,17 @@ export default function ResumeEditorView({
       }
     } else {
       const section = type;
-      const items = Array.from(parsedResume[section] || []);
+      const updated = structuredClone(parsedResume);
+      const items = Array.from(updated[section] || []);
       const [removed] = items.splice(source.index, 1);
       items.splice(destination.index, 0, removed);
-      setParsedResume({ ...parsedResume, [section]: items });
+      updated[section] = items;
+      setParsedResume(updated);
     }
   };
 
   const addItem = (section) => {
-    const updated = { ...parsedResume };
+    const updated = structuredClone(parsedResume);
     if (!updated[section]) updated[section] = [];
     if (section === 'experience') updated[section].push({ role: '', company: '', location: '', start_date: '', end_date: '', description: [''] });
     else if (section === 'education') updated[section].push({ institution: '', degree: '', field_of_study: '', location: '', start_date: '', end_date: '', gpa: '' });
@@ -175,7 +211,7 @@ export default function ResumeEditorView({
   };
 
   const removeItem = (section, index) => {
-    const updated = { ...parsedResume };
+    const updated = structuredClone(parsedResume);
     updated[section].splice(index, 1);
     setParsedResume(updated);
   };
@@ -183,7 +219,7 @@ export default function ResumeEditorView({
   const removeSection = (section) => {
     const newActive = activeSections.filter(s => s !== section);
     setActiveSections(newActive);
-    const updated = { ...parsedResume };
+    const updated = structuredClone(parsedResume);
     delete updated[section];
     updated.section_order = newActive;
     setParsedResume(updated);
@@ -285,6 +321,20 @@ export default function ResumeEditorView({
                             <input className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-slate-50/50 focus:bg-white outline-none" value={item.company || ''} onChange={e => handleUpdateField(section, index, 'company', e.target.value)} placeholder="Company" />
                             <input className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-slate-50/50 focus:bg-white outline-none" value={item.start_date || ''} onChange={e => handleUpdateField(section, index, 'start_date', e.target.value)} placeholder="Start Date" />
                           </div>
+                          <div className="space-y-1.5 pt-1">
+                            {(item.description || []).map((bullet, bulletIndex) => (
+                              <textarea
+                                key={bulletIndex}
+                                value={bullet}
+                                onChange={event => handleUpdateBullet(section, index, bulletIndex, event.target.value)}
+                                className="w-full min-h-[58px] resize-y p-2 border border-slate-200 rounded-lg text-xs leading-relaxed bg-white outline-none focus:border-indigo-400"
+                                placeholder="Evidence-focused achievement bullet"
+                              />
+                            ))}
+                            <button onClick={() => addBullet(section, index)} className="text-[9px] font-black uppercase tracking-wider text-indigo-600 border-none bg-transparent cursor-pointer">
+                              + Add evidence bullet
+                            </button>
+                          </div>
                         </div>
                       )}
                       
@@ -302,6 +352,18 @@ export default function ResumeEditorView({
                         <div className="space-y-2 mt-1">
                           <input className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-slate-50/50 font-bold focus:bg-white outline-none" value={item.name || ''} onChange={e => handleUpdateField(section, index, 'name', e.target.value)} placeholder="Project Name" />
                           <input className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-slate-50/50 focus:bg-white outline-none" value={item.role || ''} onChange={e => handleUpdateField(section, index, 'role', e.target.value)} placeholder="Role / Tech Stack" />
+                          {(item.description || []).map((bullet, bulletIndex) => (
+                            <textarea
+                              key={bulletIndex}
+                              value={bullet}
+                              onChange={event => handleUpdateBullet(section, index, bulletIndex, event.target.value)}
+                              className="w-full min-h-[58px] resize-y p-2 border border-slate-200 rounded-lg text-xs leading-relaxed bg-white outline-none focus:border-indigo-400"
+                              placeholder="Project outcome or implementation evidence"
+                            />
+                          ))}
+                          <button onClick={() => addBullet(section, index)} className="text-[9px] font-black uppercase tracking-wider text-indigo-600 border-none bg-transparent cursor-pointer">
+                            + Add project bullet
+                          </button>
                         </div>
                       )}
                       
@@ -309,6 +371,19 @@ export default function ResumeEditorView({
                         <div className="space-y-2 mt-1">
                           <input className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-slate-50/50 font-bold focus:bg-white outline-none" value={item.name || item.title || ''} onChange={e => handleUpdateField(section, index, section === 'awards' ? 'title' : 'name', e.target.value)} placeholder="Name/Title" />
                         </div>
+                      )}
+
+                      {section === 'achievements' && (
+                        <textarea
+                          value={typeof item === 'string' ? item : `${item.title || item.name || ''}${item.description ? ` — ${item.description}` : ''}`}
+                          onChange={event => {
+                            const updated = structuredClone(parsedResume);
+                            updated.achievements[index] = event.target.value;
+                            setParsedResume(updated);
+                          }}
+                          className="w-full min-h-[72px] resize-y p-2 border border-slate-200 rounded-lg text-xs leading-relaxed bg-white outline-none focus:border-indigo-400"
+                          placeholder="Achievement — supporting evidence and measurable result"
+                        />
                       )}
 
                     </div>
@@ -340,6 +415,7 @@ export default function ResumeEditorView({
           <div 
             ref={provided.innerRef} 
             {...provided.draggableProps} 
+            data-editor-section={section}
             className={`bg-white border rounded-2xl overflow-hidden transition-all duration-300 group shadow-sm ${
               isExpanded 
                 ? 'border-indigo-500 ring-4 ring-indigo-50/40 shadow-md' 
@@ -370,6 +446,12 @@ export default function ResumeEditorView({
                   <span className="text-xs font-black uppercase tracking-wider text-slate-800">
                     {section.replace('_', ' ')}
                   </span>
+
+                  {!reorderOnly && SECTION_INTELLIGENCE[section] && (
+                    <span className="hidden 2xl:inline text-[8px] font-bold text-slate-500">
+                      {SECTION_INTELLIGENCE[section].importance} · ATS {SECTION_INTELLIGENCE[section].ats}
+                    </span>
+                  )}
 
                   {/* Quality Strength Badge */}
                   {!reorderOnly && (
@@ -426,6 +508,27 @@ export default function ResumeEditorView({
     <div className="h-full flex flex-col justify-between bg-white text-slate-800 font-sans">
       <div className="flex-1 overflow-y-auto px-5 pt-5 pb-24 custom-scrollbar">
         {!reorderOnly && (
+          <div className="mb-4 sticky top-0 z-20 rounded-2xl border border-slate-200 bg-white/95 backdrop-blur shadow-sm p-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Activity size={14} className={quality?.status === 'needs-attention' ? 'text-amber-500' : 'text-emerald-500'} />
+              <div>
+                <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">Authoring quality</div>
+                <div className="text-xs font-extrabold text-slate-800">
+                  {quality?.score ?? 0}/100 · {quality?.metrics?.estimatedPages || 1} page estimate
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-1">
+              <button onClick={onUndo} disabled={!canUndo} title="Undo (Ctrl+Z)" className="p-2 rounded-lg border border-slate-200 bg-white disabled:opacity-30 hover:bg-slate-50">
+                <Undo2 size={14} />
+              </button>
+              <button onClick={onRedo} disabled={!canRedo} title="Redo (Ctrl+Y)" className="p-2 rounded-lg border border-slate-200 bg-white disabled:opacity-30 hover:bg-slate-50">
+                <Redo2 size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+        {!reorderOnly && (
           <div className="mb-5 p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 flex items-start gap-2.5 shadow-sm">
             <Sparkles className="text-indigo-600 mt-0.5 shrink-0" size={16} />
             <div className="text-[11px] text-zinc-550 leading-relaxed font-bold">
@@ -436,7 +539,7 @@ export default function ResumeEditorView({
 
         {/* Personal Info Header */}
         {activeSections.includes('personal_info') && (
-          <div className="mb-4 bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+          <div data-editor-section="personal_info" className="mb-4 bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
             <div 
               className="flex items-center justify-between py-4 px-5 bg-slate-50/30 hover:bg-slate-50/70 transition-colors cursor-pointer"
               onClick={() => toggleSection('personal_info')}
@@ -456,12 +559,12 @@ export default function ResumeEditorView({
         )}
 
         <DragDropContext onDragEnd={onDragEnd}>
-          {isTwoColumn ? (
+          {sectionLayout.split ? (
             <div className="grid grid-cols-5 gap-4">
               {/* Left Column (Skills, Education etc.) */}
               <div className="col-span-2 space-y-3.5">
                 <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest pb-1 border-b border-slate-100 flex justify-between items-center">
-                  <span>Left Column</span>
+                  <span>{sectionLayout.primaryLabel}</span>
                   <span className="text-[8px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold">{leftSections.length}</span>
                 </div>
                 <Droppable droppableId="LEFT_COLUMN" type="SECTIONS">
@@ -477,7 +580,7 @@ export default function ResumeEditorView({
               {/* Right Column (Summary, Experience, Projects) */}
               <div className="col-span-3 space-y-3.5">
                 <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest pb-1 border-b border-slate-100 flex justify-between items-center">
-                  <span>Right Column</span>
+                  <span>{sectionLayout.secondaryLabel}</span>
                   <span className="text-[8px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold">{rightSections.length}</span>
                 </div>
                 <Droppable droppableId="RIGHT_COLUMN" type="SECTIONS">

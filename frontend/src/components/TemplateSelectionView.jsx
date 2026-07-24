@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { toRenderableResume } from '../utils/renderableResume';
 import { Download, Sparkles, CheckCircle2, ShieldCheck, ChevronRight, X, ZoomIn, Eye, ArrowLeft, Layers, Image, Minimize2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
@@ -95,7 +96,7 @@ export default function TemplateSelectionView({ onBack }) {
     setCustomFileName,
     companyName
   } = useApp();
-  const displayResume = tailoredResume || parsedResume;
+  const displayResume = toRenderableResume(tailoredResume || parsedResume);
   const [isDownloading, setIsDownloading] = useState(false);
   const [filter, setFilter] = useState('all'); // 'all' | 'no-photo' | 'with-photo'
   const [zoomModalTemplate, setZoomModalTemplate] = useState(null); // active zoomed template object
@@ -117,7 +118,8 @@ export default function TemplateSelectionView({ onBack }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          resume: displayResume,
+          resume: toRenderableResume(displayResume),
+          original_resume: toRenderableResume(parsedResume || displayResume),
           template_name: targetTemplate
         })
       });

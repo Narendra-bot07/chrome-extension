@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import SuccessView from '../components/SuccessView';
 import ResumeEditorView from '../components/Resume/ResumeEditorView';
@@ -9,6 +9,10 @@ import {
   Sparkles, Move, Printer, ChevronLeft, ChevronRight 
 } from 'lucide-react';
 import { compressResumeData } from '../utils/resumeCompression';
+import { toRenderableResume } from '../utils/renderableResume';
+import { createCompositionPlan } from '../utils/resumeComposition';
+import { TEMPLATE_CONFIGS } from '../templates/templates_config';
+import { getTemplateSectionLayout } from '../utils/templateSectionLayout';
 
 function DownloadPage({ onClose }) {
   const navigate = useNavigate();
@@ -25,7 +29,15 @@ function DownloadPage({ onClose }) {
   } = useApp();
 
   const [downloadSuccess, setDownloadSuccess] = useState(false);
-  const activeResume = tailoredResume || parsedResume;
+  const sourceResume = useMemo(
+    () => toRenderableResume(tailoredResume || parsedResume),
+    [tailoredResume, parsedResume]
+  );
+  const composition = useMemo(
+    () => createCompositionPlan(sourceResume, selectedTemplate || 'ExecutiveATS'),
+    [sourceResume, selectedTemplate]
+  );
+  const activeResume = composition?.resume || null;
 
   // Initialize output file name on mount
   useEffect(() => {
@@ -38,7 +50,7 @@ function DownloadPage({ onClose }) {
   }, [activeResume, companyName, customFileName]);
 
   // Typesetting Optimization Solver States
-  const [layoutLevel, setLayoutLevel] = useState(7); // Default baseline
+  const [layoutLevel, setLayoutLevel] = useState(composition?.layoutLevel ?? 6);
   const [solving, setSolving] = useState(true);
   const [lastStabilizedHeight, setLastStabilizedHeight] = useState(1056);
 
@@ -58,10 +70,10 @@ function DownloadPage({ onClose }) {
   // Reset solver on resume data or template change
   useEffect(() => {
     if (activeResume) {
-      setLayoutLevel(7);
+      setLayoutLevel(composition?.layoutLevel ?? 6);
       setSolving(true);
     }
-  }, [activeResume, selectedTemplate]);
+  }, [activeResume, selectedTemplate, composition?.layoutLevel]);
 
   // Typesetting Optimization loop
   useEffect(() => {
@@ -198,6 +210,11 @@ function DownloadPage({ onClose }) {
   };
 
   const handleFinalLooksGood = async () => {
+    if (composition?.quality?.issues?.length) {
+      const messages = composition.quality.issues.map(issue => `• ${issue.message}`).join('\n');
+      alert(`Export blocked until critical resume issues are resolved:\n\n${messages}`);
+      return;
+    }
     // Pass chosen optimal layout level to AppContext fetch trigger
     await handleDownloadFinalPDF(layoutLevel);
     setDownloadSuccess(true);
@@ -229,13 +246,16 @@ function DownloadPage({ onClose }) {
   const pruneLevel = Math.max(0, 5 - Math.floor(layoutLevel / 2));
   const compressedResume = compressResumeData(activeResume, pruneLevel);
 
-  const isTwoColumn = ['CreativeTwoColumn', 'ModernTwoColumn', 'SidebarATS'].includes(selectedTemplate);
+  const editorLayout = getTemplateSectionLayout(
+    TEMPLATE_CONFIGS[selectedTemplate] || TEMPLATE_CONFIGS.ExecutiveATS,
+    activeResume.section_order || []
+  );
 
   return (
     <div className="flex-1 flex h-full bg-zinc-950 overflow-hidden relative">
       
       {/* LEFT SIDE: Editor Panel */}
-      <div className={`${isTwoColumn ? 'w-[48%] min-w-[500px]' : 'w-[42%] min-w-[380px]'} border-r border-zinc-200 dark:border-zinc-800 flex flex-col h-full bg-white shrink-0 z-10 shadow-lg`}>
+      <div className={`${editorLayout.split ? 'w-[48%] min-w-[500px]' : 'w-[42%] min-w-[380px]'} border-r border-zinc-200 dark:border-zinc-800 flex flex-col h-full bg-white shrink-0 z-10 shadow-lg`}>
         <div className="p-4 bg-white border-b border-zinc-200 shrink-0">
           <div className="flex items-center justify-between">
             <div>

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Check, RefreshCw } from 'lucide-react';
+import { normalizePersonName } from '../utils/resumePresentation';
 
 function ParsedResumeReviewView({
   parsedResume,
@@ -22,7 +23,7 @@ function ParsedResumeReviewView({
         <div className="p-3.5 bg-white border border-slate-200 dark:bg-[#0f0f11] dark:border-slate-900 rounded-2xl space-y-2 shadow-3xs">
           <span className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block">Contact Details</span>
           <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
-            {parsedResume.personal_info?.name || 'Name Not Found'}
+            {normalizePersonName(parsedResume.personal_info?.name) || 'Name Not Found'}
           </p>
           <div className="text-[10px] text-slate-500 space-y-1">
             <p>Email: {parsedResume.personal_info?.email || 'Not Available'}</p>

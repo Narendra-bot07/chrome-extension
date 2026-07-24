@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { ZoomIn, ZoomOut, Expand, Shrink, Printer, Download } from 'lucide-react';
 import { getTemplateComponent } from '../../templates';
+import { toRenderableResume } from '../../utils/renderableResume';
 
 export default function ResumePreview({ resumeData, selectedTemplate, sectionOrder }: { resumeData: any, selectedTemplate: string, sectionOrder?: string[] }) {
   const [zoom, setZoom] = useState(1);
@@ -41,7 +42,8 @@ export default function ResumePreview({ resumeData, selectedTemplate, sectionOrd
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          resume: resumeData,
+          resume: toRenderableResume(resumeData),
+          original_resume: toRenderableResume(resumeData),
           template_name: selectedTemplate || 'ModernProATS'
         })
       });

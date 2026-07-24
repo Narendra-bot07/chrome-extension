@@ -80,34 +80,26 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
                     "awards",
                     "interests"
                 ];
-                const configuredSectionOrder = Array.isArray(data.section_order) && data.section_order.length > 0
-                    ? data.section_order
-                    : defaultSectionOrder;
-                const shouldRender = (section) => configuredSectionOrder.includes(section);
+                // section_order is presentation order, never a deletion list.
+                const shouldRender = () => true;
                 const printContainer = document.querySelector("#resume-print-container");
                 const compressionClass = Array.from(printContainer?.classList || [])
                     .find(className => className.startsWith("print-compression-level-"));
                 const compressionLevel = compressionClass
                     ? Number(compressionClass.replace("print-compression-level-", ""))
                     : 0;
-                const prunedByAutoFit = (section) => {
-                    if (compressionLevel >= 5 && ["certifications", "achievements", "awards", "publications"].includes(section)) return true;
-                    if (compressionLevel >= 4 && ["volunteer", "languages"].includes(section)) return true;
-                    return false;
-                };
-
                 const expectedSections = [];
-                if (shouldRender("summary") && !prunedByAutoFit("summary") && data.summary && data.summary.trim() !== '') expectedSections.push("summary");
-                if (shouldRender("experience") && !prunedByAutoFit("experience") && data.experience && data.experience.length > 0) expectedSections.push("experience");
-                if (shouldRender("projects") && !prunedByAutoFit("projects") && data.projects && data.projects.length > 0) expectedSections.push("projects");
-                if (shouldRender("education") && !prunedByAutoFit("education") && data.education && data.education.length > 0) expectedSections.push("education");
-                if (shouldRender("skills") && !prunedByAutoFit("skills") && data.skills && data.skills.length > 0) expectedSections.push("skills");
-                if (shouldRender("certifications") && !prunedByAutoFit("certifications") && data.certifications && data.certifications.length > 0) expectedSections.push("certifications");
-                if (shouldRender("achievements") && !prunedByAutoFit("achievements") && data.achievements && data.achievements.length > 0) expectedSections.push("achievements");
-                if (shouldRender("languages") && !prunedByAutoFit("languages") && data.languages && data.languages.length > 0) expectedSections.push("languages");
-                if (shouldRender("awards") && !prunedByAutoFit("awards") && data.awards && data.awards.length > 0) expectedSections.push("awards");
-                if (shouldRender("volunteer") && !prunedByAutoFit("volunteer") && data.volunteer_experience && data.volunteer_experience.length > 0) expectedSections.push("volunteer");
-                if (shouldRender("publications") && !prunedByAutoFit("publications") && data.publications && data.publications.length > 0) expectedSections.push("publications");
+                if (shouldRender("summary") && data.summary && data.summary.trim() !== '') expectedSections.push("summary");
+                if (shouldRender("experience") && data.experience && data.experience.length > 0) expectedSections.push("experience");
+                if (shouldRender("projects") && data.projects && data.projects.length > 0) expectedSections.push("projects");
+                if (shouldRender("education") && data.education && data.education.length > 0) expectedSections.push("education");
+                if (shouldRender("skills") && data.skills && data.skills.length > 0) expectedSections.push("skills");
+                if (shouldRender("certifications") && data.certifications && data.certifications.length > 0) expectedSections.push("certifications");
+                if (shouldRender("achievements") && data.achievements && data.achievements.length > 0) expectedSections.push("achievements");
+                if (shouldRender("languages") && data.languages && data.languages.length > 0) expectedSections.push("languages");
+                if (shouldRender("awards") && data.awards && data.awards.length > 0) expectedSections.push("awards");
+                if (shouldRender("volunteer") && data.volunteer_experience && data.volunteer_experience.length > 0) expectedSections.push("volunteer");
+                if (shouldRender("publications") && data.publications && data.publications.length > 0) expectedSections.push("publications");
                 
                 const missingSections = [];
                 const sectionHeadingAliases = {
@@ -133,6 +125,52 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
                         missingSections.push(section);
                     }
                 }
+
+                const visibleText = printContainer?.innerText || "";
+                const visibleRawUrls = visibleText.match(/(?:https?:\\/\\/|www\\.)\\S+/gi) || [];
+                if (visibleRawUrls.length > 0) {
+                    return {
+                        valid: false,
+                        error: `Raw URLs are visible instead of embedded professional labels: ${visibleRawUrls.join(', ')}`
+                    };
+                }
+                const sourceLinkValues = [
+                    data.personal_info?.linkedin,
+                    data.personal_info?.github,
+                    data.personal_info?.website,
+                    data.portfolio,
+                    ...Object.values(data.links || {}),
+                    ...Object.values(data.personal_info?.coding_profiles || {})
+                ].filter(Boolean);
+                const normalizedHref = value => String(value || '')
+                    .replace(/^https?:\\/\\//i, '')
+                    .replace(/^www\\./i, '')
+                    .replace(/[?#].*$/, '')
+                    .replace(/\\/+$/, '')
+                    .toLowerCase();
+                const renderedAnchors = Array.from(printContainer?.querySelectorAll('a[href]') || []);
+                const missingEmbeddedLinks = sourceLinkValues.filter(value =>
+                    !renderedAnchors.some(anchor =>
+                        normalizedHref(anchor.getAttribute('href')) === normalizedHref(value)
+                    )
+                );
+                if (missingEmbeddedLinks.length > 0) {
+                    return {
+                        valid: false,
+                        error: `Professional hyperlinks were not embedded: ${missingEmbeddedLinks.join(', ')}`
+                    };
+                }
+                const headerAnchors = Array.from(
+                    printContainer?.querySelectorAll('[data-contact-links="true"] a[href]') || []
+                );
+                const linkWithoutIcon = headerAnchors.find(anchor => {
+                    const href = anchor.getAttribute('href') || '';
+                    return /linkedin|github|leetcode|portfolio|smartinterview|drive\\.google/i.test(href)
+                        && !anchor.querySelector('svg');
+                });
+                if (linkWithoutIcon) {
+                    return { valid: false, error: 'A professional header link is missing its monochrome icon.' };
+                }
                 
                 if (missingSections.length > 0) {
                     return { valid: false, error: `Missing sections in rendered HTML DOM: ${missingSections.join(', ')}. The template skipped rendering them or they were cut off.` };
@@ -148,6 +186,58 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
             # Get the exact height of the resume container in pixels to enforce exact A4 scaling
             resume_height = page.evaluate("document.querySelector('#resume-print-container') ? document.querySelector('#resume-print-container').offsetHeight : 0")
             print(f"Playwright measured resume height: {resume_height}px")
+
+            # Print layout can differ slightly from the screen measurement.
+            # If the final DOM is a two-page document, insert one intentional
+            # break at the closest safe section boundary to avoid an orphaned
+            # second page.
+            if 1130 < resume_height <= 2260:
+                balance_result = page.evaluate(
+                    """
+                    () => {
+                        const root = document.querySelector('#resume-print-container');
+                        if (!root) return null;
+                        const layoutRoot = root.querySelector('[data-resume-layout]');
+                        const layout = layoutRoot?.dataset.resumeLayout || 'single-column';
+                        // Columns paginate independently. A global break chosen
+                        // from one column can push a perfectly fitting section
+                        // out of another column and create a mostly blank page.
+                        if (layout !== 'single-column') {
+                          return { skipped: true, reason: 'column-aware-pagination', layout };
+                        }
+                        const rootTop = root.getBoundingClientRect().top;
+                        const total = root.scrollHeight;
+                        const maxPage = 1122;
+                        const candidates = Array.from(root.querySelectorAll('[data-section]'))
+                          .map(section => ({
+                            section,
+                            offset: section.getBoundingClientRect().top - rootTop
+                          }))
+                          .filter(item =>
+                            item.offset > 180 &&
+                            item.offset < maxPage &&
+                            total - item.offset < maxPage
+                          );
+                        if (!candidates.length) return null;
+                        const target = total / 2;
+                        candidates.sort((a, b) =>
+                          Math.abs(a.offset - target) - Math.abs(b.offset - target)
+                        );
+                        const selected = candidates[0];
+                        selected.section.style.breakBefore = 'page';
+                        selected.section.style.pageBreakBefore = 'always';
+                        selected.section.dataset.compositionBreak = 'balanced-page-2';
+                        return {
+                          section: selected.section.dataset.section,
+                          offset: selected.offset,
+                          total
+                        };
+                    }
+                    """
+                )
+                if balance_result and balance_result.get("section"):
+                    print(f"Playwright balanced two-page resume: {balance_result}")
+                    page.wait_for_timeout(100)
             
             pdf_args = {
                 "format": "A4",
@@ -155,11 +245,8 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
                 "margin": {"top": "0", "right": "0", "bottom": "0", "left": "0"}
             }
             
-            # If the content fits within one A4 page, generate EXACTLY page 1 to prevent extra blank pages
-            # At 96 DPI, A4 is 1122px tall.
-            if resume_height > 0 and resume_height <= 1130:
-                pdf_args["page_ranges"] = "1"
-                
+            # Never force page 1: a rounding or late font-layout change can push
+            # content onto page 2, and page_ranges="1" silently truncates it.
             pdf_bytes = page.pdf(**pdf_args)
             
             browser.close()
