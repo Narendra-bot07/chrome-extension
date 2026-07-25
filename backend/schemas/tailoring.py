@@ -59,9 +59,15 @@ class ResumePatch(BaseModel):
 
 class TailoringReport(BaseModel):
     changes_made: List[str] = []
+    resume_match_before: int = 0
+    resume_match_after: int = 0
     ats_score_before: int = 0
     ats_score_after: int = 0
     patch: ResumePatch
+    ats_analysis_id: Optional[str] = None
+    breakdown_before: Optional[Dict[str, Any]] = None
+    breakdown_after: Optional[Dict[str, Any]] = None
+    suggestion_impacts: Optional[List[Dict[str, Any]]] = None
 
 class GapsAnalysis(BaseModel):
     missing_keywords: List[str] = []

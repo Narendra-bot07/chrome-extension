@@ -7,7 +7,11 @@ import {
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useApp } from '../../context/AppContext';
 import { TEMPLATE_CONFIGS } from '../../templates/templates_config';
-import { getTemplateSectionLayout } from '../../utils/templateSectionLayout';
+import {
+  applyLayoutChange,
+  createResumeLayoutModel,
+  reorderRegionComponents
+} from '../../utils/resumeLayoutModel';
 
 const CORE_SECTIONS = ['personal_info', 'summary', 'education', 'skills', 'experience', 'projects'];
 const OPTIONAL_SECTIONS = ['certifications', 'achievements', 'awards', 'languages', 'volunteer_experience', 'publications'];
@@ -55,16 +59,20 @@ export default function ResumeEditorView({
   onRedo,
   canUndo = false,
   canRedo = false,
-  quality
+  quality,
+  resumeId
 }) {
-  const { darkMode, selectedTemplate } = useApp();
+  const { darkMode, selectedTemplate, apiUrl, session } = useApp();
   const templateConfig = TEMPLATE_CONFIGS[selectedTemplate] || TEMPLATE_CONFIGS.ExecutiveATS;
 
   const [expandedSections, setExpandedSections] = useState(
-    [...CORE_SECTIONS, ...OPTIONAL_SECTIONS].reduce((acc, sec) => ({ ...acc, [sec]: false }), {})
+    [...CORE_SECTIONS, ...OPTIONAL_SECTIONS].reduce((acc, sec) => ({ ...acc, [sec]: reorderOnly }), {})
   );
   
   const [showAddMenu, setShowAddMenu] = useState(false);
+  const [layoutMessage, setLayoutMessage] = useState('');
+  const [layoutPast, setLayoutPast] = useState([]);
+  const [layoutFuture, setLayoutFuture] = useState([]);
 
   // Initialize active sections (Core + any optional that have data, or loaded from section_order)
   const [activeSections, setActiveSections] = useState(() => {
@@ -80,12 +88,144 @@ export default function ResumeEditorView({
     return active;
   });
 
-  const sectionLayout = getTemplateSectionLayout(templateConfig, activeSections, parsedResume);
-  const leftSections = sectionLayout.primary;
-  const rightSections = sectionLayout.secondary;
+  const layoutModel = createResumeLayoutModel(
+    { ...parsedResume, section_order: activeSections },
+    selectedTemplate,
+    templateConfig
+  );
+  const splitLayout = ['sidebar', 'two-column', 'marissa'].includes(templateConfig.layout);
+  const leftSections = splitLayout ? layoutModel.sidebar : layoutModel.main_column;
+  const rightSections = splitLayout ? layoutModel.main_column : [];
+
+  React.useEffect(() => {
+    if (!parsedResume?.layout_model) {
+      setParsedResume({ ...parsedResume, layout_model: layoutModel });
+    }
+  }, [parsedResume?.layout_model]);
+
+  React.useEffect(() => {
+    if (!resumeId || !parsedResume?.layout_model) return undefined;
+    const timer = setTimeout(() => {
+      fetch(`${apiUrl}/api/v1/resumes/${resumeId}/layout`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {})
+        },
+        body: JSON.stringify(parsedResume.layout_model)
+      }).catch(() => setLayoutMessage('Layout is saved locally; cloud sync will retry when the service is available.'));
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [resumeId, parsedResume?.layout_model, apiUrl, session?.access_token]);
+
+  const applyCommittedLayout = nextModel => {
+    const order = ['personal_info', ...nextModel.main_column, ...nextModel.sidebar];
+    setActiveSections(order);
+    setParsedResume({ ...parsedResume, section_order: order, layout_model: nextModel });
+    setLayoutMessage('');
+  };
+  const commitLayout = nextModel => {
+    setLayoutPast(previous => [...previous.slice(-29), structuredClone(layoutModel)]);
+    setLayoutFuture([]);
+    applyCommittedLayout(nextModel);
+  };
+  const undoLayout = () => {
+    const previous = layoutPast.at(-1);
+    if (!previous) return;
+    setLayoutPast(layoutPast.slice(0, -1));
+    setLayoutFuture(future => [structuredClone(layoutModel), ...future].slice(0, 30));
+    applyCommittedLayout(previous);
+  };
+  const redoLayout = () => {
+    const next = layoutFuture[0];
+    if (!next) return;
+    setLayoutFuture(layoutFuture.slice(1));
+    setLayoutPast(previous => [...previous, structuredClone(layoutModel)].slice(-30));
+    applyCommittedLayout(next);
+  };
+
+  const onRegionDragEnd = region => result => {
+    if (!result.destination) return;
+    const change = reorderRegionComponents(
+      layoutModel,
+      region,
+      result.source.index,
+      result.destination.index
+    );
+    if (!change.valid) {
+      setLayoutMessage('This item cannot be placed here because it would reduce readability or ATS compatibility.');
+      return;
+    }
+    commitLayout(change.model);
+  };
+
+  const componentLabel = id => ({
+    photo: 'Photo / Initials', name: 'Name', headline: 'Headline',
+    email: 'Email', phone: 'Phone', location: 'Location',
+    linkedin: 'LinkedIn', github: 'GitHub', portfolio: 'Portfolio',
+    other_links: 'Other Links', header_divider: 'Divider',
+    page_number: 'Page Number', footer_links: 'Optional Links',
+    footer_text: 'Footer Text', document_metadata: 'Document Metadata'
+  }[id] || id.replaceAll('_', ' '));
+
+  const toggleComponentVisibility = component => {
+    if (component === 'name') {
+      setLayoutMessage('This item cannot be placed here because it would reduce readability or ATS compatibility.');
+      return;
+    }
+    const hidden = new Set(layoutModel.hidden_components || []);
+    if (hidden.has(component)) hidden.delete(component);
+    else {
+      const contacts = ['email', 'phone', 'linkedin', 'github', 'portfolio'];
+      const visibleContacts = contacts.filter(id => !hidden.has(id));
+      if (contacts.includes(component) && visibleContacts.length === 1) {
+        setLayoutMessage('At least one contact method must remain visible.');
+        return;
+      }
+      hidden.add(component);
+    }
+    commitLayout({ ...layoutModel, hidden_components: [...hidden] });
+  };
+
+  const renderRegionBuilder = region => {
+    const components = layoutModel.layout_tree?.[region]?.components || [];
+    return (
+      <DragDropContext onDragEnd={onRegionDragEnd(region)}>
+        <Droppable droppableId={`${region.toUpperCase()}_COMPONENTS`} direction="horizontal" type={`${region.toUpperCase()}_COMPONENT`}>
+          {provided => (
+            <div ref={provided.innerRef} {...provided.droppableProps} className="flex min-h-12 flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-250 bg-slate-50/70 p-3">
+              {components.map((component, index) => (
+                <Draggable key={component} draggableId={`${region}-${component}`} index={index}>
+                  {drag => (
+                    <div
+                      ref={drag.innerRef}
+                      {...drag.draggableProps}
+                      {...drag.dragHandleProps}
+                      className="flex cursor-grab items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[9px] font-black uppercase tracking-wide text-slate-700 shadow-sm"
+                    >
+                      <GripVertical size={12} className="text-slate-400" />
+                      {componentLabel(component)}
+                      <button
+                        type="button"
+                        title={layoutModel.hidden_components?.includes(component) ? 'Show component' : 'Hide component'}
+                        onClick={event => { event.stopPropagation(); toggleComponentVisibility(component); }}
+                        className={`ml-1 border-0 bg-transparent p-0 ${layoutModel.hidden_components?.includes(component) ? 'text-slate-300' : 'text-slate-500'}`}
+                      >
+                        <Eye size={11} />
+                      </button>
+                    </div>
+                  )}
+                </Draggable>
+              ))}
+              {provided.placeholder}
+            </div>
+          )}
+        </Droppable>
+      </DragDropContext>
+    );
+  };
 
   const toggleSection = (section) => {
-    if (reorderOnly) return;
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
@@ -159,32 +299,17 @@ export default function ResumeEditorView({
     const { source, destination, type } = result;
 
     if (type === 'SECTIONS') {
-      if (source.droppableId !== destination.droppableId) {
-        return; // Fixed template layout: prevent dragging between columns
+      const sourceList = source.droppableId === 'RIGHT_COLUMN' ? rightSections : leftSections;
+      const section = sourceList[source.index];
+      const destinationColumn = destination.droppableId === 'LEFT_COLUMN' && splitLayout
+        ? 'sidebar'
+        : 'main';
+      const result = applyLayoutChange(parsedResume, layoutModel, section, destinationColumn, destination.index);
+      if (!result.valid) {
+        setLayoutMessage(result.message);
+        return;
       }
-      
-      if (source.droppableId === 'LEFT_COLUMN') {
-        const newLeft = Array.from(leftSections);
-        const [removed] = newLeft.splice(source.index, 1);
-        newLeft.splice(destination.index, 0, removed);
-        const merged = ['personal_info', ...newLeft, ...rightSections];
-        setActiveSections(merged);
-        setParsedResume({ ...parsedResume, section_order: merged });
-      } else if (source.droppableId === 'RIGHT_COLUMN') {
-        const newRight = Array.from(rightSections);
-        const [removed] = newRight.splice(source.index, 1);
-        newRight.splice(destination.index, 0, removed);
-        const merged = ['personal_info', ...leftSections, ...newRight];
-        setActiveSections(merged);
-        setParsedResume({ ...parsedResume, section_order: merged });
-      } else {
-        const newActive = Array.from(activeSections.filter(s => s !== 'personal_info'));
-        const [removed] = newActive.splice(source.index, 1);
-        newActive.splice(destination.index, 0, removed);
-        const merged = ['personal_info', ...newActive];
-        setActiveSections(merged);
-        setParsedResume({ ...parsedResume, section_order: merged });
-      }
+      commitLayout(result.model);
     } else {
       const section = type;
       const updated = structuredClone(parsedResume);
@@ -217,12 +342,47 @@ export default function ResumeEditorView({
   };
 
   const removeSection = (section) => {
+    if (['summary', 'experience', 'education', 'skills'].includes(section)) {
+      setLayoutMessage('Important sections cannot be hidden.');
+      return;
+    }
     const newActive = activeSections.filter(s => s !== section);
     setActiveSections(newActive);
     const updated = structuredClone(parsedResume);
     delete updated[section];
+    const nextModel = {
+      ...layoutModel,
+      main_column: layoutModel.main_column.filter(id => id !== section),
+      sidebar: layoutModel.sidebar.filter(id => id !== section),
+      hidden_sections: [...new Set([...layoutModel.hidden_sections, section])]
+    };
     updated.section_order = newActive;
+    updated.layout_model = nextModel;
     setParsedResume(updated);
+  };
+
+  const toggleLayoutSectionVisibility = section => {
+    if (['summary', 'experience', 'education', 'skills'].includes(section)) {
+      setLayoutMessage('Required resume sections must remain visible.');
+      return;
+    }
+    const hidden = layoutModel.hidden_sections || [];
+    if (hidden.includes(section)) {
+      const nextHidden = hidden.filter(id => id !== section);
+      const nextMain = [...layoutModel.main_column, section];
+      commitLayout({
+        ...layoutModel,
+        main_column: nextMain,
+        hidden_sections: nextHidden
+      });
+      return;
+    }
+    commitLayout({
+      ...layoutModel,
+      main_column: layoutModel.main_column.filter(id => id !== section),
+      sidebar: layoutModel.sidebar.filter(id => id !== section),
+      hidden_sections: [...hidden, section]
+    });
   };
 
   const renderSectionContent = (section) => {
@@ -504,6 +664,147 @@ export default function ResumeEditorView({
     );
   };
 
+  const renderStructuralBlock = (section, index) => (
+    <Draggable key={section} draggableId={`layout-${section}`} index={index}>
+      {provided => (
+        <div
+          ref={provided.innerRef}
+          {...provided.draggableProps}
+          className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm transition hover:border-slate-300 hover:shadow"
+        >
+          <div className="flex min-w-0 items-center gap-2">
+            <span
+              {...provided.dragHandleProps}
+              className="cursor-grab text-slate-400 active:cursor-grabbing"
+              aria-label={`Move ${section.replaceAll('_', ' ')}`}
+            >
+              <GripVertical size={14} />
+            </span>
+            <span className="rounded-lg bg-slate-100 p-1.5">
+              {getSectionIcon(section)}
+            </span>
+            <span className="truncate text-[10px] font-black uppercase tracking-wide text-slate-750">
+              {section.replaceAll('_', ' ')}
+            </span>
+          </div>
+          {!['summary', 'experience', 'education', 'skills'].includes(section) && (
+            <button
+              type="button"
+              onClick={() => toggleLayoutSectionVisibility(section)}
+              className="border-0 bg-transparent p-1 text-slate-400 transition hover:text-slate-700"
+              title={`Hide ${section.replaceAll('_', ' ')}`}
+              aria-label={`Hide ${section.replaceAll('_', ' ')}`}
+            >
+              <Eye size={12} />
+            </button>
+          )}
+        </div>
+      )}
+    </Draggable>
+  );
+
+  if (reorderOnly) {
+    const hiddenBodySections = layoutModel.hidden_sections || [];
+    const structuralColumn = (title, droppableId, sections, className = '') => (
+      <div className={className}>
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">{title}</span>
+          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[8px] font-bold text-slate-500">{sections.length}</span>
+        </div>
+        <Droppable droppableId={droppableId} type="SECTIONS">
+          {provided => (
+            <div
+              ref={provided.innerRef}
+              {...provided.droppableProps}
+              className="min-h-20 space-y-2 rounded-xl border border-dashed border-slate-250 bg-slate-50/70 p-2"
+            >
+              {sections.map((section, index) => renderStructuralBlock(section, index))}
+              {provided.placeholder}
+              {!sections.length && (
+                <div className="py-5 text-center text-[9px] font-bold uppercase tracking-wide text-slate-350">
+                  Drop sections here
+                </div>
+              )}
+            </div>
+          )}
+        </Droppable>
+      </div>
+    );
+
+    return (
+      <div className="flex h-full flex-col bg-white text-slate-800">
+        <div className="flex-1 overflow-y-auto px-4 pb-24 pt-4 custom-scrollbar">
+          <div className="sticky top-0 z-20 mb-4 flex items-center justify-between rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-widest text-slate-800">Layout structure</div>
+              <div className="mt-0.5 text-[9px] font-semibold text-slate-400">Placement only · Resume content stays unchanged</div>
+            </div>
+            <div className="flex gap-1">
+              <button type="button" onClick={undoLayout} disabled={!layoutPast.length} title="Undo layout change" className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 disabled:opacity-30"><Undo2 size={13} /></button>
+              <button type="button" onClick={redoLayout} disabled={!layoutFuture.length} title="Redo layout change" className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 disabled:opacity-30"><Redo2 size={13} /></button>
+            </div>
+          </div>
+
+          {layoutMessage && (
+            <div role="alert" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-bold text-amber-800">
+              {layoutMessage}
+            </div>
+          )}
+
+          <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="mb-2 text-[9px] font-black uppercase tracking-widest text-slate-400">Header</div>
+            {renderRegionBuilder('header')}
+          </section>
+
+          <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="mb-3 text-[9px] font-black uppercase tracking-widest text-slate-400">Body</div>
+            <DragDropContext onDragEnd={onDragEnd}>
+              <div className={splitLayout ? 'grid grid-cols-5 gap-3' : ''}>
+                {splitLayout && structuralColumn('Sidebar', 'LEFT_COLUMN', leftSections, 'col-span-2')}
+                {structuralColumn('Main Column', splitLayout ? 'RIGHT_COLUMN' : 'SECTIONS', splitLayout ? rightSections : leftSections, splitLayout ? 'col-span-3' : '')}
+              </div>
+            </DragDropContext>
+
+            {!!hiddenBodySections.length && (
+              <div className="mt-3 border-t border-slate-100 pt-3">
+                <div className="mb-2 text-[8px] font-black uppercase tracking-widest text-slate-400">Hidden optional sections</div>
+                <div className="flex flex-wrap gap-2">
+                  {hiddenBodySections.map(section => (
+                    <button
+                      type="button"
+                      key={section}
+                      onClick={() => toggleLayoutSectionVisibility(section)}
+                      className="flex items-center gap-1.5 rounded-lg border border-dashed border-slate-250 bg-slate-50 px-2 py-1.5 text-[8px] font-black uppercase tracking-wide text-slate-500 hover:border-slate-400"
+                    >
+                      <Eye size={10} /> {section.replaceAll('_', ' ')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="mb-2 text-[9px] font-black uppercase tracking-widest text-slate-400">Footer</div>
+            {renderRegionBuilder('footer')}
+          </section>
+        </div>
+
+        <div className="shrink-0 border-t border-slate-200 bg-white p-4 shadow-[0_-4px_10px_rgba(0,0,0,0.02)]">
+          <button
+            type="button"
+            onClick={onLooksGood}
+            disabled={loading}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border-0 bg-zinc-950 py-3.5 text-xs font-extrabold uppercase tracking-wider text-white shadow-md transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loading ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}
+            {loading ? 'Composing PDF…' : 'Download Tailored Resume'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full flex flex-col justify-between bg-white text-slate-800 font-sans">
       <div className="flex-1 overflow-y-auto px-5 pt-5 pb-24 custom-scrollbar">
@@ -537,6 +838,24 @@ export default function ResumeEditorView({
           </div>
         )}
 
+        {layoutMessage && (
+          <div role="alert" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-800">
+            {layoutMessage}
+          </div>
+        )}
+
+        <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">Header</div>
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={undoLayout} disabled={!layoutPast.length} title="Undo layout change" className="rounded border border-slate-200 bg-white p-1 text-slate-500 disabled:opacity-30"><Undo2 size={12} /></button>
+              <button type="button" onClick={redoLayout} disabled={!layoutFuture.length} title="Redo layout change" className="rounded border border-slate-200 bg-white p-1 text-slate-500 disabled:opacity-30"><Redo2 size={12} /></button>
+              <div className="ml-1 text-[8px] font-bold text-slate-400">Drag components directly</div>
+            </div>
+          </div>
+          {renderRegionBuilder('header')}
+        </div>
+
         {/* Personal Info Header */}
         {activeSections.includes('personal_info') && (
           <div data-editor-section="personal_info" className="mb-4 bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
@@ -559,12 +878,12 @@ export default function ResumeEditorView({
         )}
 
         <DragDropContext onDragEnd={onDragEnd}>
-          {sectionLayout.split ? (
+          {splitLayout ? (
             <div className="grid grid-cols-5 gap-4">
               {/* Left Column (Skills, Education etc.) */}
               <div className="col-span-2 space-y-3.5">
                 <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest pb-1 border-b border-slate-100 flex justify-between items-center">
-                  <span>{sectionLayout.primaryLabel}</span>
+                  <span>Sidebar</span>
                   <span className="text-[8px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold">{leftSections.length}</span>
                 </div>
                 <Droppable droppableId="LEFT_COLUMN" type="SECTIONS">
@@ -580,7 +899,7 @@ export default function ResumeEditorView({
               {/* Right Column (Summary, Experience, Projects) */}
               <div className="col-span-3 space-y-3.5">
                 <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest pb-1 border-b border-slate-100 flex justify-between items-center">
-                  <span>{sectionLayout.secondaryLabel}</span>
+                  <span>Main Column</span>
                   <span className="text-[8px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold">{rightSections.length}</span>
                 </div>
                 <Droppable droppableId="RIGHT_COLUMN" type="SECTIONS">
@@ -606,6 +925,14 @@ export default function ResumeEditorView({
             </Droppable>
           )}
         </DragDropContext>
+
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">Footer</div>
+            <div className="text-[8px] font-bold text-slate-400">Footer items stay in this region</div>
+          </div>
+          {renderRegionBuilder('footer')}
+        </div>
       </div>
 
       {/* Actions Bar */}

@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import {
   Check, Code2, Folder, Github, Globe, Linkedin, Mail, MapPin, Phone,
-  RotateCcw, Sparkles, X
+  RotateCcw, Sparkles, X, Award, BookOpen, Layers, Edit2, ShieldAlert, Target
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
@@ -9,7 +9,8 @@ import {
   normalizePersonName,
   professionalLink
 } from '../utils/resumePresentation';
-import { hasReviewOperation } from '../utils/resumeReviewMerge';
+import { hasReviewOperation, mergeReviewResume } from '../utils/resumeReviewMerge';
+import { toRenderableResume } from '../utils/renderableResume';
 
 const labelFor = (value) => String(value || '')
   .replace(/_/g, ' ')
@@ -48,6 +49,61 @@ const displayValue = (value) => {
   return String(value);
 };
 
+const CircularGauge = ({ score, label, colorClass, size = 58, strokeWidth = 4, showOutOf100 = false }) => {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - ((score || 0) / 100) * circumference;
+  
+  return (
+    <div className="flex flex-col items-center gap-1 font-sans">
+      <div className="relative" style={{ width: size, height: size }}>
+        <svg className="w-full h-full transform -rotate-90" viewBox={`0 0 ${size} ${size}`}>
+          <circle
+            className="text-zinc-100 dark:text-zinc-800"
+            strokeWidth={strokeWidth}
+            stroke="currentColor"
+            fill="transparent"
+            r={radius}
+            cx={size / 2}
+            cy={size / 2}
+          />
+          <circle
+            className={`transition-all duration-500 ease-out ${colorClass}`}
+            strokeWidth={strokeWidth}
+            strokeDasharray={circumference}
+            strokeDashoffset={offset}
+            strokeLinecap="round"
+            stroke="currentColor"
+            fill="transparent"
+            r={radius}
+            cx={size / 2}
+            cy={size / 2}
+          />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="flex items-baseline leading-none">
+            <span className="text-[12px] font-black text-zinc-850 dark:text-zinc-150">
+              {score ?? 0}
+            </span>
+            {showOutOf100 ? (
+              <span className="text-[6.5px] font-black text-zinc-400 dark:text-zinc-500 ml-0.5">
+                /100
+              </span>
+            ) : (
+              <span className="text-[8px] font-black text-zinc-400 dark:text-zinc-500 ml-0.5">
+                %
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+      <span className="text-[8px] font-black uppercase tracking-wider text-zinc-400 dark:text-zinc-500 text-center mt-0.5 animate-pulse">
+        {label}
+      </span>
+    </div>
+  );
+};
+
 function ResumeReviewView({
   parsedResume,
   originalResume,
@@ -56,16 +112,24 @@ function ResumeReviewView({
   reviewProgress,
   validation,
   onUpdateSuggestionStatus,
+  onUpdateSuggestionText,
   onAcceptAll,
   onRejectAll,
   onGenerateResume,
   onBack,
   loading
 }) {
-  const { darkMode, apiUrl, apiKey, jobAnalysis, setReviewSuggestions, comparison, selectedSections } = useApp();
+  const { 
+    darkMode, apiUrl, apiKey, jobAnalysis, setReviewSuggestions, 
+    comparison, selectedSections, liveATS, isRefineStreaming, setIsRefineStreaming 
+  } = useApp();
   const [activeEditSection, setActiveEditSection] = useState(null);
   const [customPrompt, setCustomPrompt] = useState("");
   const [refining, setRefining] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editText, setEditText] = useState("");
+  const [streamingSection, setStreamingSection] = useState(null);
+  const activeReaderRef = React.useRef(null);
   const summarySuggestions = useMemo(
     () => suggestions.filter(suggestion => suggestion.sectionType === 'summary'),
     [suggestions]
@@ -112,29 +176,47 @@ function ResumeReviewView({
     });
   }, [parsedResume]);
 
+  const handleStopRefinement = () => {
+    if (activeReaderRef.current) {
+      activeReaderRef.current.cancel().catch(() => {});
+    }
+    const cleared = suggestions.map(s => ({ ...s, isTyping: false }));
+    setReviewSuggestions(cleared);
+    setRefining(false);
+    setStreamingSection(null);
+    setIsRefineStreaming(false);
+    activeReaderRef.current = null;
+  };
+
   const handleRefineSection = async (sectionType) => {
     if (!customPrompt.trim()) return;
     setRefining(true);
+    setStreamingSection(sectionType);
+    setIsRefineStreaming(true);
+
+    const originalSuggestions = [...suggestions];
+    const targetSuggestions = suggestions.filter(s => s.sectionType === sectionType);
+
+    let sectionData;
+    if (sectionType === 'summary') {
+      const summarySuggest = targetSuggestions[0];
+      sectionData = {
+        original: parsedResume.summary || "",
+        current_suggested: summarySuggest ? summarySuggest.suggested : (parsedResume.summary || "")
+      };
+    } else if (sectionType === 'skills') {
+      sectionData = targetSuggestions.map(s => s.skillName);
+    } else {
+      sectionData = targetSuggestions.map(s => s.suggested);
+    }
+
+    const headers = {};
+    if (apiKey) headers["x-groq-key"] = apiKey;
+    const token = localStorage.getItem('access_token');
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
     try {
-      const targetSuggestions = suggestions.filter(s => s.sectionType === sectionType);
-      
-      let sectionData;
-      if (sectionType === 'summary') {
-        const summarySuggest = targetSuggestions[0];
-        sectionData = {
-          original: parsedResume.summary || "",
-          current_suggested: summarySuggest ? summarySuggest.suggested : (parsedResume.summary || "")
-        };
-      } else if (sectionType === 'skills') {
-        sectionData = targetSuggestions.map(s => s.skillName);
-      } else {
-        sectionData = targetSuggestions.map(s => s.suggested);
-      }
-
-      const headers = {};
-      if (apiKey) headers["x-groq-key"] = apiKey;
-
-      const res = await fetch(`${apiUrl}/api/refine-section`, {
+      const res = await fetch(`${apiUrl}/api/refine-section/stream`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -144,56 +226,119 @@ function ResumeReviewView({
           section_type: sectionType,
           section_data: sectionData,
           prompt: customPrompt,
-          job: jobAnalysis
+          job: jobAnalysis,
+          resume_id: parsedResume?.id || null,
+          intelligence_model: "ATSScoringEngine",
+          working_resume: toRenderableResume(mergeReviewResume(parsedResume, suggestions).workingResume),
+          source_resume: parsedResume,
+          resume_match_analysis: liveATS,
+          ats_analysis: liveATS,
+          accepted_changes: suggestions.filter(s => s.status === 'accepted'),
+          pending_changes: suggestions.filter(s => s.status === 'pending')
         })
       });
 
       if (!res.ok) {
-        throw new Error("Section refinement failed on backend.");
+        const errorData = await res.json().catch(() => ({}));
+        const detailStr = errorData.detail && typeof errorData.detail === 'object'
+          ? JSON.stringify(errorData.detail)
+          : (errorData.detail || "Section refinement failed on backend.");
+        throw new Error(detailStr);
       }
 
-      const data = await res.json();
-      const refined = data.refined;
+      const reader = res.body.getReader();
+      activeReaderRef.current = reader;
+      const decoder = new TextDecoder();
+      let accumulatedText = "";
 
-      if (sectionType === 'summary') {
-        const updated = suggestions.map(s => {
-          if (s.sectionType === 'summary') {
-            return { ...s, suggested: refined, status: 'pending' };
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const matches = chunk.matchAll(/data:\s*(.*?)(?:\n\n|\n|$)/g);
+        for (const match of matches) {
+          const content = match[1];
+          if (content.startsWith("[ERROR]")) {
+            throw new Error(content.replace("[ERROR]", "").trim());
           }
-          return s;
-        });
-        setReviewSuggestions(updated);
-      } else if (sectionType === 'skills') {
-        const updated = suggestions.map(s => {
-          if (s.sectionType === 'skills') {
-            const idx = targetSuggestions.findIndex(ts => ts.id === s.id);
-            if (idx !== -1 && refined[idx]) {
-              return { ...s, skillName: refined[idx], suggested: refined[idx], status: 'pending' };
+          accumulatedText += content;
+        }
+
+        let updated;
+        if (sectionType === 'summary') {
+          updated = suggestions.map(s => {
+            if (s.sectionType === 'summary') {
+              return { ...s, suggested: accumulatedText, status: 'pending', isTyping: true };
             }
-          }
-          return s;
-        });
-        setReviewSuggestions(updated);
-      } else {
-        const updated = suggestions.map(s => {
-          if (s.sectionType === sectionType) {
-            const idx = targetSuggestions.findIndex(ts => ts.id === s.id);
-            if (idx !== -1 && refined[idx]) {
-              return { ...s, suggested: refined[idx], status: 'pending' };
+            return s;
+          });
+        } else if (sectionType === 'skills') {
+          const items = accumulatedText.split(',').map(item => item.trim()).filter(Boolean);
+          updated = suggestions.map(s => {
+            if (s.sectionType === 'skills') {
+              const idx = targetSuggestions.findIndex(ts => ts.id === s.id);
+              if (idx !== -1 && items[idx] !== undefined) {
+                const isLast = idx === items.length - 1;
+                return { ...s, skillName: items[idx], suggested: items[idx], status: 'pending', isTyping: isLast };
+              }
             }
-          }
-          return s;
-        });
+            return s;
+          });
+        } else {
+          const lines = accumulatedText.split('\n')
+            .map(line => line.trim())
+            .filter(line => line.length > 0)
+            .map(line => line.replace(/^[-•*]\s*/, ''));
+          updated = suggestions.map(s => {
+            if (s.sectionType === sectionType) {
+              const idx = targetSuggestions.findIndex(ts => ts.id === s.id);
+              if (idx !== -1 && lines[idx] !== undefined) {
+                const isLast = idx === lines.length - 1;
+                return { ...s, suggested: lines[idx], status: 'pending', isTyping: isLast };
+              }
+            }
+            return s;
+          });
+        }
         setReviewSuggestions(updated);
       }
+
+      const finalSuggestions = suggestions.map(s => {
+        if (s.sectionType === sectionType) {
+          const idx = targetSuggestions.findIndex(ts => ts.id === s.id);
+          if (idx !== -1) {
+            let finalVal = s.suggested;
+            if (sectionType === 'summary') {
+              finalVal = accumulatedText;
+            } else if (sectionType === 'skills') {
+              const items = accumulatedText.split(',').map(item => item.trim()).filter(Boolean);
+              if (items[idx] !== undefined) finalVal = items[idx];
+            } else {
+              const lines = accumulatedText.split('\n')
+                .map(line => line.trim())
+                .filter(line => line.length > 0)
+                .map(line => line.replace(/^[-•*]\s*/, ''));
+              if (lines[idx] !== undefined) finalVal = lines[idx];
+            }
+            return { ...s, suggested: finalVal, skillName: sectionType === 'skills' ? finalVal : s.skillName, status: 'pending', isTyping: false };
+          }
+        }
+        return s;
+      });
+      setReviewSuggestions(finalSuggestions);
 
       setActiveEditSection(null);
       setCustomPrompt("");
     } catch (e) {
       console.error(e);
-      alert("Error refining section: " + e.message);
+      setReviewSuggestions(originalSuggestions);
+      alert("AI editing was interrupted. Your original content has been restored.");
     } finally {
       setRefining(false);
+      setStreamingSection(null);
+      setIsRefineStreaming(false);
+      activeReaderRef.current = null;
     }
   };
 
@@ -204,10 +349,14 @@ function ResumeReviewView({
           <div className="flex items-center gap-1.5 font-sans font-black text-[10px] uppercase tracking-wider">
             <Sparkles size={12} />
             <span>Edit with AI</span>
+            {refining && streamingSection === sectionType && (
+              <span className="ml-2 text-rose-500 font-extrabold animate-pulse text-[8px] tracking-widest">Generating...</span>
+            )}
           </div>
           <button 
             onClick={() => setActiveEditSection(null)}
-            className="text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-200 cursor-pointer border-none bg-transparent p-0 flex items-center justify-center"
+            disabled={refining}
+            className="text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-200 cursor-pointer border-none bg-transparent p-0 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <span className="text-sm font-bold">×</span>
           </button>
@@ -217,8 +366,9 @@ function ResumeReviewView({
           type="text"
           value={customPrompt}
           onChange={(e) => setCustomPrompt(e.target.value)}
+          disabled={refining}
           placeholder={`Describe how you want this ${sectionType} refined...`}
-          className="w-full text-[11px] px-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 rounded-lg text-zinc-700 dark:text-zinc-300 focus:outline-hidden focus:border-[#00bda5] font-sans"
+          className="w-full text-[11px] px-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 rounded-lg text-zinc-700 dark:text-zinc-300 focus:outline-hidden focus:border-[#00bda5] font-sans disabled:opacity-60 disabled:cursor-not-allowed"
         />
         
         <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
@@ -232,20 +382,31 @@ function ResumeReviewView({
                 key={idx}
                 type="button"
                 onClick={() => setCustomPrompt(preset)}
-                className="px-2.5 py-1 bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 text-zinc-650 dark:text-zinc-350 hover:bg-zinc-50 hover:text-zinc-850 dark:hover:bg-zinc-850 dark:hover:text-white rounded-full text-[9px] font-semibold cursor-pointer transition"
+                disabled={refining}
+                className="px-2.5 py-1 bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 text-zinc-650 dark:text-zinc-350 hover:bg-zinc-50 hover:text-zinc-850 dark:hover:bg-zinc-850 dark:hover:text-white rounded-full text-[9px] font-semibold cursor-pointer transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {preset}
               </button>
             ))}
           </div>
           
-          <button
-            onClick={() => handleRefineSection(sectionType)}
-            disabled={refining}
-            className="px-4 py-1.5 bg-[#00bda5] hover:bg-[#00a894] disabled:bg-zinc-300 disabled:dark:bg-zinc-800 text-white rounded-lg text-[9px] font-extrabold uppercase tracking-wider transition cursor-pointer border-none flex items-center gap-1 shadow-xs ml-auto"
-          >
-            {refining ? "Refining..." : "Edit with AI"}
-          </button>
+          {refining && streamingSection === sectionType ? (
+            <button
+              type="button"
+              onClick={handleStopRefinement}
+              className="px-4 py-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-[9px] font-extrabold uppercase tracking-wider transition cursor-pointer border-none flex items-center gap-1 shadow-xs ml-auto"
+            >
+              Stop
+            </button>
+          ) : (
+            <button
+              onClick={() => handleRefineSection(sectionType)}
+              disabled={refining || isRefineStreaming}
+              className="px-4 py-1.5 bg-[#00bda5] hover:bg-[#00a894] disabled:bg-zinc-300 disabled:dark:bg-zinc-800 text-white rounded-lg text-[9px] font-extrabold uppercase tracking-wider transition cursor-pointer border-none flex items-center gap-1 shadow-xs ml-auto"
+            >
+              Edit with AI
+            </button>
+          )}
         </div>
       </div>
     );
@@ -289,25 +450,30 @@ function ResumeReviewView({
             <span className="text-rose-500 line-through bg-rose-50/50 dark:bg-rose-950/20 px-1 py-0.5 rounded select-all font-normal">
               {change.original}
             </span>
-            <span className="text-emerald-600 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20 px-1 py-0.5 rounded font-bold select-all">
+            <span className="text-emerald-600 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20 px-1 py-0.5 rounded font-bold select-all inline-flex items-center">
               {change.suggested}
+              {change.isTyping && (
+                <span className="inline-block w-1.5 h-3.5 bg-emerald-600 dark:bg-emerald-400 ml-1 animate-pulse font-normal">|</span>
+              )}
             </span>
             <span className="inline-flex gap-1 select-none">
               <button
+                disabled={change.isTyping || refining}
                 onClick={(e) => {
                   e.stopPropagation();
                   onUpdateSuggestionStatus(change.id, 'accepted');
                 }}
-                className="px-2 py-0.5 bg-[#00bda5] hover:bg-[#00a894] text-white rounded font-extrabold text-[9px] transition cursor-pointer border-none"
+                className="px-2 py-0.5 bg-[#00bda5] hover:bg-[#00a894] disabled:bg-zinc-200 disabled:dark:bg-zinc-800 disabled:text-zinc-400 disabled:dark:text-zinc-600 disabled:cursor-not-allowed text-white rounded font-extrabold text-[9px] transition cursor-pointer border-none"
               >
                 Accept
               </button>
               <button
+                disabled={change.isTyping || refining}
                 onClick={(e) => {
                   e.stopPropagation();
                   onUpdateSuggestionStatus(change.id, 'rejected');
                 }}
-                className="px-2 py-0.5 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded font-extrabold text-[9px] transition cursor-pointer border-none"
+                className="px-2 py-0.5 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 disabled:bg-zinc-100 disabled:dark:bg-zinc-900 disabled:text-zinc-400 disabled:dark:text-zinc-650 disabled:cursor-not-allowed text-zinc-700 dark:text-zinc-300 rounded font-extrabold text-[9px] transition cursor-pointer border-none"
               >
                 Reject
               </button>
@@ -410,52 +576,89 @@ function ResumeReviewView({
     ['Links', 'links']
   ];
 
+  const originalResumeMatch = liveATS?.original_resume_match ?? comparison?.resume_match_before ?? 0;
+  const currentResumeMatch = liveATS?.current_resume_match ?? comparison?.resume_match_before ?? 0;
+  const estimatedResumeMatch = liveATS?.estimated_resume_match ?? comparison?.resume_match_after ?? 0;
+
+  const originalATS = liveATS?.original_ats ?? comparison?.ats_score_before ?? 0;
+  const currentATS = liveATS?.current_ats ?? comparison?.ats_score_before ?? 0;
+  const estimatedATS = liveATS?.estimated_ats ?? comparison?.ats_score_after ?? 0;
+  
+  const breakdownBefore = liveATS?.breakdown_before ?? comparison?.breakdown_before ?? {
+    resume_match: {
+      "Skills Match": 0, "Keyword Relevance": 0, "Experience Alignment": 0, "Role Similarity": 0, "Project Relevance": 0, "Education Fit": 0, "Certification Relevance": 0
+    },
+    ats_optimization: {
+      "ATS Parseability": 0, "Keyword Optimization": 0, "Required Skills Coverage": 0, "Formatting & Action Verbs": 0, "Section Completeness": 0, "Readability": 0, "Measurable Impact": 0, "Overall Optimization": 0
+    }
+  };
+  const breakdownCurrent = liveATS?.breakdown_current ?? comparison?.breakdown_before ?? breakdownBefore;
+  const breakdownEstimated = liveATS?.breakdown_estimated ?? comparison?.breakdown_after ?? breakdownBefore;
+
+  const matchCurrent = breakdownCurrent.resume_match || breakdownCurrent;
+  const matchEstimated = breakdownEstimated.resume_match || breakdownEstimated;
+  const matchBefore = breakdownBefore.resume_match || breakdownBefore;
+
+  const optCurrent = breakdownCurrent.ats_optimization || {};
+  const optEstimated = breakdownEstimated.ats_optimization || {};
+  const optBefore = breakdownBefore.ats_optimization || {};
+
   return (
-    <div className="flex-1 flex flex-col justify-between h-full bg-zinc-50 dark:bg-zinc-950 select-text font-sans">
-      {/* Floating Status & Progress Header Bar */}
-      <div className="sticky top-0 z-30 bg-white/80 dark:bg-zinc-950/80 border-b border-zinc-200/60 dark:border-zinc-850 p-4 select-none flex-shrink-0 flex items-center justify-between gap-3">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest">Document Review</span>
-            <span className="text-[9px] bg-zinc-100 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-450 px-2 py-0.5 rounded-full font-bold">
-              {stats.reviewed}/{stats.total} Edits
-            </span>
-          </div>
-          {/* Visual Progress Bar */}
-          <div className="flex items-center gap-2">
-            <div className="w-24 h-1 bg-zinc-100 dark:bg-zinc-900 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-[#00bda5] rounded-full transition-all duration-500"
-                style={{ width: `${stats.progressPercent}%` }}
-              />
+    <div className="flex-1 flex flex-col md:flex-row justify-between h-full bg-zinc-50 dark:bg-zinc-950 select-text font-sans overflow-hidden">
+      {/* Left Column: LaTeX Resume Review Content */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden border-r border-zinc-200/60 dark:border-zinc-800">
+        {/* Floating Status & Progress Header Bar */}
+        <div className="sticky top-0 z-30 bg-white/80 dark:bg-zinc-950/80 border-b border-zinc-200/60 dark:border-zinc-850 p-4 select-none flex-shrink-0 flex items-center justify-between gap-3">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest">Document Review</span>
+              <span className="text-[9px] bg-zinc-100 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-450 px-2 py-0.5 rounded-full font-bold">
+                {stats.reviewed}/{stats.total} Edits
+              </span>
             </div>
-            <span className="text-[9px] font-black text-zinc-400 dark:text-zinc-500">{stats.progressPercent}% Completed</span>
-          </div>
-        </div>
-
-        {/* ATS Match Score */}
-        {comparison && (
-          <div className="hidden xs:flex items-center gap-2 border-l border-zinc-200/60 dark:border-zinc-800 pl-3 mr-auto select-none">
-            <div className="text-left">
-              <p className="text-[7px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest leading-none">ATS Score</p>
-              <p className="text-[11px] font-black text-[#00bda5] dark:text-[#00bda5] leading-none mt-1">
-                {comparison.ats_score_before}% → {comparison.ats_score_after}%
-              </p>
+            {/* Visual Progress Bar */}
+            <div className="flex items-center gap-2">
+              <div className="w-24 h-1 bg-zinc-100 dark:bg-zinc-900 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-[#00bda5] rounded-full transition-all duration-500"
+                  style={{ width: `${stats.progressPercent}%` }}
+                />
+              </div>
+              <span className="text-[9px] font-black text-zinc-400 dark:text-zinc-500">{stats.progressPercent}% Completed</span>
             </div>
           </div>
-        )}
 
-        {/* Bulk Controls */}
+          {/* Resume Match & ATS Match Scores */}
+          {comparison && (
+            <div className="hidden xs:flex items-center gap-3 border-l border-zinc-200/60 dark:border-zinc-800 pl-3 mr-auto select-none">
+              <div className="text-left">
+                <p className="text-[7px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest leading-none">Resume Match</p>
+                <p className="text-[11px] font-black text-indigo-500 dark:text-indigo-400 leading-none mt-1">
+                  {currentResumeMatch}%
+                </p>
+              </div>
+              <div className="w-px h-6 bg-zinc-200 dark:bg-zinc-800" />
+              <div className="text-left">
+                <p className="text-[7px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest leading-none">ATS Score</p>
+                <p className="text-[11px] font-black text-[#00bda5] leading-none mt-1">
+                  {currentATS} / 100
+                </p>
+              </div>
+            </div>
+          )}
+
         <div className="flex gap-1.5">
           <button
             onClick={onAcceptAll}
-            className="px-3 py-1.5 bg-[#00bda5] hover:bg-[#00a894] text-white text-[9px] font-bold rounded-lg transition-all cursor-pointer border-none"
+            disabled={refining}
+            className="px-3 py-1.5 bg-[#00bda5] hover:bg-[#00a894] disabled:bg-zinc-200 disabled:dark:bg-zinc-800 disabled:text-zinc-400 disabled:cursor-not-allowed text-white text-[9px] font-bold rounded-lg transition-all cursor-pointer border-none"
           >
             Accept All
           </button>
           <button
             onClick={onRejectAll}
-            className="px-3 py-1.5 bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200/50 dark:hover:bg-zinc-800 text-zinc-650 dark:text-zinc-350 text-[9px] font-bold rounded-lg transition-all cursor-pointer border-none"
+            disabled={refining}
+            className="px-3 py-1.5 bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200/50 dark:hover:bg-zinc-800 disabled:bg-zinc-200 disabled:dark:bg-zinc-800 disabled:text-zinc-405 disabled:cursor-not-allowed text-zinc-650 dark:text-zinc-350 text-[9px] font-bold rounded-lg transition-all cursor-pointer border-none"
           >
             Reject All
           </button>
@@ -731,6 +934,183 @@ function ResumeReviewView({
           <Sparkles size={13} />
           Generate Resume
         </button>
+      </div>
+    </div>
+
+      {/* Right Column: Live ATS Dashboard Panel */}
+      <div className="w-full md:w-80 lg:w-96 bg-white dark:bg-zinc-900 border-l border-zinc-200/60 dark:border-zinc-800 flex flex-col h-full overflow-y-auto select-none p-5 shrink-0 space-y-6 scrollbar-thin">
+        <div className="space-y-1 pb-4 border-b border-zinc-150 dark:border-zinc-800">
+          <div className="flex items-center gap-2 text-zinc-950 dark:text-zinc-50">
+            <Target size={18} className="text-[#00bda5] shrink-0" />
+            <h2 className="text-xs font-black uppercase tracking-wider">ATS Intelligence</h2>
+          </div>
+          <p className="text-[10px] text-zinc-400 dark:text-zinc-500 font-bold">
+            Real-time deterministic analysis calculated by backend
+          </p>
+        </div>
+
+        {/* Section 1: Resume Match (%) */}
+        <div className="space-y-2 bg-indigo-50/20 dark:bg-indigo-950/10 border border-indigo-100/30 dark:border-indigo-900/20 p-4 rounded-2xl">
+          <div className="flex justify-between items-center">
+            <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">
+              Resume Match
+            </span>
+            <span className="text-sm font-black text-indigo-600 dark:text-indigo-400">
+              {currentResumeMatch}%
+            </span>
+          </div>
+          
+          {/* Faint double progress bar */}
+          <div className="w-full h-2 bg-zinc-150 dark:bg-zinc-800 rounded-full relative overflow-hidden">
+            <div 
+              className="h-full bg-indigo-500 rounded-full absolute left-0 top-0 transition-all duration-500"
+              style={{ width: `${currentResumeMatch}%` }}
+            />
+            {estimatedResumeMatch > currentResumeMatch && (
+              <div 
+                className="h-full bg-indigo-400/40 absolute top-0 transition-all duration-500"
+                style={{ 
+                  left: `${currentResumeMatch}%`, 
+                  width: `${estimatedResumeMatch - currentResumeMatch}%` 
+                }}
+              />
+            )}
+          </div>
+          
+          <div className="flex justify-between text-[8px] font-bold text-zinc-400 dark:text-zinc-500 pt-0.5">
+            <span>Original: {originalResumeMatch}%</span>
+            <span>Potential: {estimatedResumeMatch}%</span>
+          </div>
+        </div>
+
+        {/* Section 2: ATS Score (0-100) */}
+        <div className="space-y-3">
+          <h3 className="text-[9px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">
+            ATS Friendliness Score
+          </h3>
+          
+          {/* Circular Gauges Row */}
+          <div className="bg-zinc-50/50 dark:bg-zinc-950/30 border border-zinc-200/60 dark:border-zinc-850 p-4 rounded-2xl flex justify-around items-center gap-2">
+            <CircularGauge score={originalATS} label="Original ATS" colorClass="text-zinc-400 dark:text-zinc-500" showOutOf100={true} />
+            <div className="w-px h-10 bg-zinc-200 dark:bg-zinc-800 shrink-0" />
+            <CircularGauge score={currentATS} label="Current ATS" colorClass="text-[#00bda5]" showOutOf100={true} />
+            <div className="w-px h-10 bg-zinc-200 dark:bg-zinc-800 shrink-0" />
+            <CircularGauge score={estimatedATS} label="Potential ATS" colorClass="text-indigo-500 dark:text-indigo-400" showOutOf100={true} />
+          </div>
+        </div>
+
+        {/* Section 3: ATS Optimization Checklist Breakdown */}
+        <div className="space-y-4">
+          <h3 className="text-[9px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">
+            ATS Checklist Breakdown
+          </h3>
+          <div className="space-y-3">
+            {Object.keys(optCurrent).map((cat) => {
+              const current = optCurrent[cat] ?? 0;
+              const estimated = optEstimated[cat] ?? 0;
+              
+              const Icon = {
+                "ATS Parseability": Layers,
+                "Keyword Optimization": Target,
+                "Required Skills Coverage": Award,
+                "Formatting & Action Verbs": Code2,
+                "Section Completeness": Check,
+                "Readability": BookOpen,
+                "Measurable Impact": ShieldAlert,
+                "Overall Optimization": Sparkles
+              }[cat] || Target;
+
+              return (
+                <div key={cat} className="space-y-1 bg-white dark:bg-zinc-900 rounded-lg">
+                  <div className="flex justify-between items-center text-[10px] font-bold text-zinc-750 dark:text-zinc-300">
+                    <span className="flex items-center gap-1.5 font-bold">
+                      <Icon size={12} className="text-zinc-400 dark:text-zinc-500 shrink-0" />
+                      {cat}
+                    </span>
+                    <span className="font-extrabold flex items-center gap-1 shrink-0">
+                      <span>{current}%</span>
+                      {estimated > current && (
+                        <span className="text-indigo-500 text-[9px]">→ {estimated}%</span>
+                      )}
+                    </span>
+                  </div>
+                  
+                  <div className="w-full h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full relative overflow-hidden">
+                    <div 
+                      className="h-full bg-[#00bda5] rounded-full absolute left-0 top-0 transition-all duration-500"
+                      style={{ width: `${current}%` }}
+                    />
+                    {estimated > current && (
+                      <div 
+                        className="h-full bg-indigo-400/40 dark:bg-indigo-500/30 absolute top-0 transition-all duration-500"
+                        style={{ 
+                          left: `${current}%`, 
+                          width: `${estimated - current}%` 
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Section 4: Resume Match Breakdown */}
+        <div className="space-y-4 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+          <h3 className="text-[9px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">
+            Job Match Breakdown
+          </h3>
+          <div className="space-y-3">
+            {Object.keys(matchCurrent).map((cat) => {
+              const current = matchCurrent[cat] ?? 0;
+              const estimated = matchEstimated[cat] ?? 0;
+              
+              const Icon = {
+                "Skills Match": Award,
+                "Keyword Relevance": Target,
+                "Experience Alignment": Layers,
+                "Role Similarity": Sparkles,
+                "Project Relevance": Code2,
+                "Education Fit": BookOpen,
+                "Certification Relevance": Check
+              }[cat] || Target;
+
+              return (
+                <div key={cat} className="space-y-1 bg-white dark:bg-zinc-900 rounded-lg">
+                  <div className="flex justify-between items-center text-[10px] font-bold text-zinc-750 dark:text-zinc-300">
+                    <span className="flex items-center gap-1.5 font-bold">
+                      <Icon size={12} className="text-zinc-400 dark:text-zinc-500 shrink-0" />
+                      {cat}
+                    </span>
+                    <span className="font-extrabold flex items-center gap-1 shrink-0">
+                      <span>{current}%</span>
+                      {estimated > current && (
+                        <span className="text-indigo-500 text-[9px]">→ {estimated}%</span>
+                      )}
+                    </span>
+                  </div>
+                  
+                  <div className="w-full h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full relative overflow-hidden">
+                    <div 
+                      className="h-full bg-indigo-500 rounded-full absolute left-0 top-0 transition-all duration-500"
+                      style={{ width: `${current}%` }}
+                    />
+                    {estimated > current && (
+                      <div 
+                        className="h-full bg-indigo-400/40 absolute top-0 transition-all duration-500"
+                        style={{ 
+                          left: `${current}%`, 
+                          width: `${estimated - current}%` 
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );

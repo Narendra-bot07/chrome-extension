@@ -36,6 +36,13 @@ def test_source_employment_labels_are_normalized(source_value, canonical):
     assert ExtractedJob(employment_type=source_value).employment_type == canonical
 
 
+def test_null_benefits_are_accepted_at_tool_boundary_and_normalized():
+    benefits_schema = ExtractedJob.model_json_schema()["properties"]["benefits"]
+
+    assert {"type": "null"} in benefits_schema["anyOf"]
+    assert ExtractedJob(benefits=None).benefits == []
+
+
 def test_backend_login_wall_recovers_with_extension_selected_panel():
     panel = (
         "Senior Engineer\nJob description\nResponsibilities\nBuild reliable systems.\n"

@@ -17,6 +17,7 @@ from services.resume.composition import (
     validate_resume_presentation,
 )
 from services.resume.preservation import inventory_resume
+from services.resume.composition_engine import plan_resume_composition
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,7 @@ class FinalResumeDocument(BaseModel):
         result = copy.deepcopy(self.content.content)
         result["section_order"] = list(self.composition_plan.section_order)
         result["layout_level"] = self.composition_plan.compactness_level
+        result["_composition"] = copy.deepcopy(self.rendering_configuration)
         return result
 
 
@@ -353,7 +355,27 @@ async def export_resume_pdf(
         plan, changed = repair_composition(content, plan)
         _record(state, RepairType.REPAIRABLE_COMPOSITION_ERROR, composition_report.issues, "rebuild_valid_references", changed, content.content, [], "retry")
 
-    final = FinalResumeDocument(content=content, composition_plan=plan)
+    composition_decision = plan_resume_composition(
+        content.content, plan.section_order
+    )
+    plan.spacing_profile = composition_decision.spacing_profile
+    final = FinalResumeDocument(
+        content=content,
+        composition_plan=plan,
+        rendering_configuration=composition_decision.model_dump(mode="json"),
+    )
+    logger.info(
+        "[RESUME-COMPOSITION] request_id=%s template=%s estimated_pages=%s "
+        "content_units=%s spacing=%s target_fill=%s balance_target=%s passes=%s",
+        request_id,
+        template_name,
+        composition_decision.estimated_page_count,
+        composition_decision.total_content_units,
+        composition_decision.spacing_profile,
+        composition_decision.target_page_fill,
+        composition_decision.page_balance_target,
+        composition_decision.optimization_passes,
+    )
     for attempt in range(state.max_repair_attempts["rendering"] + 1):
         state.repair_attempt = attempt
         active_template = template_name if attempt == 0 else "ExecutiveATS"

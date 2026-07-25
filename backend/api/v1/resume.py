@@ -20,6 +20,12 @@ from schemas.resume_intelligence import (
     SelectedResumeConfirmationRequest,
     SelectedResumeIntelligenceRequest,
 )
+from schemas.resume import ResumeLayoutModel
+from schemas.layout_intelligence import (
+    LayoutIntelligenceRequest,
+    LayoutIntelligenceResponse,
+)
+from services.layout_intelligence import LayoutIntelligenceService
 from services.resume_intelligence.models import Phase2Output
 from services.resume_intelligence.semantic import GroqSemanticAnalyzer
 from services.resume_intelligence.service import SelectedResumeIntelligenceService
@@ -27,6 +33,39 @@ from services.workflow.checkpoints import PostgresCheckpointStore
 from core.config import settings
 
 router = APIRouter(prefix="/resumes", tags=["resumes"])
+
+
+@router.post(
+    "/{resume_id}/layout/recommendation",
+    response_model=LayoutIntelligenceResponse,
+)
+def recommend_resume_layout(
+    resume_id: str,
+    payload: LayoutIntelligenceRequest,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository),
+):
+    """Recommend a renderer-neutral plan without mutating the saved layout."""
+    record = repo.get_by_id(resume_id, user["id"])
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
+    resume = record.get("parsed_content") or {}
+    if not isinstance(resume, dict):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Stored resume content is invalid.",
+        )
+    result = LayoutIntelligenceService().build_plan(resume, payload)
+    logger.info(
+        "[LAYOUT-INTELLIGENCE] recommendation resume_id=%s strategy=%s "
+        "confidence=%s overridden=%s sections=%s",
+        resume_id,
+        result.layout_strategy.recommended_strategy,
+        result.layout_strategy.confidence,
+        result.layout_strategy.overridden_by_user,
+        result.layout_plan.section_order,
+    )
+    return result
 
 
 def _resume_intelligence_service(
@@ -350,6 +389,28 @@ async def mark_resume_used(
             detail="Resume not found, not active, or not owned by current user."
         )
     return record
+
+
+@router.put("/{resume_id}/layout")
+async def save_resume_layout(
+    resume_id: str,
+    layout: ResumeLayoutModel,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository),
+):
+    record = repo.update_layout(resume_id, user["id"], layout.model_dump(mode="json"))
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
+    return {
+        "resume_id": record["id"],
+        "template_id": layout.template_id,
+        "layout_version": layout.layout_version,
+        "header_config": layout.header.model_dump(mode="json"),
+        "main_column_order": layout.main_column,
+        "sidebar_order": layout.sidebar,
+        "hidden_sections": layout.hidden_sections,
+        "updated_at": record.get("updated_at"),
+    }
 
 @router.delete("/{resume_id}")
 async def delete_resume(

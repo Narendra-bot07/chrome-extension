@@ -306,6 +306,28 @@ class ResumeRepository:
             self.conn.commit()
             return bool(cur.fetchone())
 
+    def update_layout(self, resume_id: str, user_id: str, layout: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Persist layout beside resume content so reads and exports restore one model."""
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE public.resumes
+                SET parsed_content = jsonb_set(
+                        COALESCE(parsed_content, '{}'::jsonb),
+                        '{layout_model}',
+                        %s::jsonb,
+                        TRUE
+                    ),
+                    updated_at = NOW()
+                WHERE id = %s AND user_id = %s AND deleted_at IS NULL
+                RETURNING *
+                """,
+                (json.dumps(layout), resume_id, user_id),
+            )
+            record = cur.fetchone()
+            self.conn.commit()
+            return self._with_metadata_defaults(record)
+
     def mark_used(self, resume_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         query = """
             UPDATE public.resumes

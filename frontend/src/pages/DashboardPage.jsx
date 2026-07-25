@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { 
@@ -127,7 +127,17 @@ function DashboardContent() {
   const successRate = appsSubmitted === 0 ? 0 : Math.round((acceptedCount / appsSubmitted) * 100);
 
   // ATS match averages
-  const atsAverage = metrics.avg_ats_score;
+  const matchApps = applications.filter(a => a && a.resume_match_score != null);
+  const avgResumeMatch = matchApps.length > 0 
+    ? Math.round(matchApps.reduce((sum, a) => sum + Number(a.resume_match_score), 0) / matchApps.length)
+    : null;
+
+  const atsApps = applications.filter(a => a && a.ats_score != null);
+  const avgATS = atsApps.length > 0 
+    ? Math.round(atsApps.reduce((sum, a) => sum + Number(a.ats_score), 0) / atsApps.length)
+    : null;
+
+  const atsAverage = avgATS ?? metrics.avg_ats_score ?? 0;
 
   const activeAppsCount = applications.filter(a => 
     a && !['Accepted', 'Rejected', 'Archived'].includes(a.current_stage)
@@ -480,17 +490,23 @@ function DashboardContent() {
           </div>
         </div>
 
-        {/* Card 7: ATS Average */}
+        {/* Card 7: Average Scores */}
         <div className="bg-white dark:bg-zinc-900/30 border border-zinc-200 dark:border-zinc-850 rounded-2xl p-4.5 flex flex-col justify-between h-32 shadow-xs select-none">
           <div className="flex items-center justify-between">
-            <span className="text-zinc-400 dark:text-zinc-500 text-[8.5px] font-black uppercase tracking-widest">ATS Average</span>
+            <span className="text-zinc-400 dark:text-zinc-500 text-[8.5px] font-black uppercase tracking-widest">Average Scores</span>
             <Zap className="w-3.5 h-3.5 text-zinc-400" />
           </div>
           <div>
-            <div className="text-2xl font-black text-zinc-955 dark:text-zinc-50 leading-none">
-              {atsAverage}%
+            <div className="text-base font-black text-zinc-955 dark:text-zinc-50 leading-none flex flex-col gap-1.5">
+              <div className="flex justify-between items-center">
+                <span className="text-[9px] font-black text-zinc-400 uppercase">Match Avg</span>
+                <span className="text-indigo-500 text-lg font-black">{avgResumeMatch != null ? `${avgResumeMatch}%` : '—'}</span>
+              </div>
+              <div className="flex justify-between items-center border-t border-zinc-100 dark:border-zinc-850 pt-1">
+                <span className="text-[9px] font-black text-zinc-400 uppercase">ATS Avg</span>
+                <span className="text-[#00bda5] text-lg font-black">{avgATS != null ? `${avgATS}/100` : '—'}</span>
+              </div>
             </div>
-            <p className="text-[8.5px] text-zinc-455 dark:text-zinc-500 mt-2.5 font-black uppercase tracking-wider">Average JD scoring</p>
           </div>
         </div>
 
@@ -737,6 +753,7 @@ function DashboardContent() {
                 <th className="pb-2">Company</th>
                 <th className="pb-2">Role</th>
                 <th className="pb-2 text-center">Stage</th>
+                <th className="pb-2 text-center">Match</th>
                 <th className="pb-2 text-center">ATS Score</th>
                 <th className="pb-2 text-center">Resume Version</th>
                 <th className="pb-2 text-center">Last Updated</th>
@@ -750,8 +767,9 @@ function DashboardContent() {
                     <td className="py-2.5">{app.company_name}</td>
                     <td className="py-2.5">{app.job_title}</td>
                     <td className="py-2.5 text-center text-[#00bda5] uppercase text-[9px] font-black">{app.current_stage}</td>
-                    <td className="py-2.5 text-center">{app.ats_score != null ? `${Math.round(app.ats_score)}%` : 'â€”'}</td>
-                    <td className="py-2.5 text-center">{app.resume_version || 'â€”'}</td>
+                    <td className="py-2.5 text-center text-indigo-500">{app.resume_match_score != null ? `${Math.round(app.resume_match_score)}%` : '—'}</td>
+                    <td className="py-2.5 text-center text-[#00bda5]">{app.ats_score != null ? `${Math.round(app.ats_score)}/100` : '—'}</td>
+                    <td className="py-2.5 text-center">{app.resume_version || '—'}</td>
                     <td className="py-2.5 text-center text-[9px] text-zinc-455">{formatSafeDate(app.last_activity)}</td>
                     <td className="py-2.5 text-right">
                       <button
@@ -765,7 +783,7 @@ function DashboardContent() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="7" className="py-6 text-center text-[10px] text-zinc-455 font-black uppercase">
+                  <td colSpan="8" className="py-6 text-center text-[10px] text-zinc-455 font-black uppercase">
                     No active applications in the queue yet.
                   </td>
                 </tr>

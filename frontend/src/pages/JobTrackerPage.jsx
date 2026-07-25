@@ -452,7 +452,11 @@ Best regards,
             </p>
             
             <div className="pt-1.5 border-t border-zinc-100 dark:border-zinc-800/40 flex justify-between items-center text-[7.5px] text-zinc-400 font-bold">
-              <span>ATS {selectedApp?.ats_score != null ? `${Math.round(selectedApp.ats_score)}%` : '—'}</span>
+              <div className="flex gap-2">
+                <span>Match: {selectedApp?.resume_match_score != null ? `${Math.round(selectedApp.resume_match_score)}%` : '—'}</span>
+                <span>|</span>
+                <span>ATS: {selectedApp?.ats_score != null ? `${Math.round(selectedApp.ats_score)}/100` : '—'}</span>
+              </div>
               <span>{calculateDuration(selectedApp?.created_at)}</span>
             </div>
           </div>
@@ -550,7 +554,11 @@ Best regards,
                       <span className="text-[#00bda5] font-black">
                         {app.current_stage}
                       </span>
-                      <span>ATS {app.ats_score != null ? `${Math.round(app.ats_score)}%` : '—'}</span>
+                      <div className="flex gap-2">
+                        <span>Match {app.resume_match_score != null ? `${Math.round(app.resume_match_score)}%` : '—'}</span>
+                        <span>|</span>
+                        <span>ATS {app.ats_score != null ? `${Math.round(app.ats_score)}/100` : '—'}</span>
+                      </div>
                     </div>
 
                     <div className="text-[7.5px] text-zinc-400 font-bold flex justify-between uppercase mt-0.5">
@@ -602,8 +610,11 @@ Best regards,
                     <span className="text-[9px] bg-[#00bda5]/10 text-[#00bda5] px-2 py-0.5 rounded font-black uppercase tracking-wider border border-[#00bda5]/20">
                       {selectedApp?.current_stage}
                     </span>
-                    <span className="text-[9px] bg-zinc-200/40 dark:bg-zinc-900 text-zinc-500 px-2 py-0.5 rounded font-black uppercase border border-zinc-200/50 dark:border-zinc-800">
-                      ATS {selectedApp?.ats_score != null ? `${Math.round(selectedApp.ats_score)}%` : '—'}
+                    <span className="text-[9px] bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded font-black uppercase border border-indigo-100/30 dark:border-indigo-900/30">
+                      Match: {selectedApp?.resume_match_score != null ? `${Math.round(selectedApp.resume_match_score)}%` : '—'}
+                    </span>
+                    <span className="text-[9px] bg-[#00bda5]/10 text-[#00bda5] px-2 py-0.5 rounded font-black uppercase border border-[#00bda5]/20">
+                      ATS: {selectedApp?.ats_score != null ? `${Math.round(selectedApp.ats_score)}/100` : '—'}
                     </span>
                     <span className="text-[9px] bg-zinc-200/40 dark:bg-zinc-900 text-zinc-500 px-2 py-0.5 rounded font-black uppercase border border-zinc-200/50 dark:border-zinc-800">
                       Res: {selectedApp?.resume_version || 'v1'}
@@ -722,9 +733,20 @@ Best regards,
                       <span className="text-[8.5px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest block">Current Stage</span>
                       <span className="text-base font-black text-[#00bda5]">{selectedApp?.current_stage}</span>
                     </div>
-                    <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-1">
-                      <span className="text-[8.5px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest block">ATS Rating Match</span>
-                      <span className="text-base font-black text-[#00bda5]">{selectedApp?.ats_score != null ? `${Math.round(selectedApp.ats_score)}%` : '—'}</span>
+                    <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 flex flex-col justify-center space-y-1">
+                      <span className="text-[8.5px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest block mb-0.5">Scoring Overview</span>
+                      <div className="flex justify-between items-baseline">
+                        <span className="text-[9px] font-black text-zinc-400 uppercase tracking-wider">Resume Match</span>
+                        <span className="text-sm font-black text-indigo-500 dark:text-indigo-400">
+                          {selectedApp?.resume_match_score != null ? `${Math.round(selectedApp.resume_match_score)}%` : '—'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-baseline border-t border-zinc-100 dark:border-zinc-800/40 pt-1">
+                        <span className="text-[9px] font-black text-zinc-400 uppercase tracking-wider">ATS Score</span>
+                        <span className="text-sm font-black text-[#00bda5]">
+                          {selectedApp?.ats_score != null ? `${Math.round(selectedApp.ats_score)}/100` : '—'}
+                        </span>
+                      </div>
                     </div>
                     <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-1">
                       <span className="text-[8.5px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest block">Last Activity Logged</span>

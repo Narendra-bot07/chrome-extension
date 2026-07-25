@@ -43,6 +43,12 @@ function ReviewChangesPage() {
     ));
   };
 
+  const handleUpdateSuggestionText = (id, newText) => {
+    setReviewSuggestions(reviewSuggestions.map(s =>
+      s.id === id ? { ...s, suggested: newText } : s
+    ));
+  };
+
   const handleAcceptAll = () => {
     setReviewSuggestions(reviewSuggestions.map(s => ({ ...s, status: 'accepted' })));
   };
@@ -60,6 +66,7 @@ function ReviewChangesPage() {
       reviewProgress={progress}
       validation={validation}
       onUpdateSuggestionStatus={handleUpdateSuggestionStatus}
+      onUpdateSuggestionText={handleUpdateSuggestionText}
       onAcceptAll={handleAcceptAll}
       onRejectAll={handleRejectAll}
       onGenerateResume={() => handleGenerateFinalResume(

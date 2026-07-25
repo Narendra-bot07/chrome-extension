@@ -8,65 +8,64 @@ import DownloadPage from '../pages/DownloadPage';
 
 const TEMPLATES_LIST = [
   { 
+    id: 'ClassicATS', 
+    name: 'Classic ATS', 
+    description: 'Maximum ATS compatibility with a clean single-column structure and traditional corporate styling.',
+    atsScore: 99,
+    recommendedFor: 'Software Engineers, Data Engineers, Backend Engineers, Consulting, Banking',
+    layout: 'Single Column',
+    photo: 'No Photo',
+    recommended: true
+  },
+  { 
     id: 'ExecutiveATS', 
     name: 'Executive ATS', 
-    description: 'Elegant top-header alignment with deep royal blue accents.',
+    description: 'High-authority executive single-column layout with serif typography and generous spacing.',
     atsScore: 98,
-    recommendedFor: 'Senior Engineers, Engineering Managers, Architects, Staff Engineers',
+    recommendedFor: 'Senior Engineers, Leads, Tech Architects, Engineering Managers',
     layout: 'Single Column',
     photo: 'No Photo',
-    recommended: true
-  },
-  { 
-    id: 'TwoColumnATS', 
-    name: 'Two-Column ATS', 
-    description: 'Maximum information density without reducing parsing structure compatibility.',
-    atsScore: 92,
-    recommendedFor: 'Software Engineers, AI Specialists, Data Engineers, Cybersecurity Analysts',
-    layout: 'Two Column',
-    photo: 'No Photo',
     recommended: false
   },
   { 
-    id: 'EuropeanPhotoATS', 
-    name: 'European Executive', 
-    description: 'European market friendly layout with a left sidebar and elegant photo slot.',
-    atsScore: 91,
-    recommendedFor: 'International Applicants, Managers, Management Consultants',
-    layout: 'Sidebar Layout',
-    photo: 'With Photo',
-    recommended: false
-  },
-
-  { 
-    id: 'PortfolioPhotoATS', 
-    name: 'Premium Portfolio', 
-    description: 'Creative tech-oriented layout highlighting github, portfolios, and details.',
-    atsScore: 92,
-    recommendedFor: 'Frontend Developers, Product Designers, Creative Developers',
-    layout: 'Single Column',
-    photo: 'With Photo',
-    recommended: false
-  },
-  { 
-    id: 'MarissaATS', 
-    name: 'Marissa Executive', 
-    description: 'Two-column elite layout with right-aligned circular photo and solid headers.',
-    atsScore: 95,
-    recommendedFor: 'Executives, Product Managers, Senior Engineers, Directors',
-    layout: 'Two Column (R)',
-    photo: 'With Photo',
-    recommended: true
-  },
-  { 
-    id: 'AltaATS', 
-    name: 'Nico Executive', 
-    description: 'High-contrast header banner template with a shaded left sidebar and details.',
+    id: 'ModernSidebar', 
+    name: 'Modern Sidebar', 
+    description: 'Modern engineering profile with a dedicated narrow sidebar for skills, education, and credentials.',
     atsScore: 94,
-    recommendedFor: 'Researchers, Engineers, Academics, Developers',
-    layout: 'Sidebar Banner',
-    photo: 'With Photo',
+    recommendedFor: 'Developers, Data Scientists, ML Engineers, Tech Specialists',
+    layout: 'Sidebar',
+    photo: 'Optional Photo',
+    recommended: true
+  },
+  { 
+    id: 'PortfolioPro', 
+    name: 'Portfolio Pro', 
+    description: 'Tech-first personal branding layout with hero header, highlighted SVG badges, and project emphasis.',
+    atsScore: 93,
+    recommendedFor: 'Frontend, Full Stack, Product Engineers, Open Source Contributors',
+    layout: 'Hero Banner',
+    photo: 'Optional Photo',
     recommended: false
+  },
+  { 
+    id: 'EuropeanModern', 
+    name: 'European Modern', 
+    description: 'European market style featuring a sleek left accent banner, compact typography, and crisp structure.',
+    atsScore: 92,
+    recommendedFor: 'International Applications, Research, Engineering, R&D',
+    layout: 'Left Banner',
+    photo: 'Optional Photo',
+    recommended: false
+  },
+  { 
+    id: 'PremiumExecutive', 
+    name: 'Premium Executive', 
+    description: 'High-end executive resume featuring a balanced two-column strategy and luxury typography.',
+    atsScore: 96,
+    recommendedFor: 'Senior Managers, Staff Engineers, Principal Engineers, Directors',
+    layout: 'Two Column',
+    photo: 'Optional Photo',
+    recommended: true
   }
 ];
 
@@ -94,8 +93,14 @@ export default function TemplateSelectionView({ onBack }) {
     setSelectedTemplate,
     customFileName,
     setCustomFileName,
-    companyName
+    companyName,
+    comparison,
+    liveATS
   } = useApp();
+
+  const baseATS = liveATS?.current_ats ?? comparison?.ats_score_after ?? comparison?.ats_score_before;
+  const userATSScore = baseATS !== undefined && baseATS !== null ? Number(baseATS) : null;
+
   const displayResume = toRenderableResume(tailoredResume || parsedResume);
   const [isDownloading, setIsDownloading] = useState(false);
   const [filter, setFilter] = useState('all'); // 'all' | 'no-photo' | 'with-photo'
@@ -145,7 +150,7 @@ export default function TemplateSelectionView({ onBack }) {
 
   const filteredTemplates = TEMPLATES_LIST.filter(t => {
     if (filter === 'no-photo') return t.photo === 'No Photo';
-    if (filter === 'with-photo') return t.photo === 'With Photo';
+    if (filter === 'with-photo') return t.photo !== 'No Photo';
     return true;
   });
 
@@ -232,8 +237,8 @@ export default function TemplateSelectionView({ onBack }) {
                       <h3 className="text-sm font-extrabold text-zinc-900 group-hover:text-indigo-600 transition-colors uppercase tracking-tight">
                         {t.name}
                       </h3>
-                      <span className="text-[10px] font-extrabold px-1.5 py-0.5 bg-green-650 text-white rounded text-center">
-                        ATS {t.atsScore}%
+                      <span className="text-[10px] font-extrabold px-1.5 py-0.5 bg-green-650 text-white rounded text-center animate-pulse">
+                        ATS {userATSScore !== null ? Math.max(0, Math.min(100, Math.round(userATSScore + (t.atsScore - 98)))) : t.atsScore}%
                       </span>
                     </div>
                     <p className="text-[11px] text-zinc-500 mt-1.5 leading-relaxed line-clamp-2">
@@ -314,8 +319,8 @@ export default function TemplateSelectionView({ onBack }) {
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
                     <h2 className="text-lg font-black tracking-tight uppercase">{zoomModalTemplate.name}</h2>
-                    <span className="text-[10px] font-black px-1.5 py-0.5 bg-green-650 text-white rounded">
-                      ATS {zoomModalTemplate.atsScore}%
+                    <span className="text-[10px] font-black px-1.5 py-0.5 bg-green-650 text-white rounded animate-pulse">
+                      ATS {userATSScore !== null ? Math.max(0, Math.min(100, Math.round(userATSScore + (zoomModalTemplate.atsScore - 98)))) : zoomModalTemplate.atsScore}%
                     </span>
                   </div>
                   <p className="text-xs text-zinc-400 leading-relaxed">

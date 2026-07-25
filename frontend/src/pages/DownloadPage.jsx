@@ -12,7 +12,6 @@ import { compressResumeData } from '../utils/resumeCompression';
 import { toRenderableResume } from '../utils/renderableResume';
 import { createCompositionPlan } from '../utils/resumeComposition';
 import { TEMPLATE_CONFIGS } from '../templates/templates_config';
-import { getTemplateSectionLayout } from '../utils/templateSectionLayout';
 
 function DownloadPage({ onClose }) {
   const navigate = useNavigate();
@@ -246,16 +245,15 @@ function DownloadPage({ onClose }) {
   const pruneLevel = Math.max(0, 5 - Math.floor(layoutLevel / 2));
   const compressedResume = compressResumeData(activeResume, pruneLevel);
 
-  const editorLayout = getTemplateSectionLayout(
-    TEMPLATE_CONFIGS[selectedTemplate] || TEMPLATE_CONFIGS.ExecutiveATS,
-    activeResume.section_order || []
+  const editorIsSplit = ['sidebar', 'two-column', 'marissa'].includes(
+    (TEMPLATE_CONFIGS[selectedTemplate] || TEMPLATE_CONFIGS.ExecutiveATS).layout
   );
 
   return (
     <div className="flex-1 flex h-full bg-zinc-950 overflow-hidden relative">
       
       {/* LEFT SIDE: Editor Panel */}
-      <div className={`${editorLayout.split ? 'w-[48%] min-w-[500px]' : 'w-[42%] min-w-[380px]'} border-r border-zinc-200 dark:border-zinc-800 flex flex-col h-full bg-white shrink-0 z-10 shadow-lg`}>
+      <div className={`${editorIsSplit ? 'w-[48%] min-w-[500px]' : 'w-[42%] min-w-[380px]'} border-r border-zinc-200 dark:border-zinc-800 flex flex-col h-full bg-white shrink-0 z-10 shadow-lg`}>
         <div className="p-4 bg-white border-b border-zinc-200 shrink-0">
           <div className="flex items-center justify-between">
             <div>
@@ -298,6 +296,7 @@ function DownloadPage({ onClose }) {
               setZoomLevel(1.0);
               setShowZoomModal(true);
             }}
+            resumeId={parsedResume?.id}
           />
         </div>
       </div>

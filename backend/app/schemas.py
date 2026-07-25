@@ -1,5 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional, Dict, Any
+from schemas.resume import ResumeLayoutModel
 
 class PersonalInfo(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -73,6 +74,9 @@ class ResumeStructure(BaseModel):
     links: Dict[str, str] = {}
     section_order: Optional[List[str]] = None
     layout_level: Optional[int] = None
+    # The legacy /api router still owns PDF download. Keep its request
+    # contract aligned with the canonical resume schema used by the editor.
+    layout_model: Optional[ResumeLayoutModel] = None
     raw_text: Optional[str] = ""
 
 
@@ -85,13 +89,13 @@ class RenderableResume(ResumeStructure):
 class JobAnalysis(BaseModel):
     is_job_related: bool = True
     reason: Optional[str] = ""
-    title: str = ""
-    company: str = ""
-    location: str = ""
-    salary: str = ""
-    job_type: str = ""
-    work_mode: str = ""
-    experience_required: str = ""
+    title: Optional[str] = ""
+    company: Optional[str] = ""
+    location: Optional[str] = ""
+    salary: Optional[str] = ""
+    job_type: Optional[str] = ""
+    work_mode: Optional[str] = ""
+    experience_required: Optional[str] = ""
     highlights: List[str] = []
     qualifications: List[str] = []
     required_skills: List[str] = []
@@ -100,7 +104,7 @@ class JobAnalysis(BaseModel):
     responsibilities: List[str] = []
     keywords: List[str] = []
     ats_keywords: List[str] = []
-    seniority: str = ""
+    seniority: Optional[str] = ""
 
 class MissingSkillSuggestion(BaseModel):
     skill: str
@@ -158,9 +162,15 @@ class ResumePatch(BaseModel):
 
 class TailoringReport(BaseModel):
     changes_made: List[str] = []
+    resume_match_before: int = 0
+    resume_match_after: int = 0
     ats_score_before: int = 0
     ats_score_after: int = 0
     patch: ResumePatch
+    ats_analysis_id: Optional[str] = None
+    breakdown_before: Optional[Dict[str, Any]] = None
+    breakdown_after: Optional[Dict[str, Any]] = None
+    suggestion_impacts: Optional[List[Dict[str, Any]]] = None
 
 class GapsAnalysis(BaseModel):
     missing_keywords: List[str] = []

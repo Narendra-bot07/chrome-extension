@@ -33,8 +33,9 @@ export default function PrintLayout() {
 
   // 3. Scale HTML root font size dynamically based on compressionLevel
   useEffect(() => {
-    // Map compression levels 0-5 to root font sizes in px
-    const fontSizes = [16, 14.5, 13.5, 12, 11, 10];
+    // ATS-safe bounded typography. Never shrink the resume into unreadable
+    // 10-12px text merely to force a one-page result.
+    const fontSizes = [16, 15, 14, 13.5];
     const size = fontSizes[compressionLevel] || 16;
     
     // Apply to html and body elements so rem/em units scale down correctly
@@ -70,13 +71,22 @@ export default function PrintLayout() {
       el.style.height = 'auto'; // Allow height to grow naturally!
 
       const currentHeight = el.scrollHeight;
+      const composition = originalResumeData?._composition || {};
+      const plannedPages = Number(composition.estimated_page_count || 1);
+      const configuredCompression = Math.min(
+        3,
+        Math.max(0, Number(composition.maximum_compression_level ?? 2))
+      );
+      const maxCompression = plannedPages > 1
+        ? Math.min(2, configuredCompression)
+        : configuredCompression;
 
       if (currentHeight <= MAX_HEIGHT) {
         // Fits perfectly!
         setFittingComplete(true);
       } else {
         // Overflowing! Check if we should compress further
-        if (compressionLevel < 5) {
+        if (compressionLevel < maxCompression) {
           // Try next compression level
           const nextLevel = compressionLevel + 1;
           setCompressionLevel(nextLevel);
@@ -96,7 +106,12 @@ export default function PrintLayout() {
               : [];
             const candidates = sections
               .map(section => ({ section, offset: section.offsetTop }))
-              .filter(({ offset }) => offset > 0 && offset <= MAX_HEIGHT && currentHeight - offset <= MAX_HEIGHT);
+              .filter(({ offset }) =>
+                offset > MAX_HEIGHT * 0.55 &&
+                offset <= MAX_HEIGHT &&
+                currentHeight - offset <= MAX_HEIGHT &&
+                currentHeight - offset >= MAX_HEIGHT * 0.35
+              );
             if (candidates.length > 0) {
               const balancedTarget = currentHeight / 2;
               const selected = candidates.reduce((best, candidate) =>
@@ -107,6 +122,10 @@ export default function PrintLayout() {
               selected.section.style.breakBefore = 'page';
               selected.section.style.pageBreakBefore = 'always';
               selected.section.dataset.compositionBreak = 'balanced-page-2';
+              el.dataset.pageBalanceScore = String(
+                Math.min(selected.offset, currentHeight - selected.offset)
+                / Math.max(selected.offset, currentHeight - selected.offset)
+              );
             }
           }
           setFittingComplete(true);

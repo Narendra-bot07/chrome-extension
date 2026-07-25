@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Check, Download, RotateCcw, Cpu, Target, FileCheck, Clock, 
   PlusCircle, ArrowUpRight, ShieldCheck, ClipboardCheck, ArrowRight, X 
@@ -22,6 +22,14 @@ function SuccessView({
   const [appliedStatus, setAppliedStatus] = useState('Ready To Apply');
   const [quickNotes, setQuickNotes] = useState('');
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const closeOnEscape = event => {
+      if (event.key === 'Escape' && !saving) onReset();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onReset, saving]);
 
   const premiumMetrics = [
     { label: "AI Confidence", value: "98%", icon: Cpu },
@@ -52,9 +60,19 @@ function SuccessView({
   };
 
   return (
-    <div className={`flex-1 flex flex-col justify-between py-6 select-none text-zinc-650 dark:text-zinc-350 font-sans mx-auto w-full ${
+    <div className={`relative flex-1 flex flex-col justify-between py-6 select-none text-zinc-650 dark:text-zinc-350 font-sans mx-auto w-full ${
       isExtension ? 'max-w-md' : 'max-w-xl'
     }`}>
+      <button
+        type="button"
+        onClick={onReset}
+        disabled={saving}
+        aria-label="Close export success"
+        title="Close"
+        className="absolute right-0 top-0 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900/90 text-zinc-300 shadow-lg transition hover:border-zinc-500 hover:bg-zinc-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <X size={16} />
+      </button>
       <div className="flex-1 flex flex-col items-center justify-center space-y-5">
         
         {/* Glowing Success Ring */}

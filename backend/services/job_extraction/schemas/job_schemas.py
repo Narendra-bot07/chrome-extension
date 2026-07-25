@@ -70,12 +70,20 @@ class ExtractedJob(BaseModel):
             "duplicate or mix these into skills."
         ),
     )
-    benefits: list[str] = Field(default_factory=list)
+    # Some providers emit null for an absent optional collection. Keep null in
+    # the generated tool schema so the provider accepts that output, then
+    # normalize it back to the list contract used by the application.
+    benefits: Optional[list[str]] = Field(default_factory=list)
     salary: Optional[SalaryInfo] = None
     application_url: Optional[str] = None
     date_posted: Optional[str] = None
     valid_through: Optional[str] = None
     source_url: Optional[str] = None
+
+    @field_validator("benefits", mode="before")
+    @classmethod
+    def normalize_benefits(cls, value: Any) -> list[str]:
+        return [] if value is None else value
 
     @field_validator("workplace_type", mode="before")
     @classmethod

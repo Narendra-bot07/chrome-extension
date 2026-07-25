@@ -479,31 +479,91 @@ class RefinedSkills(BaseModel):
 class RefinedBullets(BaseModel):
     bullets: List[str]
 
+def is_prompt_out_of_scope(prompt: str, api_key: Optional[str] = None) -> Optional[str]:
+    """
+    Classifies if a user prompt is out of scope for resume tailoring/refinement.
+    Returns the polite error message if out of scope, otherwise None.
+    """
+    llm = get_llm(api_key, temperature=0.0)
+    system_instruction = (
+        "You are an AI Resume Copilot guard. Your job is to classify if the user's request is within the scope of "
+        "resume editing, tailoring, improving, or aligning with a job description.\n"
+        "Scope of allowed topics: editing resume text, improving bullet points, summarizing, formatting, adjusting keywords for ATS, resume advice.\n"
+        "Forbidden topics: programming help, writing code, mathematics, travel, news, general chat, writing essays/documents unrelated to their resume.\n"
+        "If the prompt is in-scope, output EXACTLY the word 'IN_SCOPE'.\n"
+        "If the prompt is out-of-scope, output a polite message explaining that this AI assistant is dedicated to improving "
+        "the currently selected resume and suggesting they return to resume-related requests."
+    )
+    messages = [
+        ("system", system_instruction),
+        ("human", f"User request: {prompt}")
+    ]
+    res = llm.invoke(messages)
+    content = res.content.strip()
+    if "IN_SCOPE" in content:
+        return None
+    return content
+
 def refine_section_with_ai(
     section_type: str,
     section_data: Any,
     prompt: str,
     job: JobAnalysis,
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None,
+    resume_id: Optional[str] = None,
+    intelligence_model: Optional[str] = None,
+    working_resume: Optional[Dict[str, Any]] = None,
+    source_resume: Optional[Dict[str, Any]] = None,
+    resume_match_analysis: Optional[Dict[str, Any]] = None,
+    ats_analysis: Optional[Dict[str, Any]] = None,
+    accepted_changes: Optional[List[Dict[str, Any]]] = None,
+    pending_changes: Optional[List[Dict[str, Any]]] = None
 ) -> Any:
+    # 1. Preflight scope check
+    out_of_scope_msg = is_prompt_out_of_scope(prompt, api_key)
+    if out_of_scope_msg:
+        raise ValueError(out_of_scope_msg)
+
+    # 2. Build context block
+    context_str = (
+        f"Selected Resume ID: {resume_id or 'Unknown'}\n"
+        f"Resume Intelligence Model: {intelligence_model or 'ATSScoringEngine'}\n"
+        f"Extracted Job Description:\n{json.dumps(job.model_dump(), indent=2)}\n\n"
+    )
+    if source_resume:
+        context_str += f"Immutable Source Resume:\n{json.dumps(source_resume, indent=2)}\n\n"
+    if working_resume:
+        context_str += f"Current Working Resume:\n{json.dumps(working_resume, indent=2)}\n\n"
+    if ats_analysis or resume_match_analysis:
+        context_str += f"ATS & Match Analysis:\n{json.dumps(ats_analysis or resume_match_analysis, indent=2)}\n\n"
+    if accepted_changes:
+        context_str += f"Accepted Changes:\n{json.dumps(accepted_changes, indent=2)}\n\n"
+    if pending_changes:
+        context_str += f"Pending Changes:\n{json.dumps(pending_changes, indent=2)}\n\n"
+
+    # 3. Setup LLM and Prompts
     llm = get_llm(api_key, temperature=0.2)
     
+    authority_rules = (
+        "AUTHORITY & TRUTHFULNESS RULES:\n"
+        "- You may modify wording, improve readability, optimize for ATS, align with job description, reduce repetition, simplify language, and strengthen evidence.\n"
+        "- You MUST NEVER invent experience, invent projects, invent skills, invent metrics, invent certifications, invent employers, or invent achievements.\n"
+        "- Do NOT modify dates or fabricate evidence. The immutable source resume remains the single source of truth.\n"
+        "- Your changes apply contextually ONLY to the selected section/data (section type: {section_type}) unless the user explicitly requests a resume-wide change."
+    )
+
     if section_type == "summary":
         sys_prompt = (
             "You are an expert resume writer. Refine the professional summary of the candidate "
-            "based on the user's instruction and the target Job Description. "
-            "Maintain the core truth of the candidate's background. Do not invent facts.\n"
-            "Target Job:\n"
-            f"- Title: {job.title}\n"
-            f"- Company: {job.company}\n"
-            f"- Required Skills: {', '.join(job.required_skills)}\n"
-            "\n"
+            "based on the user's instruction and the target Job Description.\n"
+            f"{authority_rules.format(section_type=section_type)}\n\n"
+            f"CONTEXT:\n{context_str}\n"
             f"User Instruction: {prompt}\n"
             "Return ONLY the refined summary text. Do not include any tags, notes, markdown formatting, or intros."
         )
         messages = [
             ("system", sys_prompt),
-            ("human", f"Original: {section_data.get('original')}\nCurrent Suggested: {section_data.get('current_suggested')}")
+            ("human", f"Original summary: {section_data.get('original')}\nCurrent Suggested summary: {section_data.get('current_suggested')}")
         ]
         res = llm.invoke(messages)
         return res.content.strip().replace('"', '')
@@ -513,6 +573,8 @@ def refine_section_with_ai(
         sys_prompt = (
             "You are an expert technical resume editor. Refine the candidate's skills list "
             "based on the user's instruction and the target Job Description.\n"
+            f"{authority_rules.format(section_type=section_type)}\n\n"
+            f"CONTEXT:\n{context_str}\n"
             f"User Instruction: {prompt}\n"
             "Return the list of skills as a JSON array matching the structure."
         )
@@ -527,14 +589,14 @@ def refine_section_with_ai(
         structured_llm = llm.with_structured_output(RefinedBullets)
         sys_prompt = (
             "You are an expert resume writer. Refine the following list of bullet points for a "
-            f"resume section ({section_type}) based on the user's instruction and target Job Description. "
+            f"resume section ({section_type}) based on the user's instruction and target Job Description.\n"
+            f"{authority_rules.format(section_type=section_type)}\n\n"
             "IMPORTANT Rules:\n"
             "1. You must return exactly the same number of bullet points as the input.\n"
-            "2. Preserve metrics, numbers, and technologies. Never invent false achievements.\n"
-            "3. Apply the user's refinement instruction to every bullet point where applicable.\n"
+            "2. Apply the user's refinement instruction to the bullet points where applicable.\n"
             "\n"
-            f"User Instruction: {prompt}\n"
-            f"Target Job: {job.title} at {job.company}"
+            f"CONTEXT:\n{context_str}\n"
+            f"User Instruction: {prompt}"
         )
         bullets_input = "\n".join([f"- {b}" for b in section_data])
         messages = [
@@ -543,4 +605,146 @@ def refine_section_with_ai(
         ]
         res = structured_llm.invoke(messages)
         return res.bullets
+
+
+async def refine_section_stream_generator(
+    section_type: str,
+    section_data: Any,
+    prompt: str,
+    job: JobAnalysis,
+    api_key: Optional[str] = None,
+    resume_id: Optional[str] = None,
+    intelligence_model: Optional[str] = None,
+    working_resume: Optional[Dict[str, Any]] = None,
+    source_resume: Optional[Dict[str, Any]] = None,
+    resume_match_analysis: Optional[Dict[str, Any]] = None,
+    ats_analysis: Optional[Dict[str, Any]] = None,
+    accepted_changes: Optional[List[Dict[str, Any]]] = None,
+    pending_changes: Optional[List[Dict[str, Any]]] = None,
+    user_id: str = "00000000-0000-0000-0000-000000000000",
+    conn: Optional[Any] = None
+):
+    # 1. Preflight scope check
+    try:
+        out_of_scope_msg = is_prompt_out_of_scope(prompt, api_key)
+        if out_of_scope_msg:
+            yield f"data: [ERROR] {out_of_scope_msg}\n\n"
+            return
+    except Exception as e:
+        yield f"data: [ERROR] Scope check failed: {str(e)}\n\n"
+        return
+
+    # 2. Build context block
+    context_str = (
+        f"Selected Resume ID: {resume_id or 'Unknown'}\n"
+        f"Resume Intelligence Model: {intelligence_model or 'ATSScoringEngine'}\n"
+        f"Extracted Job Description:\n{json.dumps(job.model_dump(), indent=2)}\n\n"
+    )
+    if source_resume:
+        context_str += f"Immutable Source Resume:\n{json.dumps(source_resume, indent=2)}\n\n"
+    if working_resume:
+        context_str += f"Current Working Resume:\n{json.dumps(working_resume, indent=2)}\n\n"
+    if ats_analysis or resume_match_analysis:
+        context_str += f"ATS & Match Analysis:\n{json.dumps(ats_analysis or resume_match_analysis, indent=2)}\n\n"
+    if accepted_changes:
+        context_str += f"Accepted Changes:\n{json.dumps(accepted_changes, indent=2)}\n\n"
+    if pending_changes:
+        context_str += f"Pending Changes:\n{json.dumps(pending_changes, indent=2)}\n\n"
+
+    # 3. Setup LLM and Prompts
+    try:
+        llm = get_llm(api_key, temperature=0.2)
+    except Exception as e:
+        yield f"data: [ERROR] {str(e)}\n\n"
+        return
+
+    authority_rules = (
+        "AUTHORITY & TRUTHFULNESS RULES:\n"
+        "- You may modify wording, improve readability, optimize for ATS, align with job description, reduce repetition, simplify language, and strengthen evidence.\n"
+        "- You MUST NEVER invent experience, invent projects, invent skills, invent metrics, invent certifications, invent employers, or invent achievements.\n"
+        "- Do NOT modify dates or fabricate evidence. The immutable source resume remains the single source of truth.\n"
+        "- Your changes apply contextually ONLY to the selected section/data (section type: {section_type}) unless the user explicitly requests a resume-wide change."
+    )
+
+    if section_type == "summary":
+        sys_prompt = (
+            "You are an expert resume writer. Refine the professional summary of the candidate "
+            "based on the user's instruction and the target Job Description.\n"
+            f"{authority_rules.format(section_type=section_type)}\n\n"
+            f"CONTEXT:\n{context_str}\n"
+            f"User Instruction: {prompt}\n"
+            "Return ONLY the refined summary text. Do not include any tags, notes, markdown formatting, or intros."
+        )
+        messages = [
+            ("system", sys_prompt),
+            ("human", f"Original summary: {section_data.get('original')}\nCurrent Suggested summary: {section_data.get('current_suggested')}")
+        ]
+    elif section_type == "skills":
+        sys_prompt = (
+            "You are an expert technical resume editor. Refine the candidate's skills list "
+            "based on the user's instruction and the target Job Description.\n"
+            f"{authority_rules.format(section_type=section_type)}\n\n"
+            f"CONTEXT:\n{context_str}\n"
+            f"User Instruction: {prompt}\n"
+            "Return the refined skills as a comma-separated list. Return ONLY the skills list. Do not include any brackets, quotes, intro, or explanation."
+        )
+        messages = [
+            ("system", sys_prompt),
+            ("human", f"Current Skills List: {', '.join(section_data)}")
+        ]
+    else:  # experience, projects
+        sys_prompt = (
+            "You are an expert resume writer. Refine the following list of bullet points for a "
+            f"resume section ({section_type}) based on the user's instruction and target Job Description.\n"
+            f"{authority_rules.format(section_type=section_type)}\n\n"
+            "IMPORTANT Rules:\n"
+            "1. You must return exactly the same number of bullet points as the input.\n"
+            "2. Output each bullet point on a new line starting with a dash ('- '). Do not include any other formatting, indexes, introduction, or notes.\n"
+            "\n"
+            f"CONTEXT:\n{context_str}\n"
+            f"User Instruction: {prompt}"
+        )
+        bullets_input = "\n".join([f"- {b}" for b in section_data])
+        messages = [
+            ("system", sys_prompt),
+            ("human", f"Bullets to refine:\n{bullets_input}")
+        ]
+
+    try:
+        full_text = ""
+        async for chunk in llm.astream(messages):
+            if chunk.content:
+                full_text += chunk.content
+                yield f"data: {chunk.content}\n\n"
+        
+        if conn:
+            try:
+                import uuid
+                clean_user_id = "00000000-0000-0000-0000-000000000000"
+                if user_id:
+                    try:
+                        uuid.UUID(str(user_id))
+                        clean_user_id = str(user_id)
+                    except ValueError:
+                        pass
+
+                from repositories.audit_repository import AuditRepository
+                import datetime
+                audit_repo = AuditRepository(conn)
+                metadata = {
+                    "prompt": prompt,
+                    "final_text": full_text,
+                    "target_entry_id": f"{section_type}_refinement",
+                    "status": "completed",
+                    "timestamp": datetime.datetime.utcnow().isoformat()
+                }
+                audit_repo.log_activity(
+                    user_id=clean_user_id,
+                    action="refine_resume_section",
+                    metadata=metadata
+                )
+            except Exception as e:
+                print(f"[STREAM][LOG-ERROR] Failed to save refinement history: {str(e)}")
+    except Exception as e:
+        yield f"data: [ERROR] AI editing was interrupted. Your original content has been restored.\n\n"
 

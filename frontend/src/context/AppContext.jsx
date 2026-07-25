@@ -149,6 +149,41 @@ export function AppProvider({ children }) {
   const [jobDetectionStatus, setJobDetectionStatus] = useState("idle");
   const [jobDetectionMeta, setJobDetectionMeta] = useState(null);
   const [reviewSuggestions, setReviewSuggestions] = useState([]);
+  const [liveATS, setLiveATS] = useState(null);
+  const [isRefineStreaming, setIsRefineStreaming] = useState(false);
+
+  const fetchLiveATSScore = async (currentSuggestions) => {
+    const suggestionsToSend = currentSuggestions || reviewSuggestions;
+    if (!parsedResume || !jobAnalysis) return;
+    try {
+      const token = session?.access_token || localStorage.getItem('access_token');
+      const response = await fetch(`${apiUrl}/api/ats/live-score`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { "Authorization": `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          resume: toRenderableResume(parsedResume),
+          job: jobAnalysis,
+          suggestions: suggestionsToSend
+        })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setLiveATS(data);
+        return data;
+      }
+    } catch (e) {
+      console.warn("Live ATS score fetch failed", e);
+    }
+  };
+
+  useEffect(() => {
+    if (reviewSuggestions && reviewSuggestions.length > 0 && parsedResume && jobAnalysis && !isRefineStreaming) {
+      fetchLiveATSScore(reviewSuggestions);
+    }
+  }, [reviewSuggestions, parsedResume, jobAnalysis, isRefineStreaming]);
   const [selectedTemplate, setSelectedTemplate] = useState('ExecutiveATS');
   const [customFileName, setCustomFileName] = useState('');
 
@@ -1123,7 +1158,11 @@ export function AppProvider({ children }) {
     }
   };
 
-  const syncCurrentJobToTracker = async (currentStage = "Ready To Apply", notes = "") => {
+  const syncCurrentJobToTracker = async (
+    currentStage = "Ready To Apply",
+    notes = "",
+    timelineEvent = "Synced to Job Tracker"
+  ) => {
     const token = session?.access_token || localStorage.getItem('access_token');
     if (!token || !jobAnalysis) {
       throw new Error("A signed-in user and active job session are required to sync.");
@@ -1151,7 +1190,7 @@ export function AppProvider({ children }) {
     if (existing?.id) {
       const updatedTimeline = [
         ...(existing.timeline || []),
-        { event: "Synced to Job Tracker", timestamp: new Date().toISOString() }
+        { event: timelineEvent, timestamp: new Date().toISOString() }
       ];
       const updateResponse = await fetch(`${apiUrl}/api/v1/applications/${existing.id}`, {
         method: "PUT",
@@ -1178,14 +1217,12 @@ export function AppProvider({ children }) {
       job_url: lastAnalyzedUrl || "",
       resume_version: tailoredResume ? "v1 (Tailored)" : null,
       cover_letter_version: coverLetter ? "v1" : null,
-      ats_score: strictScore(comparison?.ats_score_after),
-      resume_match_score: strictScore(
-        comparison?.ats_score_before ?? comparison?.match_score ?? comparison?.score
-      ),
+      ats_score: strictScore(comparison?.ats_score_after ?? comparison?.ats_score_before),
+      resume_match_score: strictScore(comparison?.resume_match_after ?? comparison?.resume_match_before),
       current_stage: currentStage,
       notes: notes.trim() || null,
       timeline: [{
-        event: "Synced to Job Tracker",
+        event: timelineEvent,
         timestamp: new Date().toISOString()
       }]
     };
@@ -1802,9 +1839,14 @@ export function AppProvider({ children }) {
         if (scoreResponse.ok) {
           const scoreResult = await scoreResponse.json();
           const numericScore = Number(scoreResult.ats_score);
+          const numericMatchScore = Number(scoreResult.resume_match_score);
           if (Number.isFinite(numericScore) && numericScore >= 0 && numericScore <= 100) {
             exactTailoredScore = numericScore;
-            setComparison((previous) => ({ ...(previous || {}), ats_score_after: numericScore }));
+            setComparison((previous) => ({
+              ...(previous || {}),
+              ats_score_after: numericScore,
+              resume_match_after: Number.isFinite(numericMatchScore) ? numericMatchScore : (previous?.resume_match_after || 0)
+            }));
           }
         } else {
           console.warn("Strict ATS scoring failed", await scoreResponse.text());
@@ -1907,9 +1949,22 @@ export function AppProvider({ children }) {
           // Retained only in developer tools; never rendered to the user.
           detail
         });
-        const safeMessage = typeof detail === 'object' && detail?.message
+        const validationMessage = Array.isArray(detail)
+          ? detail
+              .map(issue => {
+                const path = Array.isArray(issue?.loc)
+                  ? issue.loc.filter(part => part !== 'body').join('.')
+                  : '';
+                return `${path ? `${path}: ` : ''}${issue?.msg || ''}`.trim();
+              })
+              .filter(Boolean)
+              .join('; ')
+          : '';
+        const safeMessage = typeof detail === 'object' && !Array.isArray(detail) && detail?.message
           ? detail.message
-          : "We could not finalize the resume automatically. Your original resume data is safe. Please retry.";
+          : validationMessage
+            ? `The resume data could not be prepared for PDF: ${validationMessage}`
+            : "We could not finalize the resume automatically. Your original resume data is safe. Please retry.";
         throw new Error(
           requestId ? `${safeMessage} Support ID: ${requestId}` : safeMessage
         );
@@ -1939,39 +1994,18 @@ export function AppProvider({ children }) {
         document.body.removeChild(link);
       }
 
-      if (activeApplicationId) {
-        try {
-          const token = session?.access_token || localStorage.getItem('access_token');
-          if (token) {
-            const matchedAppRes = await fetch(`${apiUrl}/api/v1/applications/`, {
-              headers: { "Authorization": `Bearer ${token}` }
-            });
-            if (matchedAppRes.ok) {
-              const appList = await matchedAppRes.json();
-              setApplications(appList);
-              const currentApp = appList.find(a => a.id === activeApplicationId);
-              if (currentApp) {
-                const updatedTimeline = [...(currentApp.timeline || [])];
-                updatedTimeline.push({
-                  event: "Resume Downloaded",
-                  timestamp: new Date().toISOString()
-                });
-                await fetch(`${apiUrl}/api/v1/applications/${activeApplicationId}`, {
-                  method: "PUT",
-                  headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`
-                  },
-                  body: JSON.stringify({
-                    timeline: updatedTimeline
-                  })
-                });
-              }
-            }
-          }
-        } catch (err) {
-          console.error("Failed to update timeline with download:", err);
-        }
+      try {
+        setLoadingMessage("Adding downloaded resume to Job Tracker...");
+        await syncCurrentJobToTracker(
+          "Ready To Apply",
+          "",
+          "Resume Downloaded"
+        );
+      } catch (trackerError) {
+        console.error("Resume downloaded but Job Tracker sync failed:", trackerError);
+        setApiError(
+          "Your resume downloaded successfully, but it could not be added to Job Tracker. You can retry from the success screen."
+        );
       }
     } catch (e) {
       console.error(e);
@@ -2194,6 +2228,9 @@ export function AppProvider({ children }) {
       selectedSections, setSelectedSections,
       tailoringIntensity, setTailoringIntensity,
       reviewSuggestions, setReviewSuggestions,
+      liveATS, setLiveATS,
+      isRefineStreaming, setIsRefineStreaming,
+      fetchLiveATSScore,
       selectedTemplate, setSelectedTemplate,
       customFileName, setCustomFileName,
       jobDetectionStatus, setJobDetectionStatus,

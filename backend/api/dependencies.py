@@ -6,12 +6,10 @@ from repositories.job_repository import JobRepository
 from repositories.tailoring_repository import TailoringRepository
 from repositories.audit_repository import AuditRepository
 from repositories.application_repository import ApplicationRepository
+from repositories.ats_repository import ATSRepository
 from services.ai.groq_service import GroqService
 from services.storage.file_service import FileService
 from services.resume.tailoring_service import TailoringService
-
-# Re-declare to use direct postgres connection instead of Supabase client
-
 from core.security import verify_supabase_jwt
 
 def get_user_db_connection(
@@ -39,6 +37,10 @@ def get_audit_repository(db = Depends(get_user_db_connection)) -> AuditRepositor
 
 def get_application_repository(db = Depends(get_user_db_connection)) -> ApplicationRepository:
     return ApplicationRepository(db)
+
+def get_ats_repository(db = Depends(get_user_db_connection)) -> ATSRepository:
+    return ATSRepository(db)
+
 
 def get_ai_service() -> GroqService:
     return GroqService()

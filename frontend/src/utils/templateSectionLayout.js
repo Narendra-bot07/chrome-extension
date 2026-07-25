@@ -23,15 +23,17 @@ export function getTemplateSectionLayout(templateConfig, activeSections = [], re
     };
   }
 
-  const sidebarSections = templateConfig?.id === 'AltaATS'
+  const isAlta = templateConfig?.id === 'AltaATS';
+  const sidebarSections = isAlta
     ? ['skills', 'certifications', 'languages', 'interests']
     : SIDEBAR_DEFAULT_SECTIONS;
+
   let sidebar = ordered.filter(section => sidebarSections.includes(section));
   let main = ordered.filter(section => !sidebarSections.includes(section));
-  // Two-column ATS has equal-height page columns. Reassign only supporting
-  // sections when doing so lowers the taller column; otherwise a long
-  // certification block can create page 2 while the main column remains empty.
-  if (layout === 'two-column' && resume) {
+
+  // Two-column or Premium Executive layouts have equal-height page columns.
+  // Reassign only supporting sections when doing so lowers the taller column.
+  if ((layout === 'two-column' || layout === 'marissa') && resume) {
     const movable = new Set([
       'certifications', 'achievements', 'awards', 'publications',
       'volunteer_experience', 'languages', 'interests'
@@ -72,6 +74,7 @@ export function getTemplateSectionLayout(templateConfig, activeSections = [], re
       main = ordered.filter(section => !sidebarSet.has(section));
     }
   }
+
   const sidebarLike = layout === 'sidebar' || layout === 'marissa';
 
   return {

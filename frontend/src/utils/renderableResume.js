@@ -4,7 +4,7 @@ const TOP_LEVEL_FIELDS = [
   'achievements', 'publications', 'languages', 'volunteer_experience',
   'open_source', 'leadership', 'extracurricular_activities',
   'custom_sections', 'awards', 'interests', 'portfolio', 'links',
-  'section_order', 'layout_level'
+  'section_order', 'layout_level', 'layout_model'
 ];
 
 const PERSONAL_FIELDS = [

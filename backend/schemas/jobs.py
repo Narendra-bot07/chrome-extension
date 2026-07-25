@@ -4,13 +4,13 @@ from typing import List, Dict, Optional, Literal, Any
 class JobAnalysis(BaseModel):
     is_job_related: bool = True
     reason: Optional[str] = ""
-    title: str = ""
-    company: str = ""
-    location: str = ""
-    salary: str = ""
-    job_type: str = ""
-    work_mode: str = ""
-    experience_required: str = ""
+    title: Optional[str] = ""
+    company: Optional[str] = ""
+    location: Optional[str] = ""
+    salary: Optional[str] = ""
+    job_type: Optional[str] = ""
+    work_mode: Optional[str] = ""
+    experience_required: Optional[str] = ""
     highlights: List[str] = []
     qualifications: List[str] = []
     required_skills: List[str] = []
@@ -19,11 +19,10 @@ class JobAnalysis(BaseModel):
     responsibilities: List[str] = []
     keywords: List[str] = []
     ats_keywords: List[str] = []
-    seniority: str = ""
+    seniority: Optional[str] = ""
 
 class JobUrlExtractRequest(BaseModel):
     url: str = Field(min_length=8)
     request_id: Optional[str] = None
     browser_evidence: Optional[Dict[str, Any]] = None
-
 
