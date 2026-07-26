@@ -2509,6 +2509,7 @@ export function AppProvider({ children }) {
       handleActivateResume,
       recordResumeUsage,
       fetchResumeVersions,
+      listResumeVersions: fetchResumeVersions,
       createResumeVersion,
       setCurrentResumeVersion,
       updateResumeVersion,
