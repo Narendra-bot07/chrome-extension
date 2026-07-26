@@ -68,7 +68,29 @@ function ResumeReviewPage() {
     return () => window.removeEventListener('keydown', handleShortcut);
   }, []);
 
-  if (!parsedResume) return null;
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-zinc-950 text-zinc-300 gap-3">
+        <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#00bda5]/20 border-t-[#00bda5]" />
+        <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Loading Resume Data...</span>
+      </div>
+    );
+  }
+
+  if (!parsedResume) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-zinc-950 text-zinc-300 gap-4 p-6 text-center">
+        <div className="text-base font-extrabold text-zinc-100">No Resume Data Found</div>
+        <p className="text-xs text-zinc-400 max-w-sm">Please select or upload a resume to review and edit content.</p>
+        <button
+          onClick={() => navigate('/resume-detect')}
+          className="px-4 py-2.5 bg-[#00bda5] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl hover:bg-[#00a894] transition cursor-pointer shadow-sm"
+        >
+          Select or Upload Resume
+        </button>
+      </div>
+    );
+  }
 
   const handleLooksGood = () => {
     if (jobAnalysis) {

@@ -1,55 +1,228 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { ZoomIn, ZoomOut, Expand, Shrink, Printer, Download } from 'lucide-react';
+import React, { useRef, useEffect, useState, useLayoutEffect } from 'react';
+import {
+  Eye, ZoomIn, ZoomOut, Expand, Shrink, Printer, Download,
+  Sparkles, RotateCcw, ChevronUp, ChevronDown, FileText, AlertTriangle, RefreshCw
+} from 'lucide-react';
 import { getTemplateComponent } from '../../templates';
 import { toRenderableResume } from '../../utils/renderableResume';
 
-export default function ResumePreview({ resumeData, selectedTemplate, sectionOrder }: { resumeData: any, selectedTemplate: string, sectionOrder?: string[] }) {
-  const [zoom, setZoom] = useState(1);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isFitPage, setIsFitPage] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const containerRef = useRef(null);
+type ZoomMode = 'fit_width' | 'fit_page' | 'actual_size';
+type PagePreference = 'auto' | 'prefer_one_page' | 'prefer_two_pages';
 
-  const handleZoomIn = () => {
-    setZoom(prev => Math.min(prev + 0.25, 2.5));
-    setIsFitPage(false);
-  };
-  const handleZoomOut = () => {
-    setZoom(prev => Math.max(prev - 0.25, 0.4));
-    setIsFitPage(false);
-  };
-  
-  const handleFitWidth = () => {
-    if (containerRef.current) {
-      const width = containerRef.current.clientWidth - 80;
-      setZoom(width / 816);
-      setIsFitPage(false);
+interface ResumePreviewProps {
+  resumeData: any;
+  selectedTemplate: string;
+  sectionOrder?: string[];
+  apiUrl?: string;
+  resumeVersionId?: string;
+  onCompositionChange?: (plan: any) => void;
+}
+
+export default function ResumePreview({
+  resumeData,
+  selectedTemplate,
+  sectionOrder,
+  apiUrl = 'http://localhost:8000',
+  resumeVersionId,
+  onCompositionChange
+}: ResumePreviewProps) {
+  // 1. Zoom and Viewport States
+  const [zoomMode, setZoomMode] = useState<ZoomMode>(() => {
+    return (localStorage.getItem('preview_zoom_mode') as ZoomMode) || 'fit_width';
+  });
+  const [zoom, setZoom] = useState<number>(1.0);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [activePage, setActivePage] = useState<number>(1);
+
+  // 2. Page Preference Control State
+  const [pagePreference, setPagePreference] = useState<PagePreference>(() => {
+    const saved = localStorage.getItem(`page_pref_${resumeVersionId || 'current'}`);
+    return (saved as PagePreference) || 'auto';
+  });
+
+  // 3. Artifact & Rendering States
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
+  const [compositionPlan, setCompositionPlan] = useState<any>(null);
+  const [renderHash, setRenderHash] = useState<string>('');
+  const [measurementHash, setMeasurementHash] = useState<string>('');
+  const [pageCount, setPageCount] = useState<number>(1);
+  const [loadingPdf, setLoadingPdf] = useState<boolean>(false);
+  const [isDownloading, setIsDownloading] = useState<boolean>(false);
+
+  // 4. Status Messages
+  const [statusMessage, setStatusMessage] = useState<string>('Best layout selected automatically');
+  const [warningMessage, setWarningMessage] = useState<string | null>(null);
+
+  // Refs
+  const containerRef = useRef<HTMLDivElement>(null);
+  const scrollWrapperRef = useRef<HTMLDivElement>(null);
+
+  // Persist Page Preference per version
+  useEffect(() => {
+    localStorage.setItem(`page_pref_${resumeVersionId || 'current'}`, pagePreference);
+  }, [pagePreference, resumeVersionId]);
+
+  // Persist Zoom Mode
+  useEffect(() => {
+    localStorage.setItem('preview_zoom_mode', zoomMode);
+  }, [zoomMode]);
+
+  // Recalculate Zoom based on Mode and Container Width
+  const calculateZoom = () => {
+    if (!containerRef.current) return;
+    const containerWidth = containerRef.current.clientWidth;
+    const containerHeight = containerRef.current.clientHeight;
+
+    const resumeWidthPx = 816; // 8.5in at 96 DPI
+    const resumeHeightPx = 1056; // 11in at 96 DPI
+
+    if (zoomMode === 'fit_width') {
+      const padding = 48;
+      const targetZoom = Math.max(0.4, Math.min(2.0, (containerWidth - padding) / resumeWidthPx));
+      setZoom(targetZoom);
+    } else if (zoomMode === 'fit_page') {
+      const padding = 80;
+      const targetZoom = Math.max(0.35, Math.min(1.8, (containerHeight - padding) / (resumeHeightPx * pageCount)));
+      setZoom(targetZoom);
+    } else if (zoomMode === 'actual_size') {
+      setZoom(1.0);
     }
   };
 
-  const handleFitPage = () => {
-    if (containerRef.current) {
-      const height = containerRef.current.clientHeight - 80;
-      setZoom(height / 1056);
-      setIsFitPage(true);
-    }
-  };
+  // ResizeObserver for Container Layout Changes
+  useLayoutEffect(() => {
+    calculateZoom();
+    if (!containerRef.current) return;
 
-  const handleDownload = async () => {
+    const observer = new ResizeObserver(() => {
+      calculateZoom();
+    });
+    observer.observe(containerRef.current);
+
+    return () => observer.disconnect();
+  }, [zoomMode, pageCount, isFullscreen]);
+
+  // Unified Single PDF Artifact Recomposition Pipeline
+  const fetchUnifiedPdfArtifact = async (pref: PagePreference = pagePreference) => {
+    if (!resumeData) return;
     try {
-      setIsDownloading(true);
-      const res = await fetch('http://localhost:8000/api/download-pdf?company_name=Company', {
+      setLoadingPdf(true);
+      setWarningMessage(null);
+
+      const res = await fetch(`${apiUrl}/api/render-unified-pdf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           resume: toRenderableResume(resumeData),
           original_resume: toRenderableResume(resumeData),
-          template_name: selectedTemplate || 'ModernProATS'
+          template_name: selectedTemplate || 'ExecutiveATS',
+          page_preference: pref
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(`Rendering failed with status ${res.status}`);
+      }
+
+      const data = await res.json();
+      if (data.success && data.pdf_base64) {
+        const byteCharacters = atob(data.pdf_base64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: 'application/pdf' });
+        const blobUrl = URL.createObjectURL(blob);
+
+        if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
+        setPdfBlob(blob);
+        setPdfBlobUrl(blobUrl);
+        setCompositionPlan(data.composition_plan);
+        setRenderHash(data.render_hash || '');
+        setMeasurementHash(data.measurement_hash || '');
+        const pCount = data.page_count || 1;
+        setPageCount(pCount);
+
+        // Status Feedback Logic
+        if (pref === 'auto') {
+          setStatusMessage('Best layout selected automatically');
+        } else if (pref === 'prefer_one_page') {
+          if (pCount === 1) {
+            setStatusMessage('Optimized for one page');
+          } else {
+            setStatusMessage('Two pages required for readability');
+            setWarningMessage('This resume needs two pages to preserve readability. No content was removed.');
+          }
+        } else if (pref === 'prefer_two_pages') {
+          setStatusMessage('Balanced across two pages');
+        }
+
+        if (onCompositionChange) {
+          onCompositionChange(data.composition_plan);
+        }
+      }
+    } catch (err) {
+      console.warn('Backend PDF recomposition fallback triggered', err);
+    } finally {
+      setLoadingPdf(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUnifiedPdfArtifact(pagePreference);
+  }, [selectedTemplate, pagePreference]);
+
+  // Scroll Active Page Indicator
+  const handleScroll = () => {
+    if (!scrollWrapperRef.current || pageCount === 1) return;
+    const scrollTop = scrollWrapperRef.current.scrollTop;
+    const pageHeight = 1056 * zoom;
+    const currentPage = scrollTop >= pageHeight * 0.4 ? 2 : 1;
+    setActivePage(currentPage);
+  };
+
+  const scrollToPage = (page: number) => {
+    if (!scrollWrapperRef.current) return;
+    const pageHeight = 1056 * zoom;
+    scrollWrapperRef.current.scrollTo({
+      top: (page - 1) * (pageHeight + 24),
+      behavior: 'smooth'
+    });
+  };
+
+  // Download Exact Displayed PDF Artifact
+  const handleDownload = async () => {
+    try {
+      setIsDownloading(true);
+
+      if (pdfBlob && pdfBlobUrl && renderHash) {
+        const rawName = resumeData?.personal_info?.name || 'User';
+        const cleanUser = rawName.replace(/\s+/g, '_');
+        const filename = `${cleanUser}_Resume.pdf`;
+
+        const a = document.createElement('a');
+        a.href = pdfBlobUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        return;
+      }
+
+      // Fallback
+      const res = await fetch(`${apiUrl}/api/download-pdf?company_name=Company`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          resume: toRenderableResume(resumeData),
+          original_resume: toRenderableResume(resumeData),
+          template_name: selectedTemplate || 'ExecutiveATS'
         })
       });
 
       if (!res.ok) throw new Error('Failed to generate PDF');
-      
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -66,92 +239,289 @@ export default function ResumePreview({ resumeData, selectedTemplate, sectionOrd
       setIsDownloading(false);
     }
   };
-  
-  useEffect(() => {
-    handleFitWidth();
-    window.addEventListener('resize', handleFitWidth);
-    return () => window.removeEventListener('resize', handleFitWidth);
-  }, []);
-
-  useEffect(() => {
-    setTimeout(() => {
-      if (isFitPage) handleFitPage();
-      else handleFitWidth();
-    }, 50);
-  }, [isFullscreen]);
-
-  if (!resumeData) return <div className="p-8 text-center text-gray-500">No data available</div>;
 
   const TemplateComponent = getTemplateComponent(selectedTemplate);
-
   const containerClasses = isFullscreen
-    ? "fixed inset-0 z-[100] flex flex-col bg-[#f3f4f6] overflow-hidden"
-    : "flex flex-col h-full bg-[#f3f4f6] overflow-hidden relative";
+    ? "fixed inset-0 z-[100] flex flex-col bg-zinc-900 text-zinc-100 overflow-hidden"
+    : "flex flex-col h-full bg-[#f4f5f7] dark:bg-zinc-950 overflow-hidden relative";
 
-  const pillClass = "bg-white border border-zinc-200/80 shadow-sm rounded-lg flex items-center p-1 text-sm text-zinc-700 h-10";
-  const btnClass = "hover:bg-zinc-100 rounded-md px-2.5 py-1.5 transition-colors flex items-center gap-1.5 font-medium disabled:opacity-50";
+  const pillClass = "bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 shadow-sm rounded-xl flex items-center p-1 text-sm text-zinc-700 dark:text-zinc-300 h-10";
+  const btnClass = "hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg px-2.5 py-1.5 transition-colors flex items-center gap-1.5 font-medium disabled:opacity-50 text-xs cursor-pointer";
 
   return (
-    <div className={containerClasses}>
+    <div className={containerClasses} ref={containerRef}>
       
-      {/* Floating Toolbar */}
-      <div className="absolute top-4 left-0 right-0 z-20 flex justify-center px-4 pointer-events-none">
-        <div className="flex flex-wrap justify-center gap-3 pointer-events-auto">
-          
-          {/* Zoom Group */}
-          <div className={pillClass}>
-            <span className="px-2 text-xs font-semibold text-zinc-500 uppercase tracking-wider hidden sm:block">Zoom</span>
-            <div className="w-px h-4 bg-zinc-200 mx-1 hidden sm:block"></div>
-            <button onClick={handleZoomOut} className="p-1.5 hover:bg-zinc-100 rounded-md transition-colors" title="Zoom Out">
-              <ZoomOut size={16} />
+      {/* 1. TOP TOOLBAR CONTROL BAR */}
+      <div className="border-b border-zinc-200/80 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 backdrop-blur px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 shrink-0 z-30 shadow-xs">
+        
+        {/* Left: Preview Title & Segmented Page Preference Control */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg">
+            <Eye size={15} className="text-zinc-600 dark:text-zinc-400" />
+            <span className="text-xs font-black uppercase tracking-wider text-zinc-700 dark:text-zinc-300">Preview</span>
+          </div>
+
+          {/* Segmented Control: [ Auto ] [ 1 Page ] [ 2 Pages ] */}
+          <div className="bg-zinc-100 dark:bg-zinc-800/80 p-1 rounded-xl flex items-center gap-1 border border-zinc-200/60 dark:border-zinc-700/50">
+            <button
+              onClick={() => {
+                setPagePreference('auto');
+                fetchUnifiedPdfArtifact('auto');
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                pagePreference === 'auto'
+                  ? 'bg-[#00bda5] text-white shadow-xs'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+              }`}
+              title="Auto: Adaptive layout engine decides page count"
+            >
+              Auto
             </button>
-            <span className="text-xs font-bold text-zinc-700 w-12 text-center select-none">
-              {Math.round(zoom * 100)}%
-            </span>
-            <button onClick={handleZoomIn} className="p-1.5 hover:bg-zinc-100 rounded-md transition-colors" title="Zoom In">
-              <ZoomIn size={16} />
+            <button
+              onClick={() => {
+                setPagePreference('prefer_one_page');
+                fetchUnifiedPdfArtifact('prefer_one_page');
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                pagePreference === 'prefer_one_page'
+                  ? 'bg-[#00bda5] text-white shadow-xs'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+              }`}
+              title="1 Page: Optimizes layout to fit on single page cleanly"
+            >
+              1 Page
+            </button>
+            <button
+              onClick={() => {
+                setPagePreference('prefer_two_pages');
+                fetchUnifiedPdfArtifact('prefer_two_pages');
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                pagePreference === 'prefer_two_pages'
+                  ? 'bg-[#00bda5] text-white shadow-xs'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+              }`}
+              title="2 Pages: Balances content across two pages"
+            >
+              2 Pages
             </button>
           </div>
 
-          {/* Fit Group */}
+          {/* Status Feedback Badge */}
+          <div className="hidden lg:flex items-center gap-2 px-3 py-1 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200/60 dark:border-zinc-800 rounded-lg text-xs text-zinc-600 dark:text-zinc-400 font-semibold">
+            <span className={`w-2 h-2 rounded-full ${pageCount === 1 ? 'bg-emerald-500 animate-pulse' : 'bg-indigo-500'}`} />
+            <span>{statusMessage}</span>
+          </div>
+        </div>
+
+        {/* Center: Zoom Controls & Fit Modes */}
+        <div className="flex items-center gap-2">
+          
+          {/* Fit Modes */}
           <div className={pillClass}>
-            <button onClick={handleFitWidth} className={`px-3 py-1.5 rounded-md transition-colors font-medium text-xs ${!isFitPage ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200' : 'hover:bg-zinc-100'}`}>
+            <button
+              onClick={() => {
+                setZoomMode('fit_width');
+                calculateZoom();
+              }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                zoomMode === 'fit_width' ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-400 ring-1 ring-indigo-200 dark:ring-indigo-800' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800'
+              }`}
+            >
               Fit Width
             </button>
-            <button onClick={handleFitPage} className={`px-3 py-1.5 rounded-md transition-colors font-medium text-xs ${isFitPage ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200' : 'hover:bg-zinc-100'}`}>
+            <button
+              onClick={() => {
+                setZoomMode('fit_page');
+                calculateZoom();
+              }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                zoomMode === 'fit_page' ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-400 ring-1 ring-indigo-200 dark:ring-indigo-800' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800'
+              }`}
+            >
               Fit Page
             </button>
+            <button
+              onClick={() => {
+                setZoomMode('actual_size');
+                setZoom(1.0);
+              }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer hidden sm:block ${
+                zoomMode === 'actual_size' ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-400 ring-1 ring-indigo-200 dark:ring-indigo-800' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800'
+              }`}
+            >
+              100%
+            </button>
           </div>
 
-          {/* Actions */}
-          <div className={`${pillClass} hidden md:flex`}>
-            <button onClick={() => setIsFullscreen(!isFullscreen)} className={btnClass}>
-              {isFullscreen ? <Shrink size={14} /> : <Expand size={14} />} 
-              <span className="text-xs">Fullscreen</span>
+          {/* Stepper Zoom Buttons */}
+          <div className={pillClass}>
+            <button
+              onClick={() => {
+                setZoom(prev => Math.max(0.4, prev - 0.15));
+                setZoomMode('actual_size');
+              }}
+              className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+              title="Zoom Out"
+            >
+              <ZoomOut size={15} />
             </button>
-            <div className="w-px h-4 bg-zinc-200 mx-1"></div>
-            <button className={btnClass} onClick={() => window.print()}>
-              <Printer size={14} />
-              <span className="text-xs">Print</span>
+            <span className="text-xs font-extrabold text-zinc-700 dark:text-zinc-300 w-12 text-center select-none">
+              {Math.round(zoom * 100)}%
+            </span>
+            <button
+              onClick={() => {
+                setZoom(prev => Math.min(2.5, prev + 0.15));
+                setZoomMode('actual_size');
+              }}
+              className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+              title="Zoom In"
+            >
+              <ZoomIn size={15} />
             </button>
-            <div className="w-px h-4 bg-zinc-200 mx-1"></div>
-            <button className={btnClass} onClick={handleDownload} disabled={isDownloading}>
-              <Download size={14} />
-              <span className="text-xs">{isDownloading ? '...' : 'Download'}</span>
+          </div>
+
+          {/* Reset & Fullscreen */}
+          <div className={pillClass}>
+            <button
+              onClick={() => {
+                setZoomMode('fit_width');
+                calculateZoom();
+              }}
+              className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+              title="Reset Zoom to Fit Width"
+            >
+              <RotateCcw size={14} />
+            </button>
+            <button
+              onClick={() => setIsFullscreen(!isFullscreen)}
+              className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+              title={isFullscreen ? "Exit Fullscreen" : "Fullscreen Preview"}
+            >
+              {isFullscreen ? <Shrink size={15} /> : <Expand size={15} />}
             </button>
           </div>
 
         </div>
+
+        {/* Right: Actions (Print & Download PDF) */}
+        <div className="flex items-center gap-2">
+          <button className={btnClass} onClick={() => window.print()}>
+            <Printer size={14} />
+            <span className="hidden sm:inline">Print</span>
+          </button>
+
+          <button
+            className={`${btnClass} text-white bg-[#00bda5] hover:bg-[#00a894] px-4 py-2 font-black shadow-sm disabled:opacity-50`}
+            onClick={handleDownload}
+            disabled={isDownloading || loadingPdf}
+          >
+            <Download size={15} />
+            <span>{isDownloading ? 'Downloading...' : loadingPdf ? 'Optimizing...' : 'Download PDF'}</span>
+          </button>
+        </div>
+
       </div>
-      
-      {/* Resume Container */}
-      <div className="flex-1 overflow-auto custom-scrollbar p-6 pt-20 flex justify-center" ref={containerRef}>
-        <div className="origin-top flex justify-center transition-transform duration-200 ease-out" style={{ transform: `scale(${zoom})` }}>
-          <div id="resume-print-container" className="shadow-2xl bg-white ring-1 ring-zinc-200/50" style={{ width: '8.5in' }}>
-            <TemplateComponent resume={resumeData} sectionOrder={sectionOrder} />
+
+      {/* 2. WARNING ALERT BANNER IF 1-PAGE OPTIMIZATION CANNOT SAFELY FIT */}
+      {warningMessage && (
+        <div className="bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900 px-4 py-2.5 flex items-center justify-between gap-3 text-amber-800 dark:text-amber-300 text-xs font-semibold shrink-0 z-20">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={15} className="text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>{warningMessage}</span>
+          </div>
+          <button
+            onClick={() => setWarningMessage(null)}
+            className="text-amber-600 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-100 font-extrabold cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* 3. CANVAS CONTAINER & SCROLL AREA */}
+      <div
+        className="flex-1 overflow-auto custom-scrollbar p-6 flex flex-col items-center relative"
+        ref={scrollWrapperRef}
+        onScroll={handleScroll}
+      >
+        
+        {/* Loading Overlay during Recomposition */}
+        {loadingPdf && (
+          <div className="absolute inset-0 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-xs z-40 flex flex-col items-center justify-center gap-3">
+            <RefreshCw size={28} className="animate-spin text-[#00bda5]" />
+            <span className="text-sm font-extrabold text-zinc-800 dark:text-zinc-200">
+              Optimizing resume layout…
+            </span>
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+              Measuring fonts, margins, and section boundaries
+            </span>
+          </div>
+        )}
+
+        {/* Scaled PDF Canvas Document */}
+        <div
+          className="origin-top flex flex-col items-center transition-transform duration-200 ease-out space-y-6"
+          style={{ transform: `scale(${zoom})`, transformOrigin: 'top center' }}
+        >
+          <div
+            id="resume-print-container"
+            className="shadow-2xl bg-white ring-1 ring-zinc-200/70 dark:ring-zinc-800 rounded-sm overflow-hidden flex flex-col gap-6"
+            style={{ width: '8.5in', minHeight: pageCount === 2 ? '22.5in' : '11in' }}
+          >
+            {pdfBlobUrl ? (
+              <iframe
+                src={`${pdfBlobUrl}#toolbar=0&navpanes=0&scrollbar=0`}
+                className="w-full border-none"
+                style={{ width: '8.5in', height: pageCount === 2 ? '22.5in' : '11in' }}
+                title="Resume PDF Canvas Preview"
+              />
+            ) : (
+              <TemplateComponent resume={resumeData} sectionOrder={sectionOrder} />
+            )}
           </div>
         </div>
+
       </div>
+
+      {/* 4. FOOTER PAGINATION BADGE & NAVIGATION CONTROLS */}
+      <div className="border-t border-zinc-200/80 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 backdrop-blur px-4 py-2 flex items-center justify-between shrink-0 z-30">
+        
+        {/* Active Page Indicator */}
+        <div className="flex items-center gap-2">
+          <FileText size={14} className="text-zinc-500 dark:text-zinc-400" />
+          <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+            {pageCount === 1 ? 'Page 1 of 1' : `Page ${activePage} of ${pageCount}`}
+          </span>
+        </div>
+
+        {/* Page Nav Buttons if 2 Pages */}
+        {pageCount === 2 && (
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => scrollToPage(1)}
+              disabled={activePage === 1}
+              className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-xs text-zinc-700 dark:text-zinc-300 disabled:opacity-40 flex items-center gap-1 cursor-pointer font-bold"
+            >
+              <ChevronUp size={14} /> Page 1
+            </button>
+            <button
+              onClick={() => scrollToPage(2)}
+              disabled={activePage === 2}
+              className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-xs text-zinc-700 dark:text-zinc-300 disabled:opacity-40 flex items-center gap-1 cursor-pointer font-bold"
+            >
+              Page 2 <ChevronDown size={14} />
+            </button>
+          </div>
+        )}
+
+        {/* Status indicator right */}
+        <div className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500">
+          Canvas Preview = Downloaded File
+        </div>
+
+      </div>
+
     </div>
   );
 }

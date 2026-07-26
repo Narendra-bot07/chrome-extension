@@ -79,14 +79,19 @@ export default function PrintLayout() {
 
       const currentHeight = el.scrollHeight;
       const composition = originalResumeData?._composition || {};
-      const plannedPages = Number(composition.estimated_page_count || 1);
       const configuredCompression = Math.min(
         3,
-        Math.max(0, Number(composition.maximum_compression_level ?? 2))
+        Math.max(0, Number(composition.maximum_compression_level ?? 3))
       );
-      const maxCompression = plannedPages > 1
-        ? Math.min(2, configuredCompression)
+      // Text-length estimates may recommend two pages, but they must never
+      // prevent the real renderer from exhausting safe one-page compaction.
+      const maxCompression = originalResumeData?._page_preference === 'two'
+        ? Math.min(1, configuredCompression)
         : configuredCompression;
+      const measuredLayoutLevel = Math.max(
+        0,
+        Number(originalResumeData?.layout_level ?? 6) - compressionLevel * 2
+      );
 
       if (currentHeight <= MAX_HEIGHT) {
         // Fits perfectly!
@@ -96,7 +101,7 @@ export default function PrintLayout() {
           pageSize: isA4 ? A4_PAGE : {
             ...A4_PAGE, size: 'Letter', widthPx: 816, heightPx: 1056
           },
-          layoutLevel: activeResumeData.layout_level ?? Math.max(0, 5 - compressionLevel),
+          layoutLevel: measuredLayoutLevel,
           templateName,
           preference: originalResumeData?._page_preference || 'auto',
           measurementFlags: measurement,
@@ -125,7 +130,7 @@ export default function PrintLayout() {
             pageSize: isA4 ? A4_PAGE : {
               ...A4_PAGE, size: 'Letter', widthPx: 816, heightPx: 1056
             },
-            layoutLevel: activeResumeData.layout_level ?? Math.max(0, 5 - compressionLevel),
+            layoutLevel: measuredLayoutLevel,
             templateName,
             preference: originalResumeData?._page_preference || 'auto',
             measurementFlags: measurement,
@@ -168,9 +173,10 @@ export default function PrintLayout() {
     >
       <TemplateComponent 
         resume={activeResumeData} 
-        layoutLevel={activeResumeData.layout_level !== undefined
-          ? activeResumeData.layout_level
-          : Math.max(0, 5 - compressionLevel)}
+        layoutLevel={Math.max(
+          0,
+          Number(originalResumeData?.layout_level ?? 6) - compressionLevel * 2
+        )}
       />
       {/* Invisible div to signal Playwright that Auto-Fit is done */}
       {fittingComplete && <div

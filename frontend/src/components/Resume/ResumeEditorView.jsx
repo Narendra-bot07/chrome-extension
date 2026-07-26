@@ -98,10 +98,10 @@ export default function ResumeEditorView({
   const rightSections = splitLayout ? layoutModel.main_column : [];
 
   React.useEffect(() => {
-    if (!parsedResume?.layout_model) {
-      setParsedResume({ ...parsedResume, layout_model: layoutModel });
+    if (parsedResume && !parsedResume.layout_model && typeof setParsedResume === 'function') {
+      setParsedResume(prev => (prev && !prev.layout_model ? { ...prev, layout_model: layoutModel } : prev));
     }
-  }, [parsedResume?.layout_model]);
+  }, []);
 
   React.useEffect(() => {
     if (!resumeId || !parsedResume?.layout_model) return undefined;

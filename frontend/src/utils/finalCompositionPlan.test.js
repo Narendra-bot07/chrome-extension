@@ -143,3 +143,30 @@ test('a section continuing onto page two is not treated as a blank page', () => 
   assert.equal(plan.validation_report.blank_trailing_page, false);
   assert.equal(plan.validation_report.valid, true);
 });
+
+test('a tiny education-only second page is rejected for repair', () => {
+  const plan = buildMeasuredCompositionPlan({
+    contentHeight: 1200,
+    sectionMeasurements: [
+      { id: 'experience', offset: 40, height: 990, bottom: 1030 },
+      { id: 'education', offset: 1130, height: 70, bottom: 1200 }
+    ],
+    layoutLevel: 0
+  });
+  assert.equal(plan.page_count, 2);
+  assert.equal(plan.validation_report.education_orphaned, true);
+  assert.equal(plan.validation_report.valid, false);
+});
+
+test('final plan contains physical spacing and measured utilization', () => {
+  const plan = buildMeasuredCompositionPlan({
+    contentHeight: 900,
+    sectionMeasurements: sections.slice(0, 3),
+    layoutLevel: 5
+  });
+  assert.ok(plan.section_spacing.gap_px <= 8);
+  assert.ok(plan.entry_spacing.gap_px <= 5);
+  assert.ok(plan.divider_style.thickness_px <= 0.8);
+  assert.equal(plan.page_utilization.length, 1);
+  assert.ok(plan.section_measurements.experience.height_px > 0);
+});

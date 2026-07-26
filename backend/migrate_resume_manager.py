@@ -81,7 +81,17 @@ def run_migration():
         ("match_engine_version", "TEXT"),
         ("resume_content_hash", "TEXT"),
         ("jd_content_hash", "TEXT"),
-        ("analysis_timestamp", "TIMESTAMPTZ")
+        ("analysis_timestamp", "TIMESTAMPTZ"),
+        ("final_page_count", "INTEGER"),
+        ("density_level", "TEXT"),
+        ("composition_plan_json", "JSONB DEFAULT '{}'::jsonb"),
+        ("composition_plan_hash", "TEXT"),
+        ("rendered_pdf_path", "TEXT"),
+        ("rendered_pdf_hash", "TEXT"),
+        ("preview_source", "TEXT"),
+        ("renderer_version", "TEXT"),
+        ("composition_engine_version", "TEXT"),
+        ("validation_report", "JSONB DEFAULT '{}'::jsonb")
     ]
     for col_name, col_def in columns_to_add:
         cur.execute(f"""

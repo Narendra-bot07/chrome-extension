@@ -393,10 +393,13 @@ def validate_resume_presentation(
     return report
 
 
-def validate_generated_pdf(pdf_bytes: bytes, resume: ResumeStructure | dict[str, Any]) -> PreservationReport:
+def validate_generated_pdf(pdf_bytes: Any, resume: ResumeStructure | dict[str, Any]) -> PreservationReport:
     """Post-render gate for visible metadata, metrics, and PDF annotations."""
 
     from pypdf import PdfReader
+
+    if isinstance(pdf_bytes, tuple):
+        pdf_bytes = pdf_bytes[0]
 
     data = _dump(resume)
     report = PreservationReport()

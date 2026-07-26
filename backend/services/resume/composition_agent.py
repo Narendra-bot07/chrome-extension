@@ -361,6 +361,7 @@ class ResumeCompositionAgent:
             )
         else:
             # Page Two Rule: Balance content cleanly across pages
+            target_page1_cap = capacity * 0.70
             accumulated_height = 110.0  # Header
             split_idx = len(section_order) // 2
             page1_h = accumulated_height
@@ -368,7 +369,7 @@ class ResumeCompositionAgent:
 
             for idx, section in enumerate(section_order):
                 sec_h = content_profile.estimated_section_heights.get(section, 40.0)
-                if accumulated_height + sec_h <= capacity * 0.90 or idx == 0:
+                if (accumulated_height + sec_h <= target_page1_cap or idx < 2) and idx < len(section_order) - 2:
                     page_assignment[section] = 1
                     accumulated_height += sec_h
                     page1_h = accumulated_height

@@ -137,6 +137,8 @@ class ExportWorkflowState:
     last_valid_resume_content: dict[str, Any] | None = None
     last_valid_composition_plan: ResumeCompositionPlan | None = None
     final_resume_ready: bool = False
+    final_composition_plan: dict[str, Any] | None = None
+    generated_pdf_hash: str | None = None
     repair_logs: list[RepairLog] = field(default_factory=list)
 
 
@@ -407,6 +409,10 @@ async def export_resume_pdf(
                 content.content, [], "retry",
             )
             continue
+        if isinstance(pdf, tuple):
+            pdf, measured_plan, render_hash, *_ = pdf
+            state.final_composition_plan = measured_plan
+            state.generated_pdf_hash = render_hash
         if not pdf:
             raise ExportWorkflowError(request_id, RepairType.FATAL_SYSTEM_ERROR)
         rendered = validate_generated_pdf(pdf, final.render_payload())

@@ -204,19 +204,32 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
                 "margin": {"top": "0", "right": "0", "bottom": "0", "left": "0"}
             }
             
-            # Never force page 1: a rounding or late font-layout change can push
-            # content onto page 2, and page_ranges="1" silently truncates it.
             pdf_bytes = page.pdf(**pdf_args)
             pdf_page_count = len(PdfReader(BytesIO(pdf_bytes)).pages)
             planned_page_count = int(final_composition_plan.get("page_count") or 0)
             if pdf_page_count != planned_page_count:
                 raise ValueError(
-                    "Preview and PDF pagination differed; the export was blocked "
-                    "so it can be recomposed safely."
+                    f"Preview and PDF pagination differed (PDF={pdf_page_count}, Plan={planned_page_count}); "
+                    "the export was blocked so it can be recomposed safely."
                 )
-            
+
+            import hashlib
+            import json
+            render_hash = hashlib.sha256(pdf_bytes).hexdigest()
+            plan_copy = dict(final_composition_plan)
+            plan_copy["render_hash"] = render_hash
+            measurement_bytes = json.dumps({
+                "page_count": pdf_page_count,
+                "density": plan_copy.get("density"),
+                "section_positions": plan_copy.get("section_positions"),
+                "page_breaks": plan_copy.get("page_breaks"),
+                "resume_height": resume_height,
+            }, sort_keys=True).encode("utf-8")
+            measurement_hash = hashlib.sha256(measurement_bytes).hexdigest()
+            plan_copy["measurement_hash"] = measurement_hash
+
             browser.close()
-            return pdf_bytes
+            return pdf_bytes, plan_copy, render_hash, measurement_hash
     except Exception as e:
         import traceback
         traceback.print_exc()

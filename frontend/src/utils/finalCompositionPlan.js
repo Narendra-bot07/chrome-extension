@@ -155,6 +155,19 @@ export function buildMeasuredCompositionPlan({
   const emptyTrailingPage = pageCount > 1
     && pages[pageCount - 1].sections.length === 0
     && !pages[pageCount - 1].continued_from_previous_page;
+  const firstBreakOffset = pageBreaks.length
+    ? finite(sections.find(section => section.id === pageBreaks[0])?.offset)
+    : Math.min(measuredHeight, safeHeight);
+  const pageUtilization = pageCount === 1
+    ? [Math.min(1, measuredHeight / safeHeight)]
+    : [
+        Math.min(1, firstBreakOffset / safeHeight),
+        Math.min(1, (measuredHeight - firstBreakOffset) / safeHeight)
+      ];
+  const tinySecondPage = pageCount === 2
+    && pages[1].sections.length === 1
+    && ['education', 'certifications', 'achievements'].includes(pages[1].sections[0])
+    && pageUtilization[1] < 0.25;
   const readabilityValid = typography.body_font_size >= COMPOSITION_LIMITS.minBodyFontSize
     && typography.line_height >= COMPOSITION_LIMITS.minLineHeight
     && Math.min(...Object.values(pageSize.margins || A4_PAGE.margins)) >= COMPOSITION_LIMITS.minMarginPx;
@@ -164,11 +177,15 @@ export function buildMeasuredCompositionPlan({
       && !missingSections.length
       && !measurementFlags.hasHorizontalOverflow
       && !measurementFlags.hasClipping
+      && !tinySecondPage
       && readabilityValid,
     overflow,
     horizontal_overflow: Boolean(measurementFlags.hasHorizontalOverflow),
     clipping: Boolean(measurementFlags.hasClipping),
     blank_trailing_page: emptyTrailingPage,
+    tiny_second_page: tinySecondPage,
+    page_utilization: pageUtilization,
+    education_orphaned: tinySecondPage && pages[1].sections[0] === 'education',
     missing_sections: missingSections,
     content_preserved: missingSections.length === 0,
     readable: readabilityValid
@@ -186,6 +203,19 @@ export function buildMeasuredCompositionPlan({
     page_height_px: pageSize.heightPx,
     margins: { ...pageSize.margins },
     typography: { ...typography },
+    section_spacing: {
+      gap_px: typography.section_gap,
+      heading_bottom_gap_px: density === 'comfortable' ? 4 : density === 'compact' ? 3 : 2
+    },
+    entry_spacing: {
+      gap_px: density === 'comfortable' ? 5 : density === 'compact' ? 4 : 3,
+      bullet_gap_px: typography.bullet_gap,
+      paragraph_margin_px: density === 'comfortable' ? 3 : density === 'compact' ? 2 : 1
+    },
+    divider_style: {
+      thickness_px: typography.divider_width,
+      vertical_margin_px: density === 'comfortable' ? 4 : density === 'compact' ? 3 : 2
+    },
     section_order: sectionOrder,
     section_layouts: Object.fromEntries(sectionOrder.map(id => [id, {
       representation: ['skills', 'education', 'certifications'].includes(id) && density !== 'comfortable'
@@ -200,6 +230,11 @@ export function buildMeasuredCompositionPlan({
     pages,
     page_breaks: pageBreaks,
     measured_break_offsets: breakOffsets,
+    section_measurements: Object.fromEntries(sections.map(section => [
+      section.id,
+      { offset_px: section.offset, height_px: section.height, bottom_px: section.bottom }
+    ])),
+    page_utilization: pageUtilization,
     measurement_summary: {
       content_height_px: measuredHeight,
       content_width_px: finite(contentWidth),

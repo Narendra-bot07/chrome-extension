@@ -112,7 +112,7 @@ export default function TemplateSelectionView({ onBack }) {
 
   const handleUseTemplate = (id) => {
     setSelectedTemplate(id);
-    setSelectedTemplateId(id);
+    navigate('/download');
   };
 
   const handleDownload = async (templateId) => {

@@ -528,14 +528,34 @@ async def api_download_pdf(request: DownloadPDFRequest, company_name: Optional[s
         clean_user = "".join([c if c.isalnum() or c == '_' else '_' for c in user_name.replace(" ", "_")])
         clean_company = "".join([c if c.isalnum() or c == '_' else '_' for c in company_name.replace(" ", "_")])
         filename = f"{clean_user}_{clean_company}_Resume.pdf"
+        import hashlib
+        import json
+        from pypdf import PdfReader
+        pdf_hash = workflow_state.generated_pdf_hash or hashlib.sha256(pdf_bytes).hexdigest()
+        pdf_page_count = len(PdfReader(io.BytesIO(pdf_bytes)).pages)
+        measured_plan = workflow_state.final_composition_plan or {}
+        plan_hash = (
+            measured_plan.get("composition_plan_hash")
+            or measured_plan.get("plan_hash")
+            or hashlib.sha256(
+                json.dumps(measured_plan, sort_keys=True).encode("utf-8")
+            ).hexdigest()
+        )
         
         return StreamingResponse(
             io.BytesIO(pdf_bytes),
             media_type="application/pdf",
             headers={
                 "Content-Disposition": f"attachment; filename={filename}",
-                "Access-Control-Expose-Headers": "Content-Disposition, X-Request-ID",
+                "Access-Control-Expose-Headers": (
+                    "Content-Disposition, X-Request-ID, X-PDF-Hash, "
+                    "X-PDF-Page-Count, X-Composition-Plan-Hash, X-PDF-Filename"
+                ),
                 "X-Request-ID": workflow_state.request_id,
+                "X-PDF-Hash": pdf_hash,
+                "X-PDF-Page-Count": str(pdf_page_count),
+                "X-Composition-Plan-Hash": plan_hash,
+                "X-PDF-Filename": filename,
             }
         )
     except HTTPException:
@@ -557,6 +577,86 @@ async def api_download_pdf(request: DownloadPDFRequest, company_name: Optional[s
                 "request_id": request_id,
             },
         ) from e
+
+class UnifiedRenderRequest(BaseModel):
+    resume: Dict[str, Any]
+    original_resume: Optional[Dict[str, Any]] = None
+    template_name: str = "ExecutiveATS"
+    page_preference: str = "auto"
+    company_name: Optional[str] = None
+    expected_render_hash: Optional[str] = None
+
+@router.post("/render-unified-pdf")
+async def api_render_unified_pdf(request: UnifiedRenderRequest):
+    import base64
+    import hashlib
+    import json
+    from app.playwright_pdf import generate_pdf_via_playwright
+    from services.resume.composition_agent import compose_resume_layout
+
+    template = request.template_name or "ExecutiveATS"
+    resume_dict = normalize_resume_payload(request.resume)
+
+    composition_plan = compose_resume_layout(
+        resume=resume_dict,
+        template_name=template,
+        requested_section_order=resume_dict.get("section_order"),
+    )
+
+    try:
+        render_res = await run_in_threadpool(
+            generate_pdf_via_playwright,
+            json.dumps(resume_dict),
+            template
+        )
+        if isinstance(render_res, tuple):
+            pdf_bytes, plan_meta, render_hash, measurement_hash = render_res
+        else:
+            pdf_bytes = render_res
+            render_hash = hashlib.sha256(pdf_bytes).hexdigest()
+            measurement_hash = hashlib.sha256(json.dumps(composition_plan.model_dump(mode="json"), sort_keys=True).encode()).hexdigest()
+            plan_meta = composition_plan.model_dump(mode="json")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Unified PDF rendering failed: {str(exc)}"
+        )
+
+    if request.expected_render_hash and request.expected_render_hash != render_hash:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Render artifact hash mismatch between preview and download request. Please refresh preview."
+        )
+
+    pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+    page_count = composition_plan.page_count
+    status_msg = "Fits cleanly on 1 page" if page_count == 1 else "2 pages selected to preserve readability"
+
+    final_plan_dict = {
+        "page_count": page_count,
+        "density": composition_plan.density.value.lower(),
+        "page_size": "A4",
+        "margins": {"top": "0", "right": "0", "bottom": "0", "left": "0"},
+        "typography": {"fontFamily": "font-sans"},
+        "section_order": composition_plan.section_order,
+        "page_breaks": [composition_plan.final_measurements.page_break_index] if composition_plan.final_measurements.page_break_index else [],
+        "section_positions": plan_meta.get("section_positions", {}),
+        "measurement_hash": measurement_hash,
+        "render_hash": render_hash,
+        "validation_report": composition_plan.validation_status.model_dump(mode="json"),
+        "user_preference_applied": request.page_preference,
+        "status_message": status_msg
+    }
+
+    return {
+        "success": True,
+        "pdf_base64": pdf_b64,
+        "composition_plan": final_plan_dict,
+        "render_hash": render_hash,
+        "measurement_hash": measurement_hash,
+        "status_message": status_msg,
+        "page_count": page_count
+    }
 
 @router.post("/cover-letter", response_model=CoverLetterResult)
 async def api_cover_letter(

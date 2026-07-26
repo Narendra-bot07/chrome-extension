@@ -192,6 +192,7 @@ export function AppProvider({ children }) {
     }
   }, [reviewSuggestions, parsedResume, jobAnalysis, isRefineStreaming]);
   const [selectedTemplate, setSelectedTemplate] = useState('ExecutiveATS');
+  const [finalPdfArtifact, setFinalPdfArtifact] = useState(null);
   const [customFileName, setCustomFileName] = useState(() => {
     return sessionStorage.getItem('custom_file_name') || '';
   });
@@ -2075,9 +2076,30 @@ export function AppProvider({ children }) {
     }
   };
 
-  const handleDownloadFinalPDF = async (layoutLevel) => {
+  const handleDownloadFinalPDF = async (layoutLevel, options = {}) => {
     const activeRes = tailoredResume || parsedResume;
     if (!activeRes) return;
+    const reusableArtifact = options.preparedArtifact || finalPdfArtifact;
+    if (options.usePrepared && reusableArtifact?.blob && reusableArtifact?.url) {
+      const rawName = activeRes.personal_info?.name || 'User';
+      const defaultFilename = `${rawName.replace(/\s+/g, '_')}_${(companyName || 'Company').replace(/\s+/g, '_')}_Resume.pdf`;
+      const filename = customFileName.trim()
+        ? (customFileName.endsWith('.pdf') ? customFileName : `${customFileName}.pdf`)
+        : defaultFilename;
+      if (isExtension && chrome.downloads) {
+        chrome.downloads.download({
+          url: reusableArtifact.url, filename, conflictAction: 'uniquify'
+        });
+      } else {
+        const link = document.createElement('a');
+        link.href = reusableArtifact.url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+      return true;
+    }
 
     let finalRes = { ...activeRes };
     let originalForAudit = parsedResume || activeRes;
@@ -2183,13 +2205,27 @@ export function AppProvider({ children }) {
 
       setLoadingMessage("Validating the final document...");
       const blob = await response.blob();
+      const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+      const pdfHash = Array.from(new Uint8Array(digest))
+        .map(byte => byte.toString(16).padStart(2, '0')).join('');
+      if (finalPdfArtifact?.url) URL.revokeObjectURL(finalPdfArtifact.url);
+      const preparedArtifact = {
+        blob,
+        url: URL.createObjectURL(blob),
+        hash: response.headers.get('X-PDF-Hash') || pdfHash,
+        pageCount: Number(response.headers.get('X-PDF-Page-Count') || 1),
+        planHash: response.headers.get('X-Composition-Plan-Hash') || '',
+        filename: response.headers.get('X-PDF-Filename') || ''
+      };
+      setFinalPdfArtifact(preparedArtifact);
+      if (options.previewOnly) return preparedArtifact;
       const rawName = activeRes.personal_info?.name || 'User';
       const cleanUser = rawName.replace(/\s+/g, '_');
       const cleanCompany = (companyName || 'Company').replace(/\s+/g, '_');
       const defaultFilename = `${cleanUser}_${cleanCompany}_Resume.pdf`;
       const filename = customFileName.trim() ? (customFileName.endsWith('.pdf') ? customFileName : `${customFileName}.pdf`) : defaultFilename;
 
-      const objectUrl = window.URL.createObjectURL(blob);
+      const objectUrl = preparedArtifact.url;
       if (isExtension && chrome.downloads) {
         chrome.downloads.download({
           url: objectUrl,
@@ -2445,6 +2481,7 @@ export function AppProvider({ children }) {
       isRefineStreaming, setIsRefineStreaming,
       fetchLiveATSScore,
       selectedTemplate, setSelectedTemplate,
+      finalPdfArtifact, setFinalPdfArtifact,
       customFileName, setCustomFileName,
       jobDetectionStatus, setJobDetectionStatus,
       jobDetectionMeta, setJobDetectionMeta,
