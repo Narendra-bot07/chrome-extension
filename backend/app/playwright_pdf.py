@@ -271,3 +271,41 @@ def generate_cover_letter_pdf_via_playwright(cover_letter_json_str: str) -> Opti
         import traceback
         traceback.print_exc()
         raise e
+
+
+def render_cover_letter_artifact(
+    render_payload_json: str,
+    paper_size: str = "A4",
+) -> tuple[bytes, int]:
+    """Render the single PDF artifact used by both preview and download."""
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+            )
+            page = browser.new_page()
+            _open_renderer(page, "print-cover-letter")
+            page.evaluate(
+                "data => { window.__INJECTED_COVER_LETTER_DATA__ = JSON.parse(data); }",
+                render_payload_json,
+            )
+            page.evaluate("window.dispatchEvent(new Event('coverLetterDataReady'));")
+            page.wait_for_function(
+                "() => document.querySelector('#resume-print-container') !== null",
+                timeout=10000,
+            )
+            page.evaluate("document.fonts.ready")
+            pdf_bytes = page.pdf(
+                format=paper_size,
+                print_background=True,
+                margin={"top": "0", "right": "0", "bottom": "0", "left": "0"},
+                prefer_css_page_size=True,
+            )
+            page_count = len(PdfReader(BytesIO(pdf_bytes)).pages)
+            browser.close()
+            return pdf_bytes, page_count
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        raise

@@ -20,6 +20,7 @@ class JobAnalysis(BaseModel):
     keywords: List[str] = []
     ats_keywords: List[str] = []
     seniority: Optional[str] = ""
+    cover_letter_context: Optional[Dict[str, Any]] = None
 
 class JobUrlExtractRequest(BaseModel):
     url: str = Field(min_length=8)

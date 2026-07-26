@@ -132,6 +132,35 @@ export function AppProvider({ children }) {
   const [comparison, setComparison] = useState(null);
   const [tailoredResume, setTailoredResume] = useState(null);
   const [coverLetter, setCoverLetter] = useState(null);
+  const [coverLetterContext, setCoverLetterContext] = useState(null);
+  const [coverLetterStrategy, setCoverLetterStrategy] = useState(null);
+  const [generatedCoverLetter, setGeneratedCoverLetter] = useState(null);
+  const [coverLetterReview, setCoverLetterReview] = useState(null);
+  const [coverLetterEditHistory, setCoverLetterEditHistory] = useState([]);
+  const [coverLetterEditStreaming, setCoverLetterEditStreaming] = useState(false);
+  const coverLetterScopeRef = useRef('');
+
+  useEffect(() => {
+    const scope = [
+      parsedResume?.resume_version_id || parsedResume?.version_id || parsedResume?.id || '',
+      jobAnalysis?.id || jobAnalysis?.jd_id || '',
+      jobAnalysis?.title || jobAnalysis?.job_title || '',
+      jobAnalysis?.company || jobAnalysis?.company_name || ''
+    ].join('|');
+    if (coverLetterScopeRef.current && coverLetterScopeRef.current !== scope) {
+      setCoverLetterContext(null);
+      setCoverLetterStrategy(null);
+      setGeneratedCoverLetter(null);
+      setCoverLetterReview(null);
+      setCoverLetterEditHistory([]);
+      setCoverLetter(null);
+    }
+    coverLetterScopeRef.current = scope;
+  }, [
+    parsedResume?.resume_version_id, parsedResume?.version_id, parsedResume?.id,
+    jobAnalysis?.id, jobAnalysis?.jd_id, jobAnalysis?.title,
+    jobAnalysis?.job_title, jobAnalysis?.company, jobAnalysis?.company_name
+  ]);
 
   // Summarization & Checklist states
   const [applications, setApplications] = useState([]);
@@ -2311,7 +2340,244 @@ export function AppProvider({ children }) {
     }
   };
 
-  const handleGenerateCoverLetter = async () => {
+  const handleDraftCoverLetterFromContext = async () => {
+    if (!coverLetterContext?.ready_for_generation || !parsedResume || !jobAnalysis) {
+      alert("Complete the cover letter context questions before drafting.");
+      return false;
+    }
+    setLoading(true);
+    setLoadingMessage("Drafting evidence-backed cover letter...");
+    setLoadingProgress(35);
+    try {
+      const headers = { "Content-Type": "application/json" };
+      if (apiKey) headers["x-groq-key"] = apiKey;
+      const response = await fetch(`${apiUrl}/api/cover-letter`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          resume: toRenderableResume(parsedResume),
+          job: {
+            ...jobAnalysis,
+            cover_letter_context: coverLetterContext
+          }
+        })
+      });
+      if (!response.ok) {
+        const failure = await response.json().catch(() => ({}));
+        throw new Error(failure.detail || "Cover letter drafting failed.");
+      }
+      const draft = await response.json();
+      setCoverLetter(draft);
+      setCoverLetterContext(null);
+      setLoadingProgress(100);
+      return true;
+    } catch (error) {
+      console.error(error);
+      alert("Error drafting cover letter: " + error.message);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBuildCoverLetterStrategy = async () => {
+    if (!coverLetterContext?.ready_for_generation) {
+      alert("Complete and validate the cover letter context first.");
+      return false;
+    }
+    setLoading(true);
+    setLoadingMessage("Building cover letter generation strategy...");
+    try {
+      const response = await fetch(`${apiUrl}/api/cover-letter/strategy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: coverLetterContext,
+          session_id: coverLetterContext.scope_fingerprint
+        })
+      });
+      if (!response.ok) {
+        const failure = await response.json().catch(() => ({}));
+        throw new Error(failure.detail || "Strategy generation failed.");
+      }
+      setCoverLetterStrategy(await response.json());
+      setGeneratedCoverLetter(null);
+      setCoverLetterReview(null);
+      setCoverLetterEditHistory([]);
+      return true;
+    } catch (error) {
+      console.error(error);
+      alert("Error building cover letter strategy: " + error.message);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGenerateFirstCoverLetterDraft = async () => {
+    if (!coverLetterContext?.ready_for_generation) {
+      alert("Complete and validate the cover letter context first.");
+      return false;
+    }
+    if (!coverLetterStrategy?.ready_for_generation) {
+      alert("Build a ready cover letter strategy first.");
+      return false;
+    }
+    setLoading(true);
+    setLoadingMessage("Generating the first cover letter draft...");
+    setLoadingProgress(35);
+    try {
+      const headers = { "Content-Type": "application/json" };
+      if (apiKey) headers["x-groq-key"] = apiKey;
+      const response = await fetch(`${apiUrl}/api/cover-letter/generate`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          context: coverLetterContext,
+          strategy: coverLetterStrategy
+        })
+      });
+      if (!response.ok) {
+        const failure = await response.json().catch(() => ({}));
+        throw new Error(failure.detail || "Cover letter generation failed.");
+      }
+      const generated = await response.json();
+      setGeneratedCoverLetter(generated);
+      setCoverLetterReview(null);
+      setCoverLetterEditHistory([]);
+      setLoadingMessage("Reviewing the first draft...");
+      setLoadingProgress(70);
+      const reviewResponse = await fetch(`${apiUrl}/api/cover-letter/review`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          context: coverLetterContext,
+          strategy: coverLetterStrategy,
+          generated_cover_letter: generated
+        })
+      });
+      if (!reviewResponse.ok) {
+        const failure = await reviewResponse.json().catch(() => ({}));
+        throw new Error(failure.detail || "Automatic cover letter review failed.");
+      }
+      const review = await reviewResponse.json();
+      setCoverLetterReview(review);
+      setGeneratedCoverLetter(review.final_cover_letter);
+      setLoadingProgress(100);
+      return true;
+    } catch (error) {
+      console.error(error);
+      alert("Error generating cover letter: " + error.message);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditCoverLetter = async (userPrompt) => {
+    const prompt = String(userPrompt || '').trim();
+    if (!prompt || !generatedCoverLetter || coverLetterEditStreaming) return false;
+    setCoverLetterEditStreaming(true);
+    try {
+      const headers = { "Content-Type": "application/json" };
+      if (apiKey) headers["x-groq-key"] = apiKey;
+      const response = await fetch(`${apiUrl}/api/cover-letter/edit/stream`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          context: coverLetterContext,
+          strategy: coverLetterStrategy,
+          generated_cover_letter: generatedCoverLetter,
+          user_prompt: prompt
+        })
+      });
+      if (!response.ok) {
+        const failure = await response.json().catch(() => ({}));
+        throw new Error(failure.detail || "Cover letter edit failed.");
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let streamedContent = '';
+      let metadata = null;
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line);
+          if (event.type === 'metadata') metadata = event.data;
+          if (event.type === 'content_delta') {
+            streamedContent += event.data;
+            setGeneratedCoverLetter(previous => ({
+              ...previous,
+              content: streamedContent
+            }));
+          }
+        }
+        if (done) break;
+      }
+      if (!metadata) throw new Error("The edit stream returned no metadata.");
+      const previousLetter = generatedCoverLetter;
+      const nextLetter = {
+        ...previousLetter,
+        content: streamedContent,
+        word_count: (streamedContent.match(/\b[\w'-]+\b/g) || []).length
+      };
+      setGeneratedCoverLetter(nextLetter);
+      setCoverLetterEditHistory(previous => [...previous, {
+        ...metadata,
+        before_letter: previousLetter,
+        after_letter: nextLetter,
+        undone: false
+      }]);
+      return true;
+    } catch (error) {
+      console.error(error);
+      alert("Error editing cover letter: " + error.message);
+      return false;
+    } finally {
+      setCoverLetterEditStreaming(false);
+    }
+  };
+
+  const handleUndoCoverLetterEdit = () => {
+    setCoverLetterEditHistory(previous => {
+      const latestIndex = previous.findLastIndex(item => !item.undone);
+      if (latestIndex < 0) return previous;
+      const latest = previous[latestIndex];
+      setGeneratedCoverLetter(latest.before_letter);
+      return previous.map((item, index) => (
+        index === latestIndex ? { ...item, undone: true } : item
+      ));
+    });
+  };
+
+  const handleRestoreCoverLetterEdit = (editId) => {
+    const snapshot = coverLetterEditHistory.find(item => item.edit_id === editId);
+    if (snapshot) {
+      setGeneratedCoverLetter(snapshot.after_letter);
+      setCoverLetterEditHistory(previous => previous.map(item => (
+        item.edit_id === editId ? { ...item, undone: false } : item
+      )));
+    }
+  };
+
+  const handleGenerateCoverLetter = async (contextAnswers = {}, skippedQuestions = []) => {
+    // React passes the SyntheticEvent when this handler is used directly as
+    // onClick. Never treat that DOM-backed event as serializable user answers.
+    if (
+      !contextAnswers
+      || typeof contextAnswers !== 'object'
+      || contextAnswers.nativeEvent
+      || contextAnswers.currentTarget
+      || Array.isArray(contextAnswers)
+    ) {
+      contextAnswers = {};
+    }
+    if (!Array.isArray(skippedQuestions)) skippedQuestions = [];
     if (!parsedResume) {
       alert("Please select or upload a resume before drafting a cover letter.");
       return;
@@ -2323,7 +2589,7 @@ export function AppProvider({ children }) {
 
     setLoading(true);
     setLoadingProgress(10);
-    setLoadingMessage("Drafting tailored cover letter...");
+    setLoadingMessage("Building cover letter context...");
 
     const clInterval = setInterval(() => {
       setLoadingProgress((prev) => (prev >= 90 ? 90 : prev + 15));
@@ -2374,7 +2640,7 @@ export function AppProvider({ children }) {
       const headers = {};
       if (apiKey) headers["x-groq-key"] = apiKey;
 
-      const response = await fetch(`${apiUrl}/api/cover-letter`, {
+      const response = await fetch(`${apiUrl}/api/cover-letter/context`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2382,16 +2648,32 @@ export function AppProvider({ children }) {
         },
         body: JSON.stringify({
           resume: toRenderableResume(activeParsed),
-          job: jobAnalysis
+          resume_intelligence: activeParsed.resume_intelligence || null,
+          jd: jobAnalysis,
+          jd_intelligence: jobAnalysis.jd_intelligence || null,
+          resume_id: activeParsed.id || null,
+          jd_id: jobAnalysis.id || jobAnalysis.jd_id || null,
+          user_answers: contextAnswers,
+          skipped_questions: skippedQuestions
         })
       });
 
       if (!response.ok) {
-        throw new Error("Failed to generate cover letter: " + (await response.json()).detail);
+        throw new Error("Failed to build cover letter context: " + (await response.json()).detail);
       }
 
-      const clResult = await response.json();
-      setCoverLetter(clResult);
+      const contextResult = await response.json();
+      setCoverLetter(null);
+      setCoverLetterContext(contextResult);
+      setCoverLetterStrategy(null);
+      setGeneratedCoverLetter(null);
+      setCoverLetterReview(null);
+      setCoverLetterEditHistory([]);
+      clearInterval(clInterval);
+      setLoadingProgress(100);
+      setLoading(false);
+      navigate('/cover-letter');
+      return contextResult;
 
       // Auto-update cover letter in current application session
       if (activeApplicationId) {
@@ -2467,6 +2749,12 @@ export function AppProvider({ children }) {
       comparison, setComparison,
       tailoredResume, setTailoredResume,
       coverLetter, setCoverLetter,
+      coverLetterContext, setCoverLetterContext,
+      coverLetterStrategy, setCoverLetterStrategy,
+      generatedCoverLetter, setGeneratedCoverLetter,
+      coverLetterReview, setCoverLetterReview,
+      coverLetterEditHistory, setCoverLetterEditHistory,
+      coverLetterEditStreaming,
       applications, setApplications,
       activeApplicationId, setActiveApplicationId,
       pendingApplicationSubmitted, setPendingApplicationSubmitted,
@@ -2526,6 +2814,11 @@ export function AppProvider({ children }) {
       handleDownloadFinalPDF,
       handleDownloadCoverLetterPDF,
       handleGenerateCoverLetter,
+      handleBuildCoverLetterStrategy,
+      handleGenerateFirstCoverLetterDraft,
+      handleEditCoverLetter,
+      handleUndoCoverLetterEdit,
+      handleRestoreCoverLetterEdit,
       handleCopyToClipboard
     }}>
       {children}

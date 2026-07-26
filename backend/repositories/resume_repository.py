@@ -455,16 +455,40 @@ class ResumeRepository:
     # =========================================================================
 
     def list_versions(self, resume_id: str, user_id: str) -> List[Dict[str, Any]]:
-        query = """
-            SELECT rv.*
-            FROM public.resume_versions rv
-            JOIN public.resumes r ON r.id = rv.resume_id
-            WHERE rv.resume_id = %s AND r.user_id = %s AND rv.deleted_at IS NULL AND r.deleted_at IS NULL
-            ORDER BY rv.version_number DESC, rv.created_at DESC
-        """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(query, (resume_id, user_id))
-            return [dict(row) for row in cur.fetchall()]
+            # Check resume ownership & get parsed content
+            cur.execute("SELECT id, user_id, parsed_content, created_at FROM public.resumes WHERE id = %s AND user_id = %s AND deleted_at IS NULL", (resume_id, user_id))
+            r_row = cur.fetchone()
+            if not r_row:
+                return []
+
+            cur.execute("""
+                SELECT rv.*
+                FROM public.resume_versions rv
+                WHERE rv.resume_id = %s AND rv.deleted_at IS NULL
+                ORDER BY rv.version_number DESC, rv.created_at DESC
+            """, (resume_id,))
+            rows = [dict(row) for row in cur.fetchall()]
+
+            if not rows:
+                # Ensure default original version is created
+                cur.execute("""
+                    INSERT INTO public.resume_versions (
+                        resume_id, version_number, version_name, version_type, source_resume_id,
+                        content, changes_summary, change_summary_json, is_current, created_by, created_at
+                    )
+                    VALUES (%s, 1, 'v1 Original', 'original', %s, %s,
+                            'Original uploaded resume', '{"summary":"Original uploaded resume"}'::jsonb,
+                            TRUE, %s, COALESCE(%s, NOW()))
+                    RETURNING *
+                """, (resume_id, resume_id, json.dumps(r_row.get("parsed_content") or {}), user_id, r_row.get("created_at")))
+                v1_ver = cur.fetchone()
+                if v1_ver:
+                    cur.execute("UPDATE public.resumes SET active_version_id = %s WHERE id = %s", (v1_ver["id"], resume_id))
+                    self.conn.commit()
+                    rows = [dict(v1_ver)]
+
+            return rows
 
     def get_version(self, resume_id: str, version_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         query = """

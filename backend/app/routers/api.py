@@ -2,6 +2,7 @@ from fastapi import APIRouter, UploadFile, File, Header, HTTPException, status, 
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import io
+import json
 import re
 from typing import Optional, List, Any, Dict
 
@@ -27,6 +28,26 @@ from repositories.ats_repository import ATSRepository
 
 
 from app.template_engine import template_engine
+from schemas.cover_letter_context import CoverLetterContext, CoverLetterContextRequest
+from schemas.cover_letter_strategy import CoverLetterStrategy, CoverLetterStrategyRequest
+from schemas.cover_letter_generation import (
+    CoverLetterGenerationRequest,
+    GeneratedCoverLetter,
+)
+from schemas.cover_letter_intelligence import (
+    CoverLetterEditRequest,
+    CoverLetterReviewRequest,
+    CoverLetterReviewResult,
+)
+from schemas.cover_letter_template import CoverLetterRenderRequest
+from services.cover_letter import (
+    build_cover_letter_render_payload,
+    build_cover_letter_context,
+    build_cover_letter_strategy,
+    edit_cover_letter,
+    generate_cover_letter_draft,
+    review_cover_letter,
+)
 
 router = APIRouter(prefix="/api")
 router.include_router(resume_manager_router)
@@ -665,9 +686,145 @@ async def api_render_unified_pdf(request: UnifiedRenderRequest):
         "render_hash": render_hash,
         "measurement_hash": measurement_hash,
         "status_message": status_msg,
-          "page_count": page_count,
-          "filename": artifact_filename
-      }
+        "page_count": page_count,
+        "filename": artifact_filename,
+    }
+
+@router.post("/cover-letter/context", response_model=CoverLetterContext)
+async def api_build_cover_letter_context(request: CoverLetterContextRequest):
+    """Phase 1 only: build truthful context; never generate cover-letter prose."""
+    return build_cover_letter_context(request)
+
+
+@router.post("/cover-letter/strategy", response_model=CoverLetterStrategy)
+async def api_build_cover_letter_strategy(request: CoverLetterStrategyRequest):
+    """Phase 2 only: build a validated writing plan; never generate prose."""
+    return build_cover_letter_strategy(request)
+
+
+@router.post("/cover-letter/generate", response_model=GeneratedCoverLetter)
+async def api_generate_cover_letter_draft(
+    request: CoverLetterGenerationRequest,
+    x_groq_key: Optional[str] = Header(None),
+):
+    """Phase 3 only: generate one first draft; no review, repair, chat, or export."""
+    from fastapi.concurrency import run_in_threadpool
+    try:
+        return await run_in_threadpool(
+            generate_cover_letter_draft, request, x_groq_key
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post("/cover-letter/review", response_model=CoverLetterReviewResult)
+async def api_review_cover_letter(
+    request: CoverLetterReviewRequest,
+    x_groq_key: Optional[str] = Header(None),
+):
+    """Automatically review and minimally repair the current generated letter."""
+    from fastapi.concurrency import run_in_threadpool
+    try:
+        return await run_in_threadpool(review_cover_letter, request, x_groq_key)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post("/cover-letter/edit/stream")
+async def api_edit_cover_letter_stream(
+    request: CoverLetterEditRequest,
+    x_groq_key: Optional[str] = Header(None),
+):
+    """Patch only requested paragraphs and stream the resulting current letter."""
+    from fastapi.concurrency import run_in_threadpool
+    try:
+        result = await run_in_threadpool(edit_cover_letter, request, x_groq_key)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+    def stream_result():
+        metadata = result.model_dump(mode="json", exclude={"after_content"})
+        yield json.dumps({"type": "metadata", "data": metadata}) + "\n"
+        content = result.after_content
+        for start in range(0, len(content), 18):
+            yield json.dumps({
+                "type": "content_delta",
+                "data": content[start:start + 18],
+            }) + "\n"
+        yield json.dumps({"type": "complete"}) + "\n"
+
+    return StreamingResponse(
+        stream_result(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/cover-letter/render")
+async def api_render_cover_letter(request: CoverLetterRenderRequest):
+    """Return the one PDF artifact shared by live preview and download."""
+    from app.playwright_pdf import render_cover_letter_artifact
+    from fastapi.concurrency import run_in_threadpool
+
+    payload = build_cover_letter_render_payload(request)
+    original_content = request.generated_cover_letter.content
+    if payload["generated_cover_letter"]["content"] != original_content:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Presentation rendering attempted to modify cover letter content.",
+        )
+    try:
+        pdf_bytes, page_count = await run_in_threadpool(
+            render_cover_letter_artifact,
+            json.dumps(payload),
+            payload["settings"]["paper_size"],
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Cover letter rendering failed: {exc}",
+        ) from exc
+
+    if (
+        request.settings.page_mode == "force_one_page"
+        and page_count > 1
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "This content cannot fit into one page without compromising "
+                "readability. Switch to AUTO."
+            ),
+        )
+
+    candidate_name = request.context.candidate.get("name") or "Candidate"
+    company_name = request.context.job.get("company") or "Company"
+    clean_name = re.sub(r"[^A-Za-z0-9_-]+", "_", str(candidate_name)).strip("_")
+    clean_company = re.sub(r"[^A-Za-z0-9_-]+", "_", str(company_name)).strip("_")
+    filename = f"{clean_name}_{clean_company}_Cover_Letter.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Access-Control-Expose-Headers": (
+                "Content-Disposition, X-Cover-Letter-Pages, "
+                "X-Cover-Letter-Template"
+            ),
+            "X-Cover-Letter-Pages": str(page_count),
+            "X-Cover-Letter-Template": payload["settings"]["selected_template"],
+        },
+    )
+
 
 @router.post("/cover-letter", response_model=CoverLetterResult)
 async def api_cover_letter(

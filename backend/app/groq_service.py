@@ -450,6 +450,10 @@ def generate_cover_letter(resume: ResumeStructure, job: JobAnalysis, api_key: Op
         ("system", """You are an expert career counselor and professional resume writer.
         Draft a highly tailored, compelling, and professional Cover Letter matching the candidate's experience, projects, and skills to the target job description.
         Ensure the tone is warm, professional, confident, and persuasive.
+        When cover_letter_context is present in the job details, obey its validated
+        recipient, greeting, tone, length, motivation, and emphasis preferences.
+        Use only its selected_evidence and factual resume content for candidate
+        claims. Never invent a recruiter, contact detail, metric, project, or result.
         
         Extract/generate details into the CoverLetterResult structured schema:
         - recipient_name: E.g., "Hiring Manager" (or name if found in job context)
