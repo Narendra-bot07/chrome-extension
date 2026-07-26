@@ -18,6 +18,7 @@ from services.resume.composition import (
 )
 from services.resume.preservation import inventory_resume
 from services.resume.composition_engine import plan_resume_composition
+from services.resume.composition_agent import compose_resume_layout
 
 logger = logging.getLogger(__name__)
 
@@ -355,6 +356,11 @@ async def export_resume_pdf(
         plan, changed = repair_composition(content, plan)
         _record(state, RepairType.REPAIRABLE_COMPOSITION_ERROR, composition_report.issues, "rebuild_valid_references", changed, content.content, [], "retry")
 
+    agent_plan = compose_resume_layout(
+        content.content,
+        template_name=template_name,
+        requested_section_order=plan.section_order,
+    )
     composition_decision = plan_resume_composition(
         content.content, plan.section_order
     )
@@ -362,19 +368,20 @@ async def export_resume_pdf(
     final = FinalResumeDocument(
         content=content,
         composition_plan=plan,
-        rendering_configuration=composition_decision.model_dump(mode="json"),
+        rendering_configuration={
+            **composition_decision.model_dump(mode="json"),
+            "composition_agent_plan": agent_plan.model_dump(mode="json"),
+        },
     )
     logger.info(
         "[RESUME-COMPOSITION] request_id=%s template=%s estimated_pages=%s "
-        "content_units=%s spacing=%s target_fill=%s balance_target=%s passes=%s",
+        "density=%s recovered_space=%s valid=%s",
         request_id,
         template_name,
-        composition_decision.estimated_page_count,
-        composition_decision.total_content_units,
-        composition_decision.spacing_profile,
-        composition_decision.target_page_fill,
-        composition_decision.page_balance_target,
-        composition_decision.optimization_passes,
+        agent_plan.page_count,
+        agent_plan.density.value,
+        agent_plan.recovered_space,
+        agent_plan.validation_status.valid,
     )
     for attempt in range(state.max_repair_attempts["rendering"] + 1):
         state.repair_attempt = attempt
