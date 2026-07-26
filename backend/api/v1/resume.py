@@ -531,3 +531,177 @@ async def recover_resume_source_details(
         len(recovered.get("certifications") or []),
     )
     return record
+
+
+# =============================================================================
+# RESUME VERSIONING & USAGE INTELLIGENCE ENDPOINTS
+# =============================================================================
+
+@router.get("/{resume_id}/versions")
+async def list_resume_versions(
+    resume_id: str,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository)
+):
+    return repo.list_versions(resume_id, user["id"])
+
+
+@router.post("/{resume_id}/versions")
+async def create_resume_version(
+    resume_id: str,
+    payload: Dict[str, Any],
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository)
+):
+    try:
+        ver = repo.create_version(
+            user_id=user["id"],
+            resume_id=resume_id,
+            version_name=payload.get("version_name"),
+            version_type=payload.get("version_type", "tailored"),
+            content=payload.get("content"),
+            parent_version_id=payload.get("parent_version_id"),
+            jd_id=payload.get("jd_id"),
+            job_id=payload.get("job_id"),
+            ats_score=payload.get("ats_score"),
+            resume_match_score=payload.get("resume_match_score"),
+            change_summary_json=payload.get("change_summary_json"),
+            changes_summary=payload.get("changes_summary"),
+            file_url=payload.get("file_url"),
+            is_current=payload.get("is_current", True),
+            is_final=payload.get("is_final", False),
+            ats_engine_version=payload.get("ats_engine_version", "v2.4"),
+            match_engine_version=payload.get("match_engine_version", "v2.4"),
+            resume_content_hash=payload.get("resume_content_hash"),
+            jd_content_hash=payload.get("jd_content_hash"),
+        )
+        return ver
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to create version: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create version.")
+
+
+@router.post("/{resume_id}/versions/{version_id}/set-current")
+async def set_current_resume_version(
+    resume_id: str,
+    version_id: str,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository)
+):
+    ver = repo.set_current_version(resume_id, version_id, user["id"])
+    if not ver:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found.")
+    return ver
+
+
+@router.put("/{resume_id}/versions/{version_id}")
+async def update_resume_version(
+    resume_id: str,
+    version_id: str,
+    payload: Dict[str, Any],
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository)
+):
+    ver = repo.update_version(
+        resume_id=resume_id,
+        version_id=version_id,
+        user_id=user["id"],
+        version_name=payload.get("version_name"),
+        version_type=payload.get("version_type")
+    )
+    if not ver:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found.")
+    return ver
+
+
+@router.post("/{resume_id}/versions/{version_id}/duplicate")
+async def duplicate_resume_version(
+    resume_id: str,
+    version_id: str,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository)
+):
+    ver = repo.duplicate_version(resume_id, version_id, user["id"])
+    if not ver:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source version not found.")
+    return ver
+
+
+@router.post("/{resume_id}/versions/{version_id}/restore")
+async def restore_resume_version(
+    resume_id: str,
+    version_id: str,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository)
+):
+    ver = repo.restore_version(resume_id, version_id, user["id"])
+    if not ver:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source version not found.")
+    return ver
+
+
+@router.delete("/{resume_id}/versions/{version_id}")
+async def delete_resume_version(
+    resume_id: str,
+    version_id: str,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository)
+):
+    result = repo.delete_version(resume_id, version_id, user["id"])
+    if not result.get("success"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.get("error", "Deletion failed."))
+    return result
+
+
+@router.post("/{resume_id}/versions/compare")
+async def compare_resume_versions(
+    resume_id: str,
+    payload: Dict[str, Any],
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository)
+):
+    version_a_id = payload.get("version_a_id")
+    version_b_id = payload.get("version_b_id")
+    if not version_a_id or not version_b_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Both version_a_id and version_b_id are required.")
+    try:
+        diff = repo.compare_versions(version_a_id, version_b_id, user["id"])
+        return diff
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"Version comparison failed: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to compare versions.")
+
+
+@router.post("/{resume_id}/usage-event")
+async def record_resume_usage_event(
+    resume_id: str,
+    payload: Dict[str, Any],
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository)
+):
+    try:
+        event = repo.record_usage_event(
+            user_id=user["id"],
+            resume_id=resume_id,
+            version_id=payload.get("version_id"),
+            event_type=payload.get("event_type", "jd_comparison"),
+            jd_id=payload.get("jd_id"),
+            job_id=payload.get("job_id"),
+            ats_score=payload.get("ats_score"),
+            resume_match_score=payload.get("resume_match_score"),
+            ats_engine_version=payload.get("ats_engine_version", "v2.4"),
+            match_engine_version=payload.get("match_engine_version", "v2.4"),
+            resume_content_hash=payload.get("resume_content_hash"),
+            jd_content_hash=payload.get("jd_content_hash"),
+        )
+        return event
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"Usage event recording failed: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to record usage event.")
+

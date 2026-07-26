@@ -2,6 +2,12 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { getTemplateComponent } from '../../templates';
 import { isSeniorProfile, compressResumeData } from '../../utils/resumeCompression';
+import {
+  A4_PAGE,
+  buildMeasuredCompositionPlan,
+  measureResumeElement,
+  waitForRenderableFonts
+} from '../../utils/finalCompositionPlan';
 
 export default function PrintLayout() {
   const [originalResumeData, setOriginalResumeData] = useState(null);
@@ -53,9 +59,10 @@ export default function PrintLayout() {
     if (!activeResumeData || !containerRef.current || fittingComplete) return;
 
     // Give DOM a tiny moment to render the current compression level
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       const el = containerRef.current.firstElementChild;
       if (!el) return;
+      await waitForRenderableFonts(document);
 
       // Determine page format and dimensions dynamically
       const format = searchParams.get('format') || 'letter';
@@ -83,6 +90,23 @@ export default function PrintLayout() {
 
       if (currentHeight <= MAX_HEIGHT) {
         // Fits perfectly!
+        const measurement = measureResumeElement(el);
+        const finalPlan = buildMeasuredCompositionPlan({
+          ...measurement,
+          pageSize: isA4 ? A4_PAGE : {
+            ...A4_PAGE, size: 'Letter', widthPx: 816, heightPx: 1056
+          },
+          layoutLevel: activeResumeData.layout_level ?? Math.max(0, 5 - compressionLevel),
+          templateName,
+          preference: originalResumeData?._page_preference || 'auto',
+          measurementFlags: measurement,
+          optimizationActions: Array.from(
+            { length: compressionLevel },
+            (_, index) => ['remove_empty_spacing', 'reduce_section_spacing', 'reduce_bullet_spacing'][index]
+              || `safe_compression_${index + 1}`
+          )
+        });
+        window.__FINAL_COMPOSITION_PLAN__ = finalPlan;
         setFittingComplete(true);
       } else {
         // Overflowing! Check if we should compress further
@@ -95,39 +119,32 @@ export default function PrintLayout() {
         } else {
           // The one-page target was exhausted. Keep the real page width and
           // allow Chromium to paginate the complete resume onto page 2+.
-          // For a two-page document, choose a real section boundary that
-          // balances both pages and prevents a tiny orphaned continuation.
-          if (currentHeight <= MAX_HEIGHT * 2) {
-            const resumeLayout = (el as HTMLElement).dataset.resumeLayout
-              || (el.querySelector('[data-resume-layout]') as HTMLElement | null)?.dataset.resumeLayout
-              || 'single-column';
-            const sections = resumeLayout === 'single-column'
-              ? Array.from(el.querySelectorAll('[data-section]')) as HTMLElement[]
-              : [];
-            const candidates = sections
-              .map(section => ({ section, offset: section.offsetTop }))
-              .filter(({ offset }) =>
-                offset > MAX_HEIGHT * 0.55 &&
-                offset <= MAX_HEIGHT &&
-                currentHeight - offset <= MAX_HEIGHT &&
-                currentHeight - offset >= MAX_HEIGHT * 0.35
-              );
-            if (candidates.length > 0) {
-              const balancedTarget = currentHeight / 2;
-              const selected = candidates.reduce((best, candidate) =>
-                Math.abs(candidate.offset - balancedTarget) < Math.abs(best.offset - balancedTarget)
-                  ? candidate
-                  : best
-              );
-              selected.section.style.breakBefore = 'page';
-              selected.section.style.pageBreakBefore = 'always';
-              selected.section.dataset.compositionBreak = 'balanced-page-2';
-              el.dataset.pageBalanceScore = String(
-                Math.min(selected.offset, currentHeight - selected.offset)
-                / Math.max(selected.offset, currentHeight - selected.offset)
-              );
+          const measurement = measureResumeElement(el);
+          const finalPlan = buildMeasuredCompositionPlan({
+            ...measurement,
+            pageSize: isA4 ? A4_PAGE : {
+              ...A4_PAGE, size: 'Letter', widthPx: 816, heightPx: 1056
+            },
+            layoutLevel: activeResumeData.layout_level ?? Math.max(0, 5 - compressionLevel),
+            templateName,
+            preference: originalResumeData?._page_preference || 'auto',
+            measurementFlags: measurement,
+            optimizationActions: Array.from(
+              { length: compressionLevel },
+              (_, index) => ['remove_empty_spacing', 'reduce_section_spacing', 'reduce_bullet_spacing'][index]
+                || `safe_compression_${index + 1}`
+            )
+          });
+          const plannedBreak = finalPlan.page_breaks[0];
+          if (plannedBreak) {
+            const breakNode = el.querySelector(`[data-section="${plannedBreak}"]`) as HTMLElement | null;
+            if (breakNode) {
+              breakNode.style.breakBefore = 'page';
+              breakNode.style.pageBreakBefore = 'always';
+              breakNode.dataset.compositionBreak = 'final-plan';
             }
           }
+          window.__FINAL_COMPOSITION_PLAN__ = finalPlan;
           setFittingComplete(true);
         }
       }
@@ -156,7 +173,11 @@ export default function PrintLayout() {
           : Math.max(0, 5 - compressionLevel)}
       />
       {/* Invisible div to signal Playwright that Auto-Fit is done */}
-      {fittingComplete && <div id="resume-print-ready" style={{ display: 'none' }}></div>}
+      {fittingComplete && <div
+        id="resume-print-ready"
+        data-composition-plan-hash={window.__FINAL_COMPOSITION_PLAN__?.composition_plan_hash || ''}
+        style={{ display: 'none' }}
+      ></div>}
     </div>
   );
 }

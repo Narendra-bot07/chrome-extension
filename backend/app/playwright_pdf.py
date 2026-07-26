@@ -1,6 +1,8 @@
 import os
+from io import BytesIO
 from typing import Optional
 from urllib.parse import urlencode
+from pypdf import PdfReader
 from playwright.sync_api import sync_playwright
 
 PDF_RENDERER_URL = (
@@ -183,62 +185,19 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
             if not val_result.get("valid"):
                 raise ValueError(f"Rendering Validation Failed: {val_result.get('error')}")
             
+            final_composition_plan = page.evaluate(
+                "() => window.__FINAL_COMPOSITION_PLAN__ || null"
+            )
+            if not final_composition_plan:
+                raise ValueError("The renderer did not produce a final composition plan.")
+            validation_report = final_composition_plan.get("validation_report") or {}
+            if not validation_report.get("valid"):
+                raise ValueError("The measured resume composition did not pass validation.")
+
             # Get the exact height of the resume container in pixels to enforce exact A4 scaling
             resume_height = page.evaluate("document.querySelector('#resume-print-container') ? document.querySelector('#resume-print-container').offsetHeight : 0")
             print(f"Playwright measured resume height: {resume_height}px")
 
-            # Print layout can differ slightly from the screen measurement.
-            # If the final DOM is a two-page document, insert one intentional
-            # break at the closest safe section boundary to avoid an orphaned
-            # second page.
-            if 1130 < resume_height <= 2260:
-                balance_result = page.evaluate(
-                    """
-                    () => {
-                        const root = document.querySelector('#resume-print-container');
-                        if (!root) return null;
-                        const layoutRoot = root.querySelector('[data-resume-layout]');
-                        const layout = layoutRoot?.dataset.resumeLayout || 'single-column';
-                        // Columns paginate independently. A global break chosen
-                        // from one column can push a perfectly fitting section
-                        // out of another column and create a mostly blank page.
-                        if (layout !== 'single-column') {
-                          return { skipped: true, reason: 'column-aware-pagination', layout };
-                        }
-                        const rootTop = root.getBoundingClientRect().top;
-                        const total = root.scrollHeight;
-                        const maxPage = 1122;
-                        const candidates = Array.from(root.querySelectorAll('[data-section]'))
-                          .map(section => ({
-                            section,
-                            offset: section.getBoundingClientRect().top - rootTop
-                          }))
-                          .filter(item =>
-                            item.offset > 180 &&
-                            item.offset < maxPage &&
-                            total - item.offset < maxPage
-                          );
-                        if (!candidates.length) return null;
-                        const target = total / 2;
-                        candidates.sort((a, b) =>
-                          Math.abs(a.offset - target) - Math.abs(b.offset - target)
-                        );
-                        const selected = candidates[0];
-                        selected.section.style.breakBefore = 'page';
-                        selected.section.style.pageBreakBefore = 'always';
-                        selected.section.dataset.compositionBreak = 'balanced-page-2';
-                        return {
-                          section: selected.section.dataset.section,
-                          offset: selected.offset,
-                          total
-                        };
-                    }
-                    """
-                )
-                if balance_result and balance_result.get("section"):
-                    print(f"Playwright balanced two-page resume: {balance_result}")
-                    page.wait_for_timeout(100)
-            
             pdf_args = {
                 "format": "A4",
                 "print_background": True,
@@ -248,6 +207,13 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
             # Never force page 1: a rounding or late font-layout change can push
             # content onto page 2, and page_ranges="1" silently truncates it.
             pdf_bytes = page.pdf(**pdf_args)
+            pdf_page_count = len(PdfReader(BytesIO(pdf_bytes)).pages)
+            planned_page_count = int(final_composition_plan.get("page_count") or 0)
+            if pdf_page_count != planned_page_count:
+                raise ValueError(
+                    "Preview and PDF pagination differed; the export was blocked "
+                    "so it can be recomposed safely."
+                )
             
             browser.close()
             return pdf_bytes

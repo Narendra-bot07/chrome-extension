@@ -776,6 +776,188 @@ export function AppProvider({ children }) {
     }
   };
 
+  const recordResumeUsage = async (resumeId, versionId, eventType, extra = {}) => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token || !resumeId) return null;
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/resumes/${resumeId}/usage-event`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          version_id: versionId,
+          event_type: eventType,
+          ...extra
+        })
+      });
+      if (res.ok) {
+        fetchResumesList();
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn("Failed to record resume usage event", e);
+    }
+    return null;
+  };
+
+  const fetchResumeVersions = async (resumeId) => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token || !resumeId) return [];
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/resumes/${resumeId}/versions`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error("Failed to fetch resume versions", e);
+    }
+    return [];
+  };
+
+  const createResumeVersion = async (resumeId, versionPayload) => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token || !resumeId) return null;
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/resumes/${resumeId}/versions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify(versionPayload)
+      });
+      if (res.ok) {
+        const created = await res.json();
+        fetchResumesList();
+        return created;
+      }
+    } catch (e) {
+      console.error("Failed to create resume version", e);
+    }
+    return null;
+  };
+
+  const setCurrentResumeVersion = async (resumeId, versionId) => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token || !resumeId || !versionId) return null;
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/resumes/${resumeId}/versions/${versionId}/set-current`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const ver = await res.json();
+        fetchResumesList();
+        return ver;
+      }
+    } catch (e) {
+      console.error("Failed to set current version", e);
+    }
+    return null;
+  };
+
+  const updateResumeVersion = async (resumeId, versionId, payload) => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token || !resumeId || !versionId) return null;
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/resumes/${resumeId}/versions/${versionId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        fetchResumesList();
+        return updated;
+      }
+    } catch (e) {
+      console.error("Failed to update version", e);
+    }
+    return null;
+  };
+
+  const duplicateResumeVersion = async (resumeId, versionId) => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token || !resumeId || !versionId) return null;
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/resumes/${resumeId}/versions/${versionId}/duplicate`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const dup = await res.json();
+        fetchResumesList();
+        return dup;
+      }
+    } catch (e) {
+      console.error("Failed to duplicate version", e);
+    }
+    return null;
+  };
+
+  const restoreResumeVersion = async (resumeId, versionId) => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token || !resumeId || !versionId) return null;
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/resumes/${resumeId}/versions/${versionId}/restore`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const restored = await res.json();
+        fetchResumesList();
+        return restored;
+      }
+    } catch (e) {
+      console.error("Failed to restore version", e);
+    }
+    return null;
+  };
+
+  const deleteResumeVersion = async (resumeId, versionId) => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token || !resumeId || !versionId) return { success: false, error: "Missing authentication or parameters." };
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/resumes/${resumeId}/versions/${versionId}`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        fetchResumesList();
+        return data;
+      }
+      return { success: false, error: data.detail || "Failed to delete version." };
+    } catch (e) {
+      console.error("Failed to delete version", e);
+      return { success: false, error: e.message };
+    }
+  };
+
+  const compareResumeVersions = async (resumeId, versionAId, versionBId) => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token || !resumeId || !versionAId || !versionBId) return null;
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/resumes/${resumeId}/versions/compare`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ version_a_id: versionAId, version_b_id: versionBId })
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.error("Failed to compare versions", e);
+    }
+    return null;
+  };
+
   const ensureExtractionProfileReady = () => {
     if (loadingAuth || loadingResume || loadingPreferences) return false;
 
@@ -2257,6 +2439,15 @@ export function AppProvider({ children }) {
       refreshActiveResumeFromBackend,
       handleDeleteResume,
       handleActivateResume,
+      recordResumeUsage,
+      fetchResumeVersions,
+      createResumeVersion,
+      setCurrentResumeVersion,
+      updateResumeVersion,
+      duplicateResumeVersion,
+      restoreResumeVersion,
+      deleteResumeVersion,
+      compareResumeVersions,
       handleScanPage,
       handleExtractJob,
       handleCompareActiveResumeToJob,

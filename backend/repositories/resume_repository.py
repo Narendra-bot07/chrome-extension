@@ -36,6 +36,77 @@ class ResumeRepository:
         )
         return normalized
 
+    def _enrich_resume_record(self, record: Dict[str, Any], cur) -> Dict[str, Any]:
+        """Enrich root resume dict with current version info, scores, and versions count."""
+        resume_id = record["id"]
+
+        # Ensure default original version exists
+        cur.execute("""
+            SELECT id FROM public.resume_versions
+            WHERE resume_id = %s AND deleted_at IS NULL
+            LIMIT 1
+        """, (resume_id,))
+        if not cur.fetchone():
+            cur.execute("""
+                INSERT INTO public.resume_versions (
+                    resume_id, version_number, version_name, version_type, source_resume_id,
+                    content, changes_summary, change_summary_json, is_current, created_by, created_at
+                )
+                VALUES (%s, 1, 'v1 Original', 'original', %s, %s,
+                        'Original uploaded resume', '{"summary":"Original uploaded resume"}'::jsonb,
+                        TRUE, %s, NOW())
+                RETURNING id
+            """, (resume_id, resume_id, json.dumps(record.get("parsed_content") or {}), record.get("user_id")))
+            ver_row = cur.fetchone()
+            if ver_row:
+                cur.execute("UPDATE public.resumes SET active_version_id = %s WHERE id = %s", (ver_row["id"], resume_id))
+
+        # Fetch versions count
+        cur.execute("""
+            SELECT COUNT(*) AS v_count
+            FROM public.resume_versions
+            WHERE resume_id = %s AND deleted_at IS NULL
+        """, (resume_id,))
+        count_row = cur.fetchone()
+        record["versions_count"] = count_row["v_count"] if count_row else 1
+
+        # Fetch current version
+        cur.execute("""
+            SELECT *
+            FROM public.resume_versions
+            WHERE resume_id = %s AND deleted_at IS NULL
+            ORDER BY is_current DESC, version_number DESC
+            LIMIT 1
+        """, (resume_id,))
+        current_ver = cur.fetchone()
+        if current_ver:
+            record["current_version"] = dict(current_ver)
+            record["active_version_id"] = current_ver["id"]
+            record["latest_ats_score"] = current_ver.get("ats_score")
+            record["latest_match_score"] = current_ver.get("resume_match_score")
+        else:
+            record["current_version"] = None
+            record["latest_ats_score"] = None
+            record["latest_match_score"] = None
+
+        # Fetch latest scores from usage events if version scores are missing
+        if record["latest_ats_score"] is None or record["latest_match_score"] is None:
+            cur.execute("""
+                SELECT ats_score, resume_match_score
+                FROM public.resume_usage_events
+                WHERE resume_id = %s AND (ats_score IS NOT NULL OR resume_match_score IS NOT NULL)
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (resume_id,))
+            usage_score = cur.fetchone()
+            if usage_score:
+                if record["latest_ats_score"] is None:
+                    record["latest_ats_score"] = usage_score.get("ats_score")
+                if record["latest_match_score"] is None:
+                    record["latest_match_score"] = usage_score.get("resume_match_score")
+
+        return record
+
     def create(
         self,
         user_id: str,
@@ -76,9 +147,6 @@ class ResumeRepository:
             )
             record = cur.fetchone()
             
-            # The optional profile counter must never roll back the durable
-            # resume insert. PostgreSQL keeps a transaction aborted after any
-            # statement error, so isolate this call behind a savepoint.
             cur.execute("SAVEPOINT resume_count_increment")
             try:
                 cur.execute("SELECT public.increment_resume_count(%s)", (user_id,))
@@ -86,46 +154,58 @@ class ResumeRepository:
             except Exception as exc:
                 cur.execute("ROLLBACK TO SAVEPOINT resume_count_increment")
                 cur.execute("RELEASE SAVEPOINT resume_count_increment")
-                logger.warning(
-                    "[RESUME][BACKEND] Optional resume counter update skipped "
-                    "user_id=%s error=%s",
-                    user_id,
-                    str(exc),
-                )
+
+            # Create initial v1 Original version
+            if record:
+                cur.execute("""
+                    INSERT INTO public.resume_versions (
+                        resume_id, version_number, version_name, version_type, source_resume_id,
+                        content, changes_summary, change_summary_json, is_current, created_by, created_at
+                    )
+                    VALUES (%s, 1, 'v1 Original', 'original', %s, %s,
+                            'Original uploaded resume', '{"summary":"Original uploaded resume"}'::jsonb,
+                            TRUE, %s, NOW())
+                    RETURNING id
+                """, (record["id"], record["id"], json.dumps(parsed_content), user_id))
+                ver_row = cur.fetchone()
+                if ver_row:
+                    cur.execute("UPDATE public.resumes SET active_version_id = %s WHERE id = %s", (ver_row["id"], record["id"]))
+
             self.conn.commit()
             created = self._with_metadata_defaults(record) or {}
-            logger.info(
-                "[RESUME][BACKEND] Resume database record committed "
-                "user_id=%s resume_id=%s file_name=%s active=%s",
-                user_id,
-                created.get("id"),
-                created.get("file_name"),
-                created.get("is_active"),
-            )
+            if created.get("id"):
+                with self.conn.cursor(cursor_factory=RealDictCursor) as cur2:
+                    created = self._enrich_resume_record(created, cur2)
             return created
 
     def get_by_id(self, resume_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         query = "SELECT * FROM public.resumes WHERE id = %s AND user_id = %s AND deleted_at IS NULL"
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (resume_id, user_id))
-            return self._with_metadata_defaults(cur.fetchone())
+            record = self._with_metadata_defaults(cur.fetchone())
+            if record:
+                record = self._enrich_resume_record(record, cur)
+            return record
 
     def get_selected_snapshot(
         self, resume_id: str, user_id: str
     ) -> Optional[Dict[str, Any]]:
-        """Load exactly one selected resume; never enumerates sibling resumes."""
         query = """
             SELECT id, user_id, file_path, file_name, file_size, file_type,
                    parsed_content, metadata, created_at, updated_at, deleted_at,
                    is_active, resume_version, source_fingerprint,
-                   fingerprint_algorithm, fingerprinted_at
+                   fingerprint_algorithm, fingerprinted_at, active_version_id,
+                   times_used, last_used_at
             FROM public.resumes
             WHERE id = %s AND user_id = %s AND deleted_at IS NULL
             LIMIT 1
         """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (resume_id, user_id))
-            return self._with_metadata_defaults(cur.fetchone())
+            record = self._with_metadata_defaults(cur.fetchone())
+            if record:
+                record = self._enrich_resume_record(record, cur)
+            return record
 
     def set_source_fingerprint_if_missing(
         self,
@@ -133,7 +213,6 @@ class ResumeRepository:
         user_id: str,
         fingerprint: str,
     ) -> Optional[Dict[str, Any]]:
-        """Atomically initialize, but never replace, a selected source fingerprint."""
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
@@ -161,10 +240,13 @@ class ResumeRepository:
         """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (user_id,))
-            return [self._with_metadata_defaults(record) for record in cur.fetchall()]
+            records = [self._with_metadata_defaults(record) for record in cur.fetchall()]
+            enriched = []
+            for r in records:
+                enriched.append(self._enrich_resume_record(r, cur))
+            return enriched
 
     def all_file_paths(self, user_id: str) -> set[str]:
-        """Return all known paths, including soft-deleted rows, for safe recovery."""
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT file_path FROM public.resumes WHERE user_id = %s",
@@ -183,7 +265,6 @@ class ResumeRepository:
         uploaded_at: datetime,
         source_fingerprint: str | None = None,
     ) -> Optional[Dict[str, Any]]:
-        """Register one orphaned local file without disturbing active state."""
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 "SELECT id FROM public.resumes WHERE user_id = %s AND file_path = %s",
@@ -217,6 +298,20 @@ class ResumeRepository:
                 ),
             )
             record = cur.fetchone()
+            if record:
+                cur.execute("""
+                    INSERT INTO public.resume_versions (
+                        resume_id, version_number, version_name, version_type, source_resume_id,
+                        content, changes_summary, change_summary_json, is_current, created_by, created_at
+                    )
+                    VALUES (%s, 1, 'v1 Original', 'original', %s, %s,
+                            'Original uploaded resume', '{"summary":"Original uploaded resume"}'::jsonb,
+                            TRUE, %s, %s)
+                    RETURNING id
+                """, (record["id"], record["id"], json.dumps(parsed_content), user_id, uploaded_at))
+                ver_row = cur.fetchone()
+                if ver_row:
+                    cur.execute("UPDATE public.resumes SET active_version_id = %s WHERE id = %s", (ver_row["id"], record["id"]))
             self.conn.commit()
             return self._with_metadata_defaults(record)
 
@@ -230,7 +325,10 @@ class ResumeRepository:
         """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (user_id,))
-            return self._with_metadata_defaults(cur.fetchone())
+            record = self._with_metadata_defaults(cur.fetchone())
+            if record:
+                record = self._enrich_resume_record(record, cur)
+            return record
 
     def activate(self, resume_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -255,7 +353,10 @@ class ResumeRepository:
             )
             record = cur.fetchone()
             self.conn.commit()
-            return self._with_metadata_defaults(record)
+            if record:
+                record = self._with_metadata_defaults(record)
+                record = self._enrich_resume_record(record, cur)
+            return record
 
     def soft_delete(self, resume_id: str, user_id: str) -> bool:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -307,7 +408,6 @@ class ResumeRepository:
             return bool(cur.fetchone())
 
     def update_layout(self, resume_id: str, user_id: str, layout: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Persist layout beside resume content so reads and exports restore one model."""
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
@@ -335,7 +435,7 @@ class ResumeRepository:
                 times_used = COALESCE(times_used, 0) + 1,
                 tailor_count = COALESCE(tailor_count, 0) + 1,
                 updated_at = NOW()
-            WHERE id = %s AND user_id = %s AND deleted_at IS NULL AND is_active = TRUE
+            WHERE id = %s AND user_id = %s AND deleted_at IS NULL
             RETURNING *,
                       COALESCE(times_used, tailor_count, 0) AS times_used,
                       COALESCE(tailor_count, times_used, 0) AS tailor_count
@@ -349,3 +449,447 @@ class ResumeRepository:
             except Exception:
                 self.conn.rollback()
                 return self.get_by_id(resume_id, user_id)
+
+    # =========================================================================
+    # RESUME VERSIONING & USAGE INTELLIGENCE METHODS
+    # =========================================================================
+
+    def list_versions(self, resume_id: str, user_id: str) -> List[Dict[str, Any]]:
+        query = """
+            SELECT rv.*
+            FROM public.resume_versions rv
+            JOIN public.resumes r ON r.id = rv.resume_id
+            WHERE rv.resume_id = %s AND r.user_id = %s AND rv.deleted_at IS NULL AND r.deleted_at IS NULL
+            ORDER BY rv.version_number DESC, rv.created_at DESC
+        """
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query, (resume_id, user_id))
+            return [dict(row) for row in cur.fetchall()]
+
+    def get_version(self, resume_id: str, version_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        query = """
+            SELECT rv.*
+            FROM public.resume_versions rv
+            JOIN public.resumes r ON r.id = rv.resume_id
+            WHERE rv.id = %s AND rv.resume_id = %s AND r.user_id = %s AND rv.deleted_at IS NULL AND r.deleted_at IS NULL
+        """
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query, (version_id, resume_id, user_id))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def create_version(
+        self,
+        user_id: str,
+        resume_id: str,
+        version_name: str,
+        version_type: str = "tailored",
+        content: Dict[str, Any] = None,
+        parent_version_id: str | None = None,
+        jd_id: str | None = None,
+        job_id: str | None = None,
+        ats_score: float | None = None,
+        resume_match_score: float | None = None,
+        change_summary_json: Dict[str, Any] = None,
+        changes_summary: str | None = None,
+        file_url: str | None = None,
+        is_current: bool = True,
+        is_final: bool = False,
+        ats_engine_version: str | None = "v2.4",
+        match_engine_version: str | None = "v2.4",
+        resume_content_hash: str | None = None,
+        jd_content_hash: str | None = None,
+    ) -> Dict[str, Any]:
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Verify ownership
+            cur.execute("SELECT id FROM public.resumes WHERE id = %s AND user_id = %s AND deleted_at IS NULL", (resume_id, user_id))
+            if not cur.fetchone():
+                raise ValueError("Resume not found or permission denied.")
+
+            # Calculate next version number
+            cur.execute("""
+                SELECT COALESCE(MAX(version_number), 0) + 1 AS next_ver
+                FROM public.resume_versions
+                WHERE resume_id = %s AND deleted_at IS NULL
+            """, (resume_id,))
+            next_ver = cur.fetchone()["next_ver"]
+
+            ver_name = version_name or f"v{next_ver} {version_type.replace('_', ' ').title()}"
+
+            if is_current:
+                cur.execute("UPDATE public.resume_versions SET is_current = FALSE WHERE resume_id = %s", (resume_id,))
+
+            query = """
+                INSERT INTO public.resume_versions (
+                    resume_id, parent_version_id, version_number, version_name, version_type,
+                    source_resume_id, jd_id, job_id, ats_score, resume_match_score,
+                    change_summary_json, changes_summary, content, file_url, is_current,
+                    is_final, created_by, ats_engine_version, match_engine_version,
+                    resume_content_hash, jd_content_hash, analysis_timestamp, created_at
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s, %s, CASE WHEN %s IS NOT NULL OR %s IS NOT NULL THEN NOW() ELSE NULL END, NOW()
+                )
+                RETURNING *
+            """
+            cur.execute(
+                query,
+                (
+                    resume_id, parent_version_id, next_ver, ver_name, version_type,
+                    resume_id, jd_id, job_id, ats_score, resume_match_score,
+                    json.dumps(change_summary_json or {}), changes_summary or "", json.dumps(content or {}),
+                    file_url, is_current, is_final, user_id,
+                    ats_engine_version, match_engine_version, resume_content_hash, jd_content_hash,
+                    ats_score, resume_match_score
+                )
+            )
+            new_version = cur.fetchone()
+
+            if is_current and new_version:
+                cur.execute("UPDATE public.resumes SET active_version_id = %s WHERE id = %s", (new_version["id"], resume_id))
+
+            self.conn.commit()
+            return dict(new_version)
+
+    def set_current_version(self, resume_id: str, version_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT rv.id
+                FROM public.resume_versions rv
+                JOIN public.resumes r ON r.id = rv.resume_id
+                WHERE rv.id = %s AND rv.resume_id = %s AND r.user_id = %s AND rv.deleted_at IS NULL
+            """, (version_id, resume_id, user_id))
+            if not cur.fetchone():
+                return None
+
+            cur.execute("UPDATE public.resume_versions SET is_current = FALSE WHERE resume_id = %s", (resume_id,))
+            cur.execute("""
+                UPDATE public.resume_versions
+                SET is_current = TRUE, updated_at = NOW()
+                WHERE id = %s
+                RETURNING *
+            """, (version_id,))
+            updated_ver = cur.fetchone()
+
+            cur.execute("UPDATE public.resumes SET active_version_id = %s WHERE id = %s", (version_id, resume_id))
+            self.conn.commit()
+            return dict(updated_ver) if updated_ver else None
+
+    def update_version(
+        self,
+        resume_id: str,
+        version_id: str,
+        user_id: str,
+        version_name: str | None = None,
+        version_type: str | None = None,
+    ) -> Optional[Dict[str, Any]]:
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT rv.id
+                FROM public.resume_versions rv
+                JOIN public.resumes r ON r.id = rv.resume_id
+                WHERE rv.id = %s AND rv.resume_id = %s AND r.user_id = %s AND rv.deleted_at IS NULL
+            """, (version_id, resume_id, user_id))
+            if not cur.fetchone():
+                return None
+
+            updates = []
+            params = []
+            if version_name is not None:
+                updates.append("version_name = %s")
+                params.append(version_name)
+            if version_type is not None:
+                updates.append("version_type = %s")
+                params.append(version_type)
+
+            if not updates:
+                return self.get_version(resume_id, version_id, user_id)
+
+            updates.append("updated_at = NOW()")
+            params.extend([version_id, resume_id])
+            query = f"UPDATE public.resume_versions SET {', '.join(updates)} WHERE id = %s AND resume_id = %s RETURNING *"
+            cur.execute(query, tuple(params))
+            updated_ver = cur.fetchone()
+            self.conn.commit()
+            return dict(updated_ver) if updated_ver else None
+
+    def duplicate_version(self, resume_id: str, version_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        source = self.get_version(resume_id, version_id, user_id)
+        if not source:
+            return None
+
+        copy_name = f"{source['version_name'] or 'Version'} (Copy)"
+        return self.create_version(
+            user_id=user_id,
+            resume_id=resume_id,
+            version_name=copy_name,
+            version_type=source.get("version_type") or "manual_edit",
+            content=source.get("content") or {},
+            parent_version_id=version_id,
+            jd_id=source.get("jd_id"),
+            job_id=source.get("job_id"),
+            ats_score=source.get("ats_score"),
+            resume_match_score=source.get("resume_match_score"),
+            change_summary_json={"summary": f"Duplicated from v{source.get('version_number')}"},
+            changes_summary=f"Duplicated from v{source.get('version_number')}",
+            file_url=source.get("file_url"),
+            is_current=False
+        )
+
+    def restore_version(self, resume_id: str, version_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        source = self.get_version(resume_id, version_id, user_id)
+        if not source:
+            return None
+
+        restore_name = f"v{source['version_number']} Restored"
+        restored = self.create_version(
+            user_id=user_id,
+            resume_id=resume_id,
+            version_name=restore_name,
+            version_type="restored",
+            content=source.get("content") or {},
+            parent_version_id=version_id,
+            jd_id=source.get("jd_id"),
+            job_id=source.get("job_id"),
+            ats_score=source.get("ats_score"),
+            resume_match_score=source.get("resume_match_score"),
+            change_summary_json={"summary": f"Restored content from v{source.get('version_number')}"},
+            changes_summary=f"Restored content from v{source.get('version_number')}",
+            file_url=source.get("file_url"),
+            is_current=True
+        )
+
+        # Update root resume parsed_content to restored content if available
+        if source.get("content"):
+            self.update_parsed_content(resume_id, user_id, source["content"])
+
+        return restored
+
+    def delete_version(self, resume_id: str, version_id: str, user_id: str) -> Dict[str, Any]:
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Check target version
+            cur.execute("""
+                SELECT rv.*
+                FROM public.resume_versions rv
+                JOIN public.resumes r ON r.id = rv.resume_id
+                WHERE rv.id = %s AND rv.resume_id = %s AND r.user_id = %s AND rv.deleted_at IS NULL
+            """, (version_id, resume_id, user_id))
+            target = cur.fetchone()
+            if not target:
+                return {"success": False, "error": "Version not found."}
+
+            # Original protection: cannot delete if it's the only original version
+            if target.get("version_type") == "original":
+                cur.execute("""
+                    SELECT COUNT(*) AS orig_count
+                    FROM public.resume_versions
+                    WHERE resume_id = %s AND version_type = 'original' AND deleted_at IS NULL
+                """, (resume_id,))
+                orig_count = cur.fetchone()["orig_count"]
+                if orig_count <= 1:
+                    return {"success": False, "error": "Cannot delete the primary original version."}
+
+            was_current = bool(target.get("is_current"))
+
+            # Soft delete
+            cur.execute("UPDATE public.resume_versions SET deleted_at = NOW(), is_current = FALSE WHERE id = %s", (version_id,))
+
+            fallback_ver = None
+            if was_current:
+                # Find latest remaining version
+                cur.execute("""
+                    SELECT id, version_number, version_name
+                    FROM public.resume_versions
+                    WHERE resume_id = %s AND deleted_at IS NULL
+                    ORDER BY version_number DESC
+                    LIMIT 1
+                """, (resume_id,))
+                fallback_row = cur.fetchone()
+                if fallback_row:
+                    cur.execute("UPDATE public.resume_versions SET is_current = TRUE WHERE id = %s", (fallback_row["id"],))
+                    cur.execute("UPDATE public.resumes SET active_version_id = %s WHERE id = %s", (fallback_row["id"], resume_id))
+                    fallback_ver = dict(fallback_row)
+
+            self.conn.commit()
+            return {
+                "success": True,
+                "message": "Version deleted successfully.",
+                "was_current": was_current,
+                "fallback_version": fallback_ver
+            }
+
+    def record_usage_event(
+        self,
+        user_id: str,
+        resume_id: str,
+        version_id: str | None = None,
+        event_type: str = "jd_comparison",
+        jd_id: str | None = None,
+        job_id: str | None = None,
+        ats_score: float | None = None,
+        resume_match_score: float | None = None,
+        ats_engine_version: str | None = "v2.4",
+        match_engine_version: str | None = "v2.4",
+        resume_content_hash: str | None = None,
+        jd_content_hash: str | None = None,
+    ) -> Dict[str, Any]:
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Check resume ownership
+            cur.execute("SELECT active_version_id FROM public.resumes WHERE id = %s AND user_id = %s AND deleted_at IS NULL", (resume_id, user_id))
+            r_row = cur.fetchone()
+            if not r_row:
+                raise ValueError("Resume not found.")
+
+            target_ver_id = version_id or r_row.get("active_version_id")
+
+            # Insert usage event
+            cur.execute("""
+                INSERT INTO public.resume_usage_events (
+                    user_id, resume_id, version_id, event_type, jd_id, job_id,
+                    ats_score, resume_match_score, ats_engine_version, match_engine_version,
+                    resume_content_hash, jd_content_hash, created_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                RETURNING *
+            """, (
+                user_id, resume_id, target_ver_id, event_type, jd_id, job_id,
+                ats_score, resume_match_score, ats_engine_version, match_engine_version,
+                resume_content_hash, jd_content_hash
+            ))
+            event_row = cur.fetchone()
+
+            # Update dynamic usage counters on root resume
+            cur.execute("""
+                UPDATE public.resumes
+                SET times_used = COALESCE(times_used, 0) + 1,
+                    tailor_count = COALESCE(tailor_count, 0) + 1,
+                    last_used_at = NOW(),
+                    last_used_job_id = COALESCE(%s, last_used_job_id),
+                    last_used_jd_id = COALESCE(%s, last_used_jd_id),
+                    updated_at = NOW()
+                WHERE id = %s
+            """, (job_id, jd_id, resume_id))
+
+            # Update scores on target version if provided
+            if target_ver_id and (ats_score is not None or resume_match_score is not None):
+                updates = []
+                params = []
+                if ats_score is not None:
+                    updates.append("ats_score = %s")
+                    params.append(ats_score)
+                if resume_match_score is not None:
+                    updates.append("resume_match_score = %s")
+                    params.append(resume_match_score)
+                if ats_engine_version:
+                    updates.append("ats_engine_version = %s")
+                    params.append(ats_engine_version)
+                if match_engine_version:
+                    updates.append("match_engine_version = %s")
+                    params.append(match_engine_version)
+                if resume_content_hash:
+                    updates.append("resume_content_hash = %s")
+                    params.append(resume_content_hash)
+                if jd_content_hash:
+                    updates.append("jd_content_hash = %s")
+                    params.append(jd_content_hash)
+                updates.append("analysis_timestamp = NOW()")
+                params.append(target_ver_id)
+
+                cur.execute(f"UPDATE public.resume_versions SET {', '.join(updates)} WHERE id = %s", tuple(params))
+
+            self.conn.commit()
+            return dict(event_row) if event_row else {}
+
+    def compare_versions(self, version_a_id: str, version_b_id: str, user_id: str) -> Dict[str, Any]:
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT rv.*, r.file_name
+                FROM public.resume_versions rv
+                JOIN public.resumes r ON r.id = rv.resume_id
+                WHERE rv.id IN (%s, %s) AND r.user_id = %s AND rv.deleted_at IS NULL
+            """, (version_a_id, version_b_id, user_id))
+            rows = {row["id"]: dict(row) for row in cur.fetchall()}
+
+            ver_a = rows.get(version_a_id)
+            ver_b = rows.get(version_b_id)
+            if not ver_a or not ver_b:
+                raise ValueError("One or both versions not found.")
+
+            # Calculate score diffs
+            ats_a = float(ver_a.get("ats_score") or 0)
+            ats_b = float(ver_b.get("ats_score") or 0)
+            ats_diff = ats_b - ats_a if (ver_a.get("ats_score") is not None and ver_b.get("ats_score") is not None) else None
+
+            match_a = float(ver_a.get("resume_match_score") or 0)
+            match_b = float(ver_b.get("resume_match_score") or 0)
+            match_diff = match_b - match_a if (ver_a.get("resume_match_score") is not None and ver_b.get("resume_match_score") is not None) else None
+
+            # Diff analysis of content
+            content_a = ver_a.get("content") or {}
+            content_b = ver_b.get("content") or {}
+
+            skills_a = set(content_a.get("skills") or [])
+            skills_b = set(content_b.get("skills") or [])
+            added_skills = list(skills_b - skills_a)
+            removed_skills = list(skills_a - skills_b)
+
+            exp_a = content_a.get("experience") or []
+            exp_b = content_b.get("experience") or []
+
+            bullets_a = []
+            for item in exp_a:
+                if isinstance(item, dict):
+                    bullets_a.extend(item.get("highlights") or item.get("bullet_points") or [])
+
+            bullets_b = []
+            for item in exp_b:
+                if isinstance(item, dict):
+                    bullets_b.extend(item.get("highlights") or item.get("bullet_points") or [])
+
+            added_bullets = [b for b in bullets_b if b not in bullets_a]
+            removed_bullets = [b for b in bullets_a if b not in bullets_b]
+
+            summary_change = "Rewritten and optimized with tailored keywords" if added_bullets or added_skills else "Minor formatting updates"
+
+            return {
+                "version_a": {
+                    "id": ver_a["id"],
+                    "version_number": ver_a["version_number"],
+                    "version_name": ver_a["version_name"],
+                    "version_type": ver_a["version_type"],
+                    "ats_score": ver_a.get("ats_score"),
+                    "resume_match_score": ver_a.get("resume_match_score"),
+                },
+                "version_b": {
+                    "id": ver_b["id"],
+                    "version_number": ver_b["version_number"],
+                    "version_name": ver_b["version_name"],
+                    "version_type": ver_b["version_type"],
+                    "ats_score": ver_b.get("ats_score"),
+                    "resume_match_score": ver_b.get("resume_match_score"),
+                },
+                "score_diffs": {
+                    "ats_score": {
+                        "from": ver_a.get("ats_score"),
+                        "to": ver_b.get("ats_score"),
+                        "diff": ats_diff
+                    },
+                    "resume_match_score": {
+                        "from": ver_a.get("resume_match_score"),
+                        "to": ver_b.get("resume_match_score"),
+                        "diff": match_diff
+                    }
+                },
+                "summary": summary_change,
+                "added_bullets": added_bullets[:5],
+                "removed_bullets": removed_bullets[:5],
+                "added_skills": added_skills,
+                "removed_skills": removed_skills,
+                "experience_improved_count": len(added_bullets),
+                "skills_added_count": len(added_skills)
+            }
+

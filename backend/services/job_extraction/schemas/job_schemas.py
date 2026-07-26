@@ -35,8 +35,12 @@ class ExtractedJob(BaseModel):
     # Keep the LLM tool boundary permissive: source pages commonly use labels
     # such as "Full Time, Permanent". Validators below immediately convert
     # those labels into the application's stable canonical values.
-    workplace_type: str = "unknown"
-    employment_type: str = "unknown"
+    # These are nullable at the provider/tool boundary because the extraction
+    # prompt correctly asks the model to emit null when the source is silent.
+    # The validators below immediately restore the application's non-null,
+    # canonical string contract.
+    workplace_type: Optional[str] = "unknown"
+    employment_type: Optional[str] = "unknown"
     seniority: Optional[str] = None
     department: Optional[str] = None
     description: Optional[str] = Field(
