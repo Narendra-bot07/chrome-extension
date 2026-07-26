@@ -237,7 +237,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     const hidden = new Set(layoutModel.hidden_components || []);
     const headerOrder = layoutModel.layout_tree?.header?.components || [];
     const componentFor = (key: string) => {
-      if (['phone', 'email', 'location', 'linkedin', 'github', 'portfolio'].includes(key)) return key;
+      if (['phone', 'email', 'location', 'linkedin', 'github', 'portfolio', 'x'].includes(key)) return key;
       return 'other_links';
     };
     const orderIndex = (key: string) => {

@@ -1,7 +1,7 @@
 export const RESUME_LAYOUT_VERSION = 1;
 export const HEADER_COMPONENTS = Object.freeze([
   'photo', 'name', 'headline', 'email', 'phone', 'location',
-  'linkedin', 'github', 'portfolio', 'other_links', 'header_divider'
+  'linkedin', 'github', 'portfolio', 'x', 'other_links', 'header_divider'
 ]);
 export const FOOTER_COMPONENTS = Object.freeze([
   'page_number', 'footer_text', 'footer_links'
@@ -20,6 +20,58 @@ const DEFAULT_SIDEBAR = new Set(['skills', 'education', 'certifications', 'langu
 const uniqueSupported = values => [...new Set(
   (Array.isArray(values) ? values : []).filter(value => SUPPORTED_LAYOUT_SECTIONS.includes(value))
 )];
+const meaningful = value => {
+  if (Array.isArray(value)) return value.some(meaningful);
+  if (value && typeof value === 'object') return Object.values(value).some(meaningful);
+  return String(value ?? '').trim().length > 0;
+};
+const sectionValue = (resume, section) => section === 'volunteer'
+  ? resume?.volunteer_experience
+  : resume?.[section];
+export const sectionHasContent = (resume, section) => meaningful(sectionValue(resume, section));
+
+export function resolveLayoutAvailability(resume = {}, templateConfig = {}) {
+  const personal = resume.personal_info || {};
+  const ownedLinks = [
+    ...(resume.candidate_links || []),
+    ...(resume.profile_links || [])
+  ].filter(link =>
+    link?.owner_type === 'candidate'
+    && (link.validation_status || 'VALID') === 'VALID'
+    && meaningful(link.normalized_url || link.url)
+  );
+  const ownedModel = 'candidate_links' in resume || 'profile_links' in resume;
+  const platforms = new Set(ownedLinks.map(link => String(link.platform || '').toLowerCase()));
+  const hasPlatform = (platform, fallback) => platforms.has(platform)
+    || (!ownedModel && meaningful(fallback));
+  const known = new Set([
+    'email', 'phone', 'linkedin', 'github', 'portfolio', 'website', 'x'
+  ]);
+  const header = {
+    photo: Boolean(templateConfig.profilePhoto && personal.photo_url),
+    name: meaningful(personal.name),
+    headline: meaningful(personal.job_title || personal.title),
+    email: meaningful(personal.email),
+    phone: meaningful(personal.phone),
+    location: meaningful(personal.location),
+    linkedin: hasPlatform('linkedin', personal.linkedin),
+    github: hasPlatform('github', personal.github),
+    portfolio: hasPlatform('portfolio', personal.website || resume.portfolio)
+      || hasPlatform('website', personal.website || resume.portfolio),
+    x: hasPlatform('x', personal.coding_profiles?.x || personal.coding_profiles?.twitter),
+    other_links: ownedLinks.some(link => !known.has(String(link.platform || '').toLowerCase())),
+    header_divider: Boolean(templateConfig.borders?.headerDivider)
+  };
+  return {
+    header,
+    body: Object.fromEntries(SUPPORTED_LAYOUT_SECTIONS.map(section => [
+      section, sectionHasContent(resume, section)
+    ])),
+    // TailorRender currently has no footer renderer; do not expose controls
+    // for components that cannot appear in preview/PDF.
+    footer: Object.fromEntries(FOOTER_COMPONENTS.map(component => [component, false]))
+  };
+}
 
 const hasLongContent = (resume, section) => {
   const value = resume?.[section];
@@ -40,15 +92,17 @@ export function validateSectionPlacement(section, column, resume) {
 export function createResumeLayoutModel(resume = {}, templateId = 'ExecutiveATS', templateConfig = {}) {
   const existing = resume.layout_model || {};
   const existingTree = existing.layout_tree || {};
-  const sourceOrder = uniqueSupported(resume.section_order || SUPPORTED_LAYOUT_SECTIONS);
+  const availability = resolveLayoutAvailability(resume, templateConfig);
+  const sourceOrder = uniqueSupported(resume.section_order || SUPPORTED_LAYOUT_SECTIONS)
+    .filter(section => availability.body[section]);
   const split = ['sidebar', 'two-column', 'marissa'].includes(templateConfig.layout);
   const treeColumns = existingTree.body?.rows?.flatMap(row => row.columns || []) || [];
   const existingMain = uniqueSupported(
     existing.main_column || treeColumns.filter(column => Number(column.width) > 4).flatMap(column => column.sections || [])
-  );
+  ).filter(section => availability.body[section]);
   const existingSidebar = uniqueSupported(
     existing.sidebar || treeColumns.filter(column => Number(column.width) <= 4).flatMap(column => column.sections || [])
-  );
+  ).filter(section => availability.body[section]);
   const claimed = new Set([...existingMain, ...existingSidebar]);
   const remaining = sourceOrder.filter(section => !claimed.has(section));
   const main = !split
@@ -78,14 +132,14 @@ export function createResumeLayoutModel(resume = {}, templateId = 'ExecutiveATS'
     if (!visible.has(section) && !hidden.includes(section)) repairedMain.push(section);
   });
 
-  const headerComponents = [...new Set(
-    (existingTree.header?.components || existing.header?.components || HEADER_COMPONENTS)
-      .filter(component => HEADER_COMPONENTS.includes(component))
-  )];
-  if (!headerComponents.includes('name')) headerComponents.unshift('name');
+  const existingHeaderOrder = existingTree.header?.components || existing.header?.components || [];
+  const headerComponents = [...new Set([
+    ...existingHeaderOrder,
+    ...HEADER_COMPONENTS
+  ].filter(component => HEADER_COMPONENTS.includes(component) && availability.header[component]))];
   const footerComponents = [...new Set(
     (existingTree.footer?.components || FOOTER_COMPONENTS)
-      .filter(component => FOOTER_COMPONENTS.includes(component))
+      .filter(component => FOOTER_COMPONENTS.includes(component) && availability.footer[component])
   )];
   const mainColumn = uniqueSupported(repairedMain).filter(section => !hidden.includes(section));
   const sidebarColumn = uniqueSupported(repairedSidebar).filter(section => !hidden.includes(section));
@@ -121,6 +175,23 @@ export function createResumeLayoutModel(resume = {}, templateId = 'ExecutiveATS'
     sidebar: sidebarColumn,
     hidden_sections: hidden,
     layout_tree: layoutTree,
+    component_metadata: Object.fromEntries([
+      ...headerComponents.map((type, order) => [type, {
+        id: `header_${type}`, type, region: 'header', visible: true,
+        content_available: true,
+        owner_type: ['linkedin', 'github', 'portfolio', 'x', 'other_links'].includes(type)
+          ? 'candidate' : null,
+        order
+      }]),
+      ...mainColumn.map((type, order) => [type, {
+        id: `body_${type}`, type, region: 'body', visible: true,
+        content_available: true, owner_type: null, order
+      }]),
+      ...sidebarColumn.map((type, order) => [type, {
+        id: `body_${type}`, type, region: 'body', visible: true,
+        content_available: true, owner_type: null, order
+      }])
+    ]),
     component_positions: Object.fromEntries([
       ...headerComponents.map((id, index) => [id, { region: 'header', index }]),
       ...footerComponents.map((id, index) => [id, { region: 'footer', index }])

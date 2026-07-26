@@ -162,7 +162,7 @@ export default function ResumeEditorView({
   const componentLabel = id => ({
     photo: 'Photo / Initials', name: 'Name', headline: 'Headline',
     email: 'Email', phone: 'Phone', location: 'Location',
-    linkedin: 'LinkedIn', github: 'GitHub', portfolio: 'Portfolio',
+    linkedin: 'LinkedIn', github: 'GitHub', portfolio: 'Portfolio', x: 'X',
     other_links: 'Other Links', header_divider: 'Divider',
     page_number: 'Page Number', footer_links: 'Optional Links',
     footer_text: 'Footer Text', document_metadata: 'Document Metadata'
@@ -189,12 +189,29 @@ export default function ResumeEditorView({
 
   const renderRegionBuilder = region => {
     const components = layoutModel.layout_tree?.[region]?.components || [];
+    const hiddenSet = new Set(layoutModel.hidden_components || []);
+    const visibleComponents = components.filter(component => !hiddenSet.has(component));
+    const hiddenComponents = components.filter(component => hiddenSet.has(component));
+    const handleVisibleDragEnd = result => {
+      if (!result.destination) return;
+      const component = visibleComponents[result.source.index];
+      const sourceIndex = components.indexOf(component);
+      const destinationComponent = visibleComponents[result.destination.index];
+      const destinationIndex = destinationComponent
+        ? components.indexOf(destinationComponent)
+        : components.length;
+      const change = reorderRegionComponents(
+        layoutModel, region, sourceIndex, destinationIndex
+      );
+      if (change.valid) commitLayout(change.model);
+    };
     return (
-      <DragDropContext onDragEnd={onRegionDragEnd(region)}>
+      <div>
+      <DragDropContext onDragEnd={handleVisibleDragEnd}>
         <Droppable droppableId={`${region.toUpperCase()}_COMPONENTS`} direction="horizontal" type={`${region.toUpperCase()}_COMPONENT`}>
           {provided => (
             <div ref={provided.innerRef} {...provided.droppableProps} className="flex min-h-12 flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-250 bg-slate-50/70 p-3">
-              {components.map((component, index) => (
+              {visibleComponents.map((component, index) => (
                 <Draggable key={component} draggableId={`${region}-${component}`} index={index}>
                   {drag => (
                     <div
@@ -222,6 +239,21 @@ export default function ResumeEditorView({
           )}
         </Droppable>
       </DragDropContext>
+      {!!hiddenComponents.length && (
+        <div className="mt-2">
+          <div className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-400">Available but hidden</div>
+          <div className="flex flex-wrap gap-1.5">
+            {hiddenComponents.map(component => (
+              <button key={component} type="button"
+                onClick={() => toggleComponentVisibility(component)}
+                className="rounded-lg border border-dashed border-slate-250 bg-slate-50 px-2 py-1.5 text-[8px] font-black uppercase text-slate-500">
+                <Eye size={10} className="mr-1 inline" />{componentLabel(component)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      </div>
     );
   };
 
@@ -784,10 +816,10 @@ export default function ResumeEditorView({
             )}
           </section>
 
-          <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+          {!!layoutModel.layout_tree?.footer?.components?.length && <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
             <div className="mb-2 text-[9px] font-black uppercase tracking-widest text-slate-400">Footer</div>
             {renderRegionBuilder('footer')}
-          </section>
+          </section>}
         </div>
 
         <div className="shrink-0 border-t border-slate-200 bg-white p-4 shadow-[0_-4px_10px_rgba(0,0,0,0.02)]">
@@ -926,13 +958,13 @@ export default function ResumeEditorView({
           )}
         </DragDropContext>
 
-        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        {!!layoutModel.layout_tree?.footer?.components?.length && <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-2 flex items-center justify-between">
             <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">Footer</div>
             <div className="text-[8px] font-bold text-slate-400">Footer items stay in this region</div>
           </div>
           {renderRegionBuilder('footer')}
-        </div>
+        </div>}
       </div>
 
       {/* Actions Bar */}

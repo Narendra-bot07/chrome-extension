@@ -7,10 +7,23 @@ import {
   validateSectionPlacement
 } from './resumeLayoutModel.js';
 
-const config = { layout: 'sidebar' };
+const config = {
+  layout: 'sidebar',
+  profilePhoto: false,
+  borders: { headerDivider: true }
+};
 const resume = {
   section_order: ['summary', 'experience', 'skills', 'education', 'certifications'],
-  experience: [{ description: ['Built reliable systems.'] }]
+  personal_info: { name: 'Ada', email: 'ada@example.com' },
+  candidate_links: [{
+    owner_type: 'candidate', platform: 'github',
+    validation_status: 'VALID', url: 'https://github.com/ada'
+  }],
+  summary: 'Engineer.',
+  experience: [{ description: ['Built reliable systems.'] }],
+  skills: ['Python'],
+  education: [{ institution: 'University' }],
+  certifications: [{ name: 'Cloud' }]
 };
 
 test('one model preserves explicit column order without duplicates', () => {
@@ -50,4 +63,29 @@ test('supported sections move between columns through the model', () => {
   assert.equal(result.valid, true);
   assert.deepEqual(result.model.main_column.slice(0, 2), ['summary', 'skills']);
   assert.equal(result.model.sidebar.includes('skills'), false);
+});
+
+test('header and body expose only components backed by current content', () => {
+  const model = createResumeLayoutModel(resume, 'AltaATS', config);
+  assert.deepEqual(model.layout_tree.header.components, [
+    'name', 'email', 'github', 'header_divider'
+  ]);
+  assert.equal(model.layout_tree.header.components.includes('photo'), false);
+  assert.equal(model.layout_tree.header.components.includes('portfolio'), false);
+  assert.equal(model.layout_tree.footer.components.length, 0);
+  assert.ok(Object.values(model.component_metadata).every(
+    component => component.visible && component.content_available
+  ));
+});
+
+test('project links never enable candidate header components', () => {
+  const model = createResumeLayoutModel({
+    personal_info: { name: 'Ada' },
+    projects: [{
+      name: 'Project',
+      links: [{ owner_type: 'project', platform: 'github', url: 'https://github.com/ada/project' }]
+    }]
+  }, 'AltaATS', config);
+  assert.equal(model.layout_tree.header.components.includes('github'), false);
+  assert.equal(model.layout_tree.header.components.includes('other_links'), false);
 });

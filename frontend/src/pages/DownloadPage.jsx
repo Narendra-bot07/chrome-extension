@@ -375,6 +375,7 @@ function DownloadPage({ onClose }) {
           resumeData={activeResume}
           selectedTemplate={selectedTemplate || 'ExecutiveATS'}
           resumeVersionId={parsedResume?.id}
+          companyName={companyName || 'Company'}
         />
 
         {/* Compile Loading Glassmorphic Overlay */}

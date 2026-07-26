@@ -2,6 +2,7 @@ from fastapi import APIRouter, UploadFile, File, Header, HTTPException, status, 
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import io
+import re
 from typing import Optional, List, Any, Dict
 
 from app.schemas import (
@@ -592,6 +593,7 @@ async def api_render_unified_pdf(request: UnifiedRenderRequest):
     import hashlib
     import json
     from app.playwright_pdf import generate_pdf_via_playwright
+    from fastapi.concurrency import run_in_threadpool
     from services.resume.composition_agent import compose_resume_layout
 
     template = request.template_name or "ExecutiveATS"
@@ -629,8 +631,16 @@ async def api_render_unified_pdf(request: UnifiedRenderRequest):
         )
 
     pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
-    page_count = composition_plan.page_count
+    page_count = int(plan_meta.get("page_count") or composition_plan.page_count)
     status_msg = "Fits cleanly on 1 page" if page_count == 1 else "2 pages selected to preserve readability"
+    personal = resume_dict.get("personal_info") or {}
+    clean_part = lambda value, fallback: re.sub(
+        r"[^A-Za-z0-9_-]+", "_", str(value or fallback).strip()
+    ).strip("_") or fallback
+    artifact_filename = (
+        f"{clean_part(personal.get('name'), 'User')}_"
+        f"{clean_part(request.company_name, 'Company')}_Resume.pdf"
+    )
 
     final_plan_dict = {
         "page_count": page_count,
@@ -655,8 +665,9 @@ async def api_render_unified_pdf(request: UnifiedRenderRequest):
         "render_hash": render_hash,
         "measurement_hash": measurement_hash,
         "status_message": status_msg,
-        "page_count": page_count
-    }
+          "page_count": page_count,
+          "filename": artifact_filename
+      }
 
 @router.post("/cover-letter", response_model=CoverLetterResult)
 async def api_cover_letter(

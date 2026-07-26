@@ -15,6 +15,7 @@ interface ResumePreviewProps {
   sectionOrder?: string[];
   apiUrl?: string;
   resumeVersionId?: string;
+  companyName?: string;
   onCompositionChange?: (plan: any) => void;
 }
 
@@ -24,6 +25,7 @@ export default function ResumePreview({
   sectionOrder,
   apiUrl = 'http://localhost:8000',
   resumeVersionId,
+  companyName = 'Company',
   onCompositionChange
 }: ResumePreviewProps) {
   // 1. Zoom and Viewport States
@@ -46,6 +48,7 @@ export default function ResumePreview({
   const [compositionPlan, setCompositionPlan] = useState<any>(null);
   const [renderHash, setRenderHash] = useState<string>('');
   const [measurementHash, setMeasurementHash] = useState<string>('');
+  const [artifactFilename, setArtifactFilename] = useState<string>('');
   const [pageCount, setPageCount] = useState<number>(1);
   const [loadingPdf, setLoadingPdf] = useState<boolean>(false);
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
@@ -104,7 +107,10 @@ export default function ResumePreview({
   }, [zoomMode, pageCount, isFullscreen]);
 
   // Unified Single PDF Artifact Recomposition Pipeline
-  const fetchUnifiedPdfArtifact = async (pref: PagePreference = pagePreference) => {
+  const fetchUnifiedPdfArtifact = async (
+    pref: PagePreference = pagePreference,
+    signal?: AbortSignal
+  ) => {
     if (!resumeData) return;
     try {
       setLoadingPdf(true);
@@ -117,12 +123,19 @@ export default function ResumePreview({
           resume: toRenderableResume(resumeData),
           original_resume: toRenderableResume(resumeData),
           template_name: selectedTemplate || 'ExecutiveATS',
-          page_preference: pref
-        })
+          page_preference: pref,
+          company_name: companyName
+        }),
+        signal
       });
 
       if (!res.ok) {
-        throw new Error(`Rendering failed with status ${res.status}`);
+        const failure = await res.json().catch(() => ({}));
+        throw new Error(
+          typeof failure.detail === 'string'
+            ? failure.detail
+            : `Rendering failed with status ${res.status}`
+        );
       }
 
       const data = await res.json();
@@ -142,6 +155,7 @@ export default function ResumePreview({
         setCompositionPlan(data.composition_plan);
         setRenderHash(data.render_hash || '');
         setMeasurementHash(data.measurement_hash || '');
+        setArtifactFilename(data.filename || '');
         const pCount = data.page_count || 1;
         setPageCount(pCount);
 
@@ -164,6 +178,7 @@ export default function ResumePreview({
         }
       }
     } catch (err) {
+      if ((err as Error)?.name === 'AbortError') return;
       console.warn('Backend PDF recomposition fallback triggered', err);
     } finally {
       setLoadingPdf(false);
@@ -171,8 +186,10 @@ export default function ResumePreview({
   };
 
   useEffect(() => {
-    fetchUnifiedPdfArtifact(pagePreference);
-  }, [selectedTemplate, pagePreference]);
+    const controller = new AbortController();
+    fetchUnifiedPdfArtifact(pagePreference, controller.signal);
+    return () => controller.abort();
+  }, [resumeData, selectedTemplate, pagePreference, companyName]);
 
   // Scroll Active Page Indicator
   const handleScroll = () => {
@@ -200,7 +217,8 @@ export default function ResumePreview({
       if (pdfBlob && pdfBlobUrl && renderHash) {
         const rawName = resumeData?.personal_info?.name || 'User';
         const cleanUser = rawName.replace(/\s+/g, '_');
-        const filename = `${cleanUser}_Resume.pdf`;
+        const cleanCompany = String(companyName || 'Company').replace(/\s+/g, '_');
+        const filename = artifactFilename || `${cleanUser}_${cleanCompany}_Resume.pdf`;
 
         const a = document.createElement('a');
         a.href = pdfBlobUrl;
@@ -212,7 +230,7 @@ export default function ResumePreview({
       }
 
       // Fallback
-      const res = await fetch(`${apiUrl}/api/download-pdf?company_name=Company`, {
+      const res = await fetch(`${apiUrl}/api/download-pdf?company_name=${encodeURIComponent(companyName || 'Company')}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -227,7 +245,7 @@ export default function ResumePreview({
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Resume.pdf`;
+      a.download = artifactFilename || `${(resumeData?.personal_info?.name || 'User').replace(/\s+/g, '_')}_${String(companyName || 'Company').replace(/\s+/g, '_')}_Resume.pdf`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -266,7 +284,6 @@ export default function ResumePreview({
             <button
               onClick={() => {
                 setPagePreference('auto');
-                fetchUnifiedPdfArtifact('auto');
               }}
               className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
                 pagePreference === 'auto'
@@ -280,7 +297,6 @@ export default function ResumePreview({
             <button
               onClick={() => {
                 setPagePreference('prefer_one_page');
-                fetchUnifiedPdfArtifact('prefer_one_page');
               }}
               className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
                 pagePreference === 'prefer_one_page'
@@ -294,7 +310,6 @@ export default function ResumePreview({
             <button
               onClick={() => {
                 setPagePreference('prefer_two_pages');
-                fetchUnifiedPdfArtifact('prefer_two_pages');
               }}
               className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
                 pagePreference === 'prefer_two_pages'
@@ -466,19 +481,10 @@ export default function ResumePreview({
         >
           <div
             id="resume-print-container"
-            className="shadow-2xl bg-white ring-1 ring-zinc-200/70 dark:ring-zinc-800 rounded-sm overflow-hidden flex flex-col gap-6"
+            className="shadow-2xl bg-white ring-1 ring-zinc-200/70 dark:ring-zinc-800 rounded-sm overflow-hidden flex flex-col gap-6 select-text text-zinc-900"
             style={{ width: '8.5in', minHeight: pageCount === 2 ? '22.5in' : '11in' }}
           >
-            {pdfBlobUrl ? (
-              <iframe
-                src={`${pdfBlobUrl}#toolbar=0&navpanes=0&scrollbar=0`}
-                className="w-full border-none"
-                style={{ width: '8.5in', height: pageCount === 2 ? '22.5in' : '11in' }}
-                title="Resume PDF Canvas Preview"
-              />
-            ) : (
-              <TemplateComponent resume={resumeData} sectionOrder={sectionOrder} />
-            )}
+            <TemplateComponent resume={resumeData} sectionOrder={sectionOrder} />
           </div>
         </div>
 

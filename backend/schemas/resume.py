@@ -92,7 +92,7 @@ class ResumeLayoutModel(BaseModel):
         footer_components = self.layout_tree.get("footer", {}).get("components", [])
         allowed_header = {
             "photo", "name", "headline", "email", "phone", "location",
-            "linkedin", "github", "portfolio", "other_links", "header_divider",
+            "linkedin", "github", "portfolio", "x", "other_links", "header_divider",
         }
         allowed_footer = {"page_number", "footer_links", "footer_text", "document_metadata"}
         if "name" not in header_components:
