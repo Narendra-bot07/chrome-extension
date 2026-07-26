@@ -1,10 +1,13 @@
+import { repairResumeLinks } from './resumeLinks.js';
+
 const TOP_LEVEL_FIELDS = [
   'personal_info', 'summary', 'objective', 'experience', 'internships',
   'projects', 'education', 'skills', 'skills_categories', 'certifications',
   'achievements', 'publications', 'languages', 'volunteer_experience',
   'open_source', 'leadership', 'extracurricular_activities',
   'custom_sections', 'awards', 'interests', 'portfolio', 'links',
-  'section_order', 'layout_level', 'layout_model'
+  'section_order', 'layout_level', 'layout_model', 'candidate_links',
+  'profile_links', 'unresolved_links', 'link_review', 'links_intelligence_version'
 ];
 
 const PERSONAL_FIELDS = [
@@ -201,7 +204,7 @@ export function toRenderableResume(record) {
     : {};
   output.links = source.links && typeof source.links === 'object' ? structuredClone(source.links) : {};
 
-  return output;
+  return repairResumeLinks(output);
 }
 
 export const RENDERABLE_RESUME_FIELDS = Object.freeze([...TOP_LEVEL_FIELDS]);

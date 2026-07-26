@@ -141,11 +141,18 @@ export function AppProvider({ children }) {
   const [selectedRewrites, setSelectedRewrites] = useState([]);
   const [acceptSummary, setAcceptSummary] = useState(false);
 
-  // Config states
-  const [selectedSections, setSelectedSections] = useState([
-    'summary', 'skills', 'experience', 'projects'
-  ]);
-  const [tailoringIntensity, setTailoringIntensity] = useState('balanced');
+  // Config states (Stateful across cycle)
+  const [selectedSections, setSelectedSections] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('selected_sections');
+      return saved ? JSON.parse(saved) : ['summary', 'skills', 'experience', 'projects'];
+    } catch {
+      return ['summary', 'skills', 'experience', 'projects'];
+    }
+  });
+  const [tailoringIntensity, setTailoringIntensity] = useState(() => {
+    return sessionStorage.getItem('tailoring_intensity') || 'balanced';
+  });
   const [jobDetectionStatus, setJobDetectionStatus] = useState("idle");
   const [jobDetectionMeta, setJobDetectionMeta] = useState(null);
   const [reviewSuggestions, setReviewSuggestions] = useState([]);
@@ -185,7 +192,29 @@ export function AppProvider({ children }) {
     }
   }, [reviewSuggestions, parsedResume, jobAnalysis, isRefineStreaming]);
   const [selectedTemplate, setSelectedTemplate] = useState('ExecutiveATS');
-  const [customFileName, setCustomFileName] = useState('');
+  const [customFileName, setCustomFileName] = useState(() => {
+    return sessionStorage.getItem('custom_file_name') || '';
+  });
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('selected_sections', JSON.stringify(selectedSections));
+    } catch (e) {
+      console.warn("Failed to persist selectedSections", e);
+    }
+  }, [selectedSections]);
+
+  useEffect(() => {
+    sessionStorage.setItem('tailoring_intensity', tailoringIntensity);
+  }, [tailoringIntensity]);
+
+  useEffect(() => {
+    if (customFileName) {
+      sessionStorage.setItem('custom_file_name', customFileName);
+    } else {
+      sessionStorage.removeItem('custom_file_name');
+    }
+  }, [customFileName]);
 
   // Loading states
   const [loadingProgress, setLoadingProgress] = useState(0);
@@ -2189,9 +2218,11 @@ export function AppProvider({ children }) {
           "Your resume downloaded successfully, but it could not be added to Job Tracker. You can retry from the success screen."
         );
       }
+      return true;
     } catch (e) {
       console.error(e);
       alert("Error generating PDF: " + e.message);
+      return false;
     } finally {
       setLoading(false);
     }

@@ -75,9 +75,11 @@ def get_modern_html(resume: ResumeStructure) -> str:
     if skills_categories and isinstance(skills_categories, dict) and len(skills_categories) > 0:
         for category, items in skills_categories.items():
             if items:
-                escaped_items = ", ".join([escape_html(item) for item in items if item.strip()])
-                escaped_category = escape_html(category)
-                skills_html += f"""
+                valid_items = [escape_html(item) for item in (items if isinstance(items, list) else [items]) if item and str(item).strip()]
+                if valid_items:
+                    escaped_items = ", ".join(valid_items)
+                    escaped_category = escape_html(category)
+                    skills_html += f"""
                 <div style="margin-bottom: 6px; text-align: left;">
                     <strong style="font-size: 8.5pt; color: #2B6CB0; text-transform: uppercase; display: block;">{escaped_category}:</strong>
                     <span style="font-size: 8.5pt; color: #4A5568; display: block; margin-top: 1px;">{escaped_items}</span>

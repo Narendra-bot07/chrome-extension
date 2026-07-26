@@ -177,7 +177,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
       case 'education':
         return education && education.length > 0;
       case 'skills':
-        return (skills && skills.length > 0) || (skills_categories && Object.keys(skills_categories).length > 0);
+        return !!categorizedSkills && Object.keys(categorizedSkills).length > 0;
       case 'certifications':
         return certifications && certifications.length > 0;
       case 'achievements':
@@ -218,12 +218,15 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     const candidates = [
       { key: 'phone', val: personal_info.phone, display: personal_info.phone, icon: <Phone size={11} className="shrink-0" /> },
       { key: 'email', val: personal_info.email, display: personal_info.email, icon: <Mail size={11} className="shrink-0" /> },
-      linkedItem('linkedin', personal_info.linkedin),
-      linkedItem('github', personal_info.github),
-      linkedItem('portfolio', personal_info.website || resume.portfolio || resume.portfolio_url),
       { key: 'location', val: personal_info.location, display: personal_info.location, icon: <MapPin size={11} className="shrink-0" /> },
-      ...Object.entries(resume.links || {}).map(([key, val]) => linkedItem(key, val)),
-      ...Object.entries(personal_info.coding_profiles || {}).map(([key, val]) => linkedItem(key, val))
+      ...(resume.candidate_links || resume.profile_links || [])
+        .filter((link: any) => link.owner_type === 'candidate' && link.validation_status === 'VALID')
+        .map((link: any) => ({
+          key: link.platform,
+          val: link.normalized_url || link.url,
+          display: link.display_label,
+          icon: iconFor(link.platform)
+        }))
     ].filter(item => {
       if (!item.val) return false;
       const identity = canonicalContactIdentity(item.key, item.val);
@@ -333,11 +336,17 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
               >
                 <div className="flex justify-between items-baseline flex-wrap gap-x-2" style={{ fontSize: `${params.fontSize}px` }}>
                   <h3 className="font-bold text-zinc-950 flex items-center gap-1.5">
-                    {proj.link || proj.url
-                      ? <a href={linkHref('link', proj.link || proj.url)} target="_blank" rel="noopener noreferrer" className="underline hover:text-indigo-600 flex items-center gap-1">
-                          {proj.name} <ExternalLink size={10} className="inline opacity-75" />
-                        </a>
-                      : proj.name}
+                    {proj.name}
+                    {(proj.links || []).filter((link: any) =>
+                      link.owner_type === 'project' && link.owner_id === proj.id
+                      && link.validation_status === 'VALID'
+                    ).map((link: any) => (
+                      <a key={link.id || link.url} href={link.normalized_url || link.url}
+                        target="_blank" rel="noopener noreferrer"
+                        className="font-normal underline hover:text-indigo-600 flex items-center gap-0.5">
+                        {link.display_label}<ExternalLink size={9} className="inline opacity-75" />
+                      </a>
+                    ))}
                   </h3>
                   {proj.role && <span className="text-[9.5px] font-bold uppercase shrink-0 text-zinc-700">{proj.role}</span>}
                 </div>
@@ -372,38 +381,58 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
           </div>
         );
 
-      case 'skills':
+      case 'skills': {
+        const validSkillEntries = Object.entries(categorizedSkills || {}).filter(([cat, list]: any) => {
+          if (!cat) return false;
+          if (Array.isArray(list)) return list.filter(item => item && String(item).trim() !== '').length > 0;
+          if (typeof list === 'string') return list.trim() !== '';
+          return false;
+        });
+
+        if (validSkillEntries.length === 0) return null;
+
         if (isSidebar) {
           return (
             <div className="flex flex-col gap-3">
-              {Object.entries(categorizedSkills).map(([cat, list]: any) => (
-                <div key={cat} style={{ fontSize: `${params.fontSize - 0.5}px` }}>
-                  <h4 className="font-bold text-zinc-900 uppercase tracking-wider mb-1 text-[9.5px]">{cat}</h4>
-                  <div className="flex flex-wrap gap-1">
-                    {list.map((skill: string, idx: number) => (
-                      <span 
-                        key={idx} 
-                        className="bg-white text-zinc-800 px-2 py-0.5 rounded text-[9.5px] font-medium border border-zinc-300 shadow-2xs"
-                      >
-                        {skill}
-                      </span>
-                    ))}
+              {validSkillEntries.map(([cat, list]: any) => {
+                const items = Array.isArray(list) 
+                  ? list.filter(item => item && String(item).trim() !== '')
+                  : String(list).split(',').map(s => s.trim()).filter(Boolean);
+                return (
+                  <div key={cat} style={{ fontSize: `${params.fontSize - 0.5}px` }}>
+                    <h4 className="font-bold text-zinc-900 uppercase tracking-wider mb-1 text-[9.5px]">{cat}</h4>
+                    <div className="flex flex-wrap gap-1">
+                      {items.map((skill: string, idx: number) => (
+                        <span 
+                          key={idx} 
+                          className="bg-white text-zinc-800 px-2 py-0.5 rounded text-[9.5px] font-medium border border-zinc-300 shadow-2xs"
+                        >
+                          {skill}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           );
         }
         return (
           <div className="flex flex-col" style={{ gap: `${params.bulletGap}px` }}>
-            {Object.entries(categorizedSkills).map(([cat, list]: any) => (
-              <div key={cat} className="grid grid-cols-4 gap-2 text-zinc-900" style={{ fontSize: `${params.fontSize}px` }}>
-                <span className="font-bold col-span-1 capitalize">{cat}:</span>
-                <span className="col-span-3 font-semibold">{list.join(', ')}</span>
-              </div>
-            ))}
+            {validSkillEntries.map(([cat, list]: any) => {
+              const items = Array.isArray(list) 
+                ? list.filter(item => item && String(item).trim() !== '')
+                : String(list).split(',').map(s => s.trim()).filter(Boolean);
+              return (
+                <div key={cat} className="grid grid-cols-4 gap-2 text-zinc-900" style={{ fontSize: `${params.fontSize}px` }}>
+                  <span className="font-bold col-span-1 capitalize">{cat}:</span>
+                  <span className="col-span-3 font-semibold">{items.join(', ')}</span>
+                </div>
+              );
+            })}
           </div>
         );
+      }
 
       case 'certifications':
         return (
@@ -416,10 +445,18 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
                     <span className="absolute left-0">•</span>{renderTextWithLinks(cert.description)}
                   </div>
                 )}
-                {(cert.organization || cert.date || cert.url) && (
+                {(cert.organization || cert.date || cert.links?.length) && (
                   <div className="text-zinc-600 mt-0.5 text-[9.5px]">
                     {[cert.organization, cert.date].filter(Boolean).join(' · ')}
-                    {cert.url && <a href={linkHref('link', cert.url)} target="_blank" rel="noopener noreferrer" className="underline ml-1">Credential</a>}
+                    {(cert.links || []).filter((link: any) =>
+                      link.owner_type === 'certification' && link.owner_id === cert.id
+                      && link.validation_status === 'VALID'
+                    ).map((link: any) => (
+                      <a key={link.id || link.url} href={link.normalized_url || link.url}
+                        target="_blank" rel="noopener noreferrer" className="underline ml-1">
+                        {link.display_label || 'View Credential'}
+                      </a>
+                    ))}
                   </div>
                 )}
               </div>
@@ -527,8 +564,8 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
         className="font-sans bg-white text-zinc-900"
         style={{ width: '816px', minHeight: '1056px', padding: `${params.paddingY}px ${params.paddingX}px`, fontSize: `${params.fontSize}px` }}
       >
-        {/* Left-Aligned Header */}
-        <header className="border-b border-zinc-400 pb-3 mb-4 text-left">
+        {/* Centered Header for Classic ATS */}
+        <header className="border-b border-zinc-400 pb-3 mb-4 text-center">
           <h1 className="font-extrabold uppercase text-zinc-950 tracking-tight leading-none" style={{ fontSize: `${params.nameSize}px` }}>
             {candidateName}
           </h1>
@@ -538,7 +575,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
             </div>
           )}
           {/* Contact Strip */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-zinc-800 font-semibold mt-2 text-[10px]">
+          <div className="flex flex-wrap justify-center items-center gap-x-4 gap-y-1 text-zinc-800 font-semibold mt-2 text-[10px]">
             {contacts.map((item, i) => (
               <a key={i} href={item.key === 'location' ? undefined : linkHref(item.key, item.val)} className="flex items-center gap-1 hover:underline">
                 <span className="text-zinc-700">{item.icon}</span>

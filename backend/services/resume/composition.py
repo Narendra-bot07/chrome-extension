@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import re
 from io import BytesIO
 from dataclasses import dataclass, field
@@ -103,6 +104,101 @@ def _canonical_url(value: str) -> str:
     normalized = re.sub(r"^(?:https?://)?(?:www\.)?", "", normalized)
     normalized = re.sub(r"[?#].*$", "", normalized)
     return normalized.rstrip("/")
+
+
+def _rendered_urls(resume: ResumeStructure | dict[str, Any]) -> set[str]:
+    """Return only URLs the ownership-aware renderer is expected to expose."""
+
+    data = _dump(resume)
+    rendered: set[str] = set()
+    owned_model = any(
+        key in data
+        for key in ("candidate_links", "profile_links", "unresolved_links", "link_review")
+    )
+
+    def add_records(records: Any, owner_type: str | None = None) -> None:
+        if not isinstance(records, list):
+            return
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            if record.get("validation_status", "VALID") != "VALID":
+                continue
+            if owner_type and record.get("owner_type", owner_type) != owner_type:
+                continue
+            value = record.get("normalized_url") or record.get("url")
+            if value:
+                rendered.add(str(value).strip().rstrip("/"))
+
+    if owned_model:
+        add_records(data.get("candidate_links") or data.get("profile_links"), "candidate")
+        for owner_type, section in (
+            ("project", "projects"),
+            ("certification", "certifications"),
+            ("publication", "publications"),
+            ("achievement", "achievements"),
+            ("experience", "experience"),
+            ("education", "education"),
+        ):
+            for item in data.get(section) or []:
+                if isinstance(item, dict):
+                    add_records(item.get("links"), owner_type)
+        return rendered
+
+    # Compatibility for stored resumes that predate ownership intelligence.
+    personal = data.get("personal_info") or {}
+    for key in ("linkedin", "github", "website"):
+        value = personal.get(key)
+        if value:
+            rendered.add(str(value).strip().rstrip("/"))
+    for value in (personal.get("coding_profiles") or {}).values():
+        if value:
+            rendered.add(str(value).strip().rstrip("/"))
+    for section in ("projects", "certifications", "publications"):
+        for item in data.get(section) or []:
+            if not isinstance(item, dict):
+                continue
+            for key in ("url", "link", "credential_url", "repository_url", "github_url"):
+                value = item.get(key)
+                if value:
+                    rendered.add(str(value).strip().rstrip("/"))
+    return rendered
+
+
+def normalize_link_ownership(
+    resume: ResumeStructure | dict[str, Any],
+) -> dict[str, Any]:
+    """Make approved candidate ownership authoritative over legacy header fields."""
+
+    data = copy.deepcopy(_dump(resume))
+    records = data.get("candidate_links") or data.get("profile_links")
+    if not isinstance(records, list):
+        return data
+
+    approved: dict[str, str] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if record.get("validation_status", "VALID") != "VALID":
+            continue
+        if record.get("owner_type", "candidate") != "candidate":
+            continue
+        platform = _text(record.get("platform")).lower()
+        value = record.get("normalized_url") or record.get("url")
+        if platform and value and platform not in approved:
+            approved[platform] = str(value)
+
+    personal = data.setdefault("personal_info", {})
+    personal["linkedin"] = approved.get("linkedin", "")
+    personal["github"] = approved.get("github", "")
+    personal["website"] = approved.get("portfolio") or approved.get("website", "")
+    personal["coding_profiles"] = {
+        platform: value
+        for platform, value in approved.items()
+        if platform in {"leetcode", "x", "kaggle", "medium"}
+    }
+    data["links"] = {}
+    return data
 
 
 def _bullet_count(items: Any) -> int:
@@ -321,7 +417,7 @@ def validate_generated_pdf(pdf_bytes: bytes, resume: ResumeStructure | dict[str,
         if metric not in text:
             report.add(f"metric missing from rendered PDF: {metric}")
 
-    required_urls = _urls(data)
+    required_urls = _rendered_urls(data)
     annotation_urls: set[str] = set()
     for page in reader.pages:
         for annotation_ref in page.get("/Annots") or []:

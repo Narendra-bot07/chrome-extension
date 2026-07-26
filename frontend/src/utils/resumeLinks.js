@@ -28,12 +28,12 @@ export function isValidProjectUrl(value) {
     const pathSegments = parsed.pathname.split('/').filter(Boolean);
 
     if (host === 'github.com') {
-      // A project repository is exactly /owner/repository. Profiles and
-      // deeper GitHub resource URLs are not project links.
-      if (pathSegments.length !== 2 || pathSegments.some(part => part === '.' || part === '..')) return false;
+      // Repository subpaths (tree, issues, docs) retain repository ownership.
+      if (pathSegments.length < 2 || pathSegments.some(part => part === '.' || part === '..')) return false;
     } else {
-      // Domain-only links without path are invalid for project repositories
-      if (pathSegments.length === 0) return false;
+      const deploymentHost = ['vercel.app', 'netlify.app', 'github.io']
+        .some(domain => host === domain || host.endsWith(`.${domain}`));
+      if (pathSegments.length === 0 && !deploymentHost) return false;
     }
 
     return true;
@@ -77,6 +77,15 @@ export function githubUrlKind(value) {
   return 'unknown';
 }
 
+export function linkedinUrlKind(value) {
+  const url = parsedUrl(value);
+  if (!url || !url.hostname.endsWith('linkedin.com')) return null;
+  const parts = url.pathname.split('/').filter(Boolean);
+  if (parts[0]?.toLowerCase() === 'in' && parts[1]) return 'profile';
+  if (parts[0]?.toLowerCase() === 'company' && parts[1]) return 'company';
+  return 'unknown';
+}
+
 const platformFor = (key, value) => {
   const source = `${key} ${value}`.toLowerCase();
   const url = parsedUrl(value);
@@ -117,12 +126,31 @@ const makeLink = ({ ownerType, ownerId, linkType, platform, url, label }) => ({
 
 const projectId = (project, index) => text(project?.id) || `project-${index}-${slug(project?.name || project?.title).slice(0, 40) || index}`;
 const projectTitle = project => text(project?.title || project?.name);
+const itemId = (type, item, index) => text(item?.id)
+  || `${type}-${index}-${slug(item?.name || item?.title).slice(0, 40) || index}`;
+const credentialHost = host => [
+  'credentials.databricks.com', 'credly.com', 'coursera.org', 'verify.oracle.com'
+].some(domain => host === domain || host.endsWith(`.${domain}`));
+
+const ownedLink = (link, context = {}) => ({
+  id: `link-${slug(`${link.owner_type}-${link.owner_id}-${link.url}-${link.link_type}`)}`,
+  ...link,
+  original_url: context.originalUrl || link.url,
+  normalized_url: link.url,
+  source_section: context.sourceSection || link.owner_type,
+  source_provenance: context.sourceProvenance || context.sourceKey || 'resume_field',
+  confidence: context.confidence ?? 1,
+  validation_status: 'VALID'
+});
 
 /**
  * Migrates legacy flat links into ownership-aware collections. Ambiguous links
  * are preserved in link_review and are deliberately excluded from the header.
  */
 export function repairResumeLinks(resume) {
+  if (resume?.links_intelligence_version === 1) {
+    return structuredClone(resume);
+  }
   const output = structuredClone(resume || {});
   const candidateId = text(output.candidate_id || output.personal_info?.id || output.id) || 'candidate';
   output.projects = (Array.isArray(output.projects) ? output.projects : []).map((project, index) => ({
@@ -130,18 +158,32 @@ export function repairResumeLinks(resume) {
     id: projectId(project, index),
     links: []
   }));
+  output.certifications = (Array.isArray(output.certifications) ? output.certifications : [])
+    .map((item, index) => ({ ...item, id: itemId('certification', item, index), links: [] }));
+  output.publications = (Array.isArray(output.publications) ? output.publications : [])
+    .map((item, index) => ({ ...item, id: itemId('publication', item, index), links: [] }));
 
   const projectById = new Map(output.projects.map(project => [project.id, project]));
+  const certificationById = new Map(output.certifications.map(item => [item.id, item]));
+  const publicationById = new Map(output.publications.map(item => [item.id, item]));
   const seen = new Set();
   const add = link => {
     if (!link.url || !link.owner_id) return false;
-    const identity = `${link.owner_type}|${link.owner_id}|${link.url}`;
+    const identity = `${link.owner_type}|${link.owner_id}|${link.link_type}|${link.url}`;
     if (seen.has(identity)) return false;
     seen.add(identity);
     if (link.owner_type === 'project') {
       const project = projectById.get(link.owner_id);
       if (!project) return false;
       project.links.push(link);
+    } else if (link.owner_type === 'certification') {
+      const certification = certificationById.get(link.owner_id);
+      if (!certification) return false;
+      certification.links.push(link);
+    } else if (link.owner_type === 'publication') {
+      const publication = publicationById.get(link.owner_id);
+      if (!publication) return false;
+      publication.links.push(link);
     } else {
       output.profile_links.push(link);
     }
@@ -169,12 +211,41 @@ export function repairResumeLinks(resume) {
           : /demo/.test(key) ? 'live_demo'
             : /doc/.test(key) ? 'documentation'
               : /case/.test(key) ? 'case_study' : 'project_website');
-      add({
+      add(ownedLink({
         ...makeLink({ ownerType: 'project', ownerId, linkType, platform, url, label: rawLink?.display_label || rawLink?.label }),
         is_valid: true
-      });
+      }, { originalUrl: url, sourceSection: 'projects', sourceKey: key }));
     });
   });
+
+  const attachItemLinks = (sourceItems, targetItems, ownerType) => {
+    (Array.isArray(sourceItems) ? sourceItems : []).forEach((sourceItem, index) => {
+      if (!sourceItem || typeof sourceItem !== 'object') return;
+      const ownerId = targetItems[index].id;
+      const values = [
+        ...(Array.isArray(sourceItem.links) ? sourceItem.links : []),
+        ...['credential_url', 'publication_url', 'url', 'link', 'doi']
+          .filter(key => sourceItem[key]).map(key => ({ url: sourceItem[key], source_key: key }))
+      ];
+      values.forEach(rawLink => {
+        const url = text(typeof rawLink === 'string' ? rawLink : rawLink?.url);
+        const normalized = normalizeResumeUrl(url);
+        const parsed = parsedUrl(normalized);
+        if (!parsed || !parsed.hostname.includes('.')) return;
+        const linkType = ownerType === 'certification' ? 'credential' : 'publication';
+        const platform = credentialHost(parsed.hostname)
+          ? parsed.hostname.includes('databricks') ? 'databricks'
+            : parsed.hostname.includes('credly') ? 'credly' : 'website'
+          : platformFor(rawLink?.source_key || linkType, url);
+        add(ownedLink(makeLink({
+          ownerType, ownerId, linkType, platform, url,
+          label: rawLink?.display_label || (ownerType === 'certification' ? 'View Credential' : 'View Publication')
+        }), { originalUrl: url, sourceSection: `${ownerType}s`, sourceKey: rawLink?.source_key }));
+      });
+    });
+  };
+  attachItemLinks(resume?.certifications, output.certifications, 'certification');
+  attachItemLinks(resume?.publications, output.publications, 'publication');
 
   const globalCandidates = [
     ['email', output.personal_info?.email],
@@ -196,22 +267,45 @@ export function repairResumeLinks(resume) {
     if (githubKind === 'repository') {
       // Flat candidate-level links have no reliable project ownership. Keep
       // them quarantined; never infer ownership from a title or repository slug.
-      output.link_review.push({ url: normalizeResumeUrl(url), reason: 'unmatched_project_repository', source: key });
+      output.link_review.push({ url: normalizeResumeUrl(url), reason: 'unmatched_project_repository', source: key, validation_status: 'UNRESOLVED' });
+      return;
+    }
+    const host = parsedUrl(url)?.hostname || '';
+    if (credentialHost(host)) {
+      output.link_review.push({ url: normalizeResumeUrl(url), reason: 'unmatched_credential', source: key, validation_status: 'OWNER_MISMATCH' });
+      return;
+    }
+    if (platform === 'linkedin' && linkedinUrlKind(url) !== 'profile') {
+      output.link_review.push({ url: normalizeResumeUrl(url), reason: 'non_candidate_linkedin', source: key, validation_status: 'OWNER_MISMATCH' });
       return;
     }
     const allowed = new Set(['email', 'phone', 'linkedin', 'github', 'portfolio', 'x', 'leetcode', 'website']);
     if (!allowed.has(platform) || (platform === 'github' && githubKind !== 'profile')) {
-      output.link_review.push({ url: normalizeResumeUrl(url), reason: 'uncertain_ownership', source: key });
+      output.link_review.push({ url: normalizeResumeUrl(url), reason: 'uncertain_ownership', source: key, validation_status: 'UNRESOLVED' });
       return;
     }
     if (seenGlobalTypes.has(platform)) return;
     seenGlobalTypes.add(platform);
-    add(makeLink({
+    add(ownedLink(makeLink({
       ownerType: 'candidate', ownerId: candidateId, linkType: 'profile',
       platform, url, label: item.display_label || item.label
-    }));
+    }), { originalUrl: url, sourceSection: 'header', sourceKey: key }));
   });
 
+  output.candidate_links = output.profile_links;
+  output.unresolved_links = output.link_review;
+  const byPlatform = new Map(output.candidate_links.map(link => [link.platform, link]));
+  output.personal_info = { ...(output.personal_info || {}) };
+  output.personal_info.linkedin = byPlatform.get('linkedin')?.url || '';
+  output.personal_info.github = byPlatform.get('github')?.url || '';
+  output.personal_info.website = (byPlatform.get('portfolio') || byPlatform.get('website'))?.url || '';
+  output.personal_info.coding_profiles = Object.fromEntries(
+    output.candidate_links
+      .filter(link => ['leetcode', 'x'].includes(link.platform))
+      .map(link => [link.platform, link.url])
+  );
+  output.links = {};
+  output.links_intelligence_version = 1;
   return output;
 }
 
@@ -241,6 +335,9 @@ export function validateResumeLinks(resume) {
         issues.push('Project GitHub link is not a repository URL');
       }
     }
+  }
+  for (const link of resume?.unresolved_links || []) {
+    if (link.validation_status === 'VALID') issues.push('Unresolved link marked valid');
   }
   return { valid: issues.length === 0, issues };
 }

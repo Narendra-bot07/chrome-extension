@@ -86,18 +86,29 @@ export default function ModernProATS({ resume }) {
             <div className="mb-10" data-section="skills">
               <h2 className="text-sm font-bold text-indigo-700 uppercase tracking-wider mb-4 border-b border-indigo-100 pb-2">Skills</h2>
               <div className="space-y-4">
-                {Object.entries(categorizedSkills).map(([category, skillList]) => (
-                  <div key={category}>
-                    <h3 className="text-[0.625rem] font-bold text-zinc-500 uppercase mb-2">{category}</h3>
-                    <div className="flex flex-wrap gap-1.5">
-                      {skillList.map((skill, i) => (
-                        <span key={i} className="px-2 py-0.5 bg-white border border-indigo-100 text-indigo-900 text-[0.625rem] rounded shadow-sm font-medium">
-                          {skill}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+                {Object.entries(categorizedSkills)
+                  .filter(([_, skillList]: any) => {
+                    if (Array.isArray(skillList)) return skillList.filter((s: any) => s && String(s).trim() !== '').length > 0;
+                    if (typeof skillList === 'string') return skillList.trim() !== '';
+                    return false;
+                  })
+                  .map(([category, skillList]: any) => {
+                    const items = Array.isArray(skillList) 
+                      ? skillList.filter((s: any) => s && String(s).trim() !== '')
+                      : String(skillList).split(',').map(s => s.trim()).filter(Boolean);
+                    return (
+                      <div key={category}>
+                        <h3 className="text-[0.625rem] font-bold text-zinc-500 uppercase mb-2">{category}</h3>
+                        <div className="flex flex-wrap gap-1.5">
+                          {items.map((skill: any, i: number) => (
+                            <span key={i} className="px-2 py-0.5 bg-white border border-indigo-100 text-indigo-900 text-[0.625rem] rounded shadow-sm font-medium">
+                              {skill}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
               </div>
             </div>
           )}

@@ -1,12 +1,32 @@
 export function categorizeSkills(skillsArray, skillsCategories) {
-  // If the backend already provided categories, use them
+  const getNonEmptyItems = (value) => {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+      return value.map(item => String(item ?? '').trim()).filter(Boolean);
+    }
+    if (typeof value === 'string' && value.trim() !== '') {
+      return value.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    return [];
+  };
+
+  // If the backend already provided categories, use them after filtering out empty categories
   if (skillsCategories && typeof skillsCategories === 'object' && Object.keys(skillsCategories).length > 0) {
-    return skillsCategories;
+    const cleaned = {};
+    for (const [cat, list] of Object.entries(skillsCategories)) {
+      const items = getNonEmptyItems(list);
+      if (items.length > 0) {
+        cleaned[cat] = items;
+      }
+    }
+    if (Object.keys(cleaned).length > 0) {
+      return cleaned;
+    }
   }
 
   // If we only have a flat array, we do best-effort categorization
   if (!skillsArray || !Array.isArray(skillsArray) || skillsArray.length === 0) {
-    return null;
+    return {};
   }
 
   const categories = {
@@ -36,7 +56,8 @@ export function categorizeSkills(skillsArray, skillsCategories) {
   };
 
   skillsArray.forEach(skill => {
-    const key = skill.toLowerCase().trim();
+    if (!skill || String(skill).trim() === '') return;
+    const key = String(skill).toLowerCase().trim();
     let placed = false;
     
     for (const [mappedKey, category] of Object.entries(map)) {
@@ -54,8 +75,9 @@ export function categorizeSkills(skillsArray, skillsCategories) {
 
   const result = {};
   for (const [cat, items] of Object.entries(categories)) {
-    if (items.length > 0) {
-      result[cat] = [...new Set(items)];
+    const validItems = [...new Set(items.map(s => String(s).trim()).filter(Boolean))];
+    if (validItems.length > 0) {
+      result[cat] = validItems;
     }
   }
 

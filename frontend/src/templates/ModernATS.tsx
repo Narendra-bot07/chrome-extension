@@ -106,12 +106,18 @@ export default function ModernATS({ resume }) {
         <section className="mb-8" data-section="skills">
           <h2 className="text-xl font-semibold text-indigo-900 mb-3">Core Competencies</h2>
           <div className="space-y-2">
-            {Object.entries(categorizedSkills).map(([cat, items], i) => (
-              <div key={i} className="text-sm">
-                <span className="font-bold text-indigo-800">{cat}: </span>
-                <span className="text-gray-700">{Array.isArray(items) ? items.join(', ') : items}</span>
-              </div>
-            ))}
+            {Object.entries(categorizedSkills)
+              .filter(([_, items]: any) => {
+                if (Array.isArray(items)) return items.filter(i => i && String(i).trim() !== '').length > 0;
+                if (typeof items === 'string') return items.trim() !== '';
+                return false;
+              })
+              .map(([cat, items]: any, i) => (
+                <div key={i} className="text-sm">
+                  <span className="font-bold text-indigo-800">{cat}: </span>
+                  <span className="text-gray-700">{Array.isArray(items) ? items.filter(i => i && String(i).trim() !== '').join(', ') : items}</span>
+                </div>
+              ))}
           </div>
         </section>
       )}

@@ -90,11 +90,17 @@ export default function MinimalATS({ resume }) {
         <section className="mb-6" data-section="skills">
           <h2 className="text-sm font-bold uppercase mb-2">Skills</h2>
           <div className="text-sm space-y-1">
-            {Object.entries(categorizedSkills).map(([cat, items], i) => (
-              <div key={i}>
-                <span className="font-bold">{cat}:</span> {Array.isArray(items) ? items.join(', ') : items}
-              </div>
-            ))}
+            {Object.entries(categorizedSkills)
+              .filter(([_, items]: any) => {
+                if (Array.isArray(items)) return items.filter(i => i && String(i).trim() !== '').length > 0;
+                if (typeof items === 'string') return items.trim() !== '';
+                return false;
+              })
+              .map(([cat, items]: any, i) => (
+                <div key={i}>
+                  <span className="font-bold">{cat}:</span> {Array.isArray(items) ? items.filter(i => i && String(i).trim() !== '').join(', ') : items}
+                </div>
+              ))}
           </div>
         </section>
       )}

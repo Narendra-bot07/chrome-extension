@@ -215,8 +215,8 @@ function DownloadPage({ onClose }) {
       return;
     }
     // Pass chosen optimal layout level to AppContext fetch trigger
-    await handleDownloadFinalPDF(layoutLevel);
-    setDownloadSuccess(true);
+    const downloaded = await handleDownloadFinalPDF(layoutLevel);
+    if (downloaded) setDownloadSuccess(true);
   };
 
   if (downloadSuccess) {

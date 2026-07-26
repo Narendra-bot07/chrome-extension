@@ -84,6 +84,11 @@ class RenderableResume(ResumeStructure):
     model_config = ConfigDict(extra="forbid")
     objective: str = ""
     internships: List[ExperienceItem] = []
+    candidate_links: List[Dict[str, Any]] = []
+    profile_links: List[Dict[str, Any]] = []
+    unresolved_links: List[Dict[str, Any]] = []
+    link_review: List[Dict[str, Any]] = []
+    links_intelligence_version: Optional[int] = None
     raw_text: Optional[str] = Field(default="", exclude=True)
 
 class JobAnalysis(BaseModel):

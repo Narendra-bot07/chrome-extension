@@ -56,7 +56,7 @@ const CANONICAL_TEMPLATES: Record<string, TemplateConfig> = {
       paddingX: 'px-14',
       paddingY: 'py-8'
     },
-    headerStyle: 'classic',
+    headerStyle: 'centered',
     borders: {
       sectionDivider: true,
       headerDivider: true

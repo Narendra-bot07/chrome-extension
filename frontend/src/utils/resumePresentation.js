@@ -45,7 +45,8 @@ export const normalizeDetailedRecords = (items = [], kind = 'achievement') => {
       ),
       date: clean(item?.date || item?.issue_date),
       metric: clean(item?.metric),
-      url: clean(item?.url || item?.link || item?.credential_url)
+      url: clean(item?.url || item?.link || item?.credential_url),
+      links: Array.isArray(item?.links) ? item.links : []
     };
   }).filter(record => {
     const key = fingerprint(`${record.title}|${record.description}|${record.url}`);

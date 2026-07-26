@@ -269,9 +269,9 @@ def _record(
     state.repair_logs.append(item)
     logger.info(
         "[RESUME-EXPORT] request_id=%s attempt=%s type=%s strategy=%s "
-        "changed=%s preserved=%s unresolved=%s result=%s",
+        "changed=%s preserved=%s failures=%s unresolved=%s result=%s",
         state.request_id, item.attempt, repair_type.value, strategy, changed,
-        item.preserved_content_count, unresolved, result,
+        item.preserved_content_count, failures, unresolved, result,
     )
 
 

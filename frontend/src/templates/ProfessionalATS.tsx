@@ -126,16 +126,22 @@ export default function ProfessionalATS({ resume }) {
         </section>
       )}
 
-      {categorizedSkills && (
+      {categorizedSkills && Object.keys(categorizedSkills).length > 0 && (
         <section className="mb-2.5" data-section="skills">
           <h2 className="text-sm font-bold border-b border-black mb-1.5 uppercase">Technical Skills</h2>
           <div className="text-[0.6875rem] leading-snug">
-            {Object.entries(categorizedSkills).map(([category, items], i) => (
-              <div key={i} className="mb-0.5 flex">
-                <span className="font-bold w-[160px] shrink-0">{category}: </span>
-                <span>{Array.isArray(items) ? items.join(', ') : items}</span>
-              </div>
-            ))}
+            {Object.entries(categorizedSkills)
+              .filter(([_, items]: any) => {
+                if (Array.isArray(items)) return items.filter(i => i && String(i).trim() !== '').length > 0;
+                if (typeof items === 'string') return items.trim() !== '';
+                return false;
+              })
+              .map(([category, items]: any, i) => (
+                <div key={i} className="mb-0.5 flex">
+                  <span className="font-bold w-[160px] shrink-0">{category}: </span>
+                  <span>{Array.isArray(items) ? items.filter(i => i && String(i).trim() !== '').join(', ') : items}</span>
+                </div>
+              ))}
           </div>
         </section>
       )}
