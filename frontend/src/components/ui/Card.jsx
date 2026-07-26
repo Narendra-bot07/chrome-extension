@@ -3,7 +3,7 @@ import React from 'react';
 export function Card({ children, className = '', hover = false, ...props }) {
   return (
     <div 
-      className={`bg-white dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-sm transition-all duration-300 ${hover ? 'hover:border-zinc-300 dark:hover:border-zinc-700 hover:-translate-y-1 hover:shadow-md dark:hover:shadow-premium-dark' : ''} ${className}`}
+      className={`bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[14px] transition-colors duration-150 ${hover ? 'hover:border-zinc-300 dark:hover:border-zinc-700 hover:bg-zinc-50/50 dark:hover:bg-zinc-800/40' : ''} ${className}`}
       {...props}
     >
       {children}
@@ -12,11 +12,11 @@ export function Card({ children, className = '', hover = false, ...props }) {
 }
 
 export function CardHeader({ children, className = '' }) {
-  return <div className={`p-6 pb-4 border-b border-zinc-100 dark:border-zinc-800/50 ${className}`}>{children}</div>;
+  return <div className={`p-5 pb-4 border-b border-zinc-100 dark:border-zinc-800/50 ${className}`}>{children}</div>;
 }
 
 export function CardTitle({ children, className = '' }) {
-  return <h3 className={`text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 ${className}`}>{children}</h3>;
+  return <h3 className={`text-base font-semibold tracking-[-0.01em] text-zinc-900 dark:text-zinc-50 ${className}`}>{children}</h3>;
 }
 
 export function CardDescription({ children, className = '' }) {
@@ -24,9 +24,9 @@ export function CardDescription({ children, className = '' }) {
 }
 
 export function CardContent({ children, className = '' }) {
-  return <div className={`p-6 ${className}`}>{children}</div>;
+  return <div className={`p-5 ${className}`}>{children}</div>;
 }
 
 export function CardFooter({ children, className = '' }) {
-  return <div className={`p-6 pt-4 border-t border-zinc-100 dark:border-zinc-800/50 flex items-center ${className}`}>{children}</div>;
+  return <div className={`p-5 pt-4 border-t border-zinc-100 dark:border-zinc-800/50 flex items-center ${className}`}>{children}</div>;
 }

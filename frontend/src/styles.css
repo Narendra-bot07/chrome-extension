@@ -3,17 +3,72 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --af-bg: #fafafb;
+    --af-surface: #ffffff;
+    --af-surface-subtle: #f6f7f9;
+    --af-surface-hover: #f2f4f7;
+    --af-text: #111827;
+    --af-text-secondary: #667085;
+    --af-text-muted: #98a2b3;
+    --af-border: #e4e7ec;
+    --af-accent: #5b5ce2;
+    --af-accent-hover: #4b4ccd;
+    --af-success: #12b76a;
+    --af-warning: #f79009;
+    --af-error: #f04438;
+    --af-radius-sm: 8px;
+    --af-radius: 10px;
+    --af-radius-lg: 14px;
+    --af-shadow-popover: 0 12px 32px rgba(16, 24, 40, 0.10);
+    --af-sidebar: 248px;
+  }
+
+  .dark {
+    --af-bg: #0c0d10;
+    --af-surface: #121419;
+    --af-surface-subtle: #181b21;
+    --af-surface-hover: #20242c;
+    --af-text: #f5f6f7;
+    --af-text-secondary: #a6adbb;
+    --af-text-muted: #737b8c;
+    --af-border: #292d36;
+  }
+
+  html {
+    font-family: Inter, Geist, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color-scheme: light;
+  }
+
+  html.dark { color-scheme: dark; }
+
   body {
-    @apply bg-zinc-50 dark:bg-zinc-950 text-zinc-950 dark:text-zinc-50 antialiased selection:bg-zinc-300 dark:selection:bg-zinc-700 selection:text-zinc-900 dark:selection:text-zinc-100 transition-colors duration-300;
+    margin: 0;
+    background: var(--af-bg);
+    color: var(--af-text);
+    @apply antialiased;
+    font-size: 14px;
+    line-height: 1.5;
   }
   
-  /* Standardize focus outlines for accessibility */
   *:focus-visible {
-    @apply outline-none ring-2 ring-zinc-500 dark:ring-zinc-400 ring-offset-2 ring-offset-white dark:ring-offset-zinc-950 rounded-sm;
+    outline: 2px solid var(--af-accent) !important;
+    outline-offset: 2px !important;
+    box-shadow: none !important;
   }
+
+  button, a, input, textarea, select {
+    transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease, opacity 160ms ease, transform 160ms ease;
+  }
+
+  button, [role="button"] { -webkit-tap-highlight-color: transparent; }
+  button:disabled, input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; }
+
+  h1, h2, h3, h4, p { text-wrap: pretty; }
+
+  ::selection { background: rgba(91, 92, 226, .18); }
 }
 
-/* Custom Gutterless Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -22,13 +77,13 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  @apply bg-zinc-300 dark:bg-zinc-800 rounded-full;
+  background: var(--af-border);
+  border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-zinc-400 dark:bg-zinc-700;
+  background: var(--af-text-muted);
 }
 
-/* Linear Gradient Progress Animation */
 @keyframes progress {
   0% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
@@ -40,7 +95,6 @@
   animation: progress 2.5s ease infinite;
 }
 
-/* Premium Shimmer for Loading States */
 @keyframes shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
@@ -57,17 +111,80 @@
   animation: shimmer 2s infinite linear;
 }
 
-/* Premium Subtle Background Pattern */
 .bg-grid-pattern {
-  background-image: 
-    linear-gradient(to right, rgba(0,0,0,0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(0,0,0,0.03) 1px, transparent 1px);
-  background-size: 32px 32px;
+  background-color: var(--af-bg) !important;
+  background-image: none !important;
 }
-.dark .bg-grid-pattern {
-  background-image: 
-    linear-gradient(to right, rgba(255,255,255,0.02) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255,255,255,0.02) 1px, transparent 1px);
+
+/* ApplyFlow design-system compatibility layer. It brings legacy workflow
+   screens into the same visual language while their behavior stays intact. */
+#root .bg-white { background-color: var(--af-surface); }
+#root .bg-zinc-50, #root .bg-slate-50 { background-color: var(--af-bg); }
+#root .bg-zinc-100, #root .bg-slate-100 { background-color: var(--af-surface-subtle); }
+#root .border-zinc-100, #root .border-zinc-150, #root .border-zinc-200,
+#root .border-slate-100, #root .border-slate-200 { border-color: var(--af-border); }
+#root .text-zinc-950, #root .text-zinc-900, #root .text-slate-950, #root .text-slate-900 { color: var(--af-text); }
+#root .text-zinc-700, #root .text-zinc-600, #root .text-slate-700, #root .text-slate-600 { color: var(--af-text-secondary); }
+#root .text-zinc-500, #root .text-zinc-400, #root .text-slate-500, #root .text-slate-400 { color: var(--af-text-muted); }
+#root .bg-indigo-600, #root .bg-violet-600, #root .bg-\[\#00bda5\] { background-color: var(--af-accent); }
+#root .hover\:bg-indigo-700:hover, #root .hover\:bg-violet-700:hover, #root .hover\:bg-\[\#00a894\]:hover { background-color: var(--af-accent-hover); }
+#root .text-indigo-600, #root .text-violet-600, #root .text-\[\#00bda5\] { color: var(--af-accent); }
+#root .border-indigo-500, #root .border-violet-500 { border-color: var(--af-accent); }
+
+.af-page {
+  width: 100%;
+  max-width: 1320px;
+  margin: 0 auto;
+}
+
+.af-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.af-page-title {
+  margin: 0;
+  color: var(--af-text);
+  font-size: clamp(24px, 3vw, 30px);
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.af-page-description {
+  margin: 6px 0 0;
+  color: var(--af-text-secondary);
+  font-size: 14px;
+}
+
+.af-card {
+  background: var(--af-surface);
+  border: 1px solid var(--af-border);
+  border-radius: var(--af-radius-lg);
+}
+
+.af-eyebrow {
+  color: var(--af-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+
+@media (max-width: 767px) {
+  .af-page-header { align-items: stretch; flex-direction: column; gap: 16px; }
+  .af-page-header > :last-child { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
 }
 
 @media print {

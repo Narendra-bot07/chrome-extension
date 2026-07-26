@@ -205,7 +205,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex bg-white text-zinc-800 font-sans select-none overflow-hidden relative">
+    <div className="min-h-screen flex bg-[#FAFAFB] text-zinc-800 font-sans overflow-hidden relative">
       
       {/* Dynamic hardware flip transitions styles */}
       <style dangerouslySetInnerHTML={{__html: `
@@ -215,8 +215,9 @@ export default function LoginPage() {
         .flip-card-inner {
           position: relative;
           width: 100%;
-          height: 640px;
-          transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+          min-height: 620px;
+          height: auto;
+          transition: transform 180ms ease, opacity 180ms ease;
           transform-style: preserve-3d;
         }
         .flip-card-inner.flipped {
@@ -232,9 +233,9 @@ export default function LoginPage() {
           left: 0;
           background: white;
           border: 1px solid #e4e4e7;
-          border-radius: 24px;
-          padding: 36px;
-          box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.03), 0 2px 4px -2px rgb(0 0 0 / 0.03);
+          border-radius: 14px;
+          padding: 32px;
+          box-shadow: 0 12px 32px rgb(16 24 40 / 0.06);
           display: flex;
           flex-col: true;
           flex-direction: column;
@@ -247,8 +248,7 @@ export default function LoginPage() {
 
       {/* LEFT COLUMN: Premium Enterprise Showcase (Static left panel) */}
       <div 
-        className="hidden lg:flex lg:w-[50%] border-r border-zinc-200 flex-col justify-between p-12 relative overflow-hidden shrink-0"
-        style={{ background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)' }}
+        className="hidden lg:flex lg:w-[46%] border-r border-zinc-200 flex-col justify-between p-12 relative overflow-hidden shrink-0 bg-white"
       >
         {/* Subtle grid pattern background */}
         <div className="absolute inset-0 opacity-5 bg-[linear-gradient(to_right,#808080_1px,transparent_1px),linear-gradient(to_bottom,#808080_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none" />
@@ -272,11 +272,11 @@ export default function LoginPage() {
             <span className="inline-block px-3 py-1 bg-[#00bda5]/10 border border-[#00bda5]/20 text-[#00bda5] text-[9.5px] font-black uppercase tracking-widest rounded-full">
               Enterprise Orchestration
             </span>
-            <h2 className="text-3xl font-black tracking-tight text-zinc-950 leading-tight">
-              Orchestrate your application pipeline with AI.
+            <h2 className="text-3xl font-bold tracking-[-0.025em] text-zinc-950 leading-tight">
+              Build stronger applications with AI.
             </h2>
-            <p className="text-zinc-500 font-bold uppercase tracking-wider text-[11px] leading-relaxed">
-              Dynamically tailor your resumes for ATS benchmarks, monitor interviews in real time, and negotiate job offers with a modern Kanban dashboard.
+            <p className="text-zinc-500 font-normal text-[15px] leading-relaxed">
+              Tailor your resume, create cover letters, and track every application in one calm workspace.
             </p>
           </div>
 
@@ -322,7 +322,7 @@ export default function LoginPage() {
 
       {/* RIGHT COLUMN: The Form Workspace (With Perspective Flip Card) */}
       <div 
-        className="w-full lg:w-[50%] flex items-center justify-center p-6 sm:p-12 relative z-10 min-h-screen"
+        className="w-full lg:w-[54%] flex items-center justify-center p-5 sm:p-10 relative z-10 min-h-screen"
         style={{ background: 'radial-gradient(circle at center, #ffffff 0%, #f1f5f9 100%)' }}
       >
         <div className="w-full max-w-md perspective-container">

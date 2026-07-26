@@ -10,10 +10,10 @@ export const Input = forwardRef(({ className = '', error, icon: Icon, ...props }
       )}
       <input
         ref={ref}
-        className={`w-full flex h-10 rounded-lg border bg-transparent px-3 py-2 text-sm text-zinc-900 dark:text-zinc-50 placeholder:text-zinc-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-zinc-950 disabled:cursor-not-allowed disabled:opacity-50 transition-colors ${
+        className={`w-full flex h-10 rounded-[9px] border bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-50 placeholder:text-zinc-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 transition-colors ${
           error 
-            ? 'border-red-500 focus-visible:ring-red-500' 
-            : 'border-zinc-300 dark:border-zinc-700 focus-visible:ring-zinc-400 dark:focus-visible:ring-zinc-600'
+            ? 'border-red-500' 
+            : 'border-zinc-300 dark:border-zinc-700 hover:border-zinc-400'
         } ${Icon ? 'pl-10' : ''} ${className}`}
         {...props}
       />

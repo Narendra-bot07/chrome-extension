@@ -234,7 +234,7 @@ function Layout() {
   const jdPercent = jdLimit ? Math.min(100, (jdUsed / jdLimit) * 100) : 0;
 
   return (
-    <div className={`w-full h-screen flex overflow-hidden font-sans select-none transition-all duration-300 bg-grid-pattern ${
+    <div className={`w-full h-screen flex overflow-hidden font-sans transition-colors duration-200 bg-grid-pattern ${
       darkMode ? 'dark bg-[#0a0a0a] text-zinc-50' : 'bg-zinc-50 text-zinc-900'
     }`}>
       {/* Mobile Overlay */}
@@ -255,15 +255,15 @@ function Layout() {
             : 'bg-white border-zinc-150'
         }`}>
         
-        <div className="flex flex-col gap-6 p-6">
+        <div className="flex flex-col gap-6 px-4 py-5">
           {/* Logo Header */}
           <div className="flex items-center justify-between">
             <Link to="/dashboard" className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 text-white font-black text-sm">
-                AF
+              <div className="w-8 h-8 rounded-[9px] bg-[#5B5CE2] flex items-center justify-center text-white font-bold text-sm">
+                A
               </div>
-              <span className={`text-lg font-black tracking-tight ${darkMode ? 'text-white' : 'text-slate-905'}`}>
-                Apply<span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">Flow</span>
+              <span className={`text-[17px] font-bold tracking-[-0.02em] ${darkMode ? 'text-white' : 'text-slate-905'}`}>
+                ApplyFlow
               </span>
             </Link>
             <button 
@@ -413,7 +413,7 @@ function Layout() {
                 darkMode ? 'bg-zinc-950 border-zinc-850 hover:bg-zinc-900' : 'bg-zinc-50 border-zinc-200/60 hover:bg-zinc-100'
               }`}
             >
-              <div className="w-11 h-11 flex-shrink-0 rounded-2xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 text-white flex items-center justify-center font-black text-sm shadow-lg shadow-indigo-500/20">
+              <div className="w-9 h-9 flex-shrink-0 rounded-full bg-[#5B5CE2] text-white flex items-center justify-center font-semibold text-sm">
                 {(profile.full_name || user?.metadata?.full_name || user?.email || 'N').charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0 flex-1">
@@ -439,7 +439,7 @@ function Layout() {
         
         {/* TOP NAV */}
         <header className={`px-6 py-4 border-b flex justify-between items-center z-20 flex-shrink-0 transition-colors duration-200 ${
-          darkMode ? 'bg-[#0a0a0a]/90 border-zinc-800/80 backdrop-blur-xl' : 'bg-white border-zinc-200 shadow-sm'
+            darkMode ? 'bg-[#121419]/95 border-zinc-800/80 backdrop-blur-xl' : 'bg-white/95 border-zinc-200 backdrop-blur-xl'
         }`}>
           <div className="flex items-center gap-3">
             <button 
@@ -560,13 +560,13 @@ function Layout() {
         />
 
         {/* VIEW OUTLET */}
-        <div className="flex-1 overflow-y-auto px-6 py-6 flex flex-col scrollbar-thin">
+        <main className="flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8 lg:py-7 flex flex-col scrollbar-thin">
           <Outlet />
-        </div>
+        </main>
 
         {/* FOOTER WIZARD STEPS */}
-        <footer className="px-6 py-4 border-t border-zinc-200 dark:border-zinc-800 flex justify-between items-center bg-white dark:bg-zinc-950/20 flex-shrink-0">
-          <span className="text-[9px] text-zinc-500 dark:text-zinc-500 font-bold uppercase tracking-widest">
+        <footer className="px-6 py-2.5 border-t border-zinc-200 dark:border-zinc-800 flex justify-between items-center bg-white dark:bg-zinc-950/20 flex-shrink-0">
+          <span className="text-[11px] text-zinc-500 dark:text-zinc-500 font-medium">
             {(currentPath === '/' || currentPath === '/dashboard') && "Step: Dashboard Overview"}
             {currentPath === '/job-tracker' && "Step: Job Tracking Overview"}
             {currentPath === '/tailor' && "Step 1: Extract Job Description"}

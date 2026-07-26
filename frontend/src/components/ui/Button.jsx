@@ -9,14 +9,14 @@ export function Button({
   disabled = false,
   ...props 
 }) {
-  const baseStyles = "inline-flex items-center justify-center font-medium transition-all duration-200 focus:outline-none focus-visible:ring-2 disabled:opacity-50 disabled:pointer-events-none rounded-lg active:scale-[0.98]";
+  const baseStyles = "inline-flex min-w-0 items-center justify-center gap-2 font-semibold transition-colors duration-150 focus:outline-none disabled:opacity-50 disabled:pointer-events-none rounded-[9px]";
   
   const variants = {
-    primary: "bg-zinc-900 text-zinc-50 hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200 shadow-sm",
-    secondary: "bg-zinc-100 text-zinc-900 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-50 dark:hover:bg-zinc-700",
-    ghost: "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-50",
-    danger: "bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20",
-    outline: "border border-zinc-200 dark:border-zinc-800 bg-transparent hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-900 dark:text-zinc-50"
+    primary: "bg-[#5B5CE2] text-white hover:bg-[#4B4CCD]",
+    secondary: "bg-[#F2F4F7] text-[#344054] hover:bg-[#E4E7EC] dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700",
+    ghost: "text-[#667085] hover:bg-[#F2F4F7] hover:text-[#111827] dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white",
+    danger: "bg-red-50 text-[#D92D20] hover:bg-red-100 dark:bg-red-500/10 dark:text-red-400",
+    outline: "border border-[#E4E7EC] dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-[#F6F7F9] dark:hover:bg-zinc-800 text-[#344054] dark:text-zinc-100"
   };
 
   const sizes = {
