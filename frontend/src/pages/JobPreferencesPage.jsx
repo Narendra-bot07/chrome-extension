@@ -1,7 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Briefcase, Building2, Check, Edit3, MapPin, Settings2, Sparkles, Target, X, SlidersHorizontal } from 'lucide-react';
+import { 
+  ArrowLeft, ArrowRight, Briefcase, Building2, Check, Edit3, 
+  MapPin, Settings2, Target, X, SlidersHorizontal, Sparkles 
+} from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { Button } from '../components/ui/Button';
+import { Badge } from '../components/ui/Badge';
+
 
 const defaults = {
   target_roles: [],
@@ -40,20 +46,24 @@ function TagInput({ label, value, onChange, options }) {
   };
 
   return (
-    <div className="space-y-4">
-      <label className="text-xs font-black uppercase tracking-widest text-zinc-500">{label}</label>
-      <div className="min-h-28 rounded-3xl border border-zinc-200 bg-white p-4 focus-within:border-[#00bda5] transition">
-        <div className="flex flex-wrap gap-2">
+    <div className="space-y-3">
+      <label className="text-xs font-medium text-tf-text">{label}</label>
+      <div className="min-h-[96px] rounded-md border border-tf-border bg-tf-surface p-3 focus-within:border-tf-accent focus-within:ring-3 focus-within:ring-tf-accent/15 transition-all">
+        <div className="flex flex-wrap gap-1.5">
           {value.map((tag) => (
-            <button
+            <span
               key={tag}
-              type="button"
-              onClick={() => onChange(value.filter((item) => item !== tag))}
-              className="inline-flex items-center gap-2 rounded-full bg-zinc-950 px-3 py-1.5 text-[11px] font-bold text-white"
+              className="inline-flex items-center gap-1.5 rounded-sm bg-tf-surface-2 border border-tf-border px-2 py-0.5 text-xs font-medium text-tf-text"
             >
               {tag}
-              <X size={12} />
-            </button>
+              <button
+                type="button"
+                onClick={() => onChange(value.filter((item) => item !== tag))}
+                className="text-tf-text-tertiary hover:text-tf-text"
+              >
+                <X size={12} />
+              </button>
+            </span>
           ))}
           <input
             value={draft}
@@ -65,19 +75,19 @@ function TagInput({ label, value, onChange, options }) {
               }
             }}
             placeholder="Type and press Enter"
-            className="min-w-44 flex-1 border-none bg-transparent py-1.5 text-sm font-semibold text-zinc-900 outline-none placeholder:text-zinc-400"
+            className="min-w-[160px] flex-1 border-none bg-transparent py-1 text-sm font-normal text-tf-text outline-none placeholder:text-tf-text-tertiary"
           />
         </div>
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5">
         {filtered.slice(0, 8).map((item) => (
           <button
             key={item}
             type="button"
             onClick={() => addTag(item)}
-            className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-[11px] font-bold text-zinc-700 hover:border-[#00bda5] hover:text-[#008f7d] transition"
+            className="rounded-md border border-tf-border bg-tf-surface-2 px-2.5 py-1 text-xs font-medium text-tf-text-secondary hover:border-tf-accent hover:text-tf-accent transition-colors cursor-pointer"
           >
-            {item}
+            + {item}
           </button>
         ))}
       </div>
@@ -93,21 +103,22 @@ function OptionGrid({ value, onChange, options }) {
           key={option}
           type="button"
           onClick={() => onChange(option)}
-          className={`rounded-2xl border px-4 py-4 text-left text-sm font-black transition ${
+          className={`rounded-md border px-4 py-3 text-left text-sm font-medium transition-colors cursor-pointer ${
             value === option
-              ? 'border-[#00bda5] bg-[#00bda5]/10 text-zinc-950'
-              : 'border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300'
+              ? 'border-tf-accent bg-tf-accent/10 text-tf-accent'
+              : 'border-tf-border bg-tf-surface text-tf-text-secondary hover:border-tf-border-strong'
           }`}
         >
           <span className="flex items-center justify-between">
             {option}
-            {value === option && <Check size={16} className="text-[#00bda5]" />}
+            {value === option && <Check size={16} className="text-tf-accent" />}
           </span>
         </button>
       ))}
     </div>
   );
 }
+
 
 export default function JobPreferencesPage() {
   const navigate = useNavigate();
@@ -204,59 +215,58 @@ export default function JobPreferencesPage() {
 
     return (
       <div className="min-h-full px-4 py-8">
-        <div className="mx-auto w-full max-w-6xl space-y-5">
-          <section className="rounded-[2rem] border border-zinc-200 bg-white/95 p-6 shadow-xl shadow-zinc-200/40">
-            <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+        <div className="mx-auto w-full max-w-5xl space-y-6">
+          <section className="rounded-lg border border-tf-border bg-tf-surface p-6 shadow-sm">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div className="flex items-start gap-4">
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-zinc-950 text-white">
-                  <SlidersHorizontal size={24} />
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-tf-accent/10 border border-tf-accent/20 text-tf-accent">
+                  <SlidersHorizontal size={20} />
                 </div>
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#00bda5]">Job Preferences</p>
-                  <h1 className="mt-2 text-3xl font-black tracking-tight text-zinc-950">Career targets</h1>
-                  <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-zinc-500">
-                    ApplyFlow uses this profile to tune match scores, dashboard insights, resume generation, and job recommendations.
+                  <h1 className="text-xl font-semibold tracking-tight text-tf-text">Career targets</h1>
+                  <p className="mt-1 text-xs text-tf-text-secondary font-normal max-w-2xl leading-relaxed">
+                    TailorFlow uses this profile to tune match scores, dashboard insights, resume generation, and job recommendations.
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
+              <Button
+                variant="primary"
+                size="md"
                 onClick={() => {
                   setIsEditing(true);
                   setStep(1);
                 }}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-zinc-950 px-5 py-3 text-sm font-black text-white shadow-lg shadow-zinc-300/40"
               >
-                <Edit3 size={16} /> Edit all
-              </button>
+                <Edit3 size={14} /> Edit profile
+              </Button>
             </div>
           </section>
 
-          <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <section className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {rows.map(({ label, values, stepIndex }) => {
               const visibleValues = (values || []).filter(Boolean);
               return (
-                <article key={label} className="group rounded-3xl border border-zinc-200 bg-white/90 p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-[#00bda5]/50 hover:shadow-lg hover:shadow-zinc-200/60">
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <h2 className="text-[11px] font-black uppercase tracking-widest text-zinc-500">{label}</h2>
+                <article key={label} className="rounded-lg border border-tf-border bg-tf-surface p-5 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <h2 className="text-xs font-semibold text-tf-text">{label}</h2>
                     <button
                       type="button"
                       onClick={() => {
                         setIsEditing(true);
                         setStep(stepIndex);
                       }}
-                      className="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest text-[#00a18d] transition hover:bg-[#00bda5]/10"
+                      className="text-xs font-medium text-tf-accent hover:underline cursor-pointer"
                     >
                       Edit
                     </button>
                   </div>
-                  <div className="flex min-h-16 flex-wrap content-start gap-2">
+                  <div className="flex min-h-[56px] flex-wrap content-start gap-1.5">
                     {visibleValues.length ? visibleValues.map((item) => (
-                      <span key={item} className="rounded-full bg-zinc-100 px-3 py-1.5 text-xs font-bold text-zinc-750">
+                      <span key={item} className="rounded-sm bg-tf-surface-2 border border-tf-border px-2 py-0.5 text-xs font-medium text-tf-text">
                         {item}
                       </span>
                     )) : (
-                      <span className="text-xs font-bold text-zinc-400">No preference added</span>
+                      <span className="text-xs text-tf-text-tertiary">No preference added</span>
                     )}
                   </div>
                 </article>
@@ -270,35 +280,35 @@ export default function JobPreferencesPage() {
 
   return (
     <div className="min-h-full flex items-center justify-center px-4 py-8">
-      <div className="w-full max-w-4xl rounded-[2rem] border border-zinc-200 bg-white/90 shadow-2xl shadow-zinc-200/50 overflow-hidden">
-        <div className="h-1.5 bg-zinc-100">
-          <div className="h-full bg-[#00bda5] transition-all duration-300" style={{ width: `${progress}%` }} />
+      <div className="w-full max-w-3xl rounded-xl border border-tf-border bg-tf-surface shadow-modal overflow-hidden">
+        <div className="h-1 bg-tf-surface-2">
+          <div className="h-full bg-tf-accent transition-all duration-300" style={{ width: `${progress}%` }} />
         </div>
 
-        <div className="grid md:grid-cols-[280px,1fr]">
-          <aside className="border-r border-zinc-100 bg-zinc-50 p-7">
-            <div className="w-12 h-12 rounded-2xl bg-zinc-950 text-white flex items-center justify-center mb-6">
-              <Icon size={22} />
+        <div className="grid md:grid-cols-[240px,1fr]">
+          <aside className="border-r border-tf-border bg-tf-surface-2 p-6">
+            <div className="w-10 h-10 rounded-md bg-tf-accent/10 border border-tf-accent/20 text-tf-accent flex items-center justify-center mb-4">
+              <Icon size={20} />
             </div>
-            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#00bda5]">Step {step + 1} of {steps.length}</p>
-            <h1 className="mt-3 text-2xl font-black tracking-tight text-zinc-950">{current.title}</h1>
-            <p className="mt-2 text-sm font-medium leading-relaxed text-zinc-500">{current.subtitle}</p>
+            <p className="text-[11px] font-semibold text-tf-accent uppercase tracking-wider">Step {step + 1} of {steps.length}</p>
+            <h1 className="mt-2 text-lg font-semibold tracking-tight text-tf-text">{current.title}</h1>
+            <p className="mt-1.5 text-xs text-tf-text-secondary font-normal leading-relaxed">{current.subtitle}</p>
           </aside>
 
-          <main className="p-7 md:p-10">
+          <main className="p-6 md:p-8">
             {step === 0 && (
-              <div className="space-y-8">
+              <div className="space-y-6">
                 {!isSettings && (
-                  <div className="rounded-3xl border border-[#00bda5]/30 bg-[#00bda5]/10 px-5 py-4">
-                    <p className="text-sm font-black text-zinc-950">Complete your ApplyFlow setup to start tailoring resumes.</p>
+                  <div className="rounded-md border border-tf-accent/20 bg-tf-accent/10 p-4">
+                    <p className="text-xs font-medium text-tf-text">Complete your TailorFlow setup to start tailoring resumes.</p>
                   </div>
                 )}
-                <p className="text-base font-semibold leading-8 text-zinc-600">
-                  ApplyFlow will use these preferences to personalize job reminders, match scores, and future AI recommendations.
+                <p className="text-xs leading-relaxed text-tf-text-secondary">
+                  TailorFlow will use these preferences to personalize job reminders, match scores, and future AI recommendations.
                 </p>
-                <button onClick={next} className="rounded-2xl bg-zinc-950 px-5 py-3 text-sm font-black text-white inline-flex items-center gap-2">
+                <Button variant="primary" size="md" onClick={next}>
                   Get Started <ArrowRight size={16} />
-                </button>
+                </Button>
               </div>
             )}
 
@@ -309,7 +319,7 @@ export default function JobPreferencesPage() {
             {step === 5 && <OptionGrid value={form.experience_level} onChange={(v) => update('experience_level', v)} options={experienceOptions} />}
             {step === 6 && <TagInput label="Priority skills" value={form.priority_skills} onChange={(v) => update('priority_skills', v)} options={suggestions.priority_skills} />}
             {step === 7 && (
-              <div className="grid gap-4">
+              <div className="grid gap-3">
                 {[
                   ['Target Roles', form.target_roles],
                   ['Target Companies', form.target_companies],
@@ -318,31 +328,31 @@ export default function JobPreferencesPage() {
                   ['Experience Level', [form.experience_level]],
                   ['Priority Skills', form.priority_skills]
                 ].map(([label, values], idx) => (
-                  <button key={label} onClick={() => setStep(idx + 1)} className="rounded-2xl border border-zinc-200 p-4 text-left hover:border-[#00bda5] transition">
-                    <span className="block text-[10px] font-black uppercase tracking-widest text-zinc-400">{label}</span>
-                    <span className="mt-2 flex flex-wrap gap-2">
-                      {values.length ? values.map((item) => <span key={item} className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-700">{item}</span>) : <span className="text-xs font-bold text-zinc-400">None selected</span>}
+                  <button key={label} onClick={() => setStep(idx + 1)} className="rounded-md border border-tf-border p-3 text-left hover:border-tf-accent transition-colors bg-tf-surface">
+                    <span className="block text-[11px] font-medium text-tf-text-tertiary uppercase tracking-wider">{label}</span>
+                    <span className="mt-1.5 flex flex-wrap gap-1.5">
+                      {values.length ? values.map((item) => <span key={item} className="rounded-sm bg-tf-surface-2 border border-tf-border px-2 py-0.5 text-xs font-medium text-tf-text">{item}</span>) : <span className="text-xs text-tf-text-tertiary">None selected</span>}
                     </span>
                   </button>
                 ))}
               </div>
             )}
 
-            {error && <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">{error}</div>}
+            {error && <div className="mt-4 rounded-md border border-tf-danger/20 bg-tf-danger/10 px-3.5 py-2.5 text-xs font-medium text-tf-danger">{error}</div>}
 
             {step > 0 && (
-              <div className="mt-8 flex items-center justify-between gap-3">
-                <button type="button" onClick={() => setStep((prev) => Math.max(0, prev - 1))} className="rounded-2xl border border-zinc-200 px-4 py-3 text-sm font-black text-zinc-700 inline-flex items-center gap-2">
+              <div className="mt-6 flex items-center justify-between gap-3 pt-4 border-t border-tf-border">
+                <Button variant="secondary" size="md" onClick={() => setStep((prev) => Math.max(0, prev - 1))}>
                   <ArrowLeft size={16} /> Previous
-                </button>
+                </Button>
                 {step < steps.length - 1 ? (
-                  <button type="button" onClick={next} className="rounded-2xl bg-zinc-950 px-5 py-3 text-sm font-black text-white inline-flex items-center gap-2">
+                  <Button variant="primary" size="md" onClick={next}>
                     Next <ArrowRight size={16} />
-                  </button>
+                  </Button>
                 ) : (
-                  <button type="button" disabled={saving} onClick={complete} className="rounded-2xl bg-[#00bda5] px-5 py-3 text-sm font-black text-white disabled:opacity-70">
-                    {saving ? 'Saving...' : hasCompletedPreferences && isSettings ? 'Save Preferences' : 'Complete Setup'}
-                  </button>
+                  <Button variant="primary" size="md" isLoading={saving} onClick={complete}>
+                    {hasCompletedPreferences && isSettings ? 'Save Preferences' : 'Complete Setup'}
+                  </Button>
                 )}
               </div>
             )}
@@ -352,3 +362,4 @@ export default function JobPreferencesPage() {
     </div>
   );
 }
+

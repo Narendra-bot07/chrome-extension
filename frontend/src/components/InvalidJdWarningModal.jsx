@@ -1,47 +1,51 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { AlertCircle } from 'lucide-react';
+import { Button } from './ui/Button';
 
 function InvalidJdWarningModal({ isOpen, onClose, onPasteManually }) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 flex items-center justify-center p-5 select-none font-sans">
+    <div className="fixed inset-0 bg-[#0A0B0D]/50 backdrop-blur-[4px] z-50 flex items-center justify-center p-4 select-none font-sans">
       <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
+        initial={{ opacity: 0, scale: 0.98 }}
         animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        className="bg-white dark:bg-[#0c0c0e] border border-slate-200 dark:border-slate-850 rounded-2xl p-5 max-w-sm w-full space-y-4 shadow-premium"
+        exit={{ opacity: 0, scale: 0.98 }}
+        transition={{ duration: 0.24, ease: [0.2, 0, 0, 1] }}
+        className="bg-tf-surface border border-tf-border rounded-xl p-6 max-w-sm w-full space-y-4 shadow-modal"
       >
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-550 flex-shrink-0">
+          <div className="w-9 h-9 rounded-md bg-tf-warning/10 border border-tf-warning/20 flex items-center justify-center text-tf-warning shrink-0">
             <AlertCircle size={18} />
           </div>
           <div>
-            <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-100">Invalid Job Details</h3>
-            <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Scanned page is not a job posting</p>
+            <h3 className="text-base font-semibold tracking-tight text-tf-text">Invalid Job Details</h3>
+            <p className="text-xs text-tf-text-secondary font-normal mt-0.5">Scanned page is not a job posting</p>
           </div>
         </div>
 
-        <p className="text-[10.5px] leading-relaxed text-slate-550 dark:text-slate-400">
+        <p className="text-xs leading-relaxed text-tf-text-secondary">
           The content on this page does not appear to contain job requirements or recruitment details. Please navigate to a job posting (e.g., on LinkedIn, Indeed, or Greenhouse) and try again, or paste the text manually.
         </p>
 
         <div className="flex gap-2.5 pt-2">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="md"
             onClick={onPasteManually}
-            className="flex-1 py-2.5 border border-slate-200 dark:border-slate-850 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-900 font-bold text-[10px] uppercase tracking-wider rounded-xl transition cursor-pointer"
+            className="flex-1"
           >
             Paste Manually
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="primary"
+            size="md"
             onClick={onClose}
-            className="flex-1 py-2.5 bg-brand hover:bg-brand-hover text-white font-bold text-[10px] uppercase tracking-wider rounded-xl transition shadow-md cursor-pointer"
+            className="flex-1"
           >
             Close
-          </button>
+          </Button>
         </div>
       </motion.div>
     </div>
@@ -49,3 +53,4 @@ function InvalidJdWarningModal({ isOpen, onClose, onPasteManually }) {
 }
 
 export default InvalidJdWarningModal;
+

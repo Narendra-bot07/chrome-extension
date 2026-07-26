@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { Check, TrendingUp, ChevronDown, ChevronRight, Plus, Minus, ArrowRight } from 'lucide-react';
+import { Button } from './ui/Button';
 
 const getScoreBgColor = (score) => {
-  if (score >= 80) return 'text-emerald-500'; 
-  if (score >= 60) return 'text-amber-500'; 
-  return 'text-rose-500'; 
+  if (score >= 80) return 'text-tf-success'; 
+  if (score >= 60) return 'text-tf-warning'; 
+  return 'text-tf-danger'; 
 };
 
 function DashboardView({
@@ -40,24 +41,25 @@ function DashboardView({
   const projectedScore = Math.min(99, comparison.ats_score + Math.round((selectedOptimizations / (totalOptimizations || 1)) * (100 - comparison.ats_score) * 0.8));
 
   return (
-    <div className="flex-1 flex flex-col justify-between select-none bg-white dark:bg-[#0a0a0a] text-slate-800 dark:text-slate-200">
-      <div className="space-y-6 pr-2 scrollbar-thin overflow-y-auto max-h-[440px] pb-6">
+    <div className="flex-1 flex flex-col justify-between select-none bg-tf-bg text-tf-text">
+      <div className="space-y-6 overflow-y-auto max-h-[440px] pb-6">
         
         {/* 1. Hero Section: ATS Score & Progress */}
-        <div className="p-6 border border-slate-200 dark:border-slate-800 rounded-2xl flex flex-col gap-4">
+        <div className="p-5 border border-tf-border bg-tf-surface rounded-lg flex flex-col gap-4 shadow-sm">
           <div className="flex items-center justify-between">
             <div className="space-y-1">
-              <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400">Match Rate</h3>
+              <h3 className="text-xs font-medium text-tf-text-secondary">Match Rate</h3>
               <div className="flex items-baseline gap-3">
-                <span className="text-4xl font-bold tracking-tight">{comparison.ats_score}%</span>
+                <span className="text-3xl font-semibold tracking-tight text-tf-text">{comparison.ats_score}%</span>
                 {selectedOptimizations > 0 && (
                   <>
-                    <ArrowRight className="w-4 h-4 text-slate-400" />
-                    <span className="text-4xl font-bold tracking-tight text-emerald-500">{projectedScore}%</span>
+                    <ArrowRight className="w-4 h-4 text-tf-text-tertiary" />
+                    <span className="text-3xl font-semibold tracking-tight text-tf-success">{projectedScore}%</span>
                   </>
                 )}
               </div>
             </div>
+
           </div>
           
           <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800/60">

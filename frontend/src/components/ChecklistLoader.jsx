@@ -1,37 +1,40 @@
 import React from 'react';
-import { Check, Circle, Loader2 } from 'lucide-react';
+import { Check, Circle } from 'lucide-react';
 
 function ChecklistLoader({ title, progress, message, checklistItems }) {
   return (
-    <div className="flex-1 flex flex-col items-center justify-center space-y-6 py-12 animate-fadeIn select-none font-sans max-w-sm mx-auto">
-      <div className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm flex items-center justify-center">
-        <Loader2 className="text-[#00bda5] animate-spin" size={16} />
+    <div className="flex-1 flex flex-col items-center justify-center space-y-6 py-12 select-none font-sans max-w-sm mx-auto">
+      <div className="w-9 h-9 rounded-md bg-tf-surface border border-tf-border shadow-sm flex items-center justify-center">
+        <svg className="animate-spin h-4 w-4 text-tf-accent shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"></circle>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
       </div>
 
       <div className="text-center space-y-1">
-        <h3 className="text-xs font-black uppercase tracking-widest text-zinc-900 dark:text-zinc-50">{title}</h3>
-        <p className="text-[10px] text-zinc-400 dark:text-zinc-500 font-medium h-4 leading-none">{message}</p>
+        <h3 className="text-sm font-semibold tracking-tight text-tf-text">{title}</h3>
+        <p className="text-xs text-tf-text-secondary font-normal h-4 leading-none">{message}</p>
       </div>
 
-      <div className="w-48 h-1 bg-zinc-100 dark:bg-zinc-900 rounded-full overflow-hidden">
+      <div className="w-48 h-1 bg-tf-surface-2 border border-tf-border rounded-full overflow-hidden">
         <div
-          className="h-full bg-[#00bda5] rounded-full transition-all duration-300"
+          className="h-full bg-tf-accent rounded-full transition-all duration-200"
           style={{ width: `${progress}%` }}
         />
       </div>
 
-      <div className="w-full bg-white/80 dark:bg-zinc-900/40 border border-zinc-200/60 dark:border-zinc-800 rounded-2xl p-4 space-y-2.5 text-[11px] text-zinc-500 dark:text-zinc-400 shadow-sm">
+      <div className="w-full bg-tf-surface border border-tf-border rounded-lg p-4 space-y-2.5 text-xs text-tf-text-secondary shadow-sm">
         {checklistItems.map((item, idx) => {
           const isDone = progress >= item.progressThreshold;
           const isPending = progress < item.progressThreshold && (idx === 0 || progress >= checklistItems[idx - 1].progressThreshold);
           return (
-            <div key={item.label || idx} className="flex items-center gap-2.5 font-bold">
-              <span className={`w-4 h-4 rounded-full flex items-center justify-center ${
-                isDone ? 'bg-[#00bda5] text-white' : isPending ? 'bg-zinc-100 dark:bg-zinc-800 text-[#00bda5]' : 'bg-zinc-200/60 dark:bg-zinc-800 text-zinc-400'
+            <div key={item.label || idx} className="flex items-center gap-2.5 font-medium">
+              <span className={`w-4 h-4 rounded-full flex items-center justify-center text-xs ${
+                isDone ? 'bg-tf-accent/15 text-tf-accent' : isPending ? 'bg-tf-surface-2 border border-tf-accent text-tf-accent' : 'bg-tf-surface-2 border border-tf-border text-tf-text-tertiary'
               }`}>
-                {isDone ? <Check size={10} /> : isPending ? <Loader2 size={10} className="animate-spin" /> : <Circle size={8} />}
+                {isDone ? <Check size={10} strokeWidth={2.5} /> : <Circle size={6} />}
               </span>
-              <span className={isDone ? 'line-through text-zinc-400 dark:text-zinc-600' : 'text-zinc-700 dark:text-zinc-300'}>{item.label}</span>
+              <span className={isDone ? 'line-through text-tf-text-tertiary' : isPending ? 'text-tf-text font-semibold' : 'text-tf-text-secondary'}>{item.label}</span>
             </div>
           );
         })}
@@ -41,3 +44,4 @@ function ChecklistLoader({ title, progress, message, checklistItems }) {
 }
 
 export default ChecklistLoader;
+

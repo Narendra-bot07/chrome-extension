@@ -9,31 +9,31 @@ export function Button({
   disabled = false,
   ...props 
 }) {
-  const baseStyles = "inline-flex min-w-0 items-center justify-center gap-2 font-semibold transition-colors duration-150 focus:outline-none disabled:opacity-50 disabled:pointer-events-none rounded-[9px]";
+  const baseStyles = "inline-flex min-w-0 items-center justify-center gap-2 font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-tf-accent focus-visible:outline-offset-2 disabled:opacity-50 disabled:pointer-events-none rounded-md cursor-pointer select-none";
   
   const variants = {
-    primary: "bg-[#5B5CE2] text-white hover:bg-[#4B4CCD]",
-    secondary: "bg-[#F2F4F7] text-[#344054] hover:bg-[#E4E7EC] dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700",
-    ghost: "text-[#667085] hover:bg-[#F2F4F7] hover:text-[#111827] dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white",
-    danger: "bg-red-50 text-[#D92D20] hover:bg-red-100 dark:bg-red-500/10 dark:text-red-400",
-    outline: "border border-[#E4E7EC] dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-[#F6F7F9] dark:hover:bg-zinc-800 text-[#344054] dark:text-zinc-100"
+    primary: "bg-tf-accent text-tf-accent-fg hover:bg-tf-accent-hover border border-transparent",
+    secondary: "bg-tf-surface text-tf-text hover:bg-tf-surface-2 border border-tf-border",
+    ghost: "bg-transparent text-tf-text-secondary hover:bg-tf-surface-2 hover:text-tf-text border border-transparent",
+    danger: "bg-tf-danger/10 text-tf-danger hover:bg-tf-danger/20 border border-transparent",
+    outline: "bg-tf-surface text-tf-text hover:bg-tf-surface-2 border border-tf-border"
   };
 
   const sizes = {
     sm: "h-8 px-3 text-xs",
-    md: "h-10 px-4 text-sm",
-    lg: "h-12 px-6 text-base"
+    md: "h-9 px-3.5 text-sm",
+    lg: "h-10 px-4 text-sm"
   };
 
   return (
     <button
-      className={`${baseStyles} ${variants[variant]} ${sizes[size]} ${className}`}
+      className={`${baseStyles} ${variants[variant] || variants.primary} ${sizes[size] || sizes.md} ${className}`}
       disabled={disabled || isLoading}
       {...props}
     >
       {isLoading ? (
-        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+        <svg className="animate-spin h-3.5 w-3.5 text-current shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"></circle>
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
         </svg>
       ) : null}

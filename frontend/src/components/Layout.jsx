@@ -4,15 +4,21 @@ import { useApp } from '../context/AppContext';
 import { 
   Settings, Sun, Moon, AlertCircle, X, Menu, 
   LayoutDashboard, FileText, Briefcase, User, 
-  LogOut, Zap, Target
+  LogOut, Zap, Target, Search, HelpCircle, Bell, ChevronDown, Shield
 } from 'lucide-react';
+
 import { Button } from './ui/Button';
 import SettingsOverlay from './SettingsOverlay';
 import InvalidJdWarningModal from './InvalidJdWarningModal';
 import HowItWorksModal from './modals/HowItWorksModal';
 import FeedbackModal from './modals/FeedbackModal';
 import SupportModal from './modals/SupportModal';
+import { FlowStepper } from './FlowStepper';
 import { classifyBrowserPageUrl } from '../services/jdExtractionFlow';
+import { InteractiveAuroraBackground } from './layout/InteractiveAuroraBackground';
+import { FlowParticleBackground } from './layout/FlowParticleBackground';
+
+
 
 function Layout() {
   const navigate = useNavigate();
@@ -55,13 +61,20 @@ function Layout() {
     resume_count: 0
   });
 
-  const [sidebarOpen, setSidebarOpen] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return window.innerWidth >= 768 && !isExtension;
-    }
-    return true;
-  });
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileDropupOpen, setProfileDropupOpen] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target)) {
+        setProfileMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const [isHowItWorksOpen, setIsHowItWorksOpen] = useState(false);
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
@@ -204,8 +217,7 @@ function Layout() {
     apiError.toLowerCase().includes("not appear to contain")
   );
 
-  const getHeaderTitle = () => {
-    if (currentPath === '/profile' && routeTitleOverride) return routeTitleOverride;
+  const getBreadcrumbTitle = () => {
     switch (currentPath) {
       case '/':
       case '/dashboard': return 'Dashboard';
@@ -222,8 +234,15 @@ function Layout() {
       case '/download': return 'Tailoring Complete';
       case '/cover-letter': return 'Draft Cover Letter';
       case '/subscription': return 'Subscription';
-      case '/settings/job-preferences': return 'Job Preferences';
-      default: return 'ApplyFlow';
+      case '/settings/security': return 'Security';
+      case '/settings/job-preferences':
+      case '/onboarding/job-preferences': return 'Job Preferences';
+      case '/support/search': return 'Help Search';
+      case '/support/faq': return 'FAQ';
+      case '/support/contact': return 'Contact Support';
+      case '/no-job-detected': return 'No Job Detected';
+      case '/manual-job-entry': return 'Manual Job Entry';
+      default: return 'TailorFlow';
     }
   };
 
@@ -233,282 +252,333 @@ function Layout() {
   const jdRemaining = jdUsage?.remaining;
   const jdPercent = jdLimit ? Math.min(100, (jdUsed / jdLimit) * 100) : 0;
 
+  const navItems = [
+    { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { path: '/resume-detect', label: 'Resumes', icon: FileText },
+    { path: '/job-tracker', label: 'Job Tracker', icon: Briefcase },
+    { path: '/settings/job-preferences', label: 'Job Preferences', icon: Target },
+  ];
+
   return (
-    <div className={`w-full h-screen flex overflow-hidden font-sans transition-colors duration-200 bg-grid-pattern ${
-      darkMode ? 'dark bg-[#0a0a0a] text-zinc-50' : 'bg-zinc-50 text-zinc-900'
-    }`}>
+    <div className={`w-full h-screen flex overflow-hidden font-sans bg-tf-bg text-tf-text relative ${darkMode ? 'dark' : ''}`}>
+      {/* Global Interactive Ambient Aurora & Data Flow Backgrounds */}
+      <InteractiveAuroraBackground />
+      <FlowParticleBackground />
+
       {/* Mobile Overlay */}
       {sidebarOpen && (
         <div 
-          className="fixed inset-0 bg-black/50 z-30 md:hidden transition-opacity"
+          className="fixed inset-0 bg-[#0A0B0D]/50 z-30 md:hidden transition-opacity"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
-      {/* 1. PREMIUM SIDEBAR */}
-      <div className={`transition-all duration-300 ease-in-out z-40 absolute md:relative h-full flex-shrink-0 overflow-hidden ${
-        sidebarOpen ? 'w-64 translate-x-0' : 'w-0 -translate-x-full md:translate-x-0'
-      }`}>
-        <aside className={`w-64 h-full border-r flex flex-col justify-between ${
-          darkMode 
-            ? 'bg-[#09090b] border-zinc-850' 
-            : 'bg-white border-zinc-150'
-        }`}>
-        
-        <div className="flex flex-col gap-6 px-4 py-5">
+      {/* 1. OPTIONAL MOBILE SLIDE-OVER SIDEBAR */}
+      <aside 
+        className={`transition-all duration-200 ease-enter z-40 fixed inset-y-0 left-0 h-full border-r border-tf-border bg-tf-surface flex flex-col justify-between ${
+          sidebarOpen ? 'w-[240px] translate-x-0 shadow-2xl' : 'w-0 -translate-x-full pointer-events-none hidden'
+        }`}
+      >
+        <div className="flex flex-col gap-5 p-3">
           {/* Logo Header */}
-          <div className="flex items-center justify-between">
-            <Link to="/dashboard" className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-[9px] bg-[#5B5CE2] flex items-center justify-center text-white font-bold text-sm">
-                A
+          <div className="h-[44px] flex items-center justify-between px-2">
+            <Link to="/dashboard" className="flex items-center gap-2.5 overflow-hidden">
+              <div className="w-7 h-7 rounded-md bg-tf-accent flex items-center justify-center text-tf-accent-fg font-semibold text-xs shrink-0">
+                T
               </div>
-              <span className={`text-[17px] font-bold tracking-[-0.02em] ${darkMode ? 'text-white' : 'text-slate-905'}`}>
-                ApplyFlow
-              </span>
+              {sidebarOpen && (
+                <span className="text-sm font-semibold tracking-tight text-tf-text truncate">
+                  TailorFlow
+                </span>
+              )}
             </Link>
             <button 
-              className="md:hidden text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+              className="md:hidden text-tf-text-tertiary hover:text-tf-text"
               onClick={() => setSidebarOpen(false)}
             >
               <X size={16} />
             </button>
           </div>
 
-          {/* Nav Items */}
-          <nav className="flex flex-col gap-1">
-            <Link 
-              to="/dashboard" 
-              className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                currentPath === '/dashboard' || currentPath === '/'
-                  ? darkMode ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-100 text-zinc-950'
-                  : darkMode ? 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-950' : 'text-zinc-650 hover:text-zinc-900 hover:bg-zinc-50'
-              }`}
-            >
-              <LayoutDashboard size={16} />
-              Dashboard
-            </Link>
-            <Link 
-              to="/resume-detect" 
-              className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                currentPath.startsWith('/resume-') 
-                  ? darkMode ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-100 text-zinc-950'
-                  : darkMode ? 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-950' : 'text-zinc-650 hover:text-zinc-900 hover:bg-zinc-50'
-              }`}
-            >
-              <FileText size={16} />
-              Resumes
-            </Link>
-            <Link 
-              to="/job-tracker" 
-              className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                currentPath === '/job-tracker' 
-                  ? darkMode ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-100 text-zinc-950'
-                  : darkMode ? 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-950' : 'text-zinc-650 hover:text-zinc-900 hover:bg-zinc-50'
-              }`}
-            >
-              <Briefcase size={16} />
-              Job Tracker
-            </Link>
-            <Link
-              to="/settings/job-preferences"
-              className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                currentPath === '/settings/job-preferences'
-                  ? darkMode ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-100 text-zinc-950'
-                  : darkMode ? 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-950' : 'text-zinc-650 hover:text-zinc-900 hover:bg-zinc-50'
-              }`}
-            >
-              <Target size={16} />
-              Job Preferences
-            </Link>
+          {/* Navigation Links */}
+          <nav className="flex flex-col gap-0.5">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = currentPath === item.path || (item.path === '/resume-detect' && currentPath.startsWith('/resume-'));
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  className={`relative flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-colors ${
+                    isActive 
+                      ? 'text-tf-text bg-tf-surface-2 before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[2px] before:bg-tf-accent' 
+                      : 'text-tf-text-secondary hover:text-tf-text hover:bg-tf-surface-2'
+                  }`}
+                >
+                  <Icon size={20} className="shrink-0" />
+                  {sidebarOpen && <span className="truncate">{item.label}</span>}
+                </Link>
+              );
+            })}
           </nav>
         </div>
 
-        <div className="p-6 space-y-3">
-          {/* JD Extraction Status / Plan Overview Card */}
-          <div className={`border rounded-xl p-4 flex flex-col gap-3 transition-colors ${
-            darkMode ? 'bg-zinc-950 border-zinc-850' : 'bg-zinc-50 border-zinc-200/60'
-          }`}>
-            <div className="flex justify-between items-center">
-              <div>
-                <span className="text-[8px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">CURRENT PLAN</span>
-                <p className={`text-[11px] font-black mt-0.5 ${darkMode ? 'text-white' : 'text-zinc-800'}`}>
-                  {subscription?.plan?.name || profile.subscription_plan} Plan
-                </p>
-              </div>
-              <Zap className="w-3.5 h-3.5 text-[#00bda5]" />
-            </div>
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-[10px] font-bold text-zinc-500">
-                <span>Job extractions</span>
-                <span className={darkMode ? 'text-white' : 'text-zinc-800'}>
-                  {jdLimit ? `${jdUsed}/${jdLimit}` : `${jdUsed}/∞`}
+        {/* Sidebar Footer (Usage + Profile) */}
+        {sidebarOpen && (
+          <div className="p-3 space-y-3 border-t border-tf-border">
+            {/* JD Usage Mini Card */}
+            <div className="border border-tf-border bg-tf-surface-2 rounded-md p-3 space-y-2">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-[11px] font-medium text-tf-text-tertiary uppercase tracking-wider">PLAN</span>
+                <span className="font-medium text-tf-text">
+                  {subscription?.plan?.name || profile.subscription_plan}
                 </span>
               </div>
-              <div className={`w-full h-1 rounded-full overflow-hidden ${darkMode ? 'bg-zinc-800' : 'bg-zinc-200'}`}>
-                <div 
-                  className="bg-[#00bda5] h-full transition-all duration-300"
-                  style={{ width: `${jdPercent}%` }}
-                />
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs text-tf-text-secondary">
+                  <span>Extractions</span>
+                  <span className="font-medium text-tf-text">
+                    {jdLimit ? `${jdUsed}/${jdLimit}` : `${jdUsed}/∞`}
+                  </span>
+                </div>
+                <div className="w-full h-1 bg-tf-border rounded-full overflow-hidden">
+                  <div 
+                    className="bg-tf-accent h-full transition-all duration-200"
+                    style={{ width: `${jdPercent}%` }}
+                  />
+                </div>
               </div>
-              <div className="text-[9px] font-bold text-zinc-400">
-                {jdLimit ? `${jdRemaining ?? 0} remaining` : 'Unlimited'}{jdUsage?.period_end ? ` · Resets ${new Date(jdUsage.period_end).toLocaleDateString()}` : ''}
-              </div>
+              <Link to="/subscription" className="block pt-1">
+                <Button variant="secondary" size="sm" className="w-full h-7 text-xs">
+                  Upgrade Plan
+                </Button>
+              </Link>
             </div>
-            <Link 
-              to="/subscription"
-              className="mt-1"
-            >
-              <Button variant="outline" size="sm" className="w-full text-xs py-1.5 font-bold rounded-lg border-zinc-200 dark:border-zinc-800">
-                Manage Plan
-              </Button>
-            </Link>
+
+            {/* Profile Drop-up */}
+            <div className="relative">
+              {profileDropupOpen && (
+                <div className="absolute bottom-full left-0 right-0 mb-2 rounded-md border border-tf-border bg-tf-surface shadow-modal overflow-hidden z-50 py-1">
+                  <button
+                    onClick={() => {
+                      setProfileDropupOpen(false);
+                      navigate('/profile');
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] font-medium text-tf-text hover:bg-tf-surface-2 transition-colors"
+                  >
+                    <User size={16} />
+                    Account
+                  </button>
+                  <button
+                    onClick={() => {
+                      setProfileDropupOpen(false);
+                      navigate('/subscription');
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] font-medium text-tf-text hover:bg-tf-surface-2 transition-colors"
+                  >
+                    <Zap size={16} />
+                    Subscription
+                  </button>
+                  <div className="border-t border-tf-border my-1" />
+                  <button
+                    onClick={logout}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] font-medium text-tf-danger hover:bg-tf-danger/10 transition-colors"
+                  >
+                    <LogOut size={16} />
+                    Sign out
+                  </button>
+                </div>
+              )}
+
+              <button
+                onClick={() => setProfileDropupOpen((open) => !open)}
+                className="w-full border border-tf-border rounded-md p-2 flex items-center gap-2.5 text-left bg-tf-surface hover:bg-tf-surface-2 transition-colors"
+              >
+                <div className="w-7 h-7 shrink-0 rounded-full bg-tf-accent text-tf-accent-fg flex items-center justify-center font-medium text-xs">
+                  {(profile.full_name || user?.metadata?.full_name || user?.email || 'N').charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] font-medium text-tf-text truncate leading-tight">
+                    {profile.full_name || user?.metadata?.full_name || 'Narendra'}
+                  </p>
+                  <p className="text-xs text-tf-text-tertiary truncate leading-tight">
+                    {profile.email || user?.email || 'user@example.com'}
+                  </p>
+                </div>
+              </button>
+            </div>
           </div>
-
-          {/* Bottom Profile Bar + Drop-up */}
-          <div className="relative">
-            {profileDropupOpen && (
-              <div className={`absolute bottom-full left-0 right-0 mb-2 rounded-2xl border shadow-xl overflow-hidden z-50 ${
-                darkMode ? 'bg-zinc-950 border-zinc-800 text-zinc-100' : 'bg-white border-zinc-200 text-zinc-900'
-              }`}>
-                <button
-                  onClick={() => {
-                    setProfileDropupOpen(false);
-                    navigate('/profile');
-                  }}
-                  className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-extrabold transition-colors ${
-                    darkMode ? 'hover:bg-zinc-900 text-zinc-300' : 'hover:bg-zinc-50 text-zinc-700'
-                  }`}
-                >
-                  <User size={15} />
-                  Account
-                </button>
-                <button
-                  onClick={() => {
-                    setProfileDropupOpen(false);
-                    navigate('/subscription');
-                  }}
-                  className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-extrabold transition-colors ${
-                    darkMode ? 'hover:bg-zinc-900 text-zinc-300' : 'hover:bg-zinc-50 text-zinc-700'
-                  }`}
-                >
-                  <Zap size={15} />
-                  Subscription
-                </button>
-                <div className={darkMode ? 'border-t border-zinc-800' : 'border-t border-zinc-100'} />
-                <button
-                  onClick={logout}
-                  className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-extrabold transition-colors ${
-                    darkMode ? 'hover:bg-zinc-900 text-zinc-300' : 'hover:bg-zinc-50 text-zinc-700'
-                  }`}
-                >
-                  <LogOut size={15} />
-                  Sign out
-                </button>
-              </div>
-            )}
-
-            <button
-              onClick={() => setProfileDropupOpen((open) => !open)}
-              className={`w-full border rounded-2xl p-3 flex items-center gap-3 text-left transition-colors ${
-                darkMode ? 'bg-zinc-950 border-zinc-850 hover:bg-zinc-900' : 'bg-zinc-50 border-zinc-200/60 hover:bg-zinc-100'
-              }`}
-            >
-              <div className="w-9 h-9 flex-shrink-0 rounded-full bg-[#5B5CE2] text-white flex items-center justify-center font-semibold text-sm">
-                {(profile.full_name || user?.metadata?.full_name || user?.email || 'N').charAt(0).toUpperCase()}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className={`text-sm font-black truncate ${darkMode ? 'text-white' : 'text-zinc-900'}`}>
-                  {profile.full_name || user?.metadata?.full_name || 'Narendra'}
-                </p>
-                <p className={`text-[11px] font-semibold truncate mt-0.5 ${darkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
-                  {profile.email || user?.email || 'bandinarendra3333@gmail.com'}
-                </p>
-              </div>
-              <span className={`text-xs font-black transition-transform ${profileDropupOpen ? 'rotate-180' : ''} ${darkMode ? 'text-zinc-500' : 'text-zinc-400'}`}>
-                ^
-              </span>
-            </button>
-          </div>
-        </div>
-
+        )}
       </aside>
-      </div>
 
-      {/* 2. MAIN PANEL */}
+      {/* 2. MAIN CONTAINER */}
       <div className="flex-1 flex flex-col justify-between overflow-hidden relative">
         
-        {/* TOP NAV */}
-        <header className={`px-6 py-4 border-b flex justify-between items-center z-20 flex-shrink-0 transition-colors duration-200 ${
-            darkMode ? 'bg-[#121419]/95 border-zinc-800/80 backdrop-blur-xl' : 'bg-white/95 border-zinc-200 backdrop-blur-xl'
-        }`}>
-          <div className="flex items-center gap-3">
+        {/* TOPBAR (60px) */}
+        <header className="h-[60px] px-4 sm:px-6 border-b border-tf-border bg-tf-surface flex justify-between items-center z-20 shrink-0 select-none">
+          <div className="flex items-center gap-6">
+            {/* Sidebar toggle for mobile/compact */}
             <button 
-              className="p-1 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+              className="p-1.5 rounded-md text-tf-text-secondary hover:text-tf-text hover:bg-tf-surface-2 transition-colors md:hidden"
               onClick={() => setSidebarOpen(!sidebarOpen)}
             >
-              <Menu size={20} />
+              <Menu size={18} />
             </button>
-            <span className={`text-md font-bold tracking-tight ${darkMode ? 'text-white' : 'text-zinc-900'}`}>{getHeaderTitle()}</span>
+
+            {/* TailorFlow Brand Logo */}
+            <Link to="/dashboard" className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-[#2E5BFF] to-[#00BDA5] flex items-center justify-center text-white font-extrabold text-sm shadow-xs">
+                T
+              </div>
+              <span className="text-base font-bold tracking-tight text-tf-text hidden sm:inline">
+                TailorFlow
+              </span>
+            </Link>
+
+            {/* Horizontal Navigation Tabs */}
+            <nav className="hidden md:flex items-center gap-1 bg-tf-surface-2/60 p-1 rounded-xl border border-tf-border/50">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = currentPath === item.path || (item.path === '/resume-detect' && currentPath.startsWith('/resume-'));
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      isActive
+                        ? 'bg-tf-accent/15 text-tf-accent border border-tf-accent/20 shadow-2xs dark:bg-tf-accent/20'
+                        : 'text-tf-text-secondary hover:text-tf-text hover:bg-tf-surface'
+                    }`}
+                  >
+                    <Icon size={14} />
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </nav>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            {/* Theme Toggle */}
             <button 
-              onClick={() => {
-                setIsHowItWorksOpen(true);
-              }}
-              className="hidden md:inline text-xs text-zinc-500 font-semibold cursor-pointer hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors"
-            >
-              How it works
-            </button>
-            <button 
-              onClick={() => {
-                navigate('/subscription');
-              }}
-              className="hidden md:inline text-xs text-zinc-500 font-semibold cursor-pointer hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors"
-            >
-              Upgrade
-            </button>
-            <button 
-              onClick={() => setIsFeedbackOpen(true)}
-              className="hidden md:inline text-xs text-zinc-500 font-semibold cursor-pointer hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors"
-            >
-              Feedback
-            </button>
-
-            {/* Support support */}
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="hidden sm:inline-flex"
-              onClick={() => setIsSupportOpen(true)}
-            >
-              Need Help?
-            </Button>
-
-            {/* Theme / settings */}
-            <button 
-              className={`p-2 rounded-lg border transition-colors ${
-                darkMode ? 'border-zinc-800 bg-zinc-900/40 text-zinc-400 hover:text-white hover:bg-zinc-800' : 'border-zinc-200 bg-white text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50'
-              }`}
+              className="p-2 rounded-lg border border-tf-border bg-tf-surface text-tf-text-secondary hover:text-tf-text hover:bg-tf-surface-2 transition-colors cursor-pointer"
               onClick={toggleDarkMode}
+              title="Toggle dark / light theme"
             >
-              {darkMode ? <Sun size={14} /> : <Moon size={14} />}
+              {darkMode ? <Sun size={16} /> : <Moon size={16} />}
             </button>
 
+            {/* Notification Bell */}
+            <button 
+              className="relative p-2 rounded-lg border border-tf-border bg-tf-surface text-tf-text-secondary hover:text-tf-text hover:bg-tf-surface-2 transition-colors cursor-pointer"
+              title="Notifications"
+            >
+              <Bell size={16} />
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-tf-accent text-white text-[9px] font-black rounded-full flex items-center justify-center border-2 border-tf-surface">
+                3
+              </span>
+            </button>
+
+            {/* User Profile Dropdown Pill */}
+            {(() => {
+              const displayName = profile?.full_name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Narendra';
+              const avatarInitial = displayName.charAt(0).toUpperCase();
+
+              return (
+                <div className="relative border-l border-tf-border pl-3" ref={profileMenuRef}>
+                  <button
+                    onClick={() => setProfileMenuOpen((prev) => !prev)}
+                    className="flex items-center gap-2.5 p-1 rounded-xl hover:bg-tf-surface-2 transition cursor-pointer select-none"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-tf-accent/20 text-tf-accent border border-tf-accent/30 font-bold text-xs flex items-center justify-center uppercase shadow-2xs">
+                      {avatarInitial}
+                    </div>
+                    <div className="hidden lg:flex flex-col text-left leading-tight">
+                      <span className="text-xs font-semibold text-tf-text truncate max-w-[110px]">
+                        {displayName}
+                      </span>
+                      <span className="text-[10px] text-tf-text-tertiary font-medium capitalize">
+                        {profile?.subscription_plan || 'Free'}
+                      </span>
+                    </div>
+                    <ChevronDown size={14} className="text-tf-text-tertiary hidden lg:inline" />
+                  </button>
+
+                  {/* Profile Dropdown Menu */}
+                  {profileMenuOpen && (
+                    <div className="absolute right-0 top-full mt-2 w-56 bg-tf-surface border border-tf-border rounded-xl shadow-xl z-50 py-1.5 overflow-hidden select-none">
+                      {/* User Info Header */}
+                      <div className="px-3.5 py-2.5 border-b border-tf-border space-y-0.5">
+                        <div className="text-xs font-bold text-tf-text truncate">{displayName}</div>
+                        <div className="text-[11px] text-tf-text-tertiary truncate">{user?.email || 'user@example.com'}</div>
+                        <div className="pt-1">
+                          <span className="inline-block px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-tf-accent/10 text-tf-accent border border-tf-accent/20">
+                            {profile?.subscription_plan || 'Free Plan'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Menu Items */}
+                      <div className="py-1">
+                        <button
+                          onClick={() => {
+                            setProfileMenuOpen(false);
+                            navigate('/profile');
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-medium text-tf-text hover:bg-tf-surface-2 transition cursor-pointer"
+                        >
+                          <User size={15} className="text-tf-text-secondary" />
+                          <span>Account Settings</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setProfileMenuOpen(false);
+                            navigate('/subscription');
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-medium text-tf-text hover:bg-tf-surface-2 transition cursor-pointer"
+                        >
+                          <Zap size={15} className="text-tf-text-secondary" />
+                          <span>Subscription & Credits</span>
+                        </button>
+                      </div>
+
+                      <div className="border-t border-tf-border my-1" />
+
+                      {/* Sign Out */}
+                      <button
+                        onClick={() => {
+                          setProfileMenuOpen(false);
+                          logout();
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-medium text-tf-danger hover:bg-tf-danger/10 transition cursor-pointer"
+                      >
+                        <LogOut size={15} />
+                        <span>Sign Out</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </header>
 
+
         {/* APPLICATION SUBMISSION CONFIRMATION TOAST */}
+
         {pendingApplicationSubmitted && (
-          <div className="px-6 py-4 bg-emerald-50 dark:bg-emerald-950/20 border-b border-emerald-200/50 text-emerald-850 dark:text-emerald-400 text-xs flex justify-between items-center gap-3 flex-shrink-0 animate-fadeIn select-none">
-            <div className="flex items-center gap-2.5">
-              <Zap size={14} className="text-[#00bda5] animate-pulse" />
-              <p className="font-semibold text-zinc-700 dark:text-zinc-300">
-                It looks like you completed this application at <span className="font-black underline">{pendingApplicationSubmitted.company}</span>. Mark as Applied?
+          <div className="px-6 py-3 bg-tf-surface-2 border-b border-tf-border text-tf-text text-xs flex justify-between items-center gap-3 shrink-0 select-none">
+            <div className="flex items-center gap-2">
+              <Zap size={14} className="text-tf-accent" />
+              <p className="font-medium text-tf-text">
+                Application detected for <span className="font-semibold">{pendingApplicationSubmitted.company}</span>. Mark as Applied?
               </p>
             </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <button
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={async () => {
                   if (activeApplicationId) {
                     await updateApplicationStage(activeApplicationId, 'Applied');
@@ -522,13 +592,12 @@ function Layout() {
                   }
                   setPendingApplicationSubmitted(null);
                 }}
-                className="bg-[#00bda5] hover:bg-[#00a894] text-white font-extrabold px-3 py-1.5 rounded-lg border-none cursor-pointer transition uppercase text-[9px] tracking-wider shadow-sm"
               >
                 Mark as Applied
-              </button>
+              </Button>
               <button
                 onClick={() => setPendingApplicationSubmitted(null)}
-                className="bg-transparent hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-500 p-1.5 rounded-lg border-none cursor-pointer transition flex items-center justify-center"
+                className="text-tf-text-tertiary hover:text-tf-text p-1"
               >
                 <X size={14} />
               </button>
@@ -538,12 +607,12 @@ function Layout() {
 
         {/* ERROR TOAST */}
         {apiError && !isInvalidJdError && (
-          <div className="px-6 py-3 bg-rose-50 border-b border-rose-200/50 text-rose-800 text-xs flex justify-between items-start gap-2 flex-shrink-0 animate-fadeIn">
-            <div className="flex gap-2">
-              <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
-              <p className="leading-tight">{apiError}</p>
+          <div className="px-6 py-3 bg-tf-danger/10 border-b border-tf-danger/20 text-tf-danger text-xs flex justify-between items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2">
+              <AlertCircle size={14} className="shrink-0" />
+              <p className="font-medium">{apiError}</p>
             </div>
-            <button onClick={() => setApiError(null)} className="text-rose-600 hover:text-rose-800">
+            <button onClick={() => setApiError(null)} className="text-tf-danger hover:opacity-75">
               <X size={14} />
             </button>
           </div>
@@ -560,27 +629,11 @@ function Layout() {
         />
 
         {/* VIEW OUTLET */}
-        <main className="flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8 lg:py-7 flex flex-col scrollbar-thin">
-          <Outlet />
+        <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8 lg:py-8 flex flex-col">
+          <div className="max-w-[1200px] w-full mx-auto flex-1 flex flex-col">
+            <Outlet />
+          </div>
         </main>
-
-        {/* FOOTER WIZARD STEPS */}
-        <footer className="px-6 py-2.5 border-t border-zinc-200 dark:border-zinc-800 flex justify-between items-center bg-white dark:bg-zinc-950/20 flex-shrink-0">
-          <span className="text-[11px] text-zinc-500 dark:text-zinc-500 font-medium">
-            {(currentPath === '/' || currentPath === '/dashboard') && "Step: Dashboard Overview"}
-            {currentPath === '/job-tracker' && "Step: Job Tracking Overview"}
-            {currentPath === '/tailor' && "Step 1: Extract Job Description"}
-            {currentPath === '/resume-detect' && "Step 2: Resume Source"}
-            {currentPath === '/resume-parse' && "Step 3: Parsing Resume"}
-            {currentPath === '/resume-review' && "Step 4: Verify Resume Data"}
-            {currentPath === '/tailor-config' && "Step 5: Configure Tailoring"}
-            {currentPath === '/tailor-progress' && "Step 6: AI Tailoring"}
-            {currentPath === '/review-changes' && "Step 7: Review AI Changes"}
-            {currentPath === '/templates' && "Step 8: Choose Style Layout"}
-            {currentPath === '/download' && "Step 9: Tailoring Complete"}
-            {currentPath === '/cover-letter' && "Draft: Cover Letter"}
-          </span>
-        </footer>
 
         {/* SETTINGS OVERLAY */}
         {showSettings && (
@@ -593,6 +646,7 @@ function Layout() {
           />
         )}
       </div>
+
       <HowItWorksModal isOpen={isHowItWorksOpen} onClose={() => setIsHowItWorksOpen(false)} />
       <FeedbackModal isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />
       <SupportModal isOpen={isSupportOpen} onClose={() => setIsSupportOpen(false)} />

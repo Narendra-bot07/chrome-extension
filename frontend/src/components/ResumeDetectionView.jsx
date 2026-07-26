@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   CheckCircle2,
   Circle,
@@ -33,6 +34,9 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import TailorRender from './Resume/TailorRender';
+import { ResumeDropzoneOverlay } from './Resume/ResumeDropzoneOverlay';
+import { Button } from './ui/Button';
+
 
 function formatDate(value) {
   if (!value) return '—';
@@ -335,299 +339,381 @@ export default function ResumeDetectionView({
     setVersionRenameValue('');
   };
 
+  const [uploadQueue, setUploadQueue] = useState([]);
+
+  const handleDropFiles = async (files) => {
+    if (!files || files.length === 0) return;
+    
+    const newItems = files.map((file, idx) => ({
+      id: `${file.name}-${Date.now()}-${idx}`,
+      name: file.name,
+      size: file.size,
+      progress: 10,
+      status: 'uploading',
+      error: null
+    }));
+
+    setUploadQueue(prev => [...newItems, ...prev]);
+
+    for (let i = 0; i < files.length; i += 3) {
+      const chunk = files.slice(i, i + 3);
+      await Promise.all(
+        chunk.map(async (file) => {
+          const queueId = newItems.find(item => item.name === file.name)?.id;
+          try {
+            if (onUploadResume) {
+              await onUploadResume(file);
+            }
+            setUploadQueue(prev =>
+              prev.map(item => item.id === queueId ? { ...item, progress: 100, status: 'success' } : item)
+            );
+            setTimeout(() => {
+              setUploadQueue(prev => prev.filter(item => item.id !== queueId));
+            }, 1000);
+          } catch (err) {
+            setUploadQueue(prev =>
+              prev.map(item => item.id === queueId ? { ...item, status: 'error', error: err.message || 'Upload failed' } : item)
+            );
+          }
+        })
+      );
+    }
+  };
+
+  const activeUploads = uploadQueue.filter(item => item.status !== 'success');
+  const isUploading = loading || activeUploads.length > 0;
+
+
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 space-y-6 text-zinc-900 font-sans relative">
-      
-      {/* HEADER SECTION (Light Theme) */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white border border-zinc-200 p-6 rounded-2xl shadow-sm">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-[#00bda5]/10 border border-[#00bda5]/30 flex items-center justify-center text-[#00bda5]">
-              <FileText size={18} />
-            </div>
-            <h1 className="text-xl font-extrabold text-zinc-900 tracking-tight">Resume Manager</h1>
-          </div>
-          <p className="text-xs text-zinc-500 font-semibold pl-10">
-            Select the resume you want to use and manage its saved versions.
-          </p>
-        </div>
-
-        {/* Upload Resume CTA */}
-        <div className="flex items-center gap-3">
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileChange}
-            accept=".pdf,.docx,.doc,.txt"
-            className="hidden"
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={loading}
-            className="flex items-center gap-2 px-5 py-2.5 bg-[#00bda5] text-white font-black text-xs uppercase tracking-wider rounded-xl hover:bg-[#00a894] active:scale-95 transition cursor-pointer shadow-md shadow-[#00bda5]/20 disabled:opacity-50"
-          >
-            <Upload size={15} />
-            Upload Resume
-          </button>
-        </div>
-      </div>
-
-      {/* UPLOADING STATE BAR */}
-      {loading && (
-        <div className="bg-white border border-indigo-200 p-4 rounded-xl flex items-center gap-4 shadow-sm animate-pulse">
-          <RefreshCw size={20} className="animate-spin text-indigo-600" />
-          <div className="flex-1 space-y-1">
-            <div className="flex justify-between text-xs font-bold">
-              <span className="text-indigo-700">Parsing and indexing new resume...</span>
-              <span className="text-zinc-600">{uploadProgress}%</span>
-            </div>
-            <div className="w-full h-1.5 bg-zinc-200 rounded-full overflow-hidden">
-              <div className="h-full bg-indigo-600 transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* FILTER & SEARCH BAR */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-50 border border-zinc-200 p-4 rounded-xl">
+    <ResumeDropzoneOverlay onDropFiles={handleDropFiles}>
+      <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 space-y-6 text-tf-text font-sans relative">
         
-        {/* Search Bar */}
-        <div className="relative flex-1 max-w-md">
-          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search resumes by name..."
-            className="w-full pl-9 pr-4 py-2 bg-white border border-zinc-300 rounded-xl text-xs text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-[#00bda5] font-medium shadow-2xs"
-          />
-          {searchQuery && (
-            <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700">
-              <X size={13} />
-            </button>
-          )}
+        {/* HEADER SECTION */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-tf-surface border border-tf-border p-6 rounded-xl shadow-sm">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-tf-accent/10 border border-tf-accent/20 flex items-center justify-center text-tf-accent">
+                <FileText size={18} strokeWidth={1.75} />
+              </div>
+              <h1 className="text-xl font-semibold text-tf-text tracking-tight">Resume Manager</h1>
+            </div>
+            <p className="text-xs text-tf-text-secondary font-normal pl-10">
+              Select the resume you want to use and manage its saved versions.
+            </p>
+          </div>
+
+          {/* Upload Resume & Drag & Drop CTA */}
+          <div className="flex items-center gap-3">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              accept=".pdf,.docx,.doc,.txt"
+              className="hidden"
+            />
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              className="group flex items-center gap-3 px-4 py-2.5 border-2 border-dashed border-tf-accent/40 hover:border-tf-accent bg-tf-accent/5 hover:bg-tf-accent/10 rounded-xl cursor-pointer transition-all select-none"
+            >
+              <div className="w-8 h-8 rounded-lg bg-tf-accent text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform shrink-0">
+                <Upload size={16} strokeWidth={2} />
+              </div>
+              <div className="text-left space-y-0.5">
+                <div className="text-xs font-semibold text-tf-text flex items-center gap-1.5">
+                  <span>Upload Resume</span>
+                  <span className="text-[10px] font-normal text-tf-text-tertiary">(PDF, DOCX)</span>
+                </div>
+                <p className="text-[11px] text-tf-accent font-medium">
+                  Drag & drop file here, or click to browse
+                </p>
+              </div>
+            </div>
+          </div>
+
         </div>
 
-        {/* Filter Pills & Sort Controls */}
-        <div className="flex flex-wrap items-center gap-3">
-          
-          {/* Filter Pills */}
-          <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-zinc-200 shadow-2xs">
-            {[
-              { id: 'all', label: 'All' },
-              { id: 'active', label: 'Active' },
-              { id: 'parsed', label: 'Parsed' },
-              { id: 'has_versions', label: 'Has Versions' },
-              { id: 'recently_used', label: 'Recently Used' }
-            ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setFilterType(tab.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer border-none ${
-                  filterType === tab.id
-                    ? 'bg-[#00bda5] text-white shadow-xs'
-                    : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100'
-                }`}
-              >
-                {tab.label}
-              </button>
+        {/* UPLOADING STATE QUEUE BARS */}
+        {activeUploads.length > 0 && (
+          <div className="space-y-2">
+            {activeUploads.map(item => (
+              <div key={item.id} className="bg-tf-surface border border-tf-accent/30 p-3 rounded-lg flex items-center gap-4 shadow-sm">
+                <RefreshCw size={16} className={`animate-spin ${item.status === 'error' ? 'text-tf-danger' : 'text-tf-accent'}`} />
+                <div className="flex-1 space-y-1">
+                  <div className="flex justify-between text-xs font-medium">
+                    <span className="text-tf-text truncate">{item.name}</span>
+                    <span className="text-tf-text-tertiary">{item.status === 'error' ? item.error : `${item.progress}%`}</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-tf-surface-2 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-300 ${item.status === 'error' ? 'bg-tf-danger' : 'bg-tf-accent'}`}
+                      style={{ width: `${item.progress}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
             ))}
           </div>
+        )}
 
-          {/* Sort Dropdown */}
-          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-zinc-200 text-xs font-medium shadow-2xs">
-            <span className="text-zinc-500 font-bold uppercase text-[10px] tracking-wider">Sort:</span>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="bg-transparent text-zinc-800 font-bold focus:outline-none cursor-pointer"
-            >
-              <option value="last_used">Last Used</option>
-              <option value="recently_uploaded">Recently Uploaded</option>
-              <option value="most_used">Most Used</option>
-              <option value="name">Name</option>
-            </select>
+
+        {/* FILTER & SEARCH BAR */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-tf-surface-2 border border-tf-border p-3.5 rounded-xl">
+          
+          {/* Search Bar */}
+          <div className="relative flex-1 max-w-md">
+            <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-tf-text-tertiary" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search resumes by name..."
+              className="w-full pl-9 pr-4 py-1.5 bg-tf-surface border border-tf-border rounded-lg text-xs text-tf-text placeholder:text-tf-text-tertiary focus:outline-none focus:border-tf-accent font-normal"
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-tf-text-tertiary hover:text-tf-text">
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
+          {/* Filter Pills & Sort Controls */}
+          <div className="flex flex-wrap items-center gap-3">
+            
+            {/* Filter Pills with Restrained Morphing layoutId */}
+            <div className="flex items-center gap-1 bg-tf-surface p-1 rounded-lg border border-tf-border">
+              {[
+                { id: 'all', label: 'All' },
+                { id: 'active', label: 'Active' },
+                { id: 'parsed', label: 'Parsed' },
+                { id: 'has_versions', label: 'Has Versions' },
+                { id: 'recently_used', label: 'Recently Used' }
+              ].map(tab => {
+                const isSelected = filterType === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setFilterType(tab.id)}
+                    className="relative px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer border-none text-tf-text-secondary hover:text-tf-text"
+                  >
+                    {isSelected && (
+                      <motion.div
+                        layoutId="activeResumeFilter"
+                        className="absolute inset-0 bg-tf-surface-2 rounded-md border border-tf-border"
+                        transition={{ type: "spring", stiffness: 350, damping: 28 }}
+                      />
+                    )}
+                    <span className={`relative z-10 ${isSelected ? 'text-tf-text font-semibold' : ''}`}>
+                      {tab.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Sort Dropdown */}
+            <div className="flex items-center gap-2 bg-tf-surface px-3 py-1.5 rounded-lg border border-tf-border text-xs font-normal">
+              <span className="text-tf-text-tertiary uppercase text-[10px] font-medium tracking-wider">Sort:</span>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="bg-transparent text-tf-text font-medium focus:outline-none cursor-pointer"
+              >
+                <option value="last_used">Last Used</option>
+                <option value="recently_uploaded">Recently Uploaded</option>
+                <option value="most_used">Most Used</option>
+                <option value="name">Name</option>
+              </select>
+            </div>
+
           </div>
 
         </div>
 
-      </div>
-
-      {/* RESUMES TABLE */}
-      <div className="bg-white border border-zinc-200 rounded-2xl overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="border-b border-zinc-200 bg-zinc-100/80 text-[10px] font-black uppercase tracking-wider text-zinc-600">
-                <th className="py-3.5 px-4 w-28 text-center">Select</th>
-                <th className="py-3.5 px-4">Resume Name</th>
-                <th className="py-3.5 px-4">Current Version</th>
-                <th className="py-3.5 px-4">Uploaded</th>
-                <th className="py-3.5 px-4">Status</th>
-                <th className="py-3.5 px-4 text-center">Times Used</th>
-                <th className="py-3.5 px-4">Last Used</th>
-                <th className="py-3.5 px-4 text-center">Versions</th>
-                <th className="py-3.5 px-4">Parsing</th>
-                <th className="py-3.5 px-4 text-right pr-6">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-200 font-medium">
-              {filteredResumes.length === 0 ? (
-                <tr>
-                  <td colSpan={10} className="py-12 text-center text-zinc-500 space-y-3">
-                    <FileText size={36} className="mx-auto text-zinc-400 stroke-[1.5]" />
-                    <p className="text-sm font-bold text-zinc-700">No resumes found matching your filter.</p>
-                    <p className="text-xs text-zinc-500">Upload a new resume PDF/DOCX to get started.</p>
-                  </td>
+        {/* RESUMES TABLE */}
+        <div className="bg-tf-surface border border-tf-border rounded-xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-tf-border bg-tf-surface-2 text-[10px] font-medium uppercase tracking-wider text-tf-text-tertiary">
+                  <th className="py-3 px-4 w-28 text-center">Select</th>
+                  <th className="py-3 px-4">Resume Name</th>
+                  <th className="py-3 px-4">Current Version</th>
+                  <th className="py-3 px-4">Uploaded</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4 text-center">Times Used</th>
+                  <th className="py-3 px-4">Last Used</th>
+                  <th className="py-3 px-4 text-center">Versions</th>
+                  <th className="py-3 px-4">Parsing</th>
+                  <th className="py-3 px-4 text-right pr-6">Actions</th>
                 </tr>
-              ) : (
-                filteredResumes.map(resume => {
-                  const isActive = !!resume.is_active;
-                  const versionsCount = resume.versions_count || 1;
-                  const currentVerName = resume.current_version?.version_name || 'v1 Original';
+              </thead>
+              <tbody className="divide-y divide-tf-border font-normal">
+                {filteredResumes.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="py-12 text-center text-tf-text-tertiary space-y-3">
+                      <FileText size={36} className="mx-auto text-tf-text-tertiary stroke-[1.5]" />
+                      <p className="text-sm font-medium text-tf-text">No resumes found matching your filter.</p>
+                      <p className="text-xs text-tf-text-secondary">Upload a new resume PDF/DOCX to get started.</p>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredResumes.map(resume => {
+                    const isActive = !!resume.is_active;
+                    const versionsCount = resume.versions_count || 1;
+                    const currentVerName = resume.current_version?.version_name || 'v1 Original';
+                    const isPdf = (resume.file_name || '').toLowerCase().endsWith('.pdf');
 
-                  return (
-                    <tr key={resume.id} className={`hover:bg-zinc-50 transition-colors ${isActive ? 'bg-[#00bda5]/5' : ''}`}>
-                      
-                      {/* 1. SELECT CONTROL (Far Left Radio Button) */}
-                      <td className="py-4 px-4 text-center">
-                        <button
-                          onClick={() => handleSelectActiveResume(resume)}
-                          title={isActive ? "Active Resume" : "Click to select as Active Resume"}
-                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-extrabold text-[11px] transition cursor-pointer border ${
-                            isActive
-                              ? 'bg-[#00bda5] text-white border-[#00bda5] shadow-xs'
-                              : 'bg-white text-zinc-700 border-zinc-300 hover:border-zinc-400 hover:bg-zinc-50'
-                          }`}
-                        >
-                          {isActive ? (
-                            <>
-                              <CheckCircle2 size={13} className="text-white fill-white stroke-[#00bda5]" />
-                              Active
-                            </>
-                          ) : (
-                            <>
-                              <Circle size={13} className="text-zinc-400" />
-                              Select
-                            </>
-                          )}
-                        </button>
-                      </td>
+                    return (
+                      <tr
+                        key={resume.id}
+                        className={`hover:bg-tf-surface-2 transition-colors ${
+                          isActive ? 'bg-tf-accent/5 border-l-4 border-l-tf-accent' : ''
+                        }`}
+                      >
+                        
+                        {/* 1. SELECT CONTROL (Far Left Radio Button) */}
+                        <td className="py-3.5 px-4 text-center">
+                          <Button
+                            variant={isActive ? "primary" : "secondary"}
+                            size="sm"
+                            onClick={() => handleSelectActiveResume(resume)}
+                            className="text-xs py-1 px-2.5"
+                          >
+                            {isActive ? (
+                              <>
+                                <CheckCircle2 size={13} />
+                                <span>Active</span>
+                              </>
+                            ) : (
+                              <>
+                                <Circle size={13} />
+                                <span>Select</span>
+                              </>
+                            )}
+                          </Button>
+                        </td>
 
-                      {/* 2. RESUME NAME */}
-                      <td className="py-4 px-4 font-bold text-zinc-900">
-                        <div className="flex items-center gap-2.5">
-                          <FileText size={16} className={isActive ? 'text-[#00bda5]' : 'text-zinc-500'} />
-                          <div className="space-y-0.5">
-                            <div className="flex items-center gap-2">
-                              <span className="hover:underline cursor-pointer text-zinc-900" onClick={() => setPreviewResume(resume)}>
-                                {resume.file_name}
-                              </span>
+                        {/* 2. RESUME NAME */}
+                        <td className="py-3.5 px-4 font-medium text-tf-text">
+                          <div className="flex items-center gap-2.5">
+                            <div className={`w-7 h-7 rounded flex items-center justify-center text-xs font-semibold shrink-0 ${
+                              isPdf ? 'bg-tf-danger/10 text-tf-danger border border-tf-danger/20' : 'bg-tf-accent/10 text-tf-accent border border-tf-accent/20'
+                            }`}>
+                              <FileText size={14} />
                             </div>
-                            <div className="text-[10px] font-medium text-zinc-500">
-                              {formatSize(resume.file_size)}
+                            <div className="space-y-0.5 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="hover:underline cursor-pointer text-tf-text font-medium truncate" onClick={() => setPreviewResume(resume)}>
+                                  {resume.file_name}
+                                </span>
+                              </div>
+                              <div className="text-[10px] font-normal text-tf-text-tertiary">
+                                {formatSize(resume.file_size)}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </td>
+                        </td>
 
-                      {/* 3. CURRENT VERSION */}
-                      <td className="py-4 px-4 font-semibold text-zinc-800">
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-zinc-100 border border-zinc-200 rounded-lg text-zinc-800 font-bold">
-                          <Layers size={11} className="text-indigo-600" />
-                          {currentVerName}
-                        </span>
-                      </td>
-
-                      {/* 4. UPLOADED */}
-                      <td className="py-4 px-4 text-zinc-600 font-medium">
-                        {formatDate(resume.created_at || resume.uploaded_at)}
-                      </td>
-
-                      {/* 5. STATUS */}
-                      <td className="py-4 px-4">
-                        {isActive ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300">
-                            Active
+                        {/* 3. CURRENT VERSION */}
+                        <td className="py-3.5 px-4 font-normal text-tf-text-secondary">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-tf-surface-2 border border-tf-border rounded text-xs font-normal text-tf-text-secondary">
+                            <Layers size={11} className="text-tf-accent-secondary" />
+                            <span>{currentVerName}</span>
                           </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-zinc-100 text-zinc-600 border border-zinc-200">
-                            Inactive
+                        </td>
+
+                        {/* 4. UPLOADED */}
+                        <td className="py-3.5 px-4 text-tf-text-tertiary font-normal text-xs">
+                          {formatDate(resume.created_at || resume.uploaded_at)}
+                        </td>
+
+                        {/* 5. STATUS (Success Green vs Muted Neutral) */}
+                        <td className="py-3.5 px-4">
+                          {isActive ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium uppercase tracking-wider bg-tf-success/10 text-tf-success border border-tf-success/20">
+                              Active
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-normal uppercase tracking-wider bg-tf-surface-2 text-tf-text-tertiary border border-tf-border">
+                              Inactive
+                            </span>
+                          )}
+                        </td>
+
+                        {/* 6. TIMES USED */}
+                        <td className="py-3.5 px-4 text-center">
+                          <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-tf-surface-2 border border-tf-border font-medium text-xs text-tf-text tabular-nums">
+                            {resume.times_used || 0}
                           </span>
-                        )}
-                      </td>
+                        </td>
 
-                      {/* 6. TIMES USED */}
-                      <td className="py-4 px-4 text-center">
-                        <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-zinc-100 border border-zinc-200 font-black text-zinc-900">
-                          {resume.times_used || 0}
-                        </span>
-                      </td>
+                        {/* 7. LAST USED */}
+                        <td className="py-3.5 px-4 text-tf-text-secondary font-normal text-xs">
+                          {formatRelativeTime(resume.last_used_at)}
+                        </td>
 
-                      {/* 7. LAST USED */}
-                      <td className="py-4 px-4 text-zinc-700 font-semibold">
-                        {formatRelativeTime(resume.last_used_at)}
-                      </td>
-
-                      {/* 8. VERSIONS DRAWER TRIGGER */}
-                      <td className="py-4 px-4 text-center">
-                        <button
-                          onClick={() => handleOpenVersionsDrawer(resume, 'versions')}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl font-extrabold text-xs transition cursor-pointer shadow-2xs"
-                        >
-                          <span>{versionsCount} {versionsCount === 1 ? 'Version' : 'Versions'}</span>
-                          <ChevronRight size={14} />
-                        </button>
-                      </td>
-
-                      {/* 9. PARSING STATUS */}
-                      <td className="py-4 px-4">
-                        {(resume.parsing_status || '').toLowerCase() === 'parsed' || resume.parsed_content ? (
-                          <span className="inline-flex items-center gap-1 text-emerald-700 font-extrabold text-[11px]">
-                            <CheckCircle2 size={13} /> Parsed
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-amber-700 font-extrabold text-[11px]">
-                            <Clock3 size={13} /> Pending
-                          </span>
-                        )}
-                      </td>
-
-                      {/* 10. ACTIONS */}
-                      <td className="py-4 px-4 text-right pr-6">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => setPreviewResume(resume)}
-                            className="px-2.5 py-1 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 font-bold rounded-lg transition text-xs border border-zinc-200 cursor-pointer flex items-center gap-1"
-                            title="Preview Resume"
-                          >
-                            <Eye size={13} /> Preview
-                          </button>
+                        {/* 8. VERSIONS DRAWER TRIGGER */}
+                        <td className="py-3.5 px-4 text-center">
                           <button
                             onClick={() => handleOpenVersionsDrawer(resume, 'versions')}
-                            className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-lg transition text-xs border border-indigo-200 cursor-pointer flex items-center gap-1"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-tf-accent-secondary/10 hover:bg-tf-accent-secondary/20 text-tf-accent-secondary border border-tf-accent-secondary/20 rounded-md font-medium text-xs transition cursor-pointer"
                           >
-                            <Layers size={13} /> Versions
+                            <span>{versionsCount} {versionsCount === 1 ? 'Version' : 'Versions'}</span>
+                            <ChevronRight size={13} />
                           </button>
-                          <button
-                            onClick={() => {
-                              setRenamingResume(resume);
-                              setRenameValue(resume.file_name || '');
-                            }}
-                            className="p-1.5 hover:bg-zinc-200 text-zinc-600 hover:text-zinc-900 rounded-lg transition border-none cursor-pointer"
-                            title="Rename Resume"
-                          >
-                            <Edit2 size={13} />
-                          </button>
-                          <button
-                            onClick={() => onDeleteResume && onDeleteResume(resume.id)}
-                            className="p-1.5 hover:bg-rose-100 text-zinc-600 hover:text-rose-700 rounded-lg transition border-none cursor-pointer"
-                            title="Delete Resume"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </td>
+                        </td>
+
+                        {/* 9. PARSING STATUS */}
+                        <td className="py-3.5 px-4">
+                          {(resume.parsing_status || '').toLowerCase() === 'parsed' || resume.parsed_content ? (
+                            <span className="inline-flex items-center gap-1 text-tf-success font-medium text-xs">
+                              <CheckCircle2 size={13} /> Parsed
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-tf-warning font-medium text-xs">
+                              <Clock3 size={13} /> Pending
+                            </span>
+                          )}
+                        </td>
+
+                        {/* 10. ACTIONS */}
+                        <td className="py-3.5 px-4 text-right pr-6">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setPreviewResume(resume)}
+                              title="Preview Resume"
+                            >
+                              <Eye size={13} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setRenamingResume(resume);
+                                setRenameValue(resume.file_name || '');
+                              }}
+                              title="Rename Resume"
+                            >
+                              <Edit2 size={13} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                if (confirm(`Are you sure you want to delete "${resume.file_name}"?`)) {
+                                  onDeleteResume && onDeleteResume(resume.id);
+                                }
+                              }}
+                              title="Delete Resume"
+                              className="text-tf-danger hover:bg-tf-danger/10"
+                            >
+                              <Trash2 size={13} />
+                            </Button>
+                          </div>
+                        </td>
+
 
                     </tr>
                   );
@@ -1085,6 +1171,8 @@ export default function ResumeDetectionView({
         </div>
       )}
 
-    </div>
+      </div>
+    </ResumeDropzoneOverlay>
   );
 }
+

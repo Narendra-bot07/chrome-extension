@@ -1,25 +1,34 @@
 import React, { forwardRef } from 'react';
 
-export const Input = forwardRef(({ className = '', error, icon: Icon, ...props }, ref) => {
+export const Input = forwardRef(({ className = '', error, helper, label, icon: Icon, ...props }, ref) => {
   return (
     <div className="relative w-full">
-      {Icon && (
-        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-          <Icon className="h-5 w-5 text-zinc-400" />
-        </div>
+      {label && (
+        <label className="block text-[13px] font-medium text-tf-text mb-1.5">
+          {label}
+        </label>
       )}
-      <input
-        ref={ref}
-        className={`w-full flex h-10 rounded-[9px] border bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-50 placeholder:text-zinc-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 transition-colors ${
-          error 
-            ? 'border-red-500' 
-            : 'border-zinc-300 dark:border-zinc-700 hover:border-zinc-400'
-        } ${Icon ? 'pl-10' : ''} ${className}`}
-        {...props}
-      />
-      {error && (
-        <p className="mt-1.5 text-[13px] text-red-500 font-medium">{error}</p>
-      )}
+      <div className="relative w-full">
+        {Icon && (
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <Icon className="h-4 w-4 text-tf-text-tertiary" />
+          </div>
+        )}
+        <input
+          ref={ref}
+          className={`w-full flex h-9 rounded-md border bg-tf-surface px-3 py-1.5 text-sm text-tf-text placeholder:text-tf-text-tertiary focus:outline-none focus:ring-3 focus:ring-tf-accent/15 focus:border-tf-accent disabled:cursor-not-allowed disabled:opacity-50 transition-colors ${
+            error 
+              ? 'border-tf-danger' 
+              : 'border-tf-border hover:border-tf-border-strong'
+          } ${Icon ? 'pl-9' : ''} ${className}`}
+          {...props}
+        />
+      </div>
+      {error ? (
+        <p className="mt-1 text-xs text-tf-danger font-normal">{error}</p>
+      ) : helper ? (
+        <p className="mt-1 text-xs text-tf-text-tertiary font-normal">{helper}</p>
+      ) : null}
     </div>
   );
 });
@@ -28,9 +37,9 @@ Input.displayName = 'Input';
 
 export const Label = ({ children, className = '', required, ...props }) => {
   return (
-    <label className={`block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5 ${className}`} {...props}>
+    <label className={`block text-[13px] font-medium text-tf-text mb-1.5 ${className}`} {...props}>
       {children}
-      {required && <span className="text-red-500 ml-1">*</span>}
+      {required && <span className="text-tf-danger ml-0.5">*</span>}
     </label>
   );
 };

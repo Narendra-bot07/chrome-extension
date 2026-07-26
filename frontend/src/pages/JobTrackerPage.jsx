@@ -52,12 +52,13 @@ class JobTrackerErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-zinc-50 dark:bg-zinc-950 text-center font-sans min-h-[500px]">
-          <AlertCircle className="w-12 h-12 text-rose-500 mb-4 animate-bounce" />
-          <h2 className="text-base font-black uppercase text-zinc-950 dark:text-zinc-50 tracking-wider">
+        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-tf-surface border border-tf-border rounded-lg text-center font-sans min-h-[400px]">
+          <AlertCircle className="w-10 h-10 text-tf-danger mb-4" />
+          <h2 className="text-base font-semibold tracking-tight text-tf-text">
             Job Tracker Crash Intercepted
           </h2>
-          <p className="text-xs text-zinc-500 max-w-md mt-2 font-semibold">
+          <p className="text-xs text-tf-text-secondary max-w-md mt-2 font-normal">
+
             {this.state.error?.toString() || "An unexpected rendering crash occurred."}
           </p>
           <pre className="text-[10px] text-rose-600 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-950/40 p-4 rounded-xl max-w-lg overflow-x-auto mt-4 text-left max-h-[200px] w-full font-mono">

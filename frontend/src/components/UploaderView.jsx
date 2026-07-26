@@ -1,5 +1,7 @@
 import React from 'react';
-import { Sparkles, Layers, Building2, Briefcase, AlertCircle, X } from 'lucide-react';
+import { Layers, Building2, Briefcase, AlertCircle, X, ArrowRight } from 'lucide-react';
+import { Button } from './ui/Button';
+import { Input } from './ui/Input';
 
 function UploaderView({
   jobText,
@@ -20,33 +22,33 @@ function UploaderView({
   const quotaExhausted = jdUsage?.enabled && jdUsage?.remaining !== null && jdUsage?.remaining <= 0;
 
   return (
-    <div className={`space-y-5 flex-1 flex flex-col justify-between select-none font-sans text-zinc-650 dark:text-zinc-350 mx-auto w-full ${
+    <div className={`space-y-6 flex-1 flex flex-col justify-between select-none font-sans text-tf-text mx-auto w-full ${
       isExtension ? 'max-w-lg' : 'max-w-4xl py-2'
     }`}>
-      <div className="space-y-5">
+      <div className="space-y-6">
         
         {/* Title Block */}
         <div className="space-y-1">
-          <h2 className="text-base font-extrabold tracking-tight text-zinc-950 dark:text-zinc-50">
+          <h1 className="text-xl font-semibold tracking-tight text-tf-text">
             Extract Job Details
-          </h2>
-          <p className="text-[11px] text-zinc-400 dark:text-zinc-550 leading-relaxed font-bold">
+          </h1>
+          <p className="text-xs text-tf-text-secondary font-normal">
             Scan or paste the target job description to match your qualifications against.
           </p>
         </div>
 
         {/* API Error Alert Banner */}
         {apiError && (
-          <div className="rounded-xl border border-rose-200 bg-rose-50 dark:bg-rose-950/40 dark:border-rose-900/60 p-3.5 text-xs text-rose-800 dark:text-rose-300 flex items-start justify-between gap-2 animate-fadeIn">
+          <div className="rounded-md border border-tf-danger/20 bg-tf-danger/10 p-3 text-xs text-tf-danger flex items-start justify-between gap-2">
             <div className="flex items-start gap-2">
-              <AlertCircle size={15} className="mt-0.5 flex-shrink-0 text-rose-600 dark:text-rose-400" />
-              <span className="font-semibold leading-relaxed">{apiError}</span>
+              <AlertCircle size={15} className="mt-0.5 shrink-0 text-tf-danger" />
+              <span className="font-normal leading-relaxed">{apiError}</span>
             </div>
             {setApiError && (
               <button 
                 type="button"
                 onClick={() => setApiError(null)} 
-                className="text-rose-500 hover:text-rose-700 dark:hover:text-rose-300 cursor-pointer p-0.5 border-none bg-transparent"
+                className="text-tf-danger hover:opacity-75 p-0.5"
               >
                 <X size={14} />
               </button>
@@ -55,85 +57,67 @@ function UploaderView({
         )}
 
         {subscription?.plan && (
-          <div className="rounded-xl border border-zinc-200/70 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-3 text-[11px] font-bold text-zinc-500 dark:text-zinc-400">
-            <div className="flex justify-between">
-              <span>{subscription.plan.name} Plan</span>
-              <span>
-                {jdUsage?.limit ? `${jdUsage.used || 0}/${jdUsage.limit}` : `${jdUsage?.used || 0}/∞`} JD extractions
-              </span>
-            </div>
-            <div className="mt-1">
+          <div className="rounded-md border border-tf-border bg-tf-surface-2 p-3 text-xs text-tf-text-secondary flex justify-between items-center">
+            <span className="font-medium text-tf-text">{subscription.plan.name} Plan</span>
+            <span>
               {quotaExhausted
-                ? "You have used all JD extractions for this month."
+                ? "Quota exhausted for this month"
                 : `${jdUsage?.remaining ?? 'Unlimited'} extractions remaining`}
-            </div>
+            </span>
           </div>
         )}
 
         {/* Input coordinates (Company & Title) */}
-        <div className="space-y-2">
-          <label className="text-[8.5px] font-black text-zinc-450 dark:text-zinc-550 uppercase tracking-widest block font-sans">
+        <div className="space-y-3">
+          <label className="text-[13px] font-medium text-tf-text block">
             Job Coordinates
           </label>
-          <div className="grid grid-cols-2 gap-3.5">
-            {/* Company Name Input */}
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-zinc-400 dark:text-zinc-600">
-                <Building2 size={13} />
-              </div>
-              <input 
-                type="text" 
-                className="w-full bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-850 rounded-lg pl-9 pr-3 py-2 text-xs text-zinc-850 dark:text-zinc-100 focus:outline-none focus:border-[#00bda5] focus:ring-1 focus:ring-[#00bda5] placeholder-zinc-400 font-medium"
-                value={companyName}
-                onChange={(e) => setCompanyName(e.target.value)}
-                placeholder="Company Name"
-              />
-            </div>
-
-            {/* Role Title Input */}
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-zinc-400 dark:text-zinc-600">
-                <Briefcase size={13} />
-              </div>
-              <input 
-                type="text" 
-                className="w-full bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-850 rounded-lg pl-9 pr-3 py-2 text-xs text-zinc-850 dark:text-zinc-100 focus:outline-none focus:border-[#00bda5] focus:ring-1 focus:ring-[#00bda5] placeholder-zinc-400 font-medium"
-                value={jobTitle}
-                onChange={(e) => setJobTitle(e.target.value)}
-                placeholder="Job Title"
-              />
-            </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              icon={Building2}
+              value={companyName}
+              onChange={(e) => setCompanyName(e.target.value)}
+              placeholder="Company Name"
+            />
+            <Input
+              icon={Briefcase}
+              value={jobTitle}
+              onChange={(e) => setJobTitle(e.target.value)}
+              placeholder="Job Title"
+            />
           </div>
         </div>
 
         {/* Job Description Textarea */}
-        <div className="space-y-2">
+        <div className="space-y-3">
           <div className="flex justify-between items-center">
-            <label className="text-[8.5px] font-black text-zinc-450 dark:text-zinc-550 uppercase tracking-widest block font-sans">
+            <label className="text-[13px] font-medium text-tf-text block">
               Job Description
             </label>
             {isExtension && (
-              <button 
-                type="button"
+              <Button 
+                variant="ghost"
+                size="sm"
                 onClick={() => handleScanPage(true)}
-                className="text-[8.5px] font-bold text-[#00bda5] hover:text-[#00a894] uppercase flex items-center gap-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-850 px-2.5 py-1 rounded-lg transition cursor-pointer border-none"
+                className="h-7 text-xs"
               >
-                <Layers size={10} /> Scan Page
-              </button>
+                <Layers size={14} />
+                Scan Page
+              </Button>
             )}
           </div>
 
           <div className="relative">
             <textarea 
-              className={`w-full bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-850 rounded-xl px-4 py-3 text-xs text-zinc-850 dark:text-zinc-200 focus:outline-none focus:border-[#00bda5] focus:ring-1 focus:ring-[#00bda5] placeholder-zinc-400 dark:placeholder-zinc-600 resize-none leading-relaxed scrollbar-thin transition-all font-medium ${
-                isExtension ? 'min-h-[190px]' : 'min-h-[300px]'
+              className={`w-full bg-tf-surface border border-tf-border rounded-md px-3 py-2.5 text-xs text-tf-text focus:outline-none focus:ring-3 focus:ring-tf-accent/15 focus:border-tf-accent placeholder:text-tf-text-tertiary resize-none leading-relaxed transition-all font-normal ${
+                isExtension ? 'min-h-[180px]' : 'min-h-[280px]'
               }`}
               value={jobText}
               onChange={(e) => setJobText(e.target.value)}
               placeholder="Auto-scanning page content... Or paste job details manually here."
             />
             {jobText && (
-              <span className="absolute bottom-3 right-4 text-[8px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-600 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200/50 dark:border-zinc-800/80 px-2 py-0.5 rounded-md">
+              <span className="absolute bottom-3 right-3 text-[11px] font-medium text-tf-text-tertiary bg-tf-surface-2 border border-tf-border px-1.5 py-0.5 rounded">
                 {jobText.length} Chars
               </span>
             )}
@@ -143,16 +127,18 @@ function UploaderView({
       </div>
 
       {/* Primary Trigger Button */}
-      <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800 mt-auto">
-        <button 
-          type="button"
+      <div className="pt-4 border-t border-tf-border mt-auto">
+        <Button 
+          variant="primary"
+          size="lg"
           onClick={handleAnalyzeAndMatch}
           disabled={!jobText || quotaExhausted}
-          className="w-full py-3 bg-[#00bda5] hover:bg-[#00a894] disabled:bg-zinc-100 disabled:text-zinc-400 dark:disabled:bg-zinc-900 dark:disabled:text-zinc-600 disabled:cursor-not-allowed text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 cursor-pointer border-none"
+          isLoading={loading}
+          className="w-full h-10"
         >
-          <Sparkles size={14} />
           Extract Job Description
-        </button>
+          <ArrowRight size={16} />
+        </Button>
       </div>
     </div>
   );

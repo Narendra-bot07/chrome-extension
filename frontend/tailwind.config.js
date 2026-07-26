@@ -8,53 +8,62 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        sans: ['Inter', 'Geist', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
       },
       colors: {
-        // Linear/Vercel inspired zinc scale
-        zinc: {
-          50: '#fafafa',
-          100: '#f4f4f5',
-          200: '#e4e4e7',
-          300: '#d4d4d8',
-          400: '#a1a1aa',
-          500: '#71717a',
-          600: '#52525b',
-          700: '#3f3f46',
-          800: '#27272a',
-          900: '#18181b',
-          950: '#09090b',
+        // Design Token Custom Properties
+        tf: {
+          bg: 'var(--tf-bg)',
+          surface: 'var(--tf-surface)',
+          'surface-2': 'var(--tf-surface-2)',
+          border: 'var(--tf-border)',
+          'border-strong': 'var(--tf-border-strong)',
+          text: 'var(--tf-text)',
+          'text-secondary': 'var(--tf-text-secondary)',
+          'text-tertiary': 'var(--tf-text-tertiary)',
+          accent: 'var(--tf-accent)',
+          'accent-hover': 'var(--tf-accent-hover)',
+          'accent-fg': 'var(--tf-accent-fg)',
+          success: 'var(--tf-success)',
+          warning: 'var(--tf-warning)',
+          danger: 'var(--tf-danger)',
         },
-        brand: {
-          DEFAULT: '#09090b', // Stark black for primary CTAs in light mode
-          dark: '#fafafa', // Crisp white for primary CTAs in dark mode
-        }
+      },
+      spacing: {
+        '0.5': '2px',
+        '1': '4px',
+        '2': '8px',
+        '3': '12px',
+        '4': '16px',
+        '6': '24px',
+        '8': '32px',
+        '12': '48px',
+        '16': '64px',
+      },
+      borderRadius: {
+        'sm': '6px',
+        'DEFAULT': '8px',
+        'md': '8px',
+        'lg': '12px',
+        'xl': '16px',
       },
       boxShadow: {
-        'sm': '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
-        'DEFAULT': '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1)',
-        'md': '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1)',
-        'lg': '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1)',
-        'xl': '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
-        '2xl': '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-        'premium': '0 8px 32px rgba(0, 0, 0, 0.08)',
-        'premium-dark': '0 8px 32px rgba(0, 0, 0, 0.4)',
+        'sm': '0 1px 2px 0 rgba(0, 0, 0, 0.04)',
+        'DEFAULT': '0 1px 2px 0 rgba(0, 0, 0, 0.04)',
+        'modal': '0 8px 24px 0 rgba(0, 0, 0, 0.12)',
+        'none': 'none',
       },
-      animation: {
-        'fadeIn': 'fadeIn 300ms ease-in-out',
-        'slideIn': 'slideIn 300ms cubic-bezier(0.16, 1, 0.3, 1)',
+      transitionDuration: {
+        'micro': '150ms',
+        'DEFAULT': '200ms',
+        'modal': '240ms',
       },
-      keyframes: {
-        fadeIn: {
-          '0%': { opacity: '0' },
-          '100%': { opacity: '1' },
-        },
-        slideIn: {
-          '0%': { transform: 'translateY(10px)', opacity: '0' },
-          '100%': { transform: 'translateY(0)', opacity: '1' },
-        }
+      transitionTimingFunction: {
+        'enter': 'cubic-bezier(0.2, 0, 0, 1)',
+        'exit': 'cubic-bezier(0.4, 0, 1, 1)',
       }
     },
   },
   plugins: [],
 }
+
