@@ -730,6 +730,8 @@ class ResumeRepository:
         event_type: str = "jd_comparison",
         jd_id: str | None = None,
         job_id: str | None = None,
+        workflow_id: str | None = None,
+        idempotency_key: str | None = None,
         ats_score: float | None = None,
         resume_match_score: float | None = None,
         ats_engine_version: str | None = "v2.4",
@@ -745,34 +747,48 @@ class ResumeRepository:
                 raise ValueError("Resume not found.")
 
             target_ver_id = version_id or r_row.get("active_version_id")
+            key = idempotency_key or (f"{workflow_id}:{event_type}:{resume_id}" if workflow_id else None)
 
-            # Insert usage event
+            # Insert usage event with idempotency guard
             cur.execute("""
                 INSERT INTO public.resume_usage_events (
-                    user_id, resume_id, version_id, event_type, jd_id, job_id,
-                    ats_score, resume_match_score, ats_engine_version, match_engine_version,
-                    resume_content_hash, jd_content_hash, created_at
+                    user_id, resume_id, version_id, workflow_id, event_type, jd_id, job_id,
+                    idempotency_key, ats_score, resume_match_score, ats_engine_version,
+                    match_engine_version, resume_content_hash, jd_content_hash, created_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (idempotency_key) DO NOTHING
                 RETURNING *
             """, (
-                user_id, resume_id, target_ver_id, event_type, jd_id, job_id,
-                ats_score, resume_match_score, ats_engine_version, match_engine_version,
+                user_id, resume_id, target_ver_id, workflow_id, event_type, jd_id, job_id,
+                key, ats_score, resume_match_score, ats_engine_version, match_engine_version,
                 resume_content_hash, jd_content_hash
             ))
             event_row = cur.fetchone()
 
-            # Update dynamic usage counters on root resume
+            # Recalculate unique workflow usage count and update last_used_at on root resume
             cur.execute("""
                 UPDATE public.resumes
-                SET times_used = COALESCE(times_used, 0) + 1,
-                    tailor_count = COALESCE(tailor_count, 0) + 1,
+                SET times_used = (
+                        SELECT COUNT(DISTINCT COALESCE(e.workflow_id::text, e.id::text))
+                        FROM public.resume_usage_events e
+                        WHERE e.resume_id = %s
+                          AND e.event_type != 'resume_created'
+                    ),
                     last_used_at = NOW(),
                     last_used_job_id = COALESCE(%s, last_used_job_id),
                     last_used_jd_id = COALESCE(%s, last_used_jd_id),
                     updated_at = NOW()
                 WHERE id = %s
-            """, (job_id, jd_id, resume_id))
+            """, (resume_id, job_id, jd_id, resume_id))
+
+            # Update target version last_used_at
+            if target_ver_id:
+                cur.execute("""
+                    UPDATE public.resume_versions
+                    SET updated_at = NOW()
+                    WHERE id = %s
+                """, (target_ver_id,))
 
             # Update scores on target version if provided
             if target_ver_id and (ats_score is not None or resume_match_score is not None):
@@ -803,6 +819,8 @@ class ResumeRepository:
 
             self.conn.commit()
             return dict(event_row) if event_row else {}
+
+    record_resume_usage = record_usage_event
 
     def compare_versions(self, version_a_id: str, version_b_id: str, user_id: str) -> Dict[str, Any]:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:

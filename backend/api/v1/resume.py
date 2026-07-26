@@ -426,6 +426,26 @@ async def delete_resume(
         )
     return {"status": "success", "message": "Resume soft-deleted."}
 
+@router.put("/{resume_id}/rename")
+async def rename_resume(
+    resume_id: str,
+    payload: Dict[str, Any],
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ResumeRepository = Depends(get_resume_repository)
+):
+    new_name = payload.get("file_name") or payload.get("name")
+    if not new_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_name is required.")
+    with repo.conn.cursor() as cur:
+        cur.execute(
+            "UPDATE public.resumes SET file_name = %s, updated_at = NOW() WHERE id = %s AND user_id = %s AND deleted_at IS NULL RETURNING id",
+            (new_name, resume_id, user["id"])
+        )
+        if not cur.fetchone():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
+        repo.conn.commit()
+    return {"status": "success", "message": "Resume renamed successfully.", "file_name": new_name}
+
 @router.post("/{resume_id}/parse")
 async def parse_existing_resume(
     resume_id: str,

@@ -53,51 +53,19 @@ def run_migration():
             match_engine_version TEXT,
             resume_content_hash TEXT,
             jd_content_hash TEXT,
-            analysis_timestamp TIMESTAMPTZ
+            analysis_timestamp TIMESTAMPTZ,
+            final_page_count INTEGER,
+            density_level TEXT,
+            composition_plan_json JSONB DEFAULT '{}'::jsonb,
+            composition_plan_hash TEXT,
+            rendered_pdf_path TEXT,
+            rendered_pdf_hash TEXT,
+            preview_source TEXT,
+            renderer_version TEXT,
+            composition_engine_version TEXT,
+            validation_report JSONB DEFAULT '{}'::jsonb
         );
     """)
-
-    # Ensure all columns exist on resume_versions
-    columns_to_add = [
-        ("version_number", "INTEGER NOT NULL DEFAULT 1"),
-        ("version_name", "TEXT"),
-        ("version_type", "TEXT NOT NULL DEFAULT 'tailored'"),
-        ("parent_version_id", "UUID REFERENCES public.resume_versions(id) ON DELETE SET NULL"),
-        ("source_resume_id", "UUID REFERENCES public.resumes(id) ON DELETE SET NULL"),
-        ("jd_id", "UUID"),
-        ("job_id", "UUID"),
-        ("ats_score", "NUMERIC(5,2)"),
-        ("resume_match_score", "NUMERIC(5,2)"),
-        ("change_summary_json", "JSONB NOT NULL DEFAULT '{}'::jsonb"),
-        ("changes_summary", "TEXT"),
-        ("content", "JSONB NOT NULL DEFAULT '{}'::jsonb"),
-        ("file_url", "TEXT"),
-        ("is_current", "BOOLEAN NOT NULL DEFAULT FALSE"),
-        ("is_final", "BOOLEAN NOT NULL DEFAULT FALSE"),
-        ("created_by", "UUID"),
-        ("updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
-        ("deleted_at", "TIMESTAMPTZ"),
-        ("ats_engine_version", "TEXT"),
-        ("match_engine_version", "TEXT"),
-        ("resume_content_hash", "TEXT"),
-        ("jd_content_hash", "TEXT"),
-        ("analysis_timestamp", "TIMESTAMPTZ"),
-        ("final_page_count", "INTEGER"),
-        ("density_level", "TEXT"),
-        ("composition_plan_json", "JSONB DEFAULT '{}'::jsonb"),
-        ("composition_plan_hash", "TEXT"),
-        ("rendered_pdf_path", "TEXT"),
-        ("rendered_pdf_hash", "TEXT"),
-        ("preview_source", "TEXT"),
-        ("renderer_version", "TEXT"),
-        ("composition_engine_version", "TEXT"),
-        ("validation_report", "JSONB DEFAULT '{}'::jsonb")
-    ]
-    for col_name, col_def in columns_to_add:
-        cur.execute(f"""
-            ALTER TABLE public.resume_versions
-            ADD COLUMN IF NOT EXISTS {col_name} {col_def};
-        """)
 
     # 3. Create resume_usage_events table
     cur.execute("""
@@ -106,12 +74,11 @@ def run_migration():
             user_id UUID NOT NULL,
             resume_id UUID NOT NULL REFERENCES public.resumes(id) ON DELETE CASCADE,
             version_id UUID REFERENCES public.resume_versions(id) ON DELETE SET NULL,
-            event_type TEXT NOT NULL CHECK (event_type IN (
-                'jd_comparison', 'resume_match', 'ats_analysis', 'tailoring',
-                'resume_generation', 'job_application'
-            )),
+            workflow_id UUID,
+            event_type TEXT NOT NULL,
             jd_id UUID,
             job_id UUID,
+            idempotency_key TEXT,
             ats_score NUMERIC(5,2),
             resume_match_score NUMERIC(5,2),
             ats_engine_version TEXT,
@@ -120,6 +87,14 @@ def run_migration():
             jd_content_hash TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+    """)
+
+    # Drop restrictive check constraint if exists
+    cur.execute("""
+        ALTER TABLE public.resume_usage_events
+        DROP CONSTRAINT IF EXISTS resume_usage_events_event_type_check,
+        ADD COLUMN IF NOT EXISTS workflow_id UUID,
+        ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
     """)
 
     # 4. Create indices
@@ -136,6 +111,10 @@ def run_migration():
     cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_resume_usage_events_resume_created
         ON public.resume_usage_events(resume_id, created_at DESC);
+    """)
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_resume_usage_idempotency
+        ON public.resume_usage_events(idempotency_key);
     """)
 
     # 5. Backfill active status for root resumes
@@ -165,7 +144,7 @@ def run_migration():
             resume_id, version_number, version_name, version_type, source_resume_id,
             content, changes_summary, change_summary_json, is_current, created_by, created_at
         )
-        SELECT r.id, 1, 'Original', 'original', r.id, COALESCE(r.parsed_content, '{}'::jsonb),
+        SELECT r.id, 1, 'v1 Original', 'original', r.id, COALESCE(r.parsed_content, '{}'::jsonb),
                'Original uploaded resume', '{"summary":"Original uploaded resume"}'::jsonb,
                TRUE, r.user_id, r.created_at
         FROM public.resumes r
@@ -189,12 +168,88 @@ def run_migration():
         WHERE r.active_version_id IS NULL;
     """)
 
+    # 8. Idempotent Backfill Historical Usage Events
+    # A. Backfill from applications if resume_id column exists
+    cur.execute("""
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name='applications' AND column_name='resume_id';
+    """)
+    if cur.fetchone():
+        cur.execute("""
+            INSERT INTO public.resume_usage_events (
+                user_id, resume_id, event_type, job_id, idempotency_key, created_at
+            )
+            SELECT 
+                a.user_id,
+                a.resume_id,
+                'job_application',
+                a.id,
+                'backfill_app_' || a.id::text,
+                COALESCE(a.applied_at, a.created_at, NOW())
+            FROM public.applications a
+            WHERE a.resume_id IS NOT NULL
+            ON CONFLICT (idempotency_key) DO NOTHING;
+        """)
+
+    # B. Backfill from resume_versions (each non-original version represents a tailoring workflow)
+    cur.execute("""
+        INSERT INTO public.resume_usage_events (
+            user_id, resume_id, version_id, event_type, jd_id, job_id, idempotency_key, created_at
+        )
+        SELECT 
+            rv.created_by,
+            rv.resume_id,
+            rv.id,
+            'tailoring_completed',
+            rv.jd_id,
+            rv.job_id,
+            'backfill_ver_' || rv.id::text,
+            rv.created_at
+        FROM public.resume_versions rv
+        WHERE rv.created_by IS NOT NULL AND rv.version_type != 'original'
+        ON CONFLICT (idempotency_key) DO NOTHING;
+    """)
+
+    # C. Backfill initial upload usage event for root resumes
+    cur.execute("""
+        INSERT INTO public.resume_usage_events (
+            user_id, resume_id, event_type, idempotency_key, created_at
+        )
+        SELECT 
+            r.user_id,
+            r.id,
+            'resume_created',
+            'backfill_init_' || r.id::text,
+            r.created_at
+        FROM public.resumes r
+        WHERE r.deleted_at IS NULL
+        ON CONFLICT (idempotency_key) DO NOTHING;
+    """)
+
+    # 9. Recalculate times_used and last_used_at for all root resumes
+    cur.execute("""
+        UPDATE public.resumes r
+        SET 
+            times_used = (
+                SELECT COUNT(DISTINCT COALESCE(e.workflow_id::text, e.id::text))
+                FROM public.resume_usage_events e
+                WHERE e.resume_id = r.id
+                  AND e.event_type != 'resume_created'
+            ),
+            last_used_at = (
+                SELECT MAX(e.created_at)
+                FROM public.resume_usage_events e
+                WHERE e.resume_id = r.id
+                  AND e.event_type != 'resume_created'
+            );
+    """)
+
     conn.commit()
     cur.close()
     conn.close()
-    print("Resume manager & intelligence migration completed successfully.")
+    print("Resume manager schema migration and idempotent usage backfill completed successfully.")
 
 
 if __name__ == "__main__":
     run_migration()
-
