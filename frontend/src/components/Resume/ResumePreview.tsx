@@ -61,6 +61,59 @@ export default function ResumePreview({
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollWrapperRef = useRef<HTMLDivElement>(null);
 
+  // Touch Pinch-to-Zoom Gesture Handlers
+  const touchStartDistRef = useRef<number | null>(null);
+  const initialZoomRef = useRef<number>(zoom);
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      touchStartDistRef.current = dist;
+      initialZoomRef.current = zoom;
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 2 && touchStartDistRef.current !== null) {
+      if (e.cancelable) e.preventDefault();
+      const currentDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const scale = currentDist / touchStartDistRef.current;
+      const nextZoom = Math.max(0.35, Math.min(2.5, initialZoomRef.current * scale));
+      setZoom(nextZoom);
+      setZoomMode('actual_size');
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length < 2) {
+      touchStartDistRef.current = null;
+    }
+  };
+
+  // Trackpad & Ctrl-Wheel Pinch-To-Zoom Event Listener
+  useEffect(() => {
+    const wrapper = scrollWrapperRef.current;
+    if (!wrapper) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        const delta = -e.deltaY * 0.003;
+        setZoom(prev => Math.max(0.35, Math.min(2.5, prev + delta)));
+        setZoomMode('actual_size');
+      }
+    };
+
+    wrapper.addEventListener('wheel', handleWheel, { passive: false });
+    return () => wrapper.removeEventListener('wheel', handleWheel);
+  }, []);
+
   // Persist Page Preference per version
   useEffect(() => {
     localStorage.setItem(`page_pref_${resumeVersionId || 'current'}`, pagePreference);
@@ -456,9 +509,12 @@ export default function ResumePreview({
 
       {/* 3. CANVAS CONTAINER & SCROLL AREA */}
       <div
-        className="flex-1 overflow-auto custom-scrollbar p-6 flex flex-col items-center relative"
+        className="flex-1 overflow-auto custom-scrollbar p-6 flex flex-col items-center relative touch-none"
         ref={scrollWrapperRef}
         onScroll={handleScroll}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
       >
         
         {/* Loading Overlay during Recomposition */}

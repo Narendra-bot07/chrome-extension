@@ -10,6 +10,11 @@ import asyncio
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
+from core.observability import configure_langsmith
+
+# Must run before importing routers/services that construct LangChain models.
+configure_langsmith()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -17,6 +22,7 @@ import os
 from core.config import settings
 from core.exceptions import global_exception_handler
 from core.middleware import RequestLoggingMiddleware
+from core.observability import langsmith_status
 from api.router import api_router
 from app.routers.api import router as legacy_api_router
 
@@ -64,6 +70,12 @@ async def root():
         "version": "3.0.0",
         "layer": "Enterprise Clean Architecture"
     }
+
+
+@app.get("/api/observability/status")
+async def observability_status():
+    """Expose configuration health without returning credentials."""
+    return langsmith_status()
 
 if __name__ == "__main__":
     import uvicorn

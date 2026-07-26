@@ -46,7 +46,10 @@ from services.cover_letter import (
     build_cover_letter_strategy,
     edit_cover_letter,
     generate_cover_letter_draft,
+    compose_cover_letter,
+    repair_cover_letter_plan,
     review_cover_letter,
+    review_cover_letter_composition,
 )
 
 router = APIRouter(prefix="/api")
@@ -775,24 +778,112 @@ async def api_render_cover_letter(request: CoverLetterRenderRequest):
     from app.playwright_pdf import render_cover_letter_artifact
     from fastapi.concurrency import run_in_threadpool
 
-    payload = build_cover_letter_render_payload(request)
     original_content = request.generated_cover_letter.content
-    if payload["generated_cover_letter"]["content"] != original_content:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Presentation rendering attempted to modify cover letter content.",
+    plan = compose_cover_letter(request)
+    pdf_bytes = None
+    page_count = 0
+    metrics = {}
+    visual_review = None
+    last_valid_artifact = None
+
+    for attempt in range(4):
+        payload = build_cover_letter_render_payload(request, plan)
+        if payload["generated_cover_letter"]["content"] != original_content:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Composition attempted to modify cover letter content.",
+            )
+        try:
+            rendered = await run_in_threadpool(
+                render_cover_letter_artifact,
+                json.dumps(payload),
+                plan.paper_size,
+            )
+            pdf_bytes, page_count, metrics = rendered
+        except Exception as exc:
+            if last_valid_artifact:
+                plan, pdf_bytes, page_count, metrics, visual_review = (
+                    last_valid_artifact
+                )
+                break
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Cover letter rendering failed: {exc}",
+            ) from exc
+
+        visual_review = review_cover_letter_composition(
+            plan,
+            metrics,
+            request.generated_cover_letter.word_count,
         )
-    try:
-        pdf_bytes, page_count = await run_in_threadpool(
-            render_cover_letter_artifact,
-            json.dumps(payload),
-            payload["settings"]["paper_size"],
+        import logging
+        logging.getLogger("cover_letter.render").info(
+            "[COVER-LETTER-RENDER] attempt=%s status=%s issues=%s "
+            "pages=%s body_font_pt=%.2f content_width=%.2f/%.2f "
+            "width_utilization=%.3f vertical_utilization=%.3f "
+            "line_height_px=%.2f margins_mm=%s transform=%s zoom=%s "
+            "top_whitespace=%.2f bottom_whitespace=%.2f",
+            attempt + 1,
+            visual_review.status,
+            visual_review.issues,
+            page_count,
+            float(metrics.get("body_font_pt") or 0),
+            float(metrics.get("content_width_px") or 0),
+            float(metrics.get("printable_width_px") or 0),
+            float(metrics.get("width_utilization") or 0),
+            float(metrics.get("vertical_utilization") or 0),
+            float(metrics.get("line_height_px") or 0),
+            {
+                "left": metrics.get("left_margin_mm"),
+                "right": metrics.get("right_margin_mm"),
+            },
+            metrics.get("scale_transform"),
+            metrics.get("zoom"),
+            float(metrics.get("top_whitespace_px") or 0),
+            float(metrics.get("bottom_whitespace_px") or 0),
         )
-    except Exception as exc:
+        hard_issues = {
+            "BODY_FONT_TOO_SMALL", "CONTENT_WIDTH_TOO_NARROW",
+            "ACCIDENTAL_DOCUMENT_SCALING", "EXCESSIVE_HORIZONTAL_MARGIN",
+            "TEXT_CLIPPED", "CONTENT_OVERLAP", "OVERFLOW",
+        }
+        if not hard_issues.intersection(visual_review.issues):
+            last_valid_artifact = (
+                plan.model_copy(deep=True),
+                pdf_bytes,
+                page_count,
+                dict(metrics),
+                visual_review.model_copy(deep=True),
+            )
+        if visual_review.status == "PASS":
+            break
+        if attempt >= 3:
+            break
+        repaired = repair_cover_letter_plan(plan, visual_review)
+        logging.getLogger("cover_letter.render").info(
+            "[COVER-LETTER-RENDER] repair attempt=%s issues=%s "
+            "from_plan=%s to_plan=%s",
+            attempt + 1,
+            visual_review.issues,
+            plan.model_dump(mode="json"),
+            repaired.model_dump(mode="json"),
+        )
+        if repaired == plan:
+            break
+        plan = repaired
+
+    if visual_review is None or visual_review.status != "PASS":
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Cover letter rendering failed: {exc}",
-        ) from exc
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "message": (
+                    "The cover letter could not reach professional visual "
+                    "quality within three bounded repair attempts."
+                ),
+                "issues": visual_review.issues if visual_review else [],
+                "last_plan": plan.model_dump(mode="json"),
+            },
+        )
 
     if (
         request.settings.page_mode == "force_one_page"
@@ -811,6 +902,9 @@ async def api_render_cover_letter(request: CoverLetterRenderRequest):
     clean_name = re.sub(r"[^A-Za-z0-9_-]+", "_", str(candidate_name)).strip("_")
     clean_company = re.sub(r"[^A-Za-z0-9_-]+", "_", str(company_name)).strip("_")
     filename = f"{clean_name}_{clean_company}_Cover_Letter.pdf"
+    import hashlib
+    artifact_hash = hashlib.sha256(pdf_bytes).hexdigest()
+    plan_json = json.dumps(plan.model_dump(mode="json"), separators=(",", ":"))
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
@@ -818,10 +912,14 @@ async def api_render_cover_letter(request: CoverLetterRenderRequest):
             "Content-Disposition": f'inline; filename="{filename}"',
             "Access-Control-Expose-Headers": (
                 "Content-Disposition, X-Cover-Letter-Pages, "
-                "X-Cover-Letter-Template"
+                "X-Cover-Letter-Template, X-Cover-Letter-Artifact-Hash, "
+                "X-Cover-Letter-Repair-Attempts, X-Cover-Letter-Plan"
             ),
             "X-Cover-Letter-Pages": str(page_count),
-            "X-Cover-Letter-Template": payload["settings"]["selected_template"],
+            "X-Cover-Letter-Template": plan.template,
+            "X-Cover-Letter-Artifact-Hash": artifact_hash,
+            "X-Cover-Letter-Repair-Attempts": str(plan.repair_attempt),
+            "X-Cover-Letter-Plan": plan_json,
         },
     )
 

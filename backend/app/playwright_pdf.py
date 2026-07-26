@@ -1,4 +1,7 @@
 import os
+import json
+import re
+import hashlib
 from io import BytesIO
 from typing import Optional
 from urllib.parse import urlencode
@@ -10,7 +13,6 @@ PDF_RENDERER_URL = (
     or os.environ.get("FRONTEND_URL")
     or "http://127.0.0.1:8000/__pdf_renderer/index.html"
 ).rstrip("/")
-
 def _open_renderer(page, route: str, query: Optional[dict] = None):
     fragment = f"#/{route.lstrip('/')}"
     if query:
@@ -41,8 +43,6 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
                 args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
             )
             page = browser.new_page()
-            
-            # Handle a configured Vite server 504 by reloading if necessary.
             response = _open_renderer(page, "print", {"template": template_name, "format": "a4"})
             if response and response.status == 504:
                 page.wait_for_timeout(1000)
@@ -214,7 +214,6 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
                 )
 
             import hashlib
-            import json
             render_hash = hashlib.sha256(pdf_bytes).hexdigest()
             plan_copy = dict(final_composition_plan)
             plan_copy["render_hash"] = render_hash
@@ -276,7 +275,7 @@ def generate_cover_letter_pdf_via_playwright(cover_letter_json_str: str) -> Opti
 def render_cover_letter_artifact(
     render_payload_json: str,
     paper_size: str = "A4",
-) -> tuple[bytes, int]:
+) -> tuple[bytes, int, dict]:
     """Render the single PDF artifact used by both preview and download."""
     try:
         with sync_playwright() as p:
@@ -284,8 +283,18 @@ def render_cover_letter_artifact(
                 headless=True,
                 args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
             )
-            page = browser.new_page()
+            viewport = (
+                {"width": 816, "height": 1056}
+                if paper_size == "Letter"
+                else {"width": 794, "height": 1123}
+            )
+            page = browser.new_page(viewport=viewport, device_scale_factor=1)
+            page.emulate_media(media="print")
             _open_renderer(page, "print-cover-letter")
+            try:
+                page.wait_for_load_state("networkidle", timeout=10000)
+            except Exception:
+                pass
             page.evaluate(
                 "data => { window.__INJECTED_COVER_LETTER_DATA__ = JSON.parse(data); }",
                 render_payload_json,
@@ -295,16 +304,164 @@ def render_cover_letter_artifact(
                 "() => document.querySelector('#resume-print-container') !== null",
                 timeout=10000,
             )
-            page.evaluate("document.fonts.ready")
+            page.evaluate("""async () => {
+                if (document.fonts?.ready) await document.fonts.ready;
+                await Promise.all(Array.from(document.images).map(image => {
+                    if (image.complete) return Promise.resolve();
+                    return new Promise(resolve => {
+                        image.onload = resolve;
+                        image.onerror = resolve;
+                    });
+                }));
+                await new Promise(resolve =>
+                    requestAnimationFrame(() => requestAnimationFrame(resolve))
+                );
+            }""")
+            preflight = page.evaluate("""() => {
+                const root = document.querySelector('#resume-print-container');
+                const content = root?.querySelector('[data-cover-letter-content="true"]');
+                const plan = window.__INJECTED_COVER_LETTER_DATA__?.composition_plan;
+                const rootRect = root?.getBoundingClientRect();
+                const contentRect = content?.getBoundingClientRect();
+                const rootStyle = root ? getComputedStyle(root) : null;
+                const contentStyle = content ? getComputedStyle(content) : null;
+                const horizontalMarginsPx = (
+                    Number(plan?.margins?.left_mm || 0)
+                    + Number(plan?.margins?.right_mm || 0)
+                ) * 96 / 25.4;
+                const printableWidth = Math.max(
+                    1, (rootRect?.width || innerWidth) - horizontalMarginsPx
+                );
+                return {
+                    width_utilization: (contentRect?.width || 0) / printableWidth,
+                    body_font_pt: parseFloat(rootStyle?.fontSize || '0') * 72 / 96,
+                    transform: rootStyle?.transform || 'none',
+                    zoom: parseFloat(rootStyle?.zoom || '1'),
+                    content_max_width: contentStyle?.maxWidth || 'none',
+                    horizontal_overflow: Boolean(root && (
+                        root.scrollWidth > root.clientWidth + 1
+                    ))
+                };
+            }""")
+            preflight_errors = []
+            if preflight["width_utilization"] < 0.92:
+                preflight_errors.append("content width utilization is below 92%")
+            if preflight["body_font_pt"] < 9.5:
+                preflight_errors.append("body font is below 9.5pt")
+            if preflight["transform"] != "none" or preflight["zoom"] != 1:
+                preflight_errors.append("document scaling is not 1")
+            if preflight["content_max_width"] != "none":
+                preflight_errors.append("content root has a max-width constraint")
+            if preflight["horizontal_overflow"]:
+                preflight_errors.append("document overflows horizontally")
+            if preflight_errors:
+                raise ValueError(
+                    "Cover letter DOM preflight failed: "
+                    + "; ".join(preflight_errors)
+                )
             pdf_bytes = page.pdf(
                 format=paper_size,
                 print_background=True,
                 margin={"top": "0", "right": "0", "bottom": "0", "left": "0"},
                 prefer_css_page_size=True,
+                scale=1,
             )
             page_count = len(PdfReader(BytesIO(pdf_bytes)).pages)
+            metrics = page.evaluate("""pages => {
+                const root = document.querySelector('#resume-print-container');
+                const header = root?.querySelector('[data-cover-letter-header="true"]');
+                const content = root?.querySelector('[data-cover-letter-content="true"]');
+                const rootRect = root?.getBoundingClientRect();
+                const headerRect = header?.getBoundingClientRect();
+                const contentRect = content?.getBoundingClientRect();
+                const plan = window.__INJECTED_COVER_LETTER_DATA__?.composition_plan;
+                const blocks = Array.from(content?.children || []);
+                const overlap = blocks.some((block, index) => {
+                    if (!index) return false;
+                    const previous = blocks[index - 1].getBoundingClientRect();
+                    const current = block.getBoundingClientRect();
+                    return current.top < previous.bottom - 0.5;
+                });
+                const rootStyle = root ? getComputedStyle(root) : null;
+                const contentStyle = content ? getComputedStyle(content) : null;
+                const pageHeight = innerHeight;
+                const topMarginMm = Number(plan?.margins?.top_mm || 0);
+                const bottomMarginPx = Number(plan?.margins?.bottom_mm || 0) * 96 / 25.4;
+                const printableHeight = Math.max(
+                    1,
+                    pageHeight - (
+                        topMarginMm + Number(plan?.margins?.bottom_mm || 0)
+                    ) * 96 / 25.4
+                );
+                const occupiedHeight = contentRect && headerRect
+                    ? contentRect.bottom - headerRect.top
+                    : contentRect?.height || 0;
+                return {
+                    viewport: {
+                        width: innerWidth,
+                        height: innerHeight,
+                        device_scale_factor: devicePixelRatio,
+                        dpi: 96 * devicePixelRatio
+                    },
+                    fonts_loaded: document.fonts?.status === 'loaded',
+                    page_width_px: innerWidth,
+                    page_height_px: pageHeight,
+                    printable_width_px: Math.max(
+                        1,
+                        (rootRect?.width || innerWidth)
+                        - (
+                            Number(plan?.margins?.left_mm || 0)
+                            + Number(plan?.margins?.right_mm || 0)
+                        ) * 96 / 25.4
+                    ),
+                    content_width_px: contentRect?.width || 0,
+                    width_utilization: (contentRect?.width || 0) / Math.max(
+                        1,
+                        (rootRect?.width || innerWidth)
+                        - (
+                            Number(plan?.margins?.left_mm || 0)
+                            + Number(plan?.margins?.right_mm || 0)
+                        ) * 96 / 25.4
+                    ),
+                    content_height_px: contentRect?.height || 0,
+                    occupied_height_px: occupiedHeight,
+                    printable_height_px: printableHeight,
+                    vertical_utilization: occupiedHeight / printableHeight,
+                    header_height_px: header?.getBoundingClientRect().height || 0,
+                    top_whitespace_px:
+                        Number(plan?.margins?.top_mm || 0) * 96 / 25.4,
+                    bottom_whitespace_px: contentRect
+                        ? Math.max(0, pageHeight - contentRect.bottom - bottomMarginPx)
+                        : pageHeight,
+                    body_font_pt: parseFloat(rootStyle?.fontSize || '0') * 72 / 96,
+                    line_height_px: parseFloat(rootStyle?.lineHeight || '0'),
+                    left_margin_mm: Number(plan?.margins?.left_mm || 0),
+                    right_margin_mm: Number(plan?.margins?.right_mm || 0),
+                    page_count: pages,
+                    clipped: Boolean(root && (
+                        root.scrollWidth > root.clientWidth + 1
+                        || root.scrollHeight > pages * pageHeight + 1
+                    )),
+                    overlap,
+                    scale_transform: Boolean(
+                        rootStyle?.transform && rootStyle.transform !== 'none'
+                    ),
+                    zoom: parseFloat(rootStyle?.zoom || '1'),
+                    document_scale: 1,
+                    content_has_max_width: contentStyle?.maxWidth !== 'none',
+                    horizontal_overflow: Boolean(root && (
+                        root.scrollWidth > root.clientWidth + 1
+                    )),
+                    physical_page: {
+                        width: rootRect?.width || 0,
+                        height: rootRect?.height || 0,
+                        paper_size: plan?.paper_size || ''
+                    },
+                    content_block_count: blocks.length
+                };
+            }""", page_count)
             browser.close()
-            return pdf_bytes, page_count
+            return pdf_bytes, page_count, metrics
     except Exception:
         import traceback
         traceback.print_exc()

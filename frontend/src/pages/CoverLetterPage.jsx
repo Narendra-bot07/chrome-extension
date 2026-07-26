@@ -1,9 +1,233 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import CoverLetterView from '../components/CoverLetterView';
 import { useNavigate } from 'react-router-dom';
+import {
+  FileText,
+  CheckCircle2,
+  Sparkles,
+  Download,
+  ZoomIn,
+  ZoomOut,
+  Maximize,
+  RotateCcw,
+  Undo2,
+  Send,
+  SlidersHorizontal,
+  Layers,
+  ChevronRight,
+  ChevronDown,
+  Check,
+  RefreshCw,
+  AlertCircle,
+  X,
+  Eye,
+  StopCircle,
+  ArrowLeft
+} from 'lucide-react';
 
-function CoverLetterPage() {
+// Helper to format paragraphs cleanly
+function formatParagraphs(text) {
+  if (!text) return [];
+  if (Array.isArray(text)) return text;
+  return String(text).split('\n\n').filter(p => p.trim());
+}
+
+// -----------------------------------------------------------------------------
+// VECTOR COVER LETTER RENDERER (Crisp 100% Vector DOM matching exact templates)
+// -----------------------------------------------------------------------------
+function CoverLetterVectorRender({ coverLetter, context, templateKey = 'classic_ats', settings = {} }) {
+  if (!coverLetter) return null;
+
+  const candidate = context?.candidate || {};
+  const job = context?.job || {};
+
+  const name = candidate.name || coverLetter.applicant_name || 'Candidate Name';
+  const email = candidate.email || coverLetter.email || '';
+  const phone = candidate.phone || coverLetter.phone || '';
+  const location = candidate.location || coverLetter.location || '';
+
+  const company = job.company || coverLetter.company_name || 'Hiring Company';
+  const recipient = coverLetter.recipient_name || 'Hiring Manager';
+  const salutation = coverLetter.salutation || 'Dear Hiring Manager,';
+  const date = coverLetter.date || new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  const signoff = coverLetter.signoff || 'Sincerely,';
+
+  const rawText = typeof coverLetter === 'string'
+    ? coverLetter
+    : (coverLetter?.content || coverLetter?.body || (typeof generatedCoverLetter === 'object' ? generatedCoverLetter?.content : ''));
+
+  // Extract body text excluding header/signoff if embedded
+  let bodyText = rawText || '';
+  if (salutation && bodyText.includes(salutation)) {
+    bodyText = bodyText.split(salutation)[1] || bodyText;
+  }
+  if (signoff && bodyText.includes(signoff)) {
+    bodyText = bodyText.split(signoff)[0] || bodyText;
+  }
+
+  const paragraphs = formatParagraphs(bodyText);
+
+  const themeColor = settings.theme_color || (templateKey === 'modern_corporate' ? '#1d4ed8' : '#0f172a');
+  const fontFamily = settings.font || (templateKey === 'executive_professional' ? 'Georgia, serif' : 'Inter, sans-serif');
+  const fontSize = settings.font_size ? `${settings.font_size}pt` : '10.5pt';
+  const lineHeight = settings.line_height || 1.5;
+  const paragraphGap = settings.paragraph_spacing ? `${settings.paragraph_spacing}px` : '14px';
+
+  // TEMPLATE 1: CLASSIC ATS (Clean, left-aligned, maximum parser compatibility)
+  if (templateKey === 'classic_ats') {
+    return (
+      <div
+        className="w-full bg-white text-zinc-900 p-12 space-y-6 select-text text-left"
+        style={{ fontFamily, fontSize, lineHeight }}
+      >
+        {/* Header */}
+        <div className="border-b border-zinc-900 pb-4 space-y-1">
+          <h1 className="text-xl font-bold tracking-tight text-zinc-900 uppercase">{name}</h1>
+          <div className="text-[10px] text-zinc-600 space-x-2 font-medium">
+            {email && <span>{email}</span>}
+            {phone && <span>· {phone}</span>}
+            {location && <span>· {location}</span>}
+          </div>
+        </div>
+
+        {/* Date & Recipient */}
+        <div className="space-y-3 pt-2">
+          <div className="text-xs font-semibold text-zinc-600">{date}</div>
+          <div className="text-xs font-bold text-zinc-800 leading-snug">
+            <div>{recipient}</div>
+            <div className="font-semibold text-zinc-600">{company}</div>
+          </div>
+        </div>
+
+        {/* Salutation */}
+        <div className="font-bold text-zinc-900 text-xs pt-1">{salutation}</div>
+
+        {/* Paragraphs */}
+        <div className="space-y-4">
+          {paragraphs.map((para, idx) => (
+            <p key={idx} className="text-xs text-zinc-800 text-justify leading-relaxed" style={{ marginBottom: paragraphGap }}>
+              {para}
+            </p>
+          ))}
+        </div>
+
+        {/* Signoff */}
+        <div className="pt-6 space-y-3">
+          <p className="text-xs font-semibold text-zinc-800">{signoff}</p>
+          <p className="text-xs font-bold text-zinc-900 uppercase">{name}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // TEMPLATE 2: MODERN CORPORATE (Subtle blue accent bar, modern header, clean divider)
+  if (templateKey === 'modern_corporate') {
+    return (
+      <div
+        className="w-full bg-white text-zinc-900 p-12 space-y-6 select-text text-left"
+        style={{ fontFamily, fontSize, lineHeight }}
+      >
+        {/* Modern Accent Header */}
+        <div className="flex items-start justify-between border-b-2 pb-5" style={{ borderColor: themeColor }}>
+          <div className="space-y-1">
+            <h1 className="text-2xl font-black text-zinc-900" style={{ color: themeColor }}>
+              {name}
+            </h1>
+            <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">
+              Application for {job.title || 'Target Role'}
+            </p>
+          </div>
+          <div className="text-[10px] font-semibold text-zinc-600 text-right space-y-0.5">
+            {email && <div>{email}</div>}
+            {phone && <div>{phone}</div>}
+            {location && <div>{location}</div>}
+          </div>
+        </div>
+
+        {/* Date & Recipient Grid */}
+        <div className="flex justify-between items-start pt-2 text-xs">
+          <div className="space-y-0.5">
+            <span className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider block">Recipient</span>
+            <div className="font-bold text-zinc-900">{recipient}</div>
+            <div className="font-semibold text-zinc-600">{company}</div>
+          </div>
+          <div className="text-right">
+            <span className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider block">Date</span>
+            <div className="font-semibold text-zinc-700">{date}</div>
+          </div>
+        </div>
+
+        {/* Salutation */}
+        <div className="font-bold text-zinc-900 text-xs pt-2">{salutation}</div>
+
+        {/* Paragraphs */}
+        <div className="space-y-4">
+          {paragraphs.map((para, idx) => (
+            <p key={idx} className="text-xs text-zinc-800 text-justify leading-relaxed" style={{ marginBottom: paragraphGap }}>
+              {para}
+            </p>
+          ))}
+        </div>
+
+        {/* Signoff */}
+        <div className="pt-6 space-y-4 border-t border-zinc-100">
+          <p className="text-xs font-semibold text-zinc-800">{signoff}</p>
+          <p className="text-xs font-bold text-zinc-900" style={{ color: themeColor }}>{name}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // TEMPLATE 3: EXECUTIVE PROFESSIONAL (Refined typography, formal spacing, premium header)
+  return (
+    <div
+      className="w-full bg-white text-zinc-900 p-12 space-y-6 select-text text-left font-serif"
+      style={{ fontFamily: 'Georgia, serif', fontSize, lineHeight }}
+    >
+      {/* Executive Header */}
+      <div className="text-center border-b border-zinc-300 pb-5 space-y-1.5">
+        <h1 className="text-2xl font-bold tracking-widest text-zinc-900 uppercase">{name}</h1>
+        <div className="text-[10px] text-zinc-600 space-x-3 font-sans uppercase tracking-wider font-semibold">
+          {email && <span>{email}</span>}
+          {phone && <span>| {phone}</span>}
+          {location && <span>| {location}</span>}
+        </div>
+      </div>
+
+      {/* Date & Recipient */}
+      <div className="space-y-3 pt-2 font-sans">
+        <div className="text-xs text-zinc-600 italic">{date}</div>
+        <div className="text-xs font-bold text-zinc-900">
+          <div>{recipient}</div>
+          <div className="font-normal text-zinc-600">{company}</div>
+        </div>
+      </div>
+
+      {/* Salutation */}
+      <div className="font-bold text-zinc-900 text-xs pt-1">{salutation}</div>
+
+      {/* Paragraphs */}
+      <div className="space-y-4">
+        {paragraphs.map((para, idx) => (
+          <p key={idx} className="text-xs text-zinc-800 text-justify leading-relaxed" style={{ marginBottom: paragraphGap }}>
+            {para}
+          </p>
+        ))}
+      </div>
+
+      {/* Signoff */}
+      <div className="pt-8 space-y-4 font-sans">
+        <p className="text-xs font-semibold text-zinc-800">{signoff}</p>
+        <p className="text-xs font-bold text-zinc-900 uppercase tracking-wider">{name}</p>
+      </div>
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// MAIN COVER LETTER STUDIO PAGE
+// -----------------------------------------------------------------------------
+export default function CoverLetterPage() {
   const navigate = useNavigate();
   const {
     coverLetter,
@@ -11,13 +235,14 @@ function CoverLetterPage() {
     coverLetterStrategy,
     generatedCoverLetter,
     coverLetterReview,
-    coverLetterEditHistory,
-    coverLetterEditStreaming,
+    coverLetterEditHistory = [],
+    coverLetterEditStreaming = false,
     companyName,
     apiUrl,
-    handleCopyToClipboard,
     handleDownloadCoverLetterPDF,
     loading,
+    loadingProgress,
+    loadingMessage,
     handleGenerateCoverLetter,
     handleBuildCoverLetterStrategy,
     handleGenerateFirstCoverLetterDraft,
@@ -25,34 +250,65 @@ function CoverLetterPage() {
     handleUndoCoverLetterEdit,
     handleRestoreCoverLetterEdit
   } = useApp();
-  const [contextAnswers, setContextAnswers] = useState({});
-  const [skippedQuestions, setSkippedQuestions] = useState([]);
-  const [editPrompt, setEditPrompt] = useState('');
-  const [presentationSettings, setPresentationSettings] = useState({
-    selected_template: 'classic_ats',
-    font: 'Arial',
-    theme_color: '#1d4ed8',
-    font_size: 11,
-    paragraph_spacing: 12,
-    line_height: 1.5,
-    page_margin: 20,
-    paper_size: 'A4',
-    page_mode: 'auto',
-    spacing_profile: 'balanced',
-    margin_profile: 'standard'
-  });
-  const [coverLetterPdfUrl, setCoverLetterPdfUrl] = useState('');
-  const [coverLetterPdfBlob, setCoverLetterPdfBlob] = useState(null);
-  const [coverLetterPageCount, setCoverLetterPageCount] = useState(0);
-  const [coverLetterRenderError, setCoverLetterRenderError] = useState('');
-  const [coverLetterRendering, setCoverLetterRendering] = useState(false);
 
+  // Essential Presentation Settings
+  const [selectedTemplate, setSelectedTemplate] = useState('classic_ats'); // 'classic_ats' | 'modern_corporate' | 'executive_professional'
+  const [pageSize, setPageSize] = useState('A4');
+  const [density, setDensity] = useState('standard'); // 'compact' | 'standard' | 'spacious'
+  const [themeColor, setThemeColor] = useState('#1d4ed8');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Advanced Layout Settings
+  const [font, setFont] = useState('Inter');
+  const [fontSize, setFontSize] = useState(10.5);
+  const [lineHeight, setLineHeight] = useState(1.5);
+  const [paragraphSpacing, setParagraphSpacing] = useState(14);
+  const [pageMargin, setPageMargin] = useState(20);
+
+  // Preview Workspace States
+  const [zoom, setZoom] = useState(1.0);
+  const [showFullscreen, setShowFullscreen] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState('');
+  const [pdfBlob, setPdfBlob] = useState(null);
+  const [isRenderingPdf, setIsRenderingPdf] = useState(false);
+  const [renderError, setRenderError] = useState('');
+
+  // AI Editor States
+  const [editPrompt, setEditPrompt] = useState('');
+  const [activeSectionScroll, setActiveSectionScroll] = useState(null);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+
+  const previewWrapperRef = useRef(null);
+
+  // Derived settings payload for backend Playwright rendering
+  const currentSettings = useMemo(() => {
+    const spacingProfileMap = {
+      compact: 'compact',
+      standard: 'balanced',
+      spacious: 'comfortable'
+    };
+    return {
+      selected_template: selectedTemplate,
+      paper_size: pageSize,
+      font: font || 'Arial',
+      font_size: fontSize,
+      theme_color: themeColor,
+      paragraph_spacing: paragraphSpacing,
+      line_height: lineHeight,
+      page_margin: pageMargin,
+      page_mode: 'auto',
+      spacing_profile: spacingProfileMap[density] || 'balanced',
+      margin_profile: 'standard'
+    };
+  }, [selectedTemplate, pageSize, font, fontSize, themeColor, paragraphSpacing, lineHeight, pageMargin, density]);
+
+  // Background PDF Parity Generator
   useEffect(() => {
-    if (!generatedCoverLetter || !coverLetterContext || !coverLetterReview) return undefined;
+    if (!generatedCoverLetter || !coverLetterContext) return undefined;
     const controller = new AbortController();
     const timer = setTimeout(async () => {
-      setCoverLetterRendering(true);
-      setCoverLetterRenderError('');
+      setIsRenderingPdf(true);
+      setRenderError('');
       try {
         const response = await fetch(`${apiUrl}/api/cover-letter/render`, {
           method: 'POST',
@@ -61,453 +317,609 @@ function CoverLetterPage() {
           body: JSON.stringify({
             context: coverLetterContext,
             generated_cover_letter: generatedCoverLetter,
-            settings: presentationSettings
+            settings: currentSettings
           })
         });
         if (!response.ok) {
           const failure = await response.json().catch(() => ({}));
-          throw new Error(failure.detail || 'Cover letter preview failed.');
+          const detail = failure.detail;
+          throw new Error(
+            typeof detail === 'string'
+              ? detail
+              : detail?.message
+                ? `${detail.message}${
+                    detail.issues?.length
+                      ? ` Issues: ${detail.issues.join(', ')}`
+                      : ''
+                  }`
+                : 'Cover letter PDF generation failed.'
+          );
         }
         const blob = await response.blob();
         const nextUrl = URL.createObjectURL(blob);
-        setCoverLetterPdfUrl(previous => {
+        setPdfBlobUrl(previous => {
           if (previous) URL.revokeObjectURL(previous);
           return nextUrl;
         });
-        setCoverLetterPdfBlob(blob);
-        setCoverLetterPageCount(Number(response.headers.get('X-Cover-Letter-Pages') || 1));
+        setPdfBlob(blob);
       } catch (error) {
         if (error.name !== 'AbortError') {
-          setCoverLetterRenderError(error.message);
-          setCoverLetterPdfBlob(null);
+          console.warn("Cover letter PDF render error:", error);
+          setRenderError(error.message);
         }
       } finally {
-        if (!controller.signal.aborted) setCoverLetterRendering(false);
+        if (!controller.signal.aborted) setIsRenderingPdf(false);
       }
-    }, 450);
+    }, 350);
+
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [
-    apiUrl,
-    coverLetterContext,
-    coverLetterReview,
-    generatedCoverLetter,
-    presentationSettings
-  ]);
+  }, [apiUrl, coverLetterContext, generatedCoverLetter, currentSettings]);
 
+  // Clean up blob URL on unmount
   useEffect(() => () => {
-    if (coverLetterPdfUrl) URL.revokeObjectURL(coverLetterPdfUrl);
-  }, [coverLetterPdfUrl]);
+    if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
+  }, [pdfBlobUrl]);
 
-  const updatePresentation = (key, value) => {
-    setPresentationSettings(previous => ({ ...previous, [key]: value }));
+  // Fit Width helper
+  const handleFitWidth = () => {
+    if (!previewWrapperRef.current) return;
+    const containerWidth = previewWrapperRef.current.clientWidth;
+    const targetScale = (containerWidth - 60) / 816;
+    setZoom(Math.max(0.4, Math.min(1.8, targetScale)));
   };
 
-  const downloadRenderedCoverLetter = () => {
-    if (!coverLetterPdfBlob || !coverLetterPdfUrl) return;
+  // Auto-fit width on mount
+  useEffect(() => {
+    handleFitWidth();
+  }, []);
+
+  // Download exact verified PDF
+  const handleDownloadExactPDF = () => {
+    if (!pdfBlobUrl && !pdfBlob) return;
     const candidate = coverLetterContext?.candidate?.name || 'Candidate';
     const company = coverLetterContext?.job?.company || 'Company';
     const clean = value => String(value).replace(/[^A-Za-z0-9_-]+/g, '_');
     const link = document.createElement('a');
-    link.href = coverLetterPdfUrl;
+    link.href = pdfBlobUrl;
     link.download = `${clean(candidate)}_${clean(company)}_Cover_Letter.pdf`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  if (generatedCoverLetter) {
-    return (
-      <div className="grid flex-1 min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-black text-slate-900">{generatedCoverLetter.title}</h2>
-              {coverLetterReview ? (
-                <p className="mt-1 text-xs font-bold text-emerald-700">
-                  ✓ Review Complete · {coverLetterReview.issues_fixed.length
-                    ? `${coverLetterReview.issues_fixed.length} Improvements Applied`
-                    : 'No Issues'}
-                </p>
-              ) : (
-                <p className="mt-1 text-xs font-bold text-amber-700">Review pending</p>
-              )}
-            </div>
-            <div className="rounded-lg bg-slate-100 px-3 py-2 text-[10px] font-bold text-slate-600">
-              {generatedCoverLetter.word_count} words · {generatedCoverLetter.paragraph_count} paragraphs
-            </div>
-          </div>
-          {coverLetterReview && (
-            <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-xs text-emerald-900">
-              <b>Recruiter review: {coverLetterReview.review_score}/100.</b>{' '}
-              {coverLetterReview.review_summary}
-            </div>
-          )}
-          {coverLetterReview && (
-            <>
-              <div className="mt-5 grid gap-2 sm:grid-cols-3">
-                {[
-                  ['classic_ats', 'Classic ATS', 'Maximum compatibility'],
-                  ['modern_corporate', 'Modern Corporate', 'Enterprise blue accent'],
-                  ['executive_professional', 'Executive Professional', 'Premium formal layout']
-                ].map(([value, label, description]) => (
-                  <button type="button" key={value}
-                    onClick={() => updatePresentation('selected_template', value)}
-                    className={`rounded-xl border p-3 text-left ${
-                      presentationSettings.selected_template === value
-                        ? 'border-indigo-500 bg-indigo-50'
-                        : 'border-slate-200 bg-white'
-                    }`}>
-                    <div className="text-xs font-black text-slate-800">{label}</div>
-                    <div className="mt-1 text-[10px] text-slate-500">{description}</div>
-                  </button>
-                ))}
-              </div>
-              <div className="mt-3 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-4">
-                <label className="text-[10px] font-bold text-slate-600">
-                  Font
-                  <select value={presentationSettings.font}
-                    onChange={event => updatePresentation('font', event.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2 text-xs">
-                    {['Arial', 'Calibri', 'Georgia', 'Times New Roman'].map(font => (
-                      <option key={font}>{font}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="text-[10px] font-bold text-slate-600">
-                  Page mode
-                  <select value={presentationSettings.page_mode}
-                    onChange={event => updatePresentation('page_mode', event.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2 text-xs">
-                    <option value="auto">Auto</option>
-                    <option value="force_one_page">Force one page</option>
-                    <option value="allow_two_pages">Allow two pages</option>
-                  </select>
-                </label>
-                <label className="text-[10px] font-bold text-slate-600">
-                  Paper
-                  <select value={presentationSettings.paper_size}
-                    onChange={event => updatePresentation('paper_size', event.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2 text-xs">
-                    <option value="A4">A4</option>
-                    <option value="Letter">Letter</option>
-                  </select>
-                </label>
-                <label className="text-[10px] font-bold text-slate-600">
-                  Accent
-                  <input type="color" value={presentationSettings.theme_color}
-                    onChange={event => updatePresentation('theme_color', event.target.value)}
-                    className="mt-1 h-8 w-full rounded-lg border border-slate-200 bg-white p-1" />
-                </label>
-                <label className="text-[10px] font-bold text-slate-600">
-                  Font size: {presentationSettings.font_size}pt
-                  <input type="range" min="9" max="13" step="0.5"
-                    value={presentationSettings.font_size}
-                    onChange={event => updatePresentation('font_size', Number(event.target.value))}
-                    className="mt-2 w-full" />
-                </label>
-                <label className="text-[10px] font-bold text-slate-600">
-                  Paragraph spacing: {presentationSettings.paragraph_spacing}px
-                  <input type="range" min="6" max="24" step="1"
-                    value={presentationSettings.paragraph_spacing}
-                    onChange={event => updatePresentation('paragraph_spacing', Number(event.target.value))}
-                    className="mt-2 w-full" />
-                </label>
-                <label className="text-[10px] font-bold text-slate-600">
-                  Line height: {presentationSettings.line_height}
-                  <input type="range" min="1.25" max="1.8" step="0.05"
-                    value={presentationSettings.line_height}
-                    onChange={event => updatePresentation('line_height', Number(event.target.value))}
-                    className="mt-2 w-full" />
-                </label>
-                <label className="text-[10px] font-bold text-slate-600">
-                  Margins: {presentationSettings.page_margin}mm
-                  <input type="range" min="12" max="32" step="1"
-                    value={presentationSettings.page_margin}
-                    onChange={event => updatePresentation('page_margin', Number(event.target.value))}
-                    className="mt-2 w-full" />
-                </label>
-              </div>
-              {coverLetterRenderError && (
-                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-800">
-                  {coverLetterRenderError}
-                  {presentationSettings.page_mode === 'force_one_page' && (
-                    <button type="button"
-                      onClick={() => updatePresentation('page_mode', 'auto')}
-                      className="ml-2 border-0 bg-transparent p-0 font-black underline">
-                      Switch to AUTO
-                    </button>
-                  )}
-                </div>
-              )}
-              <div className="mt-4 flex items-center justify-between">
-                <div className="text-xs font-bold text-slate-600">
-                  {coverLetterRendering
-                    ? 'Rendering exact PDF preview…'
-                    : coverLetterPageCount
-                      ? `${coverLetterPageCount}-page PDF preview`
-                      : 'Preparing preview'}
-                </div>
-                <button type="button" onClick={downloadRenderedCoverLetter}
-                  disabled={!coverLetterPdfBlob || coverLetterRendering}
-                  className="rounded-xl border-0 bg-emerald-700 px-4 py-2 text-xs font-extrabold uppercase text-white disabled:opacity-50">
-                  Download this exact PDF
-                </button>
-              </div>
-              {coverLetterPdfUrl && !coverLetterRenderError && (
-                <iframe title="Exact cover letter PDF preview"
-                  src={coverLetterPdfUrl}
-                  className="mt-3 h-[760px] w-full rounded-xl border border-slate-300 bg-slate-100" />
-              )}
-            </>
-          )}
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <div className="rounded-xl border border-slate-200 p-4">
-              <div className="text-[10px] font-black uppercase text-slate-400">Evidence used</div>
-              <ul className="mt-2 space-y-2 text-xs text-slate-700">
-                {(generatedCoverLetter.selected_evidence || []).map(item => (
-                  <li key={item.evidence_id}><b>{item.source_section}</b> — {item.reason}</li>
-                ))}
-              </ul>
-            </div>
-            <div className="rounded-xl border border-slate-200 p-4">
-              <div className="text-[10px] font-black uppercase text-slate-400">Generation metadata</div>
-              <div className="mt-2 text-xs text-slate-700">
-                <b>Keywords:</b> {(generatedCoverLetter.used_keywords || []).join(', ') || 'None'}
-              </div>
-            </div>
-          </div>
-        </div>
-        <aside className="flex min-h-0 flex-col rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-black text-slate-900">AI Editor</h3>
-              <p className="mt-1 text-[10px] text-slate-500">Edits only the requested portions.</p>
-            </div>
-            <button type="button"
-              onClick={handleUndoCoverLetterEdit}
-              disabled={!coverLetterEditHistory.length || coverLetterEditStreaming}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-bold text-slate-600 disabled:opacity-40">
-              Undo
-            </button>
-          </div>
-          <div className="mt-4 flex-1 space-y-2 overflow-y-auto">
-            {!coverLetterEditHistory.length && (
-              <div className="rounded-xl bg-slate-50 p-3 text-[11px] leading-5 text-slate-500">
-                Try “Make it shorter”, “Improve paragraph 2”, or “Emphasize Databricks”.
-              </div>
-            )}
-            {coverLetterEditHistory.map((edit, index) => (
-              <button type="button" key={edit.edit_id}
-                onClick={() => handleRestoreCoverLetterEdit(edit.edit_id)}
-                className={`w-full rounded-xl border border-slate-200 bg-white p-3 text-left ${edit.undone ? 'opacity-60' : ''}`}>
-                <div className="text-[10px] font-black text-indigo-700">Edit {index + 1}</div>
-                <div className="mt-1 text-xs font-bold text-slate-700">{edit.user_prompt}</div>
-                <div className="mt-1 text-[10px] text-slate-500">
-                  {edit.undone ? 'Undone · Click to restore' : edit.review_summary}
-                </div>
-              </button>
-            ))}
-          </div>
-          <form className="mt-4"
-            onSubmit={async event => {
-              event.preventDefault();
-              if (await handleEditCoverLetter(editPrompt)) setEditPrompt('');
-            }}>
-            <textarea value={editPrompt}
-              onChange={event => setEditPrompt(event.target.value)}
-              disabled={coverLetterEditStreaming}
-              placeholder="Tell AI what to change…"
-              className="h-24 w-full resize-none rounded-xl border border-slate-200 p-3 text-xs outline-none focus:border-indigo-500" />
-            <button type="submit"
-              disabled={!editPrompt.trim() || coverLetterEditStreaming}
-              className="mt-2 w-full rounded-xl border-0 bg-indigo-700 px-4 py-3 text-xs font-extrabold uppercase text-white disabled:opacity-50">
-              {coverLetterEditStreaming ? 'Applying edit…' : 'Apply targeted edit'}
-            </button>
-          </form>
-        </aside>
-      </div>
-    );
-  }
+  // Submit AI Edit prompt
+  const handleAIEditSubmit = async (e) => {
+    e.preventDefault();
+    if (!editPrompt.trim() || coverLetterEditStreaming) return;
+    const promptToSend = editPrompt;
+    setEditPrompt('');
+    await handleEditCoverLetter(promptToSend);
+  };
 
-  if (coverLetterStrategy) {
-    return (
-      <div className="flex-1 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6">
-        <h2 className="text-lg font-black text-slate-900">Cover Letter Generation Strategy</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          Writing plan prepared. No cover letter prose has been generated.
-        </p>
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <div className="rounded-xl border border-slate-200 p-4 text-xs">
-            <div><b>Tone:</b> {coverLetterStrategy.tone}</div>
-            <div><b>Target:</b> {coverLetterStrategy.target_word_count} words</div>
-            <div><b>Opening:</b> {coverLetterStrategy.opening_approach.replaceAll('_', ' ')}</div>
-            <div><b>Greeting:</b> {coverLetterStrategy.greeting}</div>
-            <div className="mt-2"><b>Narrative:</b> {coverLetterStrategy.narrative}</div>
-          </div>
-          <div className="rounded-xl border border-slate-200 p-4">
-            <div className="text-[10px] font-black uppercase text-slate-400">Evidence priority</div>
-            <ol className="mt-2 space-y-2 text-xs">
-              {coverLetterStrategy.selected_evidence.map(item => (
-                <li key={item.evidence_id}>
-                  <b>{item.priority}. {item.source_section}</b> — {item.reason}
-                </li>
-              ))}
-            </ol>
-          </div>
-        </div>
-        <div className="mt-4 rounded-xl border border-slate-200 p-4">
-          <div className="text-[10px] font-black uppercase text-slate-400">Paragraph plan</div>
-          <div className="mt-2 space-y-2">
-            {coverLetterStrategy.paragraph_plan.map(item => (
-              <div key={item.paragraph} className="text-xs">
-                <b>{item.paragraph}. {item.purpose.replaceAll('_', ' ')}</b>
-                <span className="text-slate-500"> — {item.key_points.join(' ')}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="mt-4 text-xs font-bold text-emerald-700">
-          Status: {coverLetterStrategy.strategy_status.replaceAll('_', ' ')}
-        </div>
-        {coverLetterStrategy.ready_for_generation && (
-          <button type="button"
-            onClick={handleGenerateFirstCoverLetterDraft}
-            disabled={loading}
-            className="mt-5 rounded-xl border-0 bg-indigo-700 px-6 py-3 text-xs font-extrabold uppercase text-white shadow-md hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-60">
-            {loading ? 'Generating First Draft…' : 'Generate First Draft'}
-          </button>
-        )}
-      </div>
-    );
-  }
+  // Quick prompt chip selection
+  const handleApplyQuickPrompt = (promptText) => {
+    setEditPrompt(promptText);
+  };
 
-  if (coverLetterContext) {
+  // If letter not yet generated, render drafting pipeline step
+  if (!generatedCoverLetter) {
     return (
-      <div className="flex-1 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6">
-        <h2 className="text-lg font-black text-slate-900">Cover Letter Context</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          Context collected for {coverLetterContext.job?.title || 'the selected role'} at {coverLetterContext.job?.company || 'the selected company'}. No letter has been generated.
-        </p>
-        <div className="mt-5 grid gap-3 md:grid-cols-2">
-          <div className="rounded-xl border border-slate-200 p-4">
-            <div className="text-[10px] font-black uppercase text-slate-400">Evidence-backed strengths</div>
-            <ul className="mt-2 space-y-2 text-xs text-slate-700">
-              {(coverLetterContext.selected_evidence || []).map(item => (
-                <li key={`${item.source_section}-${item.source_entry_id}`}>
-                  <span className="font-bold">{item.source_section}:</span> {item.exact_factual_evidence}
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div className="rounded-xl border border-slate-200 p-4">
-            <div className="text-[10px] font-black uppercase text-slate-400">Questions before strategy</div>
-            <div className="mt-2 space-y-3">
-              {(coverLetterContext.questions || []).map(question => (
-                <div key={question.id} className="text-xs text-slate-700">
-                  <div className="font-bold">{question.prompt}</div>
-                  {question.kind === 'choice' ? (
-                    <select value={contextAnswers[question.id] || ''}
-                      onChange={event => setContextAnswers(previous => ({
-                        ...previous, [question.id]: event.target.value
-                      }))}
-                      className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-xs">
-                      <option value="">Select…</option>
-                      {question.options.map(option => <option key={option} value={option}>{option}</option>)}
-                    </select>
-                  ) : (
-                    <input value={contextAnswers[question.id] || ''}
-                      onChange={event => setContextAnswers(previous => ({
-                        ...previous, [question.id]: event.target.value
-                      }))}
-                      className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-xs"
-                      placeholder={question.required ? 'Required' : 'Optional'} />
-                  )}
-                  {!question.required && (
-                    <button type="button"
-                      onClick={() => setSkippedQuestions(previous =>
-                        previous.includes(question.id)
-                          ? previous.filter(id => id !== question.id)
-                          : [...previous, question.id]
-                      )}
-                      className="mt-1 border-0 bg-transparent p-0 text-[10px] font-bold text-slate-400">
-                      {skippedQuestions.includes(question.id) ? 'Skipped ✓' : 'Skip this question'}
-                    </button>
-                  )}
-                </div>
-              ))}
-              {!coverLetterContext.questions?.length && (
-                <div className="text-xs font-bold text-emerald-700">Context is ready for future cover-letter generation.</div>
-              )}
-            </div>
-            {!!coverLetterContext.questions?.length && (
-              <button type="button"
-                onClick={() => handleGenerateCoverLetter(contextAnswers, skippedQuestions)}
-                className="mt-5 rounded-xl border-0 bg-indigo-700 px-5 py-3 text-xs font-extrabold uppercase text-white">
-                Save answers and validate context
-              </button>
-            )}
-          </div>
+      <div className="flex-1 flex flex-col items-center justify-center p-8 bg-white text-zinc-900 rounded-2xl border border-zinc-200 shadow-sm max-w-3xl mx-auto my-8 text-center space-y-6">
+        <div className="w-14 h-14 rounded-2xl bg-[#00bda5]/10 border border-[#00bda5]/30 flex items-center justify-center text-[#00bda5] mx-auto">
+          <FileText size={28} />
         </div>
-        <div className="mt-5 text-xs font-bold text-slate-600">
-          Status: {coverLetterContext.status.replaceAll('_', ' ')}
-        </div>
-        {coverLetterContext.ready_for_generation && (
-          <button type="button"
-            onClick={handleBuildCoverLetterStrategy}
-            className="mt-5 rounded-xl border-0 bg-emerald-700 px-6 py-3 text-xs font-extrabold uppercase text-white shadow-md hover:bg-emerald-800">
-            Build Generation Strategy
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center p-8 bg-slate-50 dark:bg-[#0f0f11] text-slate-500 rounded-2xl border border-slate-200 dark:border-slate-900 shadow-3xs">
-        <div className="animate-spin rounded-full h-10 w-10 border-2 border-indigo-500/20 border-t-indigo-500 mb-4" />
-        <p className="text-xs font-black uppercase tracking-wider animate-pulse">Drafting tailored cover letter...</p>
-        <p className="text-[9px] text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-1">Calling Groq AI models</p>
-      </div>
-    );
-  }
-
-  if (!coverLetter) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center p-8 bg-white dark:bg-[#0f0f11] text-slate-500 rounded-2xl border border-slate-200 dark:border-slate-900 shadow-3xs text-center space-y-4">
-        <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/20 flex items-center justify-center text-indigo-500">
-          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 19v-8.93a2 2 0 01.89-1.664l8-5.333a2 2 0 012.22 0l8 5.333A2 2 0 0121 10.07V19M3 19a2 2 0 002 2h14a2 2 0 002-2M3 19l6.75-4.5M21 19l-6.75-4.5M3 10l6.75 4.5M21 10l-6.75 4.5m0 0l-1.14.76a2 2 0 01-2.22 0l-1.14-.76" />
-          </svg>
-        </div>
-        <div className="space-y-1.5 max-w-sm">
-          <h3 className="text-sm font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider">Tailor Your Cover Letter</h3>
-          <p className="text-[10px] text-slate-400 dark:text-slate-500 leading-relaxed font-bold">
-            Draft a custom, professional cover letter matching your selected resume directly to the target job description.
+        <div className="space-y-2">
+          <h2 className="text-xl font-extrabold text-zinc-900 tracking-tight">Generate Tailored Cover Letter</h2>
+          <p className="text-xs text-zinc-500 max-w-md mx-auto leading-relaxed">
+            Craft a personalized, high-converting cover letter aligned to your active resume and the target position.
           </p>
         </div>
-        <button
-          onClick={handleGenerateCoverLetter}
-          className="py-3 px-6 bg-brand hover:bg-brand-hover text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition shadow-md hover:shadow-indigo-900/30 cursor-pointer border-none"
-        >
-          Draft Cover Letter
-        </button>
+
+        {loading ? (
+          <div className="w-full max-w-md bg-zinc-50 border border-zinc-200 p-6 rounded-2xl space-y-3 text-center shadow-xs">
+            <div className="flex items-center justify-center gap-2 text-xs font-black text-zinc-800 uppercase tracking-wider">
+              <RefreshCw size={16} className="animate-spin text-[#00bda5]" />
+              <span>{loadingMessage || "Drafting custom cover letter prose..."}</span>
+            </div>
+            <div className="w-full h-2 bg-zinc-200 rounded-full overflow-hidden">
+              <div className="h-full bg-[#00bda5] transition-all duration-300" style={{ width: `${loadingProgress || 35}%` }} />
+            </div>
+            <span className="text-[10px] text-zinc-400 font-bold block">{loadingProgress || 35}% complete</span>
+          </div>
+        ) : (
+          <button
+            onClick={() => handleGenerateFirstCoverLetterDraft && handleGenerateFirstCoverLetterDraft()}
+            className="px-6 py-3 bg-[#00bda5] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl hover:bg-[#00a894] transition cursor-pointer shadow-lg shadow-[#00bda5]/20"
+          >
+            Draft Cover Letter Now
+          </button>
+        )}
       </div>
     );
   }
 
+  const activeContent = generatedCoverLetter.content || coverLetter || {};
+
   return (
-    <CoverLetterView
-      coverLetter={coverLetter}
-      companyName={companyName}
-      handleCopyToClipboard={handleCopyToClipboard}
-      handleDownloadCoverLetterPDF={handleDownloadCoverLetterPDF}
-      setStep={() => navigate('/tailor')}
-    />
+    <div className="flex-1 flex min-h-[750px] h-[calc(100vh-140px)] w-full bg-zinc-900 overflow-hidden relative rounded-2xl border border-zinc-800 shadow-2xl">
+      
+      {/* LEFT PANEL (38% WIDTH): STRUCTURE, TEMPLATES, CONTROLS & AI CHAT */}
+      <div className="w-[38%] min-w-[420px] max-w-[500px] border-r border-zinc-200 bg-white flex flex-col h-full shrink-0 z-10 shadow-lg">
+        
+        {/* Top Header */}
+        <div className="p-4 border-b border-zinc-200 flex items-center justify-between shrink-0 bg-zinc-50">
+          <div>
+            <h2 className="text-sm font-black text-zinc-900 uppercase tracking-tight flex items-center gap-2">
+              <FileText size={16} className="text-[#00bda5]" />
+              Cover Letter Studio
+            </h2>
+            <p className="text-[10px] text-zinc-500 font-semibold mt-0.5">Customize template & edit with AI</p>
+          </div>
+
+          <button
+            onClick={() => navigate('/templates')}
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-white border border-zinc-300 text-zinc-700 font-extrabold text-[10px] uppercase tracking-wider rounded-lg hover:bg-zinc-100 transition cursor-pointer"
+          >
+            <ArrowLeft size={12} /> Back
+          </button>
+        </div>
+
+        {/* Scrollable Controls & AI Editor Area */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-5 custom-scrollbar">
+          
+          {/* COMPACT REVIEW STATUS BADGE */}
+          <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+              <div className="text-xs font-bold text-emerald-900">
+                Review Passed
+                {coverLetterReview?.issues_fixed?.length ? (
+                  <span className="text-[10px] font-semibold text-emerald-700 block">
+                    {coverLetterReview.issues_fixed.length} Improvements Applied
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            {coverLetterReview && (
+              <button
+                onClick={() => setShowReviewModal(true)}
+                className="px-2.5 py-1 bg-white border border-emerald-300 text-emerald-800 text-[10px] font-bold rounded-lg hover:bg-emerald-100 transition cursor-pointer"
+              >
+                View Details
+              </button>
+            )}
+          </div>
+
+          {/* TEMPLATE SELECTION (3 Visual Thumbnails) */}
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-zinc-500 uppercase tracking-wider block">
+              1. Choose Template
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: 'classic_ats', label: 'Classic ATS', tag: 'B&W Standard' },
+                { id: 'modern_corporate', label: 'Modern Corporate', tag: 'Blue Accent' },
+                { id: 'executive_professional', label: 'Executive', tag: 'Serif Formal' }
+              ].map(tpl => {
+                const isSelected = selectedTemplate === tpl.id;
+                return (
+                  <button
+                    key={tpl.id}
+                    onClick={() => setSelectedTemplate(tpl.id)}
+                    className={`p-2.5 rounded-xl border text-left transition cursor-pointer relative ${
+                      isSelected
+                        ? 'bg-[#00bda5]/10 border-[#00bda5] text-[#00bda5] shadow-xs'
+                        : 'bg-zinc-50 border-zinc-200 text-zinc-700 hover:border-zinc-300 hover:bg-zinc-100'
+                    }`}
+                  >
+                    {/* Mini Visual Preview Graphic */}
+                    <div className={`w-full h-12 rounded-lg border mb-2 p-1.5 flex flex-col justify-between ${
+                      isSelected ? 'bg-white border-[#00bda5]/40' : 'bg-white border-zinc-200'
+                    }`}>
+                      <div className="w-full flex items-center justify-between">
+                        <div className={`h-1.5 rounded-full ${tpl.id === 'modern_corporate' ? 'bg-blue-600 w-1/2' : 'bg-zinc-800 w-1/3'}`} />
+                        <div className="h-1 w-1/4 bg-zinc-300 rounded-full" />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="h-1 w-full bg-zinc-200 rounded-full" />
+                        <div className="h-1 w-4/5 bg-zinc-200 rounded-full" />
+                      </div>
+                    </div>
+
+                    <div className="text-xs font-black truncate">{tpl.label}</div>
+                    <div className="text-[9px] font-semibold text-zinc-400 truncate">{tpl.tag}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ESSENTIAL CUSTOMIZATION CONTROLS */}
+          <div className="space-y-3 bg-zinc-50 border border-zinc-200 p-3.5 rounded-xl">
+            <label className="text-[10px] font-black text-zinc-500 uppercase tracking-wider block">
+              2. Essential Options
+            </label>
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              {/* Paper Size */}
+              <div>
+                <span className="text-[10px] font-bold text-zinc-600 block mb-1">Paper Size</span>
+                <div className="flex rounded-lg border border-zinc-300 bg-white p-0.5">
+                  {['A4', 'Letter'].map(sz => (
+                    <button
+                      key={sz}
+                      onClick={() => setPageSize(sz)}
+                      className={`flex-1 py-1 text-[11px] font-extrabold rounded-md transition cursor-pointer border-none ${
+                        pageSize === sz ? 'bg-[#00bda5] text-white' : 'text-zinc-600 hover:text-zinc-900'
+                      }`}
+                    >
+                      {sz}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Layout Density */}
+              <div>
+                <span className="text-[10px] font-bold text-zinc-600 block mb-1">Spacing Density</span>
+                <select
+                  value={density}
+                  onChange={(e) => setDensity(e.target.value)}
+                  className="w-full p-1.5 bg-white border border-zinc-300 rounded-lg text-xs font-bold text-zinc-800 focus:outline-none cursor-pointer"
+                >
+                  <option value="compact">Compact</option>
+                  <option value="standard">Standard</option>
+                  <option value="spacious">Spacious</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Accent Color (where supported) */}
+            {selectedTemplate === 'modern_corporate' && (
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[10px] font-bold text-zinc-600">Accent Theme Color</span>
+                <input
+                  type="color"
+                  value={themeColor}
+                  onChange={(e) => setThemeColor(e.target.value)}
+                  className="w-8 h-7 bg-transparent border-none cursor-pointer rounded"
+                />
+              </div>
+            )}
+
+            {/* Collapsible Advanced Layout Toggle */}
+            <div className="pt-2 border-t border-zinc-200">
+              <button
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                className="text-[10px] font-black text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer border-none bg-transparent"
+              >
+                <SlidersHorizontal size={12} />
+                {showAdvanced ? 'Hide Advanced Layout' : 'Advanced Layout (Fonts, Margins, Spacing)'}
+                {showAdvanced ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              </button>
+            </div>
+
+            {/* ADVANCED LAYOUT CONTROLS (COLLAPSED BY DEFAULT) */}
+            {showAdvanced && (
+              <div className="space-y-3 pt-2 text-xs border-t border-zinc-200/80 animate-fade-in">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <span className="text-[10px] font-bold text-zinc-500 block mb-1">Font</span>
+                    <select
+                      value={font}
+                      onChange={(e) => setFont(e.target.value)}
+                      className="w-full p-1 bg-white border border-zinc-300 rounded text-xs"
+                    >
+                      <option value="Inter">Inter (Sans)</option>
+                      <option value="Arial">Arial</option>
+                      <option value="Calibri">Calibri</option>
+                      <option value="Georgia">Georgia (Serif)</option>
+                      <option value="Times New Roman">Times New Roman</option>
+                    </select>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-zinc-500 block mb-1">Font Size: {fontSize}pt</span>
+                    <input
+                      type="range"
+                      min="9"
+                      max="12.5"
+                      step="0.5"
+                      value={fontSize}
+                      onChange={(e) => setFontSize(Number(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <span className="text-[10px] font-bold text-zinc-500 block mb-1">Line Height: {lineHeight}</span>
+                    <input
+                      type="range"
+                      min="1.25"
+                      max="1.7"
+                      step="0.05"
+                      value={lineHeight}
+                      onChange={(e) => setLineHeight(Number(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-zinc-500 block mb-1">Paragraph Gap: {paragraphSpacing}px</span>
+                    <input
+                      type="range"
+                      min="8"
+                      max="22"
+                      step="1"
+                      value={paragraphSpacing}
+                      onChange={(e) => setParagraphSpacing(Number(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* INTEGRATED AI CHAT EDITOR */}
+          <div className="space-y-3 bg-indigo-50/60 border border-indigo-200 p-4 rounded-xl">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-black text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
+                <Sparkles size={14} className="text-indigo-600" />
+                3. AI Editor Studio
+              </label>
+
+              {coverLetterEditHistory.length > 0 && (
+                <button
+                  onClick={handleUndoCoverLetterEdit}
+                  disabled={coverLetterEditStreaming}
+                  className="px-2 py-1 bg-white border border-indigo-200 text-indigo-700 text-[10px] font-extrabold rounded-lg hover:bg-white transition cursor-pointer flex items-center gap-1 disabled:opacity-40"
+                >
+                  <Undo2 size={11} /> Undo
+                </button>
+              )}
+            </div>
+
+            {/* Quick Prompt Action Chips */}
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                "Make it shorter",
+                "Make opening stronger",
+                "Focus on internship",
+                "Rewrite paragraph 3",
+                "Use formal tone"
+              ].map(chip => (
+                <button
+                  key={chip}
+                  onClick={() => handleApplyQuickPrompt(chip)}
+                  className="px-2.5 py-1 bg-white hover:bg-indigo-100 border border-indigo-200 text-indigo-800 text-[10px] font-bold rounded-full transition cursor-pointer shadow-2xs"
+                >
+                  + {chip}
+                </button>
+              ))}
+            </div>
+
+            {/* Streaming Indicator */}
+            {coverLetterEditStreaming && (
+              <div className="p-2.5 bg-indigo-600 text-white rounded-xl text-xs font-bold flex items-center justify-between animate-pulse">
+                <span className="flex items-center gap-2">
+                  <RefreshCw size={13} className="animate-spin" /> Rewriting paragraph & updating preview...
+                </span>
+              </div>
+            )}
+
+            {/* AI Prompt Input Form */}
+            <form onSubmit={handleAIEditSubmit} className="space-y-2">
+              <textarea
+                value={editPrompt}
+                onChange={(e) => setEditPrompt(e.target.value)}
+                disabled={coverLetterEditStreaming}
+                placeholder="Tell AI how to improve this cover letter (e.g. 'Make paragraph 2 more impactful')..."
+                className="w-full h-20 p-3 bg-white border border-indigo-200 rounded-xl text-xs text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-indigo-600 font-medium resize-none shadow-2xs"
+              />
+              <button
+                type="submit"
+                disabled={!editPrompt.trim() || coverLetterEditStreaming}
+                className="w-full py-2.5 bg-indigo-600 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl hover:bg-indigo-700 transition cursor-pointer shadow-md disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                <Send size={13} /> Apply AI Edit
+              </button>
+            </form>
+
+          </div>
+
+          {/* COVER LETTER STRUCTURE NAVIGATION */}
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-zinc-500 uppercase tracking-wider block">
+              Document Structure
+            </label>
+            <div className="grid grid-cols-2 gap-1.5 text-xs font-bold text-zinc-700">
+              {[
+                "Header Info",
+                "Recipient Details",
+                "Greeting / Salutation",
+                "Opening Paragraph",
+                "Main Evidence",
+                "Company Alignment",
+                "Closing & Call to Action",
+                "Sign-off & Signature"
+              ].map((sec, idx) => (
+                <div key={idx} className="p-2 bg-zinc-50 border border-zinc-200 rounded-lg flex items-center gap-2 hover:bg-zinc-100 transition cursor-pointer">
+                  <span className="w-4 h-4 rounded bg-zinc-200 text-zinc-700 text-[10px] font-black flex items-center justify-center shrink-0">
+                    {idx + 1}
+                  </span>
+                  <span className="truncate text-[11px]">{sec}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      {/* RIGHT PANEL (62% WIDTH): LARGE EXACT PREVIEW WORKSPACE */}
+      <div className="flex-1 flex flex-col h-full relative min-w-0 bg-zinc-950">
+        
+        {/* CUSTOM PREVIEW CONTROLS TOOLBAR */}
+        <div className="bg-zinc-900 border-b border-zinc-800 px-6 py-3 flex items-center justify-between shrink-0 text-white shadow-md z-20">
+          
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-emerald-400 bg-emerald-950/60 border border-emerald-800/80 px-2.5 py-1 rounded-lg">
+              <CheckCircle2 size={13} /> Exact PDF Preview
+            </span>
+            {isRenderingPdf && (
+              <span className="text-[10px] font-bold text-zinc-400 animate-pulse">
+                Applying template…
+              </span>
+            )}
+          </div>
+
+          {/* Zoom Controls Toolbar */}
+          <div className="flex items-center gap-2 bg-zinc-950 p-1.5 rounded-xl border border-zinc-800">
+            <button
+              onClick={() => setZoom(prev => Math.max(0.4, prev - 0.1))}
+              className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition cursor-pointer border-none bg-transparent"
+              title="Zoom Out"
+            >
+              <ZoomOut size={14} />
+            </button>
+
+            <span className="text-[10px] font-black text-zinc-300 w-12 text-center select-none uppercase tracking-wider">
+              {Math.round(zoom * 100)}%
+            </span>
+
+            <button
+              onClick={() => setZoom(prev => Math.min(1.8, prev + 0.1))}
+              className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition cursor-pointer border-none bg-transparent"
+              title="Zoom In"
+            >
+              <ZoomIn size={14} />
+            </button>
+
+            <div className="w-px h-4 bg-zinc-800 mx-1" />
+
+            <button
+              onClick={handleFitWidth}
+              className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-200 text-[10px] font-extrabold transition cursor-pointer border-none"
+            >
+              Fit Width
+            </button>
+
+            <button
+              onClick={() => setShowFullscreen(true)}
+              className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition cursor-pointer border-none bg-transparent"
+              title="Fullscreen"
+            >
+              <Maximize size={14} />
+            </button>
+          </div>
+
+          {/* Download Exact PDF Button */}
+          <button
+            onClick={handleDownloadExactPDF}
+            disabled={isRenderingPdf || coverLetterEditStreaming}
+            className="flex items-center gap-2 px-5 py-2 bg-[#00bda5] text-white font-black text-xs uppercase tracking-wider rounded-xl hover:bg-[#00a894] active:scale-95 transition cursor-pointer shadow-lg shadow-[#00bda5]/20 disabled:opacity-50"
+          >
+            <Download size={15} />
+            Download PDF
+          </button>
+        </div>
+
+        {/* SCALED PREVIEW CANVAS WORKSPACE */}
+        <div
+          ref={previewWrapperRef}
+          className="flex-1 bg-zinc-950 overflow-auto flex justify-center items-start p-8 custom-scrollbar relative"
+        >
+          
+          {/* Exact PDF Canvas Document (LIVE PREVIEW = DOWNLOADED PDF) */}
+          <div
+            className="origin-top transition-transform duration-200 ease-out shadow-2xl bg-white rounded-sm relative overflow-hidden"
+            style={{
+              width: '816px',
+              height: '1056px',
+              transform: `scale(${zoom})`,
+              transformOrigin: 'top center'
+            }}
+          >
+            {isRenderingPdf && (
+              <div className="absolute inset-0 bg-white/70 backdrop-blur-xs z-30 flex flex-col items-center justify-center gap-2">
+                <RefreshCw size={24} className="animate-spin text-[#00bda5]" />
+                <span className="text-xs font-bold text-zinc-800">Applying template…</span>
+              </div>
+            )}
+
+            {pdfBlobUrl ? (
+              <iframe
+                title="Exact Cover Letter PDF Artifact Preview"
+                src={`${pdfBlobUrl}#toolbar=0&navpanes=0&scrollbar=0`}
+                className="w-full h-full border-none pointer-events-auto"
+              />
+            ) : (
+              <CoverLetterVectorRender
+                coverLetter={activeContent}
+                context={coverLetterContext}
+                templateKey={selectedTemplate}
+                settings={currentSettings}
+              />
+            )}
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* FULLSCREEN PREVIEW MODAL */}
+      {showFullscreen && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-xs z-50 flex flex-col animate-fade-in">
+          <div className="bg-zinc-900 border-b border-zinc-800 px-6 py-4 flex items-center justify-between shrink-0 text-white">
+            <h3 className="text-xs font-black uppercase tracking-widest text-[#00bda5]">Full View Preview Studio</h3>
+            <button onClick={() => setShowFullscreen(false)} className="p-2 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white cursor-pointer">
+              <X size={18} />
+            </button>
+          </div>
+          <div className="flex-1 bg-zinc-950 overflow-auto p-8 flex justify-center items-start">
+            <div className="w-[816px] min-h-[1056px] bg-white shadow-2xl rounded-sm p-12 text-zinc-900">
+              <CoverLetterVectorRender
+                coverLetter={activeContent}
+                context={coverLetterContext}
+                templateKey={selectedTemplate}
+                settings={currentSettings}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REVIEW DETAILS MODAL */}
+      {showReviewModal && coverLetterReview && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-zinc-200 p-6 rounded-2xl max-w-lg w-full space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-extrabold text-zinc-900">Review Breakdown</h3>
+              <button onClick={() => setShowReviewModal(false)} className="text-zinc-400 hover:text-zinc-700">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="space-y-3 text-xs">
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900">
+                <b>Recruiter Review Summary:</b> {coverLetterReview.review_summary}
+              </div>
+              <div>
+                <span className="text-[10px] font-black uppercase text-zinc-500 block mb-1">Improvements Applied:</span>
+                <ul className="space-y-1 list-disc pl-4 text-zinc-700">
+                  {coverLetterReview.issues_fixed.map((issue, idx) => (
+                    <li key={idx}>{issue}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
   );
 }
-
-export default CoverLetterPage;

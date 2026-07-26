@@ -2414,60 +2414,116 @@ export function AppProvider({ children }) {
     }
   };
 
-  const handleGenerateFirstCoverLetterDraft = async () => {
-    if (!coverLetterContext?.ready_for_generation) {
-      alert("Complete and validate the cover letter context first.");
-      return false;
-    }
-    if (!coverLetterStrategy?.ready_for_generation) {
-      alert("Build a ready cover letter strategy first.");
-      return false;
-    }
+  const handleGenerateFirstCoverLetterDraft = async (answers = {}, skipped = []) => {
     setLoading(true);
-    setLoadingMessage("Generating the first cover letter draft...");
-    setLoadingProgress(35);
+    setLoadingMessage("Preparing cover letter context & strategy...");
+    setLoadingProgress(15);
     try {
       const headers = { "Content-Type": "application/json" };
       if (apiKey) headers["x-groq-key"] = apiKey;
+
+      let currentCtx = coverLetterContext;
+      if (!currentCtx || !currentCtx.ready_for_generation) {
+        if (!parsedResume || !jobAnalysis) {
+          alert("Please select an active resume and extract a job description first.");
+          return false;
+        }
+        const ctxRes = await fetch(`${apiUrl}/api/cover-letter/context`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            resume: toRenderableResume(parsedResume),
+            jd: jobAnalysis || {},
+            job: jobAnalysis || {},
+            user_answers: answers,
+            skipped_questions: skipped
+          })
+        });
+        if (!ctxRes.ok) {
+          const failure = await ctxRes.json().catch(() => ({}));
+          const errDetail = typeof failure.detail === 'string'
+            ? failure.detail
+            : (Array.isArray(failure.detail) ? failure.detail.map(d => `${d.loc?.join('.')}: ${d.msg}`).join(', ') : "Failed to prepare cover letter context.");
+          throw new Error(errDetail);
+        }
+        currentCtx = await ctxRes.json();
+        setCoverLetterContext(currentCtx);
+      }
+
+      setLoadingMessage("Building cover letter strategy...");
+      setLoadingProgress(35);
+      let currentStrat = coverLetterStrategy;
+      if (!currentStrat || !currentStrat.ready_for_generation) {
+        const stratRes = await fetch(`${apiUrl}/api/cover-letter/strategy`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            context: currentCtx,
+            session_id: currentCtx.scope_fingerprint || 'session'
+          })
+        });
+        if (!stratRes.ok) {
+          const failure = await stratRes.json().catch(() => ({}));
+          const errDetail = typeof failure.detail === 'string'
+            ? failure.detail
+            : (Array.isArray(failure.detail) ? failure.detail.map(d => `${d.loc?.join('.')}: ${d.msg}`).join(', ') : "Failed to build cover letter strategy.");
+          throw new Error(errDetail);
+        }
+        currentStrat = await stratRes.json();
+        setCoverLetterStrategy(currentStrat);
+      }
+
+      setLoadingMessage("Generating cover letter prose...");
+      setLoadingProgress(55);
+
       const response = await fetch(`${apiUrl}/api/cover-letter/generate`, {
         method: "POST",
         headers,
         body: JSON.stringify({
-          context: coverLetterContext,
-          strategy: coverLetterStrategy
+          context: currentCtx,
+          strategy: currentStrat
         })
       });
+
       if (!response.ok) {
         const failure = await response.json().catch(() => ({}));
-        throw new Error(failure.detail || "Cover letter generation failed.");
+        const errDetail = typeof failure.detail === 'string'
+          ? failure.detail
+          : (Array.isArray(failure.detail) ? failure.detail.map(d => `${d.loc?.join('.')}: ${d.msg}`).join(', ') : "Cover letter generation failed.");
+        throw new Error(errDetail);
       }
       const generated = await response.json();
       setGeneratedCoverLetter(generated);
       setCoverLetterReview(null);
       setCoverLetterEditHistory([]);
-      setLoadingMessage("Reviewing the first draft...");
-      setLoadingProgress(70);
+
+      setLoadingMessage("Reviewing generated cover letter...");
+      setLoadingProgress(80);
+
       const reviewResponse = await fetch(`${apiUrl}/api/cover-letter/review`, {
         method: "POST",
         headers,
         body: JSON.stringify({
-          context: coverLetterContext,
-          strategy: coverLetterStrategy,
+          context: currentCtx,
+          strategy: currentStrat,
           generated_cover_letter: generated
         })
       });
-      if (!reviewResponse.ok) {
-        const failure = await reviewResponse.json().catch(() => ({}));
-        throw new Error(failure.detail || "Automatic cover letter review failed.");
+
+      if (reviewResponse.ok) {
+        const review = await reviewResponse.json();
+        setCoverLetterReview(review);
+        setGeneratedCoverLetter(review.final_cover_letter || generated);
       }
-      const review = await reviewResponse.json();
-      setCoverLetterReview(review);
-      setGeneratedCoverLetter(review.final_cover_letter);
+
       setLoadingProgress(100);
       return true;
     } catch (error) {
-      console.error(error);
-      alert("Error generating cover letter: " + error.message);
+      console.error("Cover letter generation pipeline error:", error);
+      const detailMsg = typeof error?.message === 'string'
+        ? error.message
+        : (typeof error === 'string' ? error : JSON.stringify(error));
+      alert(detailMsg);
       return false;
     } finally {
       setLoading(false);

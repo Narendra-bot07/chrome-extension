@@ -14,6 +14,20 @@ class Settings(BaseSettings):
     JWT_SECRET: str = Field(default="super-secret-jwt-key", env="JWT_SECRET")
     JWT_ALGORITHM: str = Field(default="HS256", env="JWT_ALGORITHM")
     DATABASE_URL: Optional[str] = Field(default=None, env="DATABASE_URL")
+    LANGSMITH_API_KEY: str = Field(default="", env="LANGSMITH_API_KEY")
+    LANGSMITH_PROJECT: str = Field(
+        default="tailorflow-ai",
+        env="LANGSMITH_PROJECT",
+    )
+    LANGSMITH_ENDPOINT: str = Field(
+        default="https://api.smith.langchain.com",
+        env="LANGSMITH_ENDPOINT",
+    )
+    LANGSMITH_WORKSPACE_ID: str = Field(
+        default="",
+        env="LANGSMITH_WORKSPACE_ID",
+    )
+    LANGSMITH_TRACING: bool = Field(default=False, env="LANGSMITH_TRACING")
     PROJECT_NAME: str = "Resume Tailor AI"
     API_V1_STR: str = "/api/v1"
 

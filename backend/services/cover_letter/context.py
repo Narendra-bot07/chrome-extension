@@ -232,8 +232,7 @@ def build_cover_letter_context(request: CoverLetterContextRequest) -> CoverLette
     ))
 
     unanswered_required = any(question.required for question in questions)
-    user_questions_resolved = not questions
-    ready = not missing and not unanswered_required and user_questions_resolved
+    ready = not missing and not unanswered_required
     fingerprint = hashlib.sha256(json.dumps({
         "resume_id": request.resume_id,
         "jd_id": request.jd_id,
