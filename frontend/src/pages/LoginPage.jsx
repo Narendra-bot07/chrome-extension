@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Mail, Lock, ChevronRight, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Mail, Lock, ChevronRight, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { useGoogleLogin } from '@react-oauth/google';
+
+import { ApplicationLogo } from '../components/ApplicationLogo';
 
 const isExtension = typeof chrome !== 'undefined' && chrome.identity;
 const BASIC_GOOGLE_SCOPES = ['openid', 'email', 'profile'];
@@ -42,27 +44,6 @@ export default function LoginPage() {
   const [loginLoading, setLoginLoading] = useState(false);
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState(null);
-  const [loginNotice, setLoginNotice] = useState(null);
-
-  const handleForgotPassword = async () => {
-    const email = loginEmail.trim();
-    if (!email) {
-      setLoginError('Enter your email address first.');
-      return;
-    }
-    setLoginError(null);
-    try {
-      const res = await fetch('http://localhost:8000/api/v1/auth/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      });
-      const data = await res.json();
-      setLoginNotice(data.message || 'If an account exists for this email, a reset link has been sent.');
-    } catch {
-      setLoginNotice('If an account exists for this email, a reset link has been sent.');
-    }
-  };
 
   // --- LOGIN SUBMIT ---
   const handleLogin = async (e) => {
@@ -158,11 +139,9 @@ export default function LoginPage() {
       <div className="hidden lg:flex flex-col justify-between w-[48%] p-12 bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 relative z-10">
         <div>
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#2E5BFF] via-[#1E48E0] to-[#00BDA5] flex items-center justify-center text-white font-extrabold text-xl shadow-md">
-              A
-            </div>
-            <span className="text-xl font-black tracking-tight text-zinc-900 dark:text-white uppercase">
-              APPLYFLOW
+            <ApplicationLogo size={36} />
+            <span className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white">
+              TailorFlow <span className="text-teal-500 font-bold text-xs uppercase tracking-wider">AI</span>
             </span>
           </div>
 
@@ -221,12 +200,6 @@ export default function LoginPage() {
               <span>{loginError}</span>
             </div>
           )}
-          {loginNotice && (
-            <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold text-emerald-700">
-              <CheckCircle2 size={16} />
-              <span>{loginNotice}</span>
-            </div>
-          )}
 
           {/* Form */}
           <form onSubmit={handleLogin} className="order-4 space-y-4">
@@ -245,9 +218,9 @@ export default function LoginPage() {
             <div>
               <div className="mb-1 flex items-center justify-between">
                 <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider">Password</label>
-                <button type="button" onClick={handleForgotPassword} className="text-[10px] font-bold text-[#00bda5] hover:underline">
+                <Link to="/forgot-password" state={{ email: loginEmail }} className="text-[10px] font-bold text-[#00bda5] hover:underline">
                   Forgot password?
-                </button>
+                </Link>
               </div>
               <div className="relative">
                 <input

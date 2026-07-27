@@ -11,7 +11,7 @@ const WIDE_ROUTES = new Set([
 ]);
 
 const WORKSPACE_ROUTES = new Set([
-  '/resume-review', '/review-changes', '/templates', '/download', '/cover-letter'
+  '/resume-review', '/review-changes', '/download', '/cover-letter'
 ]);
 
 export function getPageLayout(pathname = '/') {

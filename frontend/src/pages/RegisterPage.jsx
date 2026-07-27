@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ChevronRight, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Mail, Lock, ChevronRight, Eye, EyeOff, AlertCircle, User, ShieldCheck } from 'lucide-react';
 import { useGoogleLogin } from '@react-oauth/google';
+
+import { ApplicationLogo } from '../components/ApplicationLogo';
 
 const isExtension = typeof chrome !== 'undefined' && chrome.identity;
 const BASIC_GOOGLE_SCOPES = ['openid', 'email', 'profile'];
@@ -166,11 +168,9 @@ export default function RegisterPage() {
       <div className="hidden lg:flex flex-col justify-between w-[48%] p-12 bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 relative z-10">
         <div>
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#2E5BFF] via-[#1E48E0] to-[#00BDA5] flex items-center justify-center text-white font-extrabold text-xl shadow-md">
-              A
-            </div>
-            <span className="text-xl font-black tracking-tight text-zinc-900 dark:text-white uppercase">
-              APPLYFLOW
+            <ApplicationLogo size={36} />
+            <span className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white">
+              TailorFlow <span className="text-teal-500 font-bold text-xs uppercase tracking-wider">AI</span>
             </span>
           </div>
 
@@ -347,6 +347,8 @@ export default function RegisterPage() {
             >
               Sign In
             </Link>
+            <span className="mx-2 text-zinc-300">·</span>
+            <Link to="/forgot-password" className="font-bold text-[#00bda5] hover:underline">Forgot Password?</Link>
           </div>
 
         </div>

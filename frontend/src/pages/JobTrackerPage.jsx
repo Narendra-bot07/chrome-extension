@@ -62,13 +62,29 @@ class JobTrackerErrorBoundary extends React.Component {
   }
 }
 
+import { useSearchParams, useLocation } from 'react-router-dom';
+
 function JobTrackerContent() {
   const { session, applications: rawApps, updateApplicationStage, fetchApplications, apiUrl } = useApp();
   const applications = rawApps || [];
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
 
   const [selectedAppId, setSelectedAppId] = useState(null);
   const [showWorkspaceModal, setShowWorkspaceModal] = useState(false);
   const [isFullscreenPopup, setIsFullscreenPopup] = useState(false);
+
+  // Auto-open target application modal if appId is present in URL searchParams or location state
+  useEffect(() => {
+    const targetAppId = searchParams.get('appId') || location.state?.selectedAppId;
+    if (targetAppId && applications.length > 0) {
+      const found = applications.find(a => a && String(a.id) === String(targetAppId));
+      if (found) {
+        setSelectedAppId(found.id);
+        setShowWorkspaceModal(true);
+      }
+    }
+  }, [searchParams, location, applications]);
 
   // Search & Filters State
   const [searchQuery, setSearchQuery] = useState('');

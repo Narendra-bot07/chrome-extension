@@ -155,7 +155,7 @@ export default function TemplateSelectionView({ onBack }) {
   });
 
   return (
-    <div className="min-h-screen bg-zinc-50 flex flex-col font-sans select-none pb-12">
+    <div className="flex-1 w-full h-full overflow-y-auto custom-scrollbar bg-zinc-50 flex flex-col font-sans select-none pb-20">
       {/* Top Header */}
       <header className="bg-white border-b border-zinc-200 sticky top-0 z-20 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">

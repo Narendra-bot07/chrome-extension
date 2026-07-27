@@ -56,13 +56,6 @@ export default function ProfilePage() {
   const [editingName, setEditingName] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [msg, setMsg] = useState(null);
-  const [googleImportDebug] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('tailorflow.google-profile-import-debug') || 'null');
-    } catch {
-      return null;
-    }
-  });
 
   const cardClass = `rounded-[18px] border p-6 ${darkMode ? 'bg-[#0f0f11] border-zinc-800' : 'bg-white border-[#E5E7EB]'}`;
   const muted = darkMode ? 'text-[#9CA3AF]' : 'text-[#6B7280]';
@@ -295,27 +288,6 @@ export default function ProfilePage() {
 
             {activeSubTab === 'PROFILE' && (
               <div className="flex flex-col gap-6 animate-fadeIn">
-                {googleImportDebug && (
-                  <div className={`rounded-[18px] border p-4 text-xs ${
-                    googleImportDebug.status === 'success'
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                      : 'border-amber-200 bg-amber-50 text-amber-800'
-                  }`}>
-                    <div className="font-bold">Google import diagnostics</div>
-                    <div className="mt-1">Status: {googleImportDebug.status}</div>
-                    {googleImportDebug.http_status && (
-                      <div>HTTP status: {googleImportDebug.http_status}</div>
-                    )}
-                    {googleImportDebug.error && (
-                      <div className="mt-1 break-words">Reason: {googleImportDebug.error}</div>
-                    )}
-                    <div className="mt-1">
-                      Populated fields: {googleImportDebug.populated_fields?.length
-                        ? googleImportDebug.populated_fields.join(', ')
-                        : 'none'}
-                    </div>
-                  </div>
-                )}
                 {(() => {
                   const completion = calculateProfileCompleteness(profileForm);
                   return (

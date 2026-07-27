@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext';
 import { 
   Settings, Sun, Moon, AlertCircle, X, Menu, 
   LayoutDashboard, FileText, Briefcase, User, 
-  LogOut, Zap, Target, Search, HelpCircle, Bell, ChevronDown, Shield
+  LogOut, Zap, Target, Search, HelpCircle, Bell, ChevronDown, Shield, LockKeyhole
 } from 'lucide-react';
 
 import { Button } from './ui/Button';
@@ -487,6 +487,28 @@ function Layout() {
                           <User size={15} className="text-tf-text-secondary" />
                           <span>Account Settings</span>
                         </button>
+                        <button
+                          onClick={() => {
+                            setProfileMenuOpen(false);
+                            navigate('/settings/security');
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-medium text-tf-text hover:bg-tf-surface-2 transition cursor-pointer"
+                        >
+                          <Shield size={15} className="text-tf-text-secondary" />
+                          <span>Security</span>
+                        </button>
+                        {profile?.has_password_credential && (
+                          <button
+                            onClick={() => {
+                              setProfileMenuOpen(false);
+                              navigate('/forgot-password', { state: { email: user?.email } });
+                            }}
+                            className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-medium text-tf-text hover:bg-tf-surface-2 transition cursor-pointer"
+                          >
+                            <LockKeyhole size={15} className="text-tf-text-secondary" />
+                            <span>Forgot Password</span>
+                          </button>
+                        )}
 
                         <button
                           onClick={() => {

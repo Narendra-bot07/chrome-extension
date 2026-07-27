@@ -28,6 +28,10 @@ import NoJobDetectedPage from './pages/NoJobDetectedPage';
 import ManualJobEntryPage from './pages/ManualJobEntryPage';
 import SubscriptionPage from './pages/SubscriptionPage';
 import JobPreferencesPage from './pages/JobPreferencesPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
+import VerifyEmailPage from './pages/VerifyEmailPage';
+import EmailSentPage from './pages/EmailSentPage';
 
 function ProtectedRoute({ children }) {
   const { user, loadingAuth } = useApp();
@@ -111,6 +115,10 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/verify-email" element={<VerifyEmailPage />} />
+      <Route path="/email-sent" element={<EmailSentPage />} />
       <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/dashboard" element={<DashboardPage />} />
@@ -118,6 +126,7 @@ function AppRoutes() {
         <Route path="/job-tracker" element={<JobTrackerPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/settings/security" element={<SecurityPage />} />
+        <Route path="/security" element={<Navigate to="/settings/security" replace />} />
         <Route path="/resume-detect" element={<ResumeDetectPage />} />
         <Route path="/resume-parse" element={<ResumeParsePage />} />
         <Route path="/resume-review" element={<ResumeReviewPage />} />

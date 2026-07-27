@@ -59,19 +59,34 @@ async def verify_supabase_jwt(
 
 import hashlib
 import secrets
+import bcrypt
 
 def hash_password(password: str, salt: str = None) -> str:
-    if not salt:
-        salt = secrets.token_hex(16)
-    hashed = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000)
-    return f"{salt}${hashed.hex()}"
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
 
 def verify_password(password: str, password_hash: str) -> bool:
     if not password_hash:
         return False
     try:
+        if password_hash.startswith(("$2a$", "$2b$", "$2y$")):
+            return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+        # Verify credentials created before the bcrypt migration.
         salt, key_hex = password_hash.split('$')
         compare_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000)
-        return compare_hash.hex() == key_hex
+        return secrets.compare_digest(compare_hash.hex(), key_hex)
     except Exception:
         return False
+
+def hash_action_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+def validate_password(password: str) -> None:
+    if len(password) < 10:
+        raise ValueError("Password must be at least 10 characters.")
+    if len(password) > 128:
+        raise ValueError("Password must be 128 characters or fewer.")
+    if password.lower() in {
+        "password123", "password123!", "qwerty12345", "letmein1234",
+        "1234567890", "tailorflow"
+    }:
+        raise ValueError("Choose a less common password.")

@@ -19,6 +19,8 @@ export default function SecurityPage() {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [account, setAccount] = useState(null);
+  const [passwordForm, setPasswordForm] = useState({ current_password: '', new_password: '', confirm_password: '' });
+  const [passwordStatus, setPasswordStatus] = useState({ loading: false, error: '', message: '' });
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -93,6 +95,30 @@ export default function SecurityPage() {
     }
   };
 
+  const changePassword = async (event) => {
+    event.preventDefault();
+    if (passwordForm.new_password !== passwordForm.confirm_password) {
+      setPasswordStatus({ loading: false, error: 'Passwords do not match.', message: '' });
+      return;
+    }
+    setPasswordStatus({ loading: true, error: '', message: '' });
+    try {
+      const token = session?.access_token || localStorage.getItem('access_token');
+      const res = await fetch('http://localhost:8000/api/v1/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(passwordForm)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Password could not be changed.');
+      setPasswordForm({ current_password: '', new_password: '', confirm_password: '' });
+      setPasswordStatus({ loading: false, error: '', message: data.message });
+      fetchSessions();
+    } catch (error) {
+      setPasswordStatus({ loading: false, error: error.message, message: '' });
+    }
+  };
+
   const getDeviceIcon = (deviceType) => {
     if (deviceType === 'Mobile') return <Smartphone className="w-5 h-5 text-indigo-500" />;
     if (deviceType === 'Tablet') return <Tablet className="w-5 h-5 text-indigo-500" />;
@@ -142,6 +168,25 @@ export default function SecurityPage() {
                   </a>
                 )}
               </div>
+              {account.has_password_credential && (
+                <form onSubmit={changePassword} className="mt-5 grid gap-3 border-t border-zinc-200 pt-5 dark:border-zinc-800 md:grid-cols-3">
+                  <label className="text-xs font-semibold">Current password
+                    <input required type="password" value={passwordForm.current_password} onChange={(e) => setPasswordForm((p) => ({ ...p, current_password: e.target.value }))} className="mt-2 w-full rounded-xl border border-zinc-200 bg-transparent px-3 py-2.5 outline-none focus:border-teal-500 dark:border-zinc-700" />
+                  </label>
+                  <label className="text-xs font-semibold">New password
+                    <input required minLength={10} maxLength={128} type="password" value={passwordForm.new_password} onChange={(e) => setPasswordForm((p) => ({ ...p, new_password: e.target.value }))} className="mt-2 w-full rounded-xl border border-zinc-200 bg-transparent px-3 py-2.5 outline-none focus:border-teal-500 dark:border-zinc-700" />
+                  </label>
+                  <label className="text-xs font-semibold">Confirm password
+                    <input required type="password" value={passwordForm.confirm_password} onChange={(e) => setPasswordForm((p) => ({ ...p, confirm_password: e.target.value }))} className="mt-2 w-full rounded-xl border border-zinc-200 bg-transparent px-3 py-2.5 outline-none focus:border-teal-500 dark:border-zinc-700" />
+                  </label>
+                  <div className="md:col-span-3 flex flex-wrap items-center gap-3">
+                    <button disabled={passwordStatus.loading} className="rounded-xl bg-teal-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-teal-700 disabled:opacity-60">{passwordStatus.loading ? 'Updating…' : 'Change password'}</button>
+                    <button type="button" onClick={() => navigate('/forgot-password', { state: { email: account.email } })} className="text-xs font-bold text-teal-600">Forgot Password?</button>
+                    {passwordStatus.error && <span role="alert" className="text-xs font-semibold text-rose-600">{passwordStatus.error}</span>}
+                    {passwordStatus.message && <span className="text-xs font-semibold text-emerald-600">{passwordStatus.message}</span>}
+                  </div>
+                </form>
+              )}
             </div>
           )}
           <div className="flex items-center justify-between">
