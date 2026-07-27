@@ -2506,7 +2506,8 @@ export function AppProvider({ children }) {
         body: JSON.stringify({
           context: currentCtx,
           strategy: currentStrat,
-          generated_cover_letter: generated
+          generated_cover_letter: generated,
+          review_mode: "deterministic"
         })
       });
 

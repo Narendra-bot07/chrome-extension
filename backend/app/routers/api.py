@@ -49,6 +49,7 @@ from services.cover_letter import (
     compose_cover_letter,
     repair_cover_letter_plan,
     review_cover_letter,
+    review_cover_letter_deterministically,
     review_cover_letter_composition,
 )
 
@@ -754,10 +755,17 @@ async def api_review_cover_letter(
     request: CoverLetterReviewRequest,
     x_groq_key: Optional[str] = Header(None),
 ):
-    """Automatically review and minimally repair the current generated letter."""
+    """Review locally by default; use Groq only for an explicit AI deep review."""
     from fastapi.concurrency import run_in_threadpool
     try:
-        return await run_in_threadpool(review_cover_letter, request, x_groq_key)
+        reviewer = (
+            review_cover_letter
+            if request.review_mode == "ai"
+            else review_cover_letter_deterministically
+        )
+        if request.review_mode == "ai":
+            return await run_in_threadpool(reviewer, request, x_groq_key)
+        return await run_in_threadpool(reviewer, request)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

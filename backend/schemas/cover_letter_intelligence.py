@@ -23,7 +23,10 @@ class CoverLetterIssue(BaseModel):
 
 
 class CoverLetterReviewRequest(CoverLetterIntelligenceInput):
-    pass
+    # Deterministic review is the default because generation already receives
+    # the complete context and strategy. AI review remains opt-in for explicit
+    # deep-review workflows instead of doubling every generation request.
+    review_mode: Literal["deterministic", "ai"] = "deterministic"
 
 
 class CoverLetterReviewResult(BaseModel):

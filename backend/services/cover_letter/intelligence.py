@@ -156,6 +156,78 @@ def review_cover_letter(
     )
 
 
+def review_cover_letter_deterministically(
+    request: CoverLetterReviewRequest,
+) -> CoverLetterReviewResult:
+    """Validate a generated letter without making a second LLM request."""
+
+    letter = request.generated_cover_letter
+    content = letter.content
+    normalized = re.sub(r"\s+", " ", content).lower()
+    issues: list[CoverLetterIssue] = []
+
+    def add(category: str, description: str) -> None:
+        issues.append(CoverLetterIssue(
+            category=category,
+            description=description,
+        ))
+
+    target = request.strategy.target_word_count
+    lower_bound = max(1, int(target * 0.75))
+    upper_bound = int(target * 1.25)
+    if letter.word_count < lower_bound or letter.word_count > upper_bound:
+        add(
+            "length",
+            f"Word count {letter.word_count} is outside the safe target range "
+            f"of {lower_bound}-{upper_bound}.",
+        )
+
+    if request.strategy.greeting.lower().rstrip(",") not in normalized:
+        add("formatting", "The strategy greeting is missing.")
+    if request.strategy.sign_off.lower().rstrip(",") not in normalized:
+        add("formatting", "The strategy sign-off is missing.")
+
+    candidate_name = str(
+        (request.context.candidate or {}).get("name")
+        or (request.context.candidate or {}).get("full_name")
+        or ""
+    ).strip()
+    if candidate_name and candidate_name.lower() not in normalized:
+        add("formatting", "The candidate signature is missing.")
+
+    for phrase in request.strategy.prohibited_claims:
+        phrase = str(phrase or "").strip()
+        if len(phrase) >= 8 and phrase.lower() in normalized:
+            add("unsupported_claim", f"Prohibited claim appears in the draft: {phrase}")
+
+    for keyword in request.strategy.keywords_to_avoid:
+        keyword = str(keyword or "").strip()
+        if keyword and re.search(rf"(?<!\w){re.escape(keyword)}(?!\w)", content, re.I):
+            add("wording", f"Discouraged keyword appears in the draft: {keyword}")
+
+    expected_body_paragraphs = len(request.strategy.paragraph_plan)
+    if abs(letter.paragraph_count - expected_body_paragraphs) > 1:
+        add(
+            "structure",
+            f"Draft has {letter.paragraph_count} body paragraphs; strategy expected "
+            f"approximately {expected_body_paragraphs}.",
+        )
+
+    score = max(0, 100 - min(40, len(issues) * 8))
+    summary = (
+        "Deterministic factual, structural, and formatting checks passed."
+        if not issues
+        else f"Deterministic review found {len(issues)} item(s) for optional manual review."
+    )
+    return CoverLetterReviewResult(
+        review_summary=summary,
+        issues_found=issues,
+        issues_fixed=[],
+        final_cover_letter=letter,
+        review_score=score,
+    )
+
+
 def edit_cover_letter(
     request: CoverLetterEditRequest,
     api_key: str | None = None,

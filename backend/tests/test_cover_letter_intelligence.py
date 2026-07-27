@@ -1,10 +1,13 @@
 import pytest
 
-from schemas.cover_letter_intelligence import ParagraphPatch
+from schemas.cover_letter_intelligence import CoverLetterReviewRequest, ParagraphPatch
 from services.cover_letter.intelligence import (
     _assert_no_new_fact_markers,
     apply_paragraph_patches,
+    review_cover_letter_deterministically,
 )
+from test_cover_letter_generation import generation_request
+from services.cover_letter.generation import _GeneratedDraft, finalize_generated_cover_letter
 
 
 def test_paragraph_patch_preserves_every_untouched_block():
@@ -50,3 +53,32 @@ def test_fact_guard_allows_supported_metric():
         "I improved reliability by 30%.",
         "Resume evidence: improved reliability by 30%.",
     )
+
+
+def test_default_review_is_deterministic_and_preserves_generated_letter():
+    generation = generation_request()
+    letter = finalize_generated_cover_letter(_GeneratedDraft(
+        title="Cloud Engineer Cover Letter",
+        content=(
+            "July 27, 2026\n\nDear Hiring Manager,\n\n"
+            "My experience building reliable Python services aligns with the Cloud Engineer role at Acme. "
+            "I built Python services that improved reliability by 30% and deployed an Azure cloud platform. "
+            "Those systems required careful delivery, clear ownership, and attention to production reliability.\n\n"
+            "The role's cloud reliability challenges match the work I have already delivered. "
+            "I would welcome the opportunity to discuss how this experience can support Acme's engineering goals "
+            "and help the team build dependable cloud services.\n\n"
+            "Sincerely,\nAda"
+        ),
+    ), generation)
+    request = CoverLetterReviewRequest(
+        context=generation.context,
+        strategy=generation.strategy,
+        generated_cover_letter=letter,
+    )
+
+    result = review_cover_letter_deterministically(request)
+
+    assert request.review_mode == "deterministic"
+    assert result.final_cover_letter == letter
+    assert result.issues_fixed == []
+    assert result.review_score >= 0
