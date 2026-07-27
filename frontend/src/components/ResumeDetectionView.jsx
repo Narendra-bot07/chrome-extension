@@ -388,7 +388,7 @@ export default function ResumeDetectionView({
 
   return (
     <ResumeDropzoneOverlay onDropFiles={handleDropFiles}>
-      <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 space-y-6 text-tf-text font-sans relative">
+      <div className="w-full space-y-6 text-tf-text font-sans relative">
         
         {/* HEADER SECTION */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-tf-surface border border-tf-border p-6 rounded-xl shadow-sm">
@@ -1187,4 +1187,3 @@ export default function ResumeDetectionView({
     </ResumeDropzoneOverlay>
   );
 }
-

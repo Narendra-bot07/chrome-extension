@@ -17,6 +17,8 @@ import { FlowStepper } from './FlowStepper';
 import { classifyBrowserPageUrl } from '../services/jdExtractionFlow';
 import { InteractiveAuroraBackground } from './layout/InteractiveAuroraBackground';
 import { FlowParticleBackground } from './layout/FlowParticleBackground';
+import { PageContainer } from './layout/PageContainer';
+import { getPageLayout } from './layout/pageLayout';
 
 
 
@@ -24,6 +26,7 @@ function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const currentPath = location.pathname;
+  const pageLayout = getPageLayout(currentPath);
 
   const {
     darkMode, toggleDarkMode,
@@ -369,7 +372,8 @@ function Layout() {
       <div className="flex-1 flex flex-col justify-between overflow-hidden relative">
         
         {/* GLASS TOPBAR (64px) */}
-        <header className="h-[64px] px-3 sm:px-6 border-b border-tf-border/50 bg-tf-surface/75 backdrop-blur-md backdrop-saturate-150 flex justify-between items-center z-20 shrink-0 select-none shadow-2xs transition-colors duration-200">
+        <header className="h-[64px] border-b border-tf-border/50 bg-tf-surface/75 backdrop-blur-md backdrop-saturate-150 z-20 shrink-0 select-none shadow-2xs transition-colors duration-200">
+          <PageContainer mode={pageLayout.mode} className="page-container--header flex justify-between items-center">
           <div className="flex items-center gap-3 sm:gap-4 shrink-0">
             {/* Sidebar toggle button (Visible only when tab/window size is shrunk) */}
             <button 
@@ -464,14 +468,14 @@ function Layout() {
                   {profileMenuOpen && (
                     <div className="absolute right-0 top-full mt-2 w-56 bg-tf-surface border border-tf-border rounded-xl shadow-xl z-50 py-1.5 overflow-hidden select-none">
                       {/* User Info Header */}
-                      <div className="px-3.5 py-2.5 border-b border-tf-border space-y-0.5">
-                        <div className="text-xs font-bold text-tf-text truncate">{displayName}</div>
-                        <div className="text-[11px] text-tf-text-tertiary truncate">{user?.email || 'user@example.com'}</div>
-                        <div className="pt-1">
-                          <span className="inline-block px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-tf-accent/10 text-tf-accent border border-tf-accent/20">
-                            {profile?.subscription_plan || 'Free Plan'}
+                      <div className="px-3.5 py-2.5 border-b border-tf-border">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-xs font-bold text-tf-text truncate">{displayName}</div>
+                          <span className="inline-block px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 shrink-0">
+                            {(profile?.subscription_plan || subscription?.plan_type || 'FREE').toUpperCase()}
                           </span>
                         </div>
+                        <div className="text-[11px] text-tf-text-tertiary truncate mt-0.5">{user?.email || 'user@example.com'}</div>
                       </div>
 
                       {/* Menu Items */}
@@ -518,6 +522,7 @@ function Layout() {
               );
             })()}
           </div>
+          </PageContainer>
         </header>
 
 
@@ -585,10 +590,10 @@ function Layout() {
         />
 
         {/* VIEW OUTLET */}
-        <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8 lg:py-8 flex flex-col">
-          <div className="max-w-[1200px] w-full mx-auto flex-1 flex flex-col">
+        <main className={`app-main flex-1 min-h-0 flex flex-col ${pageLayout.workspace ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+          <PageContainer mode={pageLayout.mode} workspace={pageLayout.workspace} className="flex-1 flex flex-col">
             <Outlet />
-          </div>
+          </PageContainer>
         </main>
 
         {/* SETTINGS OVERLAY */}

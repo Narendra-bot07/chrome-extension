@@ -14,7 +14,7 @@ export default function HelpSearchPage() {
   ];
 
   return (
-    <div className="max-w-4xl mx-auto w-full animate-fadeIn">
+    <div className="w-full animate-fadeIn">
       
       {/* Header */}
       <div className="text-center py-12">

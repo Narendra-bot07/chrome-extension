@@ -167,49 +167,89 @@ function DashboardContent() {
   const pOffer = calcPercent(offerApps.length);
   const pRejected = calcPercent(rejectedApps.length);
 
-  // Dynamic Application Trend Data Points strictly from DB timestamps
+  // Dynamic Application Trend Data Points strictly from DB timestamps (Spikes per extraction date)
   const getTrendPoints = () => {
     const nowMs = Date.now();
+    let numPoints = 8;
     let daysWindow = 30;
-    if (trendTimeframe === 'Last 7 days') daysWindow = 7;
-    else if (trendTimeframe === 'Last 90 days') daysWindow = 90;
-    else if (trendTimeframe === 'All time') daysWindow = 365;
 
-    const intervalMs = (daysWindow * 86400000) / 4;
-    const pointsX = [30, 95, 160, 225, 285];
+    if (trendTimeframe === 'Last 7 days') {
+      daysWindow = 7;
+      numPoints = 7;
+    } else if (trendTimeframe === 'Last 30 days') {
+      daysWindow = 30;
+      numPoints = 10;
+    } else if (trendTimeframe === 'Last 90 days') {
+      daysWindow = 90;
+      numPoints = 10;
+    } else if (trendTimeframe === 'All time') {
+      daysWindow = 180;
+      numPoints = 12;
+    }
 
-    const pointsData = pointsX.map((x, idx) => {
-      const bucketDateMs = nowMs - (4 - idx) * intervalMs;
-      const bucketDate = new Date(bucketDateMs);
+    const startMs = nowMs - (daysWindow - 1) * 86400000;
+    const stepMs = (daysWindow * 86400000) / (numPoints - 1);
+    
+    const pointsData = [];
+    const svgWidth = 270;
+    const startX = 25;
 
+    for (let i = 0; i < numPoints; i++) {
+      const bucketMs = startMs + i * stepMs;
+      const bucketDate = new Date(bucketMs);
+      
       const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
       
       let label = `${monthNames[bucketDate.getMonth()]} ${bucketDate.getDate()}`;
       if (trendTimeframe === 'Last 7 days') {
-        label = idx === 4 ? 'Today' : dayNames[bucketDate.getDay()];
+        label = i === numPoints - 1 ? 'Today' : dayNames[bucketDate.getDay()];
       }
 
-      // Count DB applications created up to bucketDate
+      const bucketDayStr = bucketDate.toDateString();
+      
+      // Count DB applications created on or around this specific date bucket
       const count = applications.filter(a => {
-        if (!a || !a.created_at) return false;
-        const appDate = new Date(a.created_at).getTime();
-        return appDate <= bucketDateMs;
+        if (!a || (!a.created_at && !a.updated_at)) return false;
+        const appDate = new Date(a.created_at || a.updated_at);
+        if (numPoints <= 7) {
+          return appDate.toDateString() === bucketDayStr;
+        } else {
+          const appMs = appDate.getTime();
+          return Math.abs(appMs - bucketMs) <= (stepMs / 1.8);
+        }
       }).length;
 
-      return { label, count, x };
-    });
+      const x = startX + (i * (svgWidth / (numPoints - 1)));
+      pointsData.push({ label, count, x, fullDate: bucketDate.toLocaleDateString() });
+    }
 
-    const maxCount = Math.max(1, ...pointsData.map(p => p.count));
+    const maxCount = Math.max(3, ...pointsData.map(p => p.count));
 
     return pointsData.map(p => ({
       ...p,
-      y: 95 - Math.round((p.count / maxCount) * 65)
+      maxScale: maxCount,
+      y: 102 - Math.round((p.count / maxCount) * 78)
     }));
   };
 
   const trendPoints = getTrendPoints();
-  const activeHoveredPoint = trendPoints[hoveredPointIndex] || trendPoints[3] || trendPoints[0];
+  const activeHoveredPoint = trendPoints[hoveredPointIndex] || trendPoints[trendPoints.length - 1] || trendPoints[0];
+
+  const buildSvgPath = (points) => {
+    if (!points || points.length < 2) return '';
+    let d = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 0; i < points.length - 1; i++) {
+      const curr = points[i];
+      const next = points[i + 1];
+      const cp1x = curr.x + (next.x - curr.x) / 2;
+      const cp1y = curr.y;
+      const cp2x = curr.x + (next.x - curr.x) / 2;
+      const cp2y = next.y;
+      d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${next.x} ${next.y}`;
+    }
+    return d;
+  };
 
   // Recent applications from DB
   const displayRecentApps = applications.slice(0, 5);
@@ -243,7 +283,7 @@ function DashboardContent() {
         />
       }
     >
-      <div className="flex-1 flex flex-col gap-6 font-sans max-w-7xl mx-auto pb-12 select-none text-tf-text">
+      <div className="flex-1 w-full flex flex-col gap-6 font-sans pb-12 select-none text-tf-text">
         
         {/* 1. GREETING HEADER */}
         <div className="flex flex-col gap-1">
@@ -255,10 +295,37 @@ function DashboardContent() {
           </p>
         </div>
 
-      {/* 2. TOP 4 DYNAMIC METRIC CARDS WITH SPARKLINES */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* 2. TOP DYNAMIC METRIC CARDS (INCLUDING RESUME SCORE AT TOP) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         
-        {/* Card 1: Success Rate */}
+        {/* Card 1: Resume Score Top Metric */}
+        <div className="bg-tf-surface border border-tf-border rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs hover:border-tf-border-strong transition-all">
+          <div className="flex justify-between items-start">
+            <div className="space-y-1">
+              <span className="text-xs font-semibold text-tf-text-secondary">Resume Score</span>
+              <div className="text-2xl font-extrabold tracking-tight text-tf-text flex items-baseline gap-1">
+                <span>{avgResumeScore}</span>
+                <span className="text-xs font-semibold text-tf-text-tertiary">/100</span>
+              </div>
+            </div>
+            <div className="w-9 h-9 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center border border-purple-500/20">
+              <Award size={18} />
+            </div>
+          </div>
+          <div className="flex items-center justify-between mt-4">
+            <span className="text-[11px] font-semibold text-purple-500">
+              {avgResumeScore >= 80 ? 'Optimized 🎉' : 'Good Progress 👍'}
+            </span>
+            <button
+              onClick={() => navigate('/resume-detect')}
+              className="text-[10px] font-bold text-tf-accent hover:underline flex items-center gap-0.5 cursor-pointer"
+            >
+              Improve <ArrowRight size={10} />
+            </button>
+          </div>
+        </div>
+
+        {/* Card 2: Success Rate */}
         <div className="bg-tf-surface border border-tf-border rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs hover:border-tf-border-strong transition-all">
           <div className="flex justify-between items-start">
             <div className="space-y-1">
@@ -273,13 +340,13 @@ function DashboardContent() {
             <span className="text-[11px] font-semibold text-emerald-500 flex items-center gap-0.5">
               ↗ {successRate}% <span className="text-tf-text-tertiary font-normal pl-0.5">vs last month</span>
             </span>
-            <svg className="w-20 h-7 text-purple-500 overflow-visible" viewBox="0 0 80 30" fill="none">
+            <svg className="w-16 h-6 text-purple-500 overflow-visible" viewBox="0 0 80 30" fill="none">
               <path d="M0 25 Q 20 28, 35 15 T 70 8 T 80 5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
             </svg>
           </div>
         </div>
 
-        {/* Card 2: Active Pipeline */}
+        {/* Card 3: Active Pipeline */}
         <div className="bg-tf-surface border border-tf-border rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs hover:border-tf-border-strong transition-all">
           <div className="flex justify-between items-start">
             <div className="space-y-1">
@@ -294,13 +361,13 @@ function DashboardContent() {
           </div>
           <div className="flex items-center justify-between mt-4">
             <span className="text-[11px] font-normal text-tf-text-tertiary">Across all stages</span>
-            <svg className="w-20 h-7 text-blue-500 overflow-visible" viewBox="0 0 80 30" fill="none">
+            <svg className="w-16 h-6 text-blue-500 overflow-visible" viewBox="0 0 80 30" fill="none">
               <path d="M0 22 Q 25 25, 45 18 T 70 10 T 80 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
             </svg>
           </div>
         </div>
 
-        {/* Card 3: Interviews */}
+        {/* Card 4: Interviews */}
         <div className="bg-tf-surface border border-tf-border rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs hover:border-tf-border-strong transition-all">
           <div className="flex justify-between items-start">
             <div className="space-y-1">
@@ -315,13 +382,13 @@ function DashboardContent() {
           </div>
           <div className="flex items-center justify-between mt-4">
             <span className="text-[11px] font-normal text-tf-text-tertiary">This month</span>
-            <svg className="w-20 h-7 text-amber-500 overflow-visible" viewBox="0 0 80 30" fill="none">
+            <svg className="w-16 h-6 text-amber-500 overflow-visible" viewBox="0 0 80 30" fill="none">
               <path d="M0 26 Q 20 22, 40 24 T 65 12 T 80 8" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
             </svg>
           </div>
         </div>
 
-        {/* Card 4: Offers */}
+        {/* Card 5: Offers */}
         <div className="bg-tf-surface border border-tf-border rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs hover:border-tf-border-strong transition-all">
           <div className="flex justify-between items-start">
             <div className="space-y-1">
@@ -336,7 +403,7 @@ function DashboardContent() {
           </div>
           <div className="flex items-center justify-between mt-4">
             <span className="text-[11px] font-normal text-tf-text-tertiary">Keep it up! 🚀</span>
-            <svg className="w-20 h-7 text-emerald-500 overflow-visible" viewBox="0 0 80 30" fill="none">
+            <svg className="w-16 h-6 text-emerald-500 overflow-visible" viewBox="0 0 80 30" fill="none">
               <path d="M0 24 Q 25 26, 45 20 T 70 12 T 80 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
             </svg>
           </div>
@@ -591,70 +658,82 @@ function DashboardContent() {
                 <svg className="w-full h-40 overflow-visible select-none" viewBox="0 0 300 120">
                   <defs>
                     <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#8B5CF6" stopOpacity="0.35" />
+                      <stop offset="0%" stopColor="#8B5CF6" stopOpacity="0.4" />
                       <stop offset="100%" stopColor="#8B5CF6" stopOpacity="0.0" />
                     </linearGradient>
                   </defs>
                   
                   {/* Grid Lines */}
-                  <line x1="0" y1="20" x2="300" y2="20" stroke="currentColor" strokeOpacity="0.08" />
-                  <line x1="0" y1="60" x2="300" y2="60" stroke="currentColor" strokeOpacity="0.08" />
-                  <line x1="0" y1="100" x2="300" y2="100" stroke="currentColor" strokeOpacity="0.08" />
+                  <line x1="0" y1="25" x2="300" y2="25" stroke="currentColor" strokeOpacity="0.08" />
+                  <line x1="0" y1="64" x2="300" y2="64" stroke="currentColor" strokeOpacity="0.08" />
+                  <line x1="0" y1="102" x2="300" y2="102" stroke="currentColor" strokeOpacity="0.08" />
 
                   {/* Y Axis Labels */}
-                  <text x="0" y="24" fill="currentColor" opacity="0.4" fontSize="9">15</text>
-                  <text x="0" y="64" fill="currentColor" opacity="0.4" fontSize="9">10</text>
-                  <text x="0" y="104" fill="currentColor" opacity="0.4" fontSize="9">5</text>
-                  <text x="0" y="118" fill="currentColor" opacity="0.4" fontSize="9">0</text>
+                  <text x="0" y="28" fill="currentColor" opacity="0.4" fontSize="9">{trendPoints[0]?.maxScale || 15}</text>
+                  <text x="0" y="68" fill="currentColor" opacity="0.4" fontSize="9">{Math.round((trendPoints[0]?.maxScale || 15) / 2)}</text>
+                  <text x="0" y="106" fill="currentColor" opacity="0.4" fontSize="9">0</text>
 
                   {/* Filled Area */}
-                  <path
-                    d={`M ${trendPoints[0].x} ${trendPoints[0].y} C ${trendPoints[1].x - 20} ${trendPoints[0].y}, ${trendPoints[1].x - 20} ${trendPoints[1].y}, ${trendPoints[1].x} ${trendPoints[1].y} C ${trendPoints[2].x - 20} ${trendPoints[1].y}, ${trendPoints[2].x - 20} ${trendPoints[2].y}, ${trendPoints[2].x} ${trendPoints[2].y} C ${trendPoints[3].x - 20} ${trendPoints[2].y}, ${trendPoints[3].x - 20} ${trendPoints[3].y}, ${trendPoints[3].x} ${trendPoints[3].y} L ${trendPoints[4].x} ${trendPoints[4].y} L ${trendPoints[4].x} 105 L ${trendPoints[0].x} 105 Z`}
-                    fill="url(#areaGradient)"
-                  />
+                  {trendPoints.length > 1 && (
+                    <path
+                      d={`${buildSvgPath(trendPoints)} L ${trendPoints[trendPoints.length - 1].x} 102 L ${trendPoints[0].x} 102 Z`}
+                      fill="url(#areaGradient)"
+                    />
+                  )}
 
-                  {/* Smooth Line */}
-                  <path
-                    d={`M ${trendPoints[0].x} ${trendPoints[0].y} C ${trendPoints[1].x - 20} ${trendPoints[0].y}, ${trendPoints[1].x - 20} ${trendPoints[1].y}, ${trendPoints[1].x} ${trendPoints[1].y} C ${trendPoints[2].x - 20} ${trendPoints[1].y}, ${trendPoints[2].x - 20} ${trendPoints[2].y}, ${trendPoints[2].x} ${trendPoints[2].y} C ${trendPoints[3].x - 20} ${trendPoints[2].y}, ${trendPoints[3].x - 20} ${trendPoints[3].y}, ${trendPoints[3].x} ${trendPoints[3].y} L ${trendPoints[4].x} ${trendPoints[4].y}`}
-                    fill="none"
-                    stroke="#8B5CF6"
-                    strokeWidth="3"
-                    strokeLinecap="round"
-                  />
+                  {/* Smooth Line Curve */}
+                  {trendPoints.length > 1 && (
+                    <path
+                      d={buildSvgPath(trendPoints)}
+                      fill="none"
+                      stroke="#8B5CF6"
+                      strokeWidth="3.5"
+                      strokeLinecap="round"
+                    />
+                  )}
 
                   {/* Interactive Data Points with Hover Targets */}
-                  {trendPoints.map((pt, idx) => (
-                    <g key={idx} className="cursor-pointer" onMouseEnter={() => setHoveredPointIndex(idx)}>
-                      {/* Invisible larger hover hit area */}
-                      <circle cx={pt.x} cy={pt.y} r="18" fill="transparent" />
-                      {/* Outer pulse circle when hovered */}
-                      {hoveredPointIndex === idx && (
-                        <circle cx={pt.x} cy={pt.y} r="10" fill="#8B5CF6" opacity="0.3" className="animate-ping" />
-                      )}
-                      {/* Visible Circle Point */}
-                      <circle
-                        cx={pt.x}
-                        cy={pt.y}
-                        r={hoveredPointIndex === idx ? "7" : "5"}
-                        fill="#8B5CF6"
-                        stroke="#ffffff"
-                        strokeWidth={hoveredPointIndex === idx ? "3" : "2"}
-                        className="transition-all duration-200"
-                      />
-                    </g>
-                  ))}
+                  {trendPoints.map((pt, idx) => {
+                    const isHovered = hoveredPointIndex === idx;
+                    const isSpike = pt.count > 0;
+
+                    return (
+                      <g key={idx} className="cursor-pointer" onMouseEnter={() => setHoveredPointIndex(idx)}>
+                        {/* Invisible larger hover hit area */}
+                        <circle cx={pt.x} cy={pt.y} r="16" fill="transparent" />
+                        
+                        {/* Outer pulse circle when hovered or spike */}
+                        {(isHovered || (isSpike && idx === trendPoints.length - 1)) && (
+                          <circle cx={pt.x} cy={pt.y} r={isHovered ? "10" : "8"} fill="#8B5CF6" opacity="0.35" className="animate-ping" />
+                        )}
+
+                        {/* Visible Circle Point */}
+                        <circle
+                          cx={pt.x}
+                          cy={pt.y}
+                          r={isHovered ? "6" : isSpike ? "5" : "3.5"}
+                          fill={isSpike ? "#8B5CF6" : "#A78BFA"}
+                          stroke="#ffffff"
+                          strokeWidth={isHovered ? "3" : "2"}
+                          className="transition-all duration-200"
+                        />
+                      </g>
+                    );
+                  })}
                 </svg>
 
                 {/* Dynamic Tooltip Overlay on Mouse Hover */}
-                <div 
-                  className="absolute -top-1 transition-all duration-300 -translate-x-1/2 bg-zinc-900/95 dark:bg-zinc-900/95 border border-zinc-700 text-white px-3 py-1.5 rounded-xl shadow-2xl text-center z-10 select-none pointer-events-none"
-                  style={{ left: `${(activeHoveredPoint.x / 300) * 100}%` }}
-                >
-                  <div className="text-[10px] font-medium text-zinc-400">{activeHoveredPoint.label}</div>
-                  <div className="text-xs font-bold text-white whitespace-nowrap">
-                    {activeHoveredPoint.count} Applications
+                {activeHoveredPoint && (
+                  <div 
+                    className="absolute -top-1 transition-all duration-300 -translate-x-1/2 bg-zinc-900/95 dark:bg-zinc-900/95 border border-zinc-700 text-white px-3 py-1.5 rounded-xl shadow-2xl text-center z-10 select-none pointer-events-none"
+                    style={{ left: `${(activeHoveredPoint.x / 300) * 100}%` }}
+                  >
+                    <div className="text-[10px] font-medium text-zinc-400">{activeHoveredPoint.label}</div>
+                    <div className="text-xs font-bold text-white whitespace-nowrap">
+                      {activeHoveredPoint.count} {activeHoveredPoint.count === 1 ? 'Extraction' : 'Extractions / Tailored'}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Dynamic X Axis Date Labels */}
                 <div className="flex justify-between text-[10px] text-tf-text-tertiary pt-2 px-2 font-medium">
@@ -731,7 +810,49 @@ function DashboardContent() {
         {/* RIGHT COLUMN (1/3 width) */}
         <div className="space-y-6">
 
-          {/* WIDGET 1: PIPELINE OVERVIEW DONUT CHART */}
+          {/* WIDGET 1: UPCOMING EVENTS (RIGHT TOP) */}
+          <div className="bg-tf-surface border border-tf-border rounded-2xl p-6 shadow-xs space-y-4">
+            <h3 className="text-sm font-bold text-tf-text">Upcoming</h3>
+
+            <div className="space-y-3">
+              {upcomingEvents.length > 0 ? (
+                upcomingEvents.map((evt) => (
+                  <div 
+                    key={evt.id} 
+                    onClick={() => navigate('/job-tracker')}
+                    className="flex items-center justify-between p-3 rounded-xl bg-tf-surface-2/60 border border-tf-border/50 hover:bg-tf-surface-2 transition cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-tf-surface border border-tf-border flex flex-col items-center justify-center leading-none text-tf-text shrink-0">
+                        <span className="text-[9px] font-black text-tf-text-tertiary uppercase">{evt.month}</span>
+                        <span className="text-sm font-black">{evt.day}</span>
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-tf-text">{evt.title}</div>
+                        <div className="text-[10px] text-tf-text-secondary">{evt.company} • {evt.role}</div>
+                        <div className="text-[10px] text-tf-text-tertiary pt-0.5">{evt.time}</div>
+                      </div>
+                    </div>
+                    <ChevronRight size={16} className="text-tf-text-tertiary" />
+                  </div>
+                ))
+              ) : (
+                <div className="py-6 text-center text-xs text-tf-text-tertiary font-medium">
+                  No upcoming interviews or assessments.
+                </div>
+              )}
+            </div>
+
+            <button 
+              onClick={() => navigate('/job-tracker')}
+              className="w-full py-2 bg-tf-surface-2 hover:bg-tf-border text-tf-text font-semibold text-xs rounded-xl transition flex items-center justify-center gap-1.5 border border-tf-border cursor-pointer"
+            >
+              <span>View all upcoming</span>
+              <ArrowRight size={14} />
+            </button>
+          </div>
+
+          {/* WIDGET 2: PIPELINE OVERVIEW DONUT CHART */}
           <div className="bg-tf-surface border border-tf-border rounded-2xl p-6 shadow-xs space-y-5">
             <h3 className="text-sm font-bold text-tf-text">Pipeline Overview</h3>
 
@@ -788,97 +909,6 @@ function DashboardContent() {
               className="w-full py-2 bg-tf-surface-2 hover:bg-tf-border text-tf-text font-semibold text-xs rounded-xl transition flex items-center justify-center gap-1.5 border border-tf-border cursor-pointer"
             >
               <span>View full pipeline</span>
-              <ArrowRight size={14} />
-            </button>
-          </div>
-
-          {/* WIDGET 2: UPCOMING EVENTS */}
-          <div className="bg-tf-surface border border-tf-border rounded-2xl p-6 shadow-xs space-y-4">
-            <h3 className="text-sm font-bold text-tf-text">Upcoming</h3>
-
-            <div className="space-y-3">
-              {upcomingEvents.length > 0 ? (
-                upcomingEvents.map((evt) => (
-                  <div 
-                    key={evt.id} 
-                    onClick={() => navigate('/job-tracker')}
-                    className="flex items-center justify-between p-3 rounded-xl bg-tf-surface-2/60 border border-tf-border/50 hover:bg-tf-surface-2 transition cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-tf-surface border border-tf-border flex flex-col items-center justify-center leading-none text-tf-text shrink-0">
-                        <span className="text-[9px] font-black text-tf-text-tertiary uppercase">{evt.month}</span>
-                        <span className="text-sm font-black">{evt.day}</span>
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-tf-text">{evt.title}</div>
-                        <div className="text-[10px] text-tf-text-secondary">{evt.company} • {evt.role}</div>
-                        <div className="text-[10px] text-tf-text-tertiary pt-0.5">{evt.time}</div>
-                      </div>
-                    </div>
-                    <ChevronRight size={16} className="text-tf-text-tertiary" />
-                  </div>
-                ))
-              ) : (
-                <div className="py-6 text-center text-xs text-tf-text-tertiary font-medium">
-                  No upcoming interviews or assessments.
-                </div>
-              )}
-            </div>
-
-            <button 
-              onClick={() => navigate('/job-tracker')}
-              className="w-full py-2 bg-tf-surface-2 hover:bg-tf-border text-tf-text font-semibold text-xs rounded-xl transition flex items-center justify-center gap-1.5 border border-tf-border cursor-pointer"
-            >
-              <span>View all upcoming</span>
-              <ArrowRight size={14} />
-            </button>
-          </div>
-
-          {/* WIDGET 3: RESUME SCORE RING GAUGE */}
-          <div className="bg-tf-surface border border-tf-border rounded-2xl p-6 shadow-xs space-y-4">
-            <h3 className="text-sm font-bold text-tf-text">Resume Score</h3>
-
-            <div className="flex items-center gap-5">
-              <div className="relative w-20 h-20 flex items-center justify-center shrink-0">
-                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
-                  <path
-                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                    fill="none"
-                    stroke="currentColor"
-                    opacity="0.1"
-                    strokeWidth="3.5"
-                  />
-                  <path
-                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                    fill="none"
-                    stroke="#8B5CF6"
-                    strokeWidth="3.5"
-                    strokeDasharray={`${avgResumeScore}, 100`}
-                    strokeLinecap="round"
-                  />
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
-                  <span className="text-lg font-black text-tf-text">{avgResumeScore}</span>
-                  <span className="text-[9px] font-bold text-tf-text-tertiary">/100</span>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <h4 className="text-xs font-bold text-tf-text flex items-center gap-1">
-                  {avgResumeScore >= 80 ? 'Great job! 🎉' : avgResumeScore >= 60 ? 'Good Progress 👍' : 'Needs Optimization ⚠️'}
-                </h4>
-                <p className="text-[11px] text-tf-text-secondary leading-snug">
-                  {avgResumeScore >= 80 ? 'Your resume is well-optimized for your target roles.' : 'Tailor your resume skills to improve match rate.'}
-                </p>
-              </div>
-            </div>
-
-            <button 
-              onClick={() => navigate('/resume-detect')}
-              className="w-full py-2 bg-tf-accent/10 hover:bg-tf-accent/20 text-tf-accent font-semibold text-xs rounded-xl transition flex items-center justify-center gap-1.5 border border-tf-accent/20 cursor-pointer"
-            >
-              <Sparkles size={14} />
-              <span>Improve Resume</span>
               <ArrowRight size={14} />
             </button>
           </div>

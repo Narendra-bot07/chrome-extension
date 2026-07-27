@@ -1,41 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Briefcase, Search, Trash2, Clock, 
   MapPin, Send, BrainCircuit, ExternalLink, Lightbulb, Bell, FileText,
-  X, Zap, CheckCircle2, AlertCircle, Building, Sparkles, ArrowRight, CheckCircle,
-  ClipboardCheck, Eye, Calendar, FileEdit, ShieldCheck, Check, DollarSign, User, Link, Plus, Archive
+  X, Zap, CheckCircle2, AlertCircle, Building, Sparkles, ArrowRight, Check,
+  ClipboardCheck, Eye, Calendar, FileEdit, ShieldCheck, DollarSign, User, Link, Plus, Archive,
+  ArrowLeft, Layers, UserCheck, BookOpen, LayoutGrid, List, Columns, Filter, RefreshCw, MoreHorizontal, Maximize2, Minimize2
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Button } from '../components/ui/Button';
 
-const WORKFLOW_STAGES = [
-  { id: 'Ready To Apply', label: 'Ready To Apply', color: '#71717a' },
-  { id: 'Applied', label: 'Applied', color: '#3b82f6' },
-  { id: 'Assessment', label: 'Assessment', color: '#8b5cf6' },
-  { id: 'Recruiter', label: 'Recruiter Contact', color: '#ec4899' },
-  { id: 'Interview', label: 'Interview', color: '#f59e0b' },
-  { id: 'Final Round', label: 'Final Round', color: '#06b6d4' },
-  { id: 'Offer', label: 'Offer Received', color: '#10b981' }
-];
-
-const TERMINAL_STAGES = [
-  { id: 'Accepted', label: 'Accepted', color: '#059669' },
-  { id: 'Rejected', label: 'Rejected', color: '#ef4444' },
-  { id: 'Archived', label: 'Archived', color: '#64748b' }
-];
-
-const STAGE_ORDER = {
-  'Ready To Apply': 1,
-  'Applied': 2,
-  'Assessment': 3,
-  'Recruiter': 4,
-  'Interview': 5,
-  'Final Round': 6,
-  'Offer': 7,
-  'Accepted': 8,
-  'Rejected': 8,
-  'Archived': 8
-};
+// Job Tracker Components
+import JobCard from '../components/JobTracker/JobCard';
+import JobWorkspaceHeader from '../components/JobTracker/JobWorkspaceHeader';
+import OverviewTab from '../components/JobTracker/OverviewTab';
+import WorkflowTab from '../components/JobTracker/WorkflowTab';
+import DocumentsTab from '../components/JobTracker/DocumentsTab';
+import RecruiterTab from '../components/JobTracker/RecruiterTab';
+import TimelineTab from '../components/JobTracker/TimelineTab';
+import NotesTab from '../components/JobTracker/NotesTab';
+import HistoryTab from '../components/JobTracker/HistoryTab';
+import RemindersModal from '../components/JobTracker/RemindersModal';
+import JobTrackerEmptyState from '../components/JobTracker/JobTrackerEmptyState';
 
 // Error Boundary wrapper to print exact crash logs on screen
 class JobTrackerErrorBoundary extends React.Component {
@@ -52,21 +37,20 @@ class JobTrackerErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-tf-surface border border-tf-border rounded-lg text-center font-sans min-h-[400px]">
-          <AlertCircle className="w-10 h-10 text-tf-danger mb-4" />
-          <h2 className="text-base font-semibold tracking-tight text-tf-text">
+        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-center font-sans min-h-[400px]">
+          <AlertCircle className="w-10 h-10 text-rose-500 mb-4" />
+          <h2 className="text-base font-semibold tracking-tight text-zinc-900 dark:text-white">
             Job Tracker Crash Intercepted
           </h2>
-          <p className="text-xs text-tf-text-secondary max-w-md mt-2 font-normal">
-
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-md mt-2 font-normal">
             {this.state.error?.toString() || "An unexpected rendering crash occurred."}
           </p>
-          <pre className="text-[10px] text-rose-600 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-950/40 p-4 rounded-xl max-w-lg overflow-x-auto mt-4 text-left max-h-[200px] w-full font-mono">
+          <pre className="text-[10px] text-rose-600 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/40 p-4 rounded-xl max-w-lg overflow-x-auto mt-4 text-left max-h-[200px] w-full font-mono">
             {this.state.error?.stack}
           </pre>
           <button
             onClick={() => window.location.reload()}
-            className="mt-6 px-5 py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl cursor-pointer border-none"
+            className="mt-6 px-5 py-2.5 bg-zinc-900 dark:bg-zinc-800 hover:bg-zinc-800 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl cursor-pointer border-none"
           >
             Reload Window
           </button>
@@ -78,35 +62,36 @@ class JobTrackerErrorBoundary extends React.Component {
 }
 
 function JobTrackerContent() {
-  const { session, applications: rawApps, updateApplicationStage, fetchApplications, apiUrl, darkMode } = useApp();
+  const { session, applications: rawApps, updateApplicationStage, fetchApplications, apiUrl } = useApp();
   const applications = rawApps || [];
+
   const [selectedAppId, setSelectedAppId] = useState(null);
+  const [showWorkspaceModal, setShowWorkspaceModal] = useState(false);
+  const [isFullscreenPopup, setIsFullscreenPopup] = useState(false);
+
+  // Search & Filters State
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterTab, setFilterTab] = useState('All'); 
-  const [sortBy, setSortBy] = useState('last_activity'); 
+  const [stageFilter, setStageFilter] = useState('All'); // 'All' | 'Active' | 'Preparing' | 'Applied' | 'Interviewing' | 'Offers' | 'Closed'
+  const [readinessFilter, setReadinessFilter] = useState('All'); // 'All' | 'resume_pending' | 'cover_letter_pending' | 'followup_due'
+  const [sortBy, setSortBy] = useState('last_activity');
+  const [viewMode, setViewMode] = useState('cards'); // 'cards' | 'list'
   const [loading, setLoading] = useState(true);
 
-  // Modal Workspace Tab
-  const [workspaceTab, setWorkspaceTab] = useState('Workflow'); // 'Workflow' | 'Overview' | 'Timeline' | 'Documents' | 'Recruiter' | 'Notes' | 'History'
+  // Active Workspace Tab inside Pop-Up Modal
+  const [workspaceTab, setWorkspaceTab] = useState('Workflow');
 
-  // Drag and drop states
-  const [draggingAppId, setDraggingAppId] = useState(null);
-  const [dragOverStage, setDragOverStage] = useState(null);
+  // Modals State
+  const [showEditJobModal, setShowEditJobModal] = useState(false);
+  const [showRemindersModal, setShowRemindersModal] = useState(false);
 
-  // Stage Specific Popups
-  const [activeStageEditPopup, setActiveStageEditPopup] = useState(null); // stageId
-  const [popupFields, setPopupFields] = useState({});
-
-  // Notes and logs edit states
-  const [editNotes, setEditNotes] = useState('');
-  const [editRecruiterNotes, setEditRecruiterNotes] = useState('');
-  const [editInterviewNotes, setEditInterviewNotes] = useState('');
-  const [editSalaryNotes, setEditSalaryNotes] = useState('');
-  const [isSavingNotes, setIsSavingNotes] = useState(false);
-
-  // AI follow-up emails
-  const [followUpEmail, setFollowUpEmail] = useState('');
-  const [isGeneratingEmail, setIsGeneratingEmail] = useState(false);
+  // Form Fields for Editing
+  const [jobFormData, setJobFormData] = useState({
+    company_name: '',
+    job_title: '',
+    location: '',
+    job_url: '',
+    current_stage: 'Ready To Apply'
+  });
 
   useEffect(() => {
     const loadData = async () => {
@@ -117,142 +102,103 @@ function JobTrackerContent() {
     loadData();
   }, []);
 
+  // Keyboard Access: ESC key closes modal
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && showWorkspaceModal) {
+        setShowWorkspaceModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showWorkspaceModal]);
+
   const selectedApp = applications.find(a => a && a.id === selectedAppId);
 
-  useEffect(() => {
-    if (selectedApp) {
-      setEditNotes(selectedApp.notes || '');
-      setEditRecruiterNotes(selectedApp.recruiter_notes || '');
-      setEditInterviewNotes(selectedApp.interview_notes || '');
-      setEditSalaryNotes(selectedApp.salary_expectations || '');
-      setFollowUpEmail('');
-      setActiveStageEditPopup(null);
-    }
-  }, [selectedApp]);
+  const handleOpenWorkspaceModal = (appId) => {
+    setSelectedAppId(appId);
+    setShowWorkspaceModal(true);
+  };
 
-  // Load stage metadata
-  const getStageMetadata = (app, stageId) => {
-    if (!app || !app.timeline) return {};
-    const record = app.timeline.find(e => e && e.event === `Stage Metadata: ${stageId}`);
-    if (!record || !record.notes) return {};
+  // Handlers for API Mutations
+  const handleUpdateStage = async (appId, newStage) => {
     try {
-      return JSON.parse(record.notes);
-    } catch (e) {
-      return {};
+      await updateApplicationStage(appId, newStage);
+      await fetchApplications();
+    } catch (err) {
+      console.error("Failed to update application stage:", err);
     }
   };
 
-  const handleOpenStagePopup = (stageId) => {
-    if (!selectedApp) return;
-    const existing = getStageMetadata(selectedApp, stageId);
-    setPopupFields(existing);
-    setActiveStageEditPopup(stageId);
-  };
-
-  const handleSaveStageMetadata = async (stageId) => {
-    if (!selectedApp) return;
+  const handleSaveContacts = async (appId, contactsList) => {
     try {
       const token = session?.access_token || localStorage.getItem('access_token');
       if (!token) return;
 
-      let updatedTimeline = (selectedApp.timeline || []).filter(e => 
-        e && e.event !== `Stage Metadata: ${stageId}`
-      );
-
-      updatedTimeline.push({
-        event: `Stage Metadata: ${stageId}`,
-        label: `${stageId} Options Logged`,
-        timestamp: new Date().toISOString(),
-        notes: JSON.stringify(popupFields)
-      });
-
-      const res = await fetch(`${apiUrl}/api/v1/applications/${selectedApp.id}`, {
+      const res = await fetch(`${apiUrl}/api/v1/applications/${appId}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
-        body: JSON.stringify({
-          timeline: updatedTimeline
-        })
+        body: JSON.stringify({ contacts: contactsList })
       });
 
       if (res.ok) {
         await fetchApplications();
-        setActiveStageEditPopup(null);
       }
     } catch (err) {
-      console.error(err);
+      console.error("Failed to save recruiter contacts:", err);
     }
   };
 
-  const formatSafeDate = (dateVal, showTime = false) => {
-    if (!dateVal) return 'Recent';
-    const d = new Date(dateVal);
-    if (isNaN(d.getTime())) return 'Recent';
-    return showTime ? d.toLocaleString() : d.toLocaleDateString();
-  };
+  const handleSaveNotesList = async (appId, notesList) => {
+    try {
+      const token = session?.access_token || localStorage.getItem('access_token');
+      if (!token) return;
 
-  const calculateDuration = (createdDate) => {
-    if (!createdDate) return '1 day';
-    const created = new Date(createdDate);
-    const now = new Date();
-    const diffTime = Math.abs(now - created);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return `${diffDays} ${diffDays === 1 ? 'day' : 'days'}`;
-  };
+      const res = await fetch(`${apiUrl}/api/v1/applications/${appId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ notes_list: notesList })
+      });
 
-  // Drag and drop HTML5 handlers
-  const handleDragStart = (e, appId) => {
-    setDraggingAppId(appId);
-    e.dataTransfer.setData('text/plain', appId);
-  };
-
-  const handleDragEnd = () => {
-    setDraggingAppId(null);
-    setDragOverStage(null);
-  };
-
-  const handleDragOver = (e, stageId) => {
-    e.preventDefault();
-    if (draggingAppId) {
-      const app = applications.find(a => a && a.id === draggingAppId);
-      const currentOrder = STAGE_ORDER[app?.current_stage] || 0;
-      const targetOrder = STAGE_ORDER[stageId] || 0;
-      if (targetOrder > currentOrder) {
-        setDragOverStage(stageId);
-      } else {
-        e.dataTransfer.dropEffect = 'none';
+      if (res.ok) {
+        await fetchApplications();
       }
-    } else {
-      setDragOverStage(stageId);
+    } catch (err) {
+      console.error("Failed to save notes:", err);
     }
   };
 
-  const handleDragLeave = () => {
-    setDragOverStage(null);
-  };
+  const handleSaveReminders = async (appId, remindersList) => {
+    try {
+      const token = session?.access_token || localStorage.getItem('access_token');
+      if (!token) return;
 
-  const handleDrop = async (e, stageId) => {
-    e.preventDefault();
-    const appId = e.dataTransfer.getData('text/plain') || draggingAppId;
-    if (appId && stageId) {
-      const app = applications.find(a => a && a.id === appId);
-      const currentOrder = STAGE_ORDER[app?.current_stage] || 0;
-      const targetOrder = STAGE_ORDER[stageId] || 0;
-      if (targetOrder > currentOrder) {
-        await updateApplicationStage(appId, stageId);
-      } else {
-        alert("Workflow constraint: Applications in a Directed Acyclic Graph (DAG) can only move forward, not backward.");
+      const res = await fetch(`${apiUrl}/api/v1/applications/${appId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ reminders: remindersList })
+      });
+
+      if (res.ok) {
+        await fetchApplications();
       }
+    } catch (err) {
+      console.error("Failed to save reminders:", err);
     }
-    setDraggingAppId(null);
-    setDragOverStage(null);
   };
 
-  const handleSaveNotes = async () => {
+  const handleEditJobDetails = async (e) => {
+    e.preventDefault();
     if (!selectedApp) return;
-    setIsSavingNotes(true);
     try {
       const token = session?.access_token || localStorage.getItem('access_token');
       if (!token) return;
@@ -263,1072 +209,623 @@ function JobTrackerContent() {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
-        body: JSON.stringify({
-          notes: editNotes,
-          recruiter_notes: editRecruiterNotes,
-          interview_notes: editInterviewNotes,
-          salary_expectations: editSalaryNotes
-        })
+        body: JSON.stringify(jobFormData)
       });
+
       if (res.ok) {
         await fetchApplications();
-        alert("Workspace notes successfully updated in Supabase!");
+        setShowEditJobModal(false);
       }
     } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSavingNotes(false);
+      console.error("Failed to update application details:", err);
     }
   };
 
-  const handleGenerateFollowUp = () => {
-    if (!selectedApp) return;
-    setIsGeneratingEmail(true);
-    setTimeout(() => {
-      const email = `Subject: Quick Follow-up - ${selectedApp.job_title} at ${selectedApp.company_name}
-
-Dear Hiring Team,
-
-I hope this note finds you well.
-
-I am checking in regarding the status of the ${selectedApp.job_title} application I submitted recently. Having tailored my qualifications directly to your needs, I remains highly interested in joining the team.
-
-Best regards,
-[Your Name]`;
-      setFollowUpEmail(email);
-      setIsGeneratingEmail(false);
-    }, 900);
-  };
-
-  const handleDeleteApp = async (appId) => {
-    if (!confirm("Delete this tracked application permanently?")) return;
+  const handleDeleteJob = async (appId) => {
+    if (!window.confirm("Are you sure you want to delete this job application workspace?")) return;
     try {
       const token = session?.access_token || localStorage.getItem('access_token');
       if (!token) return;
-      
+
       const res = await fetch(`${apiUrl}/api/v1/applications/${appId}`, {
         method: "DELETE",
         headers: { "Authorization": `Bearer ${token}` }
       });
+
       if (res.ok) {
-        setSelectedAppId(null);
         await fetchApplications();
+        setShowWorkspaceModal(false);
+        setSelectedAppId(null);
       }
     } catch (err) {
-      console.error(err);
+      console.error("Failed to delete application:", err);
     }
   };
 
-  // Directory left list filters
+  const handleArchiveJob = async (appId) => {
+    await handleUpdateStage(appId, 'Archived');
+  };
+
+  // CALCULATE DYNAMIC SUMMARY STATS
+  const totalAppsCount = applications.length;
+  const activeAppsCount = applications.filter(a => !['Accepted', 'Rejected', 'Archived'].includes(a.current_stage)).length;
+  const preparingCount = applications.filter(a => a.current_stage === 'Preparing' || a.current_stage === 'Ready To Apply').length;
+  const appliedCount = applications.filter(a => a.current_stage === 'Applied').length;
+  const interviewingCount = applications.filter(a => ['Assessment', 'Recruiter Contact', 'Interview', 'Final Round'].includes(a.current_stage)).length;
+  const offersCount = applications.filter(a => a.current_stage === 'Offer' || a.current_stage === 'Offer Received' || a.current_stage === 'Accepted').length;
+  const followupsDueCount = applications.filter(a => a.reminders?.some(r => !r.is_completed)).length;
+
+  // FILTER & SORT APPLICATIONS DATASET
   const filteredApps = applications.filter(app => {
     if (!app) return false;
-    const title = (app.job_title || '').toLowerCase();
-    const company = (app.company_name || '').toLowerCase();
-    const query = searchQuery.toLowerCase();
-    const matchesSearch = title.includes(query) || company.includes(query);
 
-    if (!matchesSearch) return false;
+    // Search query filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const matchTitle = (app.job_title || '').toLowerCase().includes(q);
+      const matchCompany = (app.company_name || '').toLowerCase().includes(q);
+      const matchLocation = (app.location || '').toLowerCase().includes(q);
+      if (!matchTitle && !matchCompany && !matchLocation) return false;
+    }
 
-    if (filterTab === 'Active') {
-      return !['Accepted', 'Rejected', 'Archived'].includes(app.current_stage);
+    // Stage filter
+    if (stageFilter === 'Active') {
+      if (['Accepted', 'Rejected', 'Archived'].includes(app.current_stage)) return false;
+    } else if (stageFilter === 'Preparing') {
+      if (!['Saved', 'Preparing', 'Ready To Apply'].includes(app.current_stage)) return false;
+    } else if (stageFilter === 'Applied') {
+      if (app.current_stage !== 'Applied') return false;
+    } else if (stageFilter === 'Interviewing') {
+      if (!['Assessment', 'Recruiter Contact', 'Interview', 'Final Round'].includes(app.current_stage)) return false;
+    } else if (stageFilter === 'Offers') {
+      if (!['Offer', 'Offer Received', 'Accepted'].includes(app.current_stage)) return false;
+    } else if (stageFilter === 'Closed') {
+      if (!['Rejected', 'Archived'].includes(app.current_stage)) return false;
     }
-    if (filterTab === 'Interviewing') {
-      return ['Interview', 'Final Round'].includes(app.current_stage);
+
+    // Additional readiness filter
+    if (readinessFilter === 'resume_pending') {
+      if (app.resume_status === 'ready' || Boolean(app.resume_version)) return false;
+    } else if (readinessFilter === 'cover_letter_pending') {
+      if (app.cover_letter_status === 'ready' || Boolean(app.cover_letter_version)) return false;
+    } else if (readinessFilter === 'followup_due') {
+      if (!app.reminders?.some(r => !r.is_completed)) return false;
     }
-    if (filterTab === 'Offers') {
-      return app.current_stage === 'Offer';
-    }
-    if (filterTab === 'Closed') {
-      return ['Accepted', 'Rejected', 'Archived'].includes(app.current_stage);
-    }
+
     return true;
   });
 
+  // Sort Filtered Applications
   const sortedApps = [...filteredApps].sort((a, b) => {
-    if (sortBy === 'ats_score') {
+    if (sortBy === 'company') {
+      return (a.company_name || '').localeCompare(b.company_name || '');
+    } else if (sortBy === 'stage') {
+      return (a.current_stage || '').localeCompare(b.current_stage || '');
+    } else if (sortBy === 'match_score') {
+      return (b.resume_match_score || b.match_score || 0) - (a.resume_match_score || a.match_score || 0);
+    } else if (sortBy === 'ats_score') {
       return (b.ats_score || 0) - (a.ats_score || 0);
+    } else if (sortBy === 'application_date') {
+      return new Date(b.created_at || 0) - new Date(a.created_at || 0);
     }
-    return new Date(b.last_activity) - new Date(a.last_activity);
+    // Default: last_activity / updated_at
+    return new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0);
   });
 
-  const renderLogo = (name) => {
-    const letters = name ? name.substring(0, 2).toUpperCase() : 'AF';
-    const bgColors = [
-      'bg-indigo-650 text-indigo-50',
-      'bg-emerald-600 text-emerald-50',
-      'bg-amber-600 text-amber-50',
-      'bg-blue-600 text-blue-50',
-      'bg-purple-600 text-purple-50',
-      'bg-pink-600 text-pink-50',
-      'bg-rose-600 text-rose-50'
-    ];
-    const index = name ? name.charCodeAt(0) % bgColors.length : 0;
-    return (
-      <div className={`w-9 h-9 rounded-xl ${bgColors[index]} font-black text-[11px] flex items-center justify-center shadow-xs shrink-0 select-none`}>
-        {letters}
-      </div>
-    );
-  };
+  // Modal Tab Badges
+  const resumeReady = selectedApp?.resume_status === 'ready' || Boolean(selectedApp?.resume_version);
+  const coverLetterReady = selectedApp?.cover_letter_status === 'ready' || Boolean(selectedApp?.cover_letter_version);
+  const docBadgeCount = `${(resumeReady ? 1 : 0) + (coverLetterReady ? 1 : 0)}/2`;
+  const recruiterCount = selectedApp?.contacts?.length || 0;
+  const notesCount = selectedApp?.notes_list?.length || 0;
+  const followUpCount = selectedApp?.reminders?.filter(r => !r.is_completed)?.length || 0;
 
-  const renderStageBox = (stage) => {
-    const isOccupied = selectedApp?.current_stage === stage.id;
-    const isOver = dragOverStage === stage.id;
-    const isCompletedLinear = selectedApp && STAGE_ORDER[selectedApp.current_stage] > STAGE_ORDER[stage.id];
-    
-    const showAsCompleted = isCompletedLinear || (isOccupied && stage.id === 'Accepted');
-    const showAsRejected = isOccupied && stage.id === 'Rejected';
-    const showAsArchived = isOccupied && stage.id === 'Archived';
-
-    return (
-      <div
-        key={stage.id}
-        onDragOver={(e) => handleDragOver(e, stage.id)}
-        onDragLeave={handleDragLeave}
-        onDrop={(e) => handleDrop(e, stage.id)}
-        onClick={() => handleOpenStagePopup(stage.id)}
-        className={`w-[170px] shrink-0 p-3.5 rounded-2xl border transition-all duration-200 cursor-pointer relative ${
-          showAsCompleted && isOccupied ? 'border-emerald-500 shadow-xs bg-emerald-500/5' :
-          showAsRejected ? 'border-rose-500 shadow-xs bg-rose-500/5' :
-          showAsArchived ? 'border-zinc-500 shadow-xs bg-zinc-500/5' :
-          isOccupied 
-            ? 'border-[#00bda5] shadow-xs bg-white dark:bg-zinc-900/40' 
-            : isCompletedLinear
-            ? 'border-emerald-500/35 bg-emerald-500/5 dark:bg-emerald-950/10'
-            : 'border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-800 bg-white dark:bg-zinc-900/40'
-        } ${isOver ? 'ring-2 ring-[#00bda5] border-transparent bg-emerald-500/5' : ''}`}
-      >
-        <div className="flex items-center justify-between pb-1.5 mb-2 border-b border-zinc-200 dark:border-zinc-800/60 select-none">
-          <div className="flex items-center gap-1.5 min-w-0 w-full justify-between">
-            <div className="flex items-center gap-1.5 min-w-0">
-              {showAsCompleted ? (
-                <Check className="w-3 h-3 text-emerald-500 shrink-0 stroke-[3.5]" />
-              ) : showAsRejected ? (
-                <X className="w-3 h-3 text-rose-500 shrink-0 stroke-[3.5]" />
-              ) : showAsArchived ? (
-                <Archive className="w-3 h-3 text-zinc-500 shrink-0 stroke-[3.5]" />
-              ) : (
-                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: stage.color }} />
-              )}
-              <span className={`text-[8.5px] font-black uppercase tracking-wider truncate ${
-                showAsCompleted ? 'text-emerald-600 dark:text-emerald-500' :
-                showAsRejected ? 'text-rose-600 dark:text-rose-500' :
-                showAsArchived ? 'text-zinc-600 dark:text-zinc-400' :
-                'text-zinc-950 dark:text-zinc-50'
-              }`}>
-                {stage.label}
-              </span>
-            </div>
-            {showAsCompleted && (
-              <span className="text-[7.5px] font-black text-emerald-600 dark:text-emerald-500 uppercase tracking-widest leading-none bg-emerald-500/10 dark:bg-emerald-500/20 px-1 py-0.5 rounded shrink-0">
-                {isOccupied ? 'Won' : 'Done'}
-              </span>
-            )}
-            {showAsRejected && (
-              <span className="text-[7.5px] font-black text-rose-600 dark:text-rose-500 uppercase tracking-widest leading-none bg-rose-500/10 dark:bg-rose-500/20 px-1 py-0.5 rounded shrink-0">
-                Closed
-              </span>
-            )}
-            {showAsArchived && (
-              <span className="text-[7.5px] font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest leading-none bg-zinc-500/10 dark:bg-zinc-500/20 px-1 py-0.5 rounded shrink-0">
-                Closed
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Active application card occupant */}
-        {isOccupied ? (
-          <div
-            draggable
-            onDragStart={(e) => handleDragStart(e, selectedApp?.id)}
-            onDragEnd={handleDragEnd}
-            onClick={(e) => e.stopPropagation()}
-            className="p-2.5 bg-zinc-50/40 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-855 rounded-xl select-none space-y-1.5 cursor-grab active:cursor-grabbing hover:shadow-3xs transition-all relative z-10 text-zinc-800 dark:text-zinc-200"
-          >
-            <h5 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 leading-tight truncate">
-              {selectedApp?.job_title}
-            </h5>
-            <p className="text-[8.5px] text-zinc-500 font-bold truncate leading-none">
-              {selectedApp?.company_name}
-            </p>
-            
-            <div className="pt-1.5 border-t border-zinc-100 dark:border-zinc-800/40 flex justify-between items-center text-[7.5px] text-zinc-400 font-bold">
-              <div className="flex gap-2">
-                <span>Match: {selectedApp?.resume_match_score != null ? `${Math.round(selectedApp.resume_match_score)}%` : '—'}</span>
-                <span>|</span>
-                <span>ATS: {selectedApp?.ats_score != null ? `${Math.round(selectedApp.ats_score)}/100` : '—'}</span>
-              </div>
-              <span>{calculateDuration(selectedApp?.created_at)}</span>
-            </div>
-          </div>
-        ) : (
-          <div className="border border-dashed border-zinc-200 dark:border-zinc-850 rounded-xl py-4 flex items-center justify-center select-none bg-zinc-50/10 dark:bg-zinc-900/10">
-            <span className="text-[8px] font-black text-zinc-400 uppercase tracking-widest leading-none">
-              Drop Here
-            </span>
-          </div>
-        )}
-      </div>
-    );
-  };
+  const TABS = [
+    { id: 'Overview', label: 'Overview' },
+    { id: 'Workflow', label: 'Workflow' },
+    { id: 'Documents', label: 'Documents', badge: docBadgeCount },
+    { id: 'Recruiter', label: 'Recruiter', badge: recruiterCount > 0 ? recruiterCount : null },
+    { id: 'Timeline', label: 'Timeline' },
+    { id: 'Notes', label: 'Notes', badge: notesCount > 0 ? notesCount : null },
+    { id: 'History', label: 'History' }
+  ];
 
   return (
-    <div className="flex-1 flex gap-6 min-h-0 bg-transparent text-zinc-800 dark:text-zinc-200 select-none">
+    <div className="flex-1 flex flex-col h-full overflow-y-auto custom-scrollbar bg-zinc-50/60 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 relative font-sans">
       
-      {/* LEFT PANEL: minimal searchable applications browser */}
-      <div className="w-[30%] min-w-[300px] max-w-[330px] flex flex-col h-full border-r border-zinc-200 dark:border-zinc-800 pr-6 shrink-0 min-h-0 select-none">
-        
-        <div className="border-b border-zinc-200 dark:border-zinc-800 pb-4 mb-4 shrink-0">
-          <h1 className="text-lg font-black tracking-tight text-zinc-900 dark:text-zinc-50 flex items-center gap-2">
-            <Briefcase size={18} className="text-[#00bda5]" /> Job Tracker
-          </h1>
-          <p className="text-[9px] text-zinc-500 dark:text-zinc-400 font-bold uppercase tracking-widest mt-0.5">
-            Lightweight Directory Browser
-          </p>
-        </div>
+      {/* Subtle Ambient Background Gradient */}
+      <div className="absolute inset-0 bg-gradient-to-tr from-teal-500/5 via-blue-500/5 to-purple-500/5 pointer-events-none" />
 
-        <div className="relative mb-3 shrink-0">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
-          <input
-            type="text"
-            placeholder="Search applications..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full text-xs font-semibold pl-9 pr-3 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 rounded-xl focus:outline-hidden focus:border-[#00bda5]"
-          />
-        </div>
+      <main className="w-full space-y-6 z-10">
 
-        <div className="flex flex-wrap gap-1 mb-3 shrink-0 select-none">
-          {['All', 'Active', 'Interviewing', 'Offers', 'Closed'].map(tab => (
-            <button
-              key={tab}
-              onClick={() => setFilterTab(tab)}
-              className={`px-2.5 py-1.5 rounded-lg text-[8.5px] font-black uppercase tracking-wider transition cursor-pointer border-none ${
-                filterTab === tab
-                  ? 'bg-[#00bda5]/10 text-[#00bda5]'
-                  : 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 bg-transparent'
-              }`}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
 
-        <div className="flex justify-between items-center text-[8.5px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-3 shrink-0">
-          <span>Directory ({sortedApps.length})</span>
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-            className="bg-transparent text-[8.5px] font-black uppercase border-none text-[#00bda5] cursor-pointer focus:outline-hidden"
+
+        {/* 2. COMPACT SUMMARY STRIP (INTERACTIVE FILTER PILLS) */}
+        <section className="flex items-center gap-2 overflow-x-auto custom-scrollbar pb-1">
+          <button
+            onClick={() => setStageFilter('Active')}
+            className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              stageFilter === 'Active'
+                ? 'bg-teal-50 dark:bg-teal-950/40 border-teal-300 dark:border-teal-800 text-teal-700 dark:text-teal-300 shadow-2xs'
+                : 'bg-white/80 dark:bg-zinc-900/80 border-zinc-200/80 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-zinc-300'
+            }`}
           >
-            <option value="last_activity" className="bg-white dark:bg-zinc-950">Activity</option>
-            <option value="ats_score" className="bg-white dark:bg-zinc-950">ATS Score</option>
-          </select>
-        </div>
+            <span className="w-2 h-2 rounded-full bg-teal-500" />
+            <span>Active Applications</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-zinc-100 dark:bg-zinc-800 text-[10px]">{activeAppsCount}</span>
+          </button>
 
-        {/* Listing cards list */}
-        <div className="flex-1 overflow-y-auto space-y-2.5 pr-1.5 custom-scrollbar pb-6 min-h-0">
-          {sortedApps.length > 0 ? (
-            sortedApps.map(app => {
-              if (!app) return null;
-              const isSelected = selectedAppId === app.id;
-              return (
-                <div
-                  key={app.id}
-                  onClick={() => setSelectedAppId(app.id)}
-                  className={`p-4 bg-white dark:bg-zinc-950 border rounded-2xl cursor-pointer hover:border-zinc-400 dark:hover:border-zinc-700 transition relative flex gap-3.5 ${
-                    isSelected 
-                      ? 'ring-2 ring-[#00bda5] border-transparent bg-emerald-50 dark:bg-emerald-950/20 shadow-sm' 
-                      : 'border-zinc-200 dark:border-zinc-800 shadow-sm'
-                  }`}
-                >
-                  {renderLogo(app.company_name)}
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <h4 className="text-[11.5px] font-black text-zinc-950 dark:text-zinc-50 truncate leading-tight">
-                      {app.job_title}
-                    </h4>
-                    <p className="text-[10px] text-zinc-500 dark:text-zinc-500 font-bold truncate">
-                      {app.company_name}
-                    </p>
+          <button
+            onClick={() => setStageFilter('Preparing')}
+            className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              stageFilter === 'Preparing'
+                ? 'bg-blue-50 dark:bg-blue-950/40 border-blue-300 dark:border-blue-800 text-blue-700 dark:text-blue-300 shadow-2xs'
+                : 'bg-white/80 dark:bg-zinc-900/80 border-zinc-200/80 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-zinc-300'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-blue-500" />
+            <span>Preparing</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-zinc-100 dark:bg-zinc-800 text-[10px]">{preparingCount}</span>
+          </button>
 
-                    <div className="flex justify-between items-center text-[8px] text-zinc-400 font-black uppercase pt-2 mt-2 border-t border-zinc-100 dark:border-zinc-800/50">
-                      <span className="text-[#00bda5] font-black">
-                        {app.current_stage}
-                      </span>
-                      <div className="flex gap-2">
-                        <span>Match {app.resume_match_score != null ? `${Math.round(app.resume_match_score)}%` : '—'}</span>
-                        <span>|</span>
-                        <span>ATS {app.ats_score != null ? `${Math.round(app.ats_score)}/100` : '—'}</span>
-                      </div>
-                    </div>
+          <button
+            onClick={() => setStageFilter('Applied')}
+            className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              stageFilter === 'Applied'
+                ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 shadow-2xs'
+                : 'bg-white/80 dark:bg-zinc-900/80 border-zinc-200/80 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-zinc-300'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-indigo-500" />
+            <span>Applied</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-zinc-100 dark:bg-zinc-800 text-[10px]">{appliedCount}</span>
+          </button>
 
-                    <div className="text-[7.5px] text-zinc-400 font-bold flex justify-between uppercase mt-0.5">
-                      <span>Res: {app.resume_version || 'v1'}</span>
-                      <span>Applied: {formatSafeDate(app.created_at)}</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })
-          ) : (
-            <div className="h-44 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-2xl flex flex-col items-center justify-center p-4 text-center">
-              <AlertCircle size={20} className="text-zinc-400 mb-2" />
-              <p className="text-[10px] text-zinc-500 font-black uppercase tracking-wider leading-relaxed">
-                No tracked applications found.
-              </p>
-            </div>
-          )}
-        </div>
+          <button
+            onClick={() => setStageFilter('Interviewing')}
+            className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              stageFilter === 'Interviewing'
+                ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-300 shadow-2xs'
+                : 'bg-white/80 dark:bg-zinc-900/80 border-zinc-200/80 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-zinc-300'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-amber-500" />
+            <span>Interviewing</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-zinc-100 dark:bg-zinc-800 text-[10px]">{interviewingCount}</span>
+          </button>
 
-      </div>
+          <button
+            onClick={() => setStageFilter('Offers')}
+            className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              stageFilter === 'Offers'
+                ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 shadow-2xs'
+                : 'bg-white/80 dark:bg-zinc-900/80 border-zinc-200/80 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-zinc-300'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            <span>Offers</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-zinc-100 dark:bg-zinc-800 text-[10px]">{offersCount}</span>
+          </button>
 
-      {/* Placeholder layout */}
-      <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-zinc-50/10 dark:bg-zinc-900/10 rounded-3xl border border-dashed border-zinc-200 dark:border-zinc-800 self-stretch my-1 select-none">
-        <Building size={32} className="text-zinc-400 dark:text-zinc-600 mb-2.5 animate-pulse" />
-        <h3 className="text-xs font-black uppercase text-zinc-950 dark:text-zinc-200 tracking-wider">
-          Launch Orchestration Pipeline
-        </h3>
-        <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold max-w-sm mt-1 uppercase tracking-wider leading-relaxed">
-          Click on any application card in the left list directory to open the large centered modal and visualize the Databricks/Airflow hiring pipeline.
-        </p>
-      </div>
+          <button
+            onClick={() => setReadinessFilter(readinessFilter === 'followup_due' ? 'All' : 'followup_due')}
+            className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              readinessFilter === 'followup_due'
+                ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 shadow-2xs'
+                : 'bg-white/80 dark:bg-zinc-900/80 border-zinc-200/80 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:border-zinc-300'
+            }`}
+          >
+            <Bell size={13} className="text-rose-500" />
+            <span>Follow-ups Due</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 text-[10px] font-extrabold">{followupsDueCount}</span>
+          </button>
+        </section>
 
-      {/* LARGE APPLICATION WORKSPACE MODAL (90vw x 90vh) */}
-      {selectedApp && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-xs select-text animate-fadeIn p-4 sm:p-6">
+        {/* 3. SEARCH AND FILTER TOOLBAR (FULL WIDTH) */}
+        <section className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md p-4 rounded-3xl border border-zinc-200/80 dark:border-zinc-800 shadow-xs space-y-3">
           
-          {/* Backdrop Close intercept */}
-          <div className="absolute inset-0 z-0" onClick={() => setSelectedAppId(null)} />
-
-          <div className="w-[94vw] h-[92vh] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-2xl flex flex-col overflow-hidden relative z-10 animate-scaleUp">
-            
-            {/* Modal Header */}
-            <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-start shrink-0 select-none bg-zinc-50/20 dark:bg-zinc-950/20">
-              <div className="flex gap-4 items-start min-w-0">
-                {renderLogo(selectedApp?.company_name)}
-                <div className="min-w-0 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[9px] bg-[#00bda5]/10 text-[#00bda5] px-2 py-0.5 rounded font-black uppercase tracking-wider border border-[#00bda5]/20">
-                      {selectedApp?.current_stage}
-                    </span>
-                    <span className="text-[9px] bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded font-black uppercase border border-indigo-100/30 dark:border-indigo-900/30">
-                      Match: {selectedApp?.resume_match_score != null ? `${Math.round(selectedApp.resume_match_score)}%` : '—'}
-                    </span>
-                    <span className="text-[9px] bg-[#00bda5]/10 text-[#00bda5] px-2 py-0.5 rounded font-black uppercase border border-[#00bda5]/20">
-                      ATS: {selectedApp?.ats_score != null ? `${Math.round(selectedApp.ats_score)}/100` : '—'}
-                    </span>
-                    <span className="text-[9px] bg-zinc-200/40 dark:bg-zinc-900 text-zinc-500 px-2 py-0.5 rounded font-black uppercase border border-zinc-200/50 dark:border-zinc-800">
-                      Res: {selectedApp?.resume_version || 'v1'}
-                    </span>
-                    {selectedApp?.location && (
-                      <span className="text-[9px] text-zinc-500 font-bold flex items-center gap-1">
-                        <MapPin size={11} className="text-zinc-400" /> {selectedApp?.location}
-                      </span>
-                    )}
-                  </div>
-                  <h2 className="text-base sm:text-lg font-black text-zinc-950 dark:text-zinc-50 leading-tight truncate">
-                    {selectedApp?.job_title}
-                  </h2>
-                  <p className="text-xs font-bold text-zinc-500 flex items-center gap-1.5 mt-0.5">
-                    <Building size={13} /> {selectedApp?.company_name} • Applied {formatSafeDate(selectedApp?.created_at)}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0 select-none">
-                {selectedApp?.job_url && (
-                  <a
-                    href={selectedApp?.job_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="p-2 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-600 dark:text-zinc-400 font-extrabold text-[9px] uppercase tracking-wider rounded-xl transition flex items-center gap-1 cursor-pointer select-none bg-white dark:bg-transparent"
-                  >
-                    View Source <ExternalLink size={11} />
-                  </a>
-                )}
-                <button
-                  onClick={() => handleDeleteApp(selectedApp?.id)}
-                  className="p-2 border border-rose-200 dark:border-rose-950/40 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-600 rounded-xl transition cursor-pointer bg-white dark:bg-transparent"
-                >
-                  <Trash2 size={15} />
+          {/* Row 1: Search & Stage Pills */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            {/* Search Input */}
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+              <input
+                type="text"
+                placeholder="Search by role title, company, or location..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200/80 dark:border-zinc-800 rounded-xl text-xs font-medium text-zinc-900 dark:text-white placeholder-zinc-400 focus:outline-none focus:border-teal-500 transition-colors"
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600">
+                  <X size={13} />
                 </button>
-                <button
-                  onClick={() => setSelectedAppId(null)}
-                  className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-900 rounded-xl text-zinc-400 hover:text-zinc-700 transition cursor-pointer border-none bg-transparent"
-                >
-                  <X size={20} />
-                </button>
-              </div>
+              )}
             </div>
 
-            {/* Modal horizontal tabs */}
-            <div className="flex px-6 border-b border-zinc-200 dark:border-zinc-800 shrink-0 select-none bg-zinc-50/50 dark:bg-zinc-900/10">
-              {['Workflow', 'Overview', 'Timeline', 'Documents', 'Recruiter', 'Notes', 'History'].map(tab => (
+            {/* Stage Filter Buttons */}
+            <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar">
+              {['All', 'Active', 'Preparing', 'Applied', 'Interviewing', 'Offers', 'Closed'].map((st) => (
                 <button
-                  key={tab}
-                  onClick={() => {
-                    setWorkspaceTab(tab);
-                    setActiveStageEditPopup(null);
-                  }}
-                  className={`px-4 py-3 text-[10px] font-black uppercase tracking-wider transition-all border-b-2 border-transparent cursor-pointer bg-transparent ${
-                    workspaceTab === tab
-                      ? 'border-[#00bda5] text-[#00bda5]'
-                      : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+                  key={st}
+                  onClick={() => setStageFilter(st)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    stageFilter === st
+                      ? 'bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400 border border-teal-200 dark:border-teal-800 shadow-2xs'
+                      : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
                   }`}
                 >
-                  {tab}
+                  {st}
                 </button>
               ))}
             </div>
+          </div>
 
-            {/* Modal tab content */}
-            <div className="flex-1 overflow-y-auto p-6 min-h-0 bg-zinc-50/10 dark:bg-zinc-950/10 custom-scrollbar select-text">
-              
-              {/* TAB 1: WORKFLOW STAGE PIPELINE */}
-              {workspaceTab === 'Workflow' && (
-                <div className="w-full h-full flex items-center justify-start py-12 px-6 overflow-x-auto custom-scrollbar select-none animate-fadeIn">
-                  
-                  {/* Primary flow layout */}
-                  <div className="flex items-center shrink-0">
-                    {WORKFLOW_STAGES.map((stage, idx) => (
-                      <div className="flex items-center" key={stage.id}>
-                        {renderStageBox(stage)}
-                        
-                        {/* Horizontal Connector Line */}
-                        {idx < WORKFLOW_STAGES.length - 1 && (
-                          <div className="w-8 h-0.5 bg-zinc-200 dark:bg-zinc-800 shrink-0" />
-                        )}
-                      </div>
-                    ))}
-                  </div>
+          {/* Row 2: Additional Filters, Sort & View Switcher */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-zinc-100 dark:border-zinc-800 text-xs">
+            
+            {/* Additional Filter Dropdowns */}
+            <div className="flex items-center gap-2">
+              <select
+                value={readinessFilter}
+                onChange={(e) => setReadinessFilter(e.target.value)}
+                className="px-3 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-semibold text-zinc-700 dark:text-zinc-300 focus:outline-none cursor-pointer"
+              >
+                <option value="All">All Document States</option>
+                <option value="resume_pending">Resume Pending</option>
+                <option value="cover_letter_pending">Cover Letter Pending</option>
+                <option value="followup_due">Follow-up Due</option>
+              </select>
 
-                  {/* Branching vertical line on the right of Offer stage */}
-                  <div className="flex items-center shrink-0 select-none">
-                    {/* Horizontal link coming out of Offer Received */}
-                    <div className="w-8 h-0.5 bg-zinc-200 dark:bg-zinc-800 shrink-0" />
-                    
-                    {/* Vertical branching track bar of height 300px for better spacing */}
-                    <div className="w-0.5 h-[300px] bg-zinc-200 dark:bg-zinc-800 relative shrink-0">
-                      {/* Top outlet branch line to Accepted */}
-                      <div className="absolute left-0 top-0 w-8 h-0.5 bg-zinc-200 dark:bg-zinc-800" />
-                      {/* Middle outlet branch line to Rejected */}
-                      <div className="absolute left-0 top-1/2 -translate-y-1/2 w-8 h-0.5 bg-zinc-200 dark:bg-zinc-800" />
-                      {/* Bottom outlet branch line to Archived */}
-                      <div className="absolute left-0 bottom-0 w-8 h-0.5 bg-zinc-200 dark:bg-zinc-800" />
-                    </div>
-                  </div>
-
-                  {/* Terminal outcome stages stacked vertically, matching outlets */}
-                  <div className="flex flex-col justify-between h-[320px] ml-8 shrink-0 select-none">
-                    {TERMINAL_STAGES.map((tStage) => renderStageBox(tStage))}
-                  </div>
-
-                </div>
+              {(searchQuery || stageFilter !== 'All' || readinessFilter !== 'All') && (
+                <button
+                  onClick={() => { setSearchQuery(''); setStageFilter('All'); setReadinessFilter('All'); }}
+                  className="px-2.5 py-1.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-white font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  <RefreshCw size={12} /> Reset
+                </button>
               )}
+            </div>
 
-              {/* TAB 2: OVERVIEW */}
-              {workspaceTab === 'Overview' && (
-                <div className="space-y-6 animate-fadeIn select-text">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                    <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-1">
-                      <span className="text-[8.5px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest block">Current Stage</span>
-                      <span className="text-base font-black text-[#00bda5]">{selectedApp?.current_stage}</span>
-                    </div>
-                    <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 flex flex-col justify-center space-y-1">
-                      <span className="text-[8.5px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest block mb-0.5">Scoring Overview</span>
-                      <div className="flex justify-between items-baseline">
-                        <span className="text-[9px] font-black text-zinc-400 uppercase tracking-wider">Resume Match</span>
-                        <span className="text-sm font-black text-indigo-500 dark:text-indigo-400">
-                          {selectedApp?.resume_match_score != null ? `${Math.round(selectedApp.resume_match_score)}%` : '—'}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-baseline border-t border-zinc-100 dark:border-zinc-800/40 pt-1">
-                        <span className="text-[9px] font-black text-zinc-400 uppercase tracking-wider">ATS Score</span>
-                        <span className="text-sm font-black text-[#00bda5]">
-                          {selectedApp?.ats_score != null ? `${Math.round(selectedApp.ats_score)}/100` : '—'}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-1">
-                      <span className="text-[8.5px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest block">Last Activity Logged</span>
-                      <span className="text-base font-black text-zinc-700 dark:text-zinc-300">
-                        {formatSafeDate(selectedApp?.last_activity)}
-                      </span>
-                    </div>
-                  </div>
+            {/* Sort & View Switcher */}
+            <div className="flex items-center gap-3">
+              {/* Sort Dropdown */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-zinc-400 font-medium text-[11px]">Sort:</span>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="px-3 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-semibold text-zinc-700 dark:text-zinc-300 focus:outline-none cursor-pointer"
+                >
+                  <option value="last_activity">Last Activity</option>
+                  <option value="application_date">Application Date</option>
+                  <option value="company">Company</option>
+                  <option value="stage">Stage</option>
+                  <option value="match_score">Match Score</option>
+                  <option value="ats_score">ATS Score</option>
+                </select>
+              </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
-                    <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl space-y-3">
-                      <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-950 dark:text-zinc-50">General remarks</h4>
-                      <p className="text-xs text-zinc-500 leading-relaxed font-semibold whitespace-pre-wrap">
-                        {selectedApp?.notes || "No general remarks recorded yet. Update logs inside the 'Notes' tab."}
-                      </p>
-                    </div>
-
-                    <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl space-y-3">
-                      <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-950 dark:text-zinc-50">Recruiter Details</h4>
-                      <p className="text-xs text-zinc-500 leading-relaxed font-semibold whitespace-pre-wrap">
-                        {selectedApp?.recruiter_notes || "No recruiter contact parameters logged. Update contact fields inside the 'Recruiter' tab."}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 3: TIMELINE */}
-              {workspaceTab === 'Timeline' && (
-                <div className="space-y-4 animate-fadeIn select-text">
-                  <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-950 dark:text-zinc-50 select-none pb-2 border-b border-zinc-200 dark:border-zinc-800">
-                    Activity transitions history
-                  </h4>
-
-                  <div className="space-y-3 relative pl-6 border-l border-zinc-200 dark:border-zinc-800 py-1">
-                    {selectedApp?.timeline && selectedApp?.timeline.length > 0 ? (
-                      selectedApp?.timeline.map((event, idx) => (
-                        <div key={idx} className="relative space-y-1">
-                          <div className="absolute -left-[20px] top-1.5 w-1.5 h-1.5 rounded-full bg-[#00bda5] border border-white dark:border-zinc-950" />
-                          <div className="flex justify-between text-[10px] font-black uppercase tracking-wider text-zinc-950 dark:text-zinc-50">
-                            <span>{event?.label || event?.event}</span>
-                            <span className="text-zinc-400 font-bold text-[8.5px]">
-                              {formatSafeDate(event?.timestamp, true)}
-                            </span>
-                          </div>
-                          {event?.notes && (
-                            <p className="text-[10.5px] text-zinc-500 italic leading-normal">
-                              "{event?.notes}"
-                            </p>
-                          )}
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-xs text-zinc-400 italic">No timeline entries found.</div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 4: DOCUMENTS */}
-              {workspaceTab === 'Documents' && (
-                <div className="space-y-5 animate-fadeIn select-none">
-                  <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-4">
-                    <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-950 dark:text-zinc-50 flex items-center gap-1.5">
-                      <FileText size={13} className="text-[#00bda5]" /> Tailored Resume PDFs
-                    </h4>
-                    <div className="flex justify-between items-center bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3.5">
-                      <div className="min-w-0">
-                        <span className="text-[10px] font-black uppercase block text-zinc-950 dark:text-zinc-50">Tailored Resume PDF</span>
-                        <span className="text-[8.5px] text-zinc-400 font-bold">Version: {selectedApp?.resume_version || 'v1'}</span>
-                      </div>
-                      <span className="text-[8px] bg-[#00bda5]/15 text-[#00bda5] px-1.5 py-0.5 rounded font-black uppercase">
-                        Downloaded
-                      </span>
-                    </div>
-                  </div>
-
-                  {selectedApp?.cover_letter_version && (
-                    <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-4 mt-4">
-                      <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-950 dark:text-zinc-50 flex items-center gap-1.5">
-                        <CheckCircle2 size={13} className="text-[#00bda5]" /> Cover Letter PDFs
-                      </h4>
-                      <div className="flex justify-between items-center bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3.5">
-                        <div className="min-w-0">
-                          <span className="text-[10px] font-black uppercase block text-zinc-950 dark:text-zinc-50">Generated Cover Letter PDF</span>
-                          <span className="text-[8.5px] text-zinc-400 font-bold">Version: v1</span>
-                        </div>
-                        <span className="text-[8px] bg-[#00bda5]/15 text-[#00bda5] px-1.5 py-0.5 rounded font-black uppercase">
-                          Generated
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* TAB 5: RECRUITER */}
-              {workspaceTab === 'Recruiter' && (
-                <div className="space-y-5 animate-fadeIn select-text">
-                  <div className="flex justify-between items-center select-none pb-2 border-b border-zinc-200 dark:border-zinc-800">
-                    <div>
-                      <h4 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest">Recruiter / HR Contacts</h4>
-                      <p className="text-[8px] text-zinc-400 font-bold uppercase mt-0.5">Editable details stored in Supabase</p>
-                    </div>
-                    <button
-                      onClick={handleSaveNotes}
-                      disabled={isSavingNotes}
-                      className="px-3.5 py-1.5 bg-[#00bda5] hover:bg-[#00a894] text-white font-extrabold text-[8.5px] uppercase tracking-wider rounded-lg transition border-none cursor-pointer shadow-xs"
-                    >
-                      {isSavingNotes ? "Saving..." : "Save details"}
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block flex items-center gap-1 select-none">
-                        <User size={10} /> Recruiter Names, Emails, Links
-                      </label>
-                      <textarea
-                        value={editRecruiterNotes}
-                        onChange={(e) => setEditRecruiterNotes(e.target.value)}
-                        placeholder="Recruiter contact name, email address, LinkedIn links..."
-                        className="w-full text-xs p-3 bg-zinc-50/40 dark:bg-zinc-900/20 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden focus:border-[#00bda5] font-semibold font-sans min-h-[110px]"
-                      />
-                    </div>
-
-                    <div className="p-5 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-50/10 dark:bg-zinc-900/10 space-y-4 select-none self-start">
-                      <h4 className="text-[9px] font-black uppercase tracking-widest text-zinc-500 flex items-center gap-1.5">
-                        <Lightbulb size={11} className="text-[#00bda5]" /> AI Email Assist
-                      </h4>
-                      <button
-                        onClick={handleGenerateFollowUp}
-                        disabled={isGeneratingEmail}
-                        className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-850 dark:hover:bg-zinc-700 text-white font-extrabold text-[9px] uppercase tracking-wider rounded-xl transition cursor-pointer border-none flex items-center justify-center gap-1"
-                      >
-                        {isGeneratingEmail ? "Generating..." : "Generate email template"}
-                      </button>
-
-                      {followUpEmail && (
-                        <div className="p-3 bg-white dark:bg-zinc-950 border border-zinc-200 rounded-xl relative mt-2 select-text">
-                          <pre className="text-[8.5px] text-zinc-750 dark:text-zinc-400 whitespace-pre-wrap select-text leading-normal font-sans">{followUpEmail}</pre>
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(followUpEmail);
-                              alert("Template copied!");
-                            }}
-                            className="absolute top-2 right-2 text-[7.5px] font-black bg-[#00bda5] text-white px-2 py-0.5 rounded cursor-pointer border-none uppercase"
-                          >
-                            Copy
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 6: NOTES */}
-              {workspaceTab === 'Notes' && (
-                <div className="space-y-5 animate-fadeIn select-text">
-                  <div className="flex justify-between items-center select-none pb-2 border-b border-zinc-200 dark:border-zinc-800">
-                    <div>
-                      <h4 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest">Interactive Logs & Notes</h4>
-                      <p className="text-[8px] text-zinc-400 font-bold uppercase mt-0.5">Editable details stored in Supabase</p>
-                    </div>
-                    <button
-                      onClick={handleSaveNotes}
-                      disabled={isSavingNotes}
-                      className="px-3.5 py-1.5 bg-[#00bda5] hover:bg-[#00a894] text-white font-extrabold text-[8.5px] uppercase tracking-wider rounded-lg transition border-none cursor-pointer shadow-xs"
-                    >
-                      {isSavingNotes ? "Saving..." : "Save details"}
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block select-none">General Notes & Remarks</label>
-                      <textarea
-                        value={editNotes}
-                        onChange={(e) => setEditNotes(e.target.value)}
-                        placeholder="Key milestones, referral codes..."
-                        className="w-full text-xs p-3 bg-zinc-50/40 dark:bg-zinc-900/20 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden focus:border-[#00bda5] font-semibold font-sans min-h-[90px]"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block select-none">Interview Prep Questions</label>
-                      <textarea
-                        value={editInterviewNotes}
-                        onChange={(e) => setEditInterviewNotes(e.target.value)}
-                        placeholder="Technical details questions preparation..."
-                        className="w-full text-xs p-3 bg-zinc-50/40 dark:bg-zinc-900/20 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden focus:border-[#00bda5] font-semibold font-sans min-h-[90px]"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block select-none">Salary Package & Expectations</label>
-                      <textarea
-                        value={editSalaryNotes}
-                        onChange={(e) => setEditSalaryNotes(e.target.value)}
-                        placeholder="Negotiation boundaries, base values, options grant..."
-                        className="w-full text-xs p-3 bg-zinc-50/40 dark:bg-zinc-900/20 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden focus:border-[#00bda5] font-semibold font-sans min-h-[90px]"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 7: HISTORICAL TRANSITIONS */}
-              {workspaceTab === 'History' && (
-                <div className="space-y-4 animate-fadeIn select-text">
-                  <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-950 dark:text-zinc-50 select-none pb-2 border-b border-zinc-200 dark:border-zinc-800">
-                    Pipeline Stage transition logs
-                  </h4>
-
-                  <div className="space-y-3 relative pl-6 border-l border-zinc-200 dark:border-zinc-800 py-1">
-                    {selectedApp?.timeline && selectedApp?.timeline.length > 0 ? (
-                      selectedApp?.timeline
-                        .filter(e => e?.event && e?.event.includes('Stage Metadata'))
-                        .map((event, idx) => (
-                          <div key={idx} className="relative space-y-1">
-                            <div className="absolute -left-[20px] top-1.5 w-1.5 h-1.5 rounded-full bg-[#00bda5]" />
-                            <div className="flex justify-between text-[10px] font-black uppercase tracking-wider text-zinc-950 dark:text-zinc-50">
-                              <span>{event?.label || event?.event}</span>
-                              <span className="text-zinc-400 font-bold text-[8.5px]">
-                                {formatSafeDate(event?.timestamp)}
-                              </span>
-                            </div>
-                          </div>
-                        ))
-                    ) : (
-                      <div className="text-xs text-zinc-500 italic">No stage changes recorded.</div>
-                    )}
-                  </div>
-                </div>
-              )}
-
+              {/* View Switcher */}
+              <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                <button
+                  onClick={() => setViewMode('cards')}
+                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                    viewMode === 'cards'
+                      ? 'bg-white dark:bg-zinc-900 text-teal-600 dark:text-teal-400 shadow-xs'
+                      : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
+                  }`}
+                  title="Card Grid View"
+                >
+                  <LayoutGrid size={15} />
+                </button>
+                <button
+                  onClick={() => setViewMode('list')}
+                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                    viewMode === 'list'
+                      ? 'bg-white dark:bg-zinc-900 text-teal-600 dark:text-teal-400 shadow-xs'
+                      : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
+                  }`}
+                  title="Compact List View"
+                >
+                  <List size={15} />
+                </button>
+              </div>
             </div>
 
           </div>
 
+        </section>
+
+        {/* 4. FULL-WIDTH APPLICATION CONTENT AREA */}
+        {loading ? (
+          /* SKELETON SHIMMER LOADING GRID */
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(320px,100%),1fr))] gap-5 animate-pulse">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div key={i} className="h-48 bg-white/70 dark:bg-zinc-900/70 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-4 space-y-4">
+                <div className="flex justify-between items-center">
+                  <div className="w-2/3 h-5 bg-zinc-200 dark:bg-zinc-800 rounded-md" />
+                  <div className="w-1/4 h-5 bg-zinc-200 dark:bg-zinc-800 rounded-full" />
+                </div>
+                <div className="w-1/2 h-4 bg-zinc-100 dark:bg-zinc-800 rounded-md" />
+                <div className="w-full h-12 bg-zinc-100 dark:bg-zinc-800/60 rounded-xl" />
+              </div>
+            ))}
+          </div>
+        ) : sortedApps.length === 0 ? (
+          /* EMPTY STATE */
+          <JobTrackerEmptyState
+            isFilterEmpty={applications.length > 0}
+            onClearFilters={() => { setSearchQuery(''); setStageFilter('All'); setReadinessFilter('All'); }}
+            onOpenExtensionGuide={() => window.open('https://tailorflow.ai', '_blank')}
+          />
+        ) : viewMode === 'cards' ? (
+          /* FULL-WIDTH RESPONSIVE CARD GRID (3 COLUMNS ON DESKTOP) */
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(320px,100%),1fr))] gap-5">
+            {sortedApps.map((app) => (
+              <JobCard
+                key={app.id}
+                application={app}
+                onSelect={(id) => handleOpenWorkspaceModal(id)}
+                onMoveStage={(app) => { handleOpenWorkspaceModal(app.id); setWorkspaceTab('Workflow'); }}
+                onAddNote={(app) => { handleOpenWorkspaceModal(app.id); setWorkspaceTab('Notes'); }}
+                onAddReminder={(app) => { handleOpenWorkspaceModal(app.id); setShowRemindersModal(true); }}
+                onViewSource={(app) => app.job_url && window.open(app.job_url, '_blank')}
+              />
+            ))}
+          </div>
+        ) : (
+          /* COMPACT LIST VIEW */
+          <div className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/80 dark:border-zinc-800 rounded-3xl overflow-hidden shadow-xs">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 font-bold uppercase tracking-wider text-zinc-500">
+                <tr>
+                  <th className="p-4">Application</th>
+                  <th className="p-4">Stage</th>
+                  <th className="p-4">Resume</th>
+                  <th className="p-4">Cover Letter</th>
+                  <th className="p-4">Match %</th>
+                  <th className="p-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+                {sortedApps.map((app) => {
+                  const rReady = app.resume_status === 'ready' || Boolean(app.resume_version);
+                  const cReady = app.cover_letter_status === 'ready' || Boolean(app.cover_letter_version);
+
+                  return (
+                    <tr
+                      key={app.id}
+                      onClick={() => handleOpenWorkspaceModal(app.id)}
+                      className="hover:bg-teal-50/40 dark:hover:bg-zinc-800/50 cursor-pointer transition-colors"
+                    >
+                      <td className="p-4 font-bold text-zinc-900 dark:text-white">
+                        <div>{app.job_title}</div>
+                        <div className="text-[11px] font-medium text-zinc-500">{app.company_name}</div>
+                      </td>
+                      <td className="p-4 font-semibold text-teal-600 dark:text-teal-400">
+                        {app.current_stage || 'Ready To Apply'}
+                      </td>
+                      <td className="p-4 font-semibold">
+                        {rReady ? <span className="text-emerald-600">Ready</span> : <span className="text-zinc-400">Pending</span>}
+                      </td>
+                      <td className="p-4 font-semibold">
+                        {cReady ? <span className="text-teal-600">Ready</span> : <span className="text-zinc-400">Pending</span>}
+                      </td>
+                      <td className="p-4 font-bold text-zinc-900 dark:text-white">
+                        {Math.round(app.resume_match_score || app.match_score || 60)}%
+                      </td>
+                      <td className="p-4 text-right">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleOpenWorkspaceModal(app.id); }}
+                          className="px-3 py-1 bg-teal-50 text-teal-700 border border-teal-200 dark:bg-teal-950 dark:text-teal-400 rounded-lg text-xs font-bold hover:bg-teal-100"
+                        >
+                          Details
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+      </main>
+
+      {/* 5. JOB APPLICATION WORKSPACE POP-UP MODAL (ENHANCED & CENTERING) */}
+      {showWorkspaceModal && selectedApp && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-3 md:p-6 animate-fade-in">
+          <div className={`bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl flex flex-col overflow-hidden shadow-2xl relative text-zinc-900 dark:text-zinc-100 transition-all duration-200 ${
+            isFullscreenPopup 
+              ? 'w-full h-full rounded-none border-none' 
+              : 'w-[94vw] max-w-[1500px] h-[90vh] max-h-[920px]'
+          }`}>
+            
+            {/* Pop-Up Modal Header */}
+            <div className="relative">
+              <JobWorkspaceHeader
+                application={selectedApp}
+                onMoveStage={() => setWorkspaceTab('Workflow')}
+                onEditJob={() => {
+                  setJobFormData({
+                    company_name: selectedApp.company_name || '',
+                    job_title: selectedApp.job_title || '',
+                    location: selectedApp.location || '',
+                    job_url: selectedApp.job_url || '',
+                    current_stage: selectedApp.current_stage || 'Ready To Apply'
+                  });
+                  setShowEditJobModal(true);
+                }}
+                onArchiveJob={() => handleArchiveJob(selectedApp.id)}
+                onDeleteJob={() => handleDeleteJob(selectedApp.id)}
+              />
+
+              {/* Controls: Fullscreen Expansion & Close X Buttons */}
+              <div className="absolute top-4 right-4 flex items-center gap-2 z-20">
+                <button
+                  onClick={() => setIsFullscreenPopup(!isFullscreenPopup)}
+                  className="p-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700"
+                  title={isFullscreenPopup ? 'Exit Fullscreen' : 'Fullscreen Expansion'}
+                >
+                  {isFullscreenPopup ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                </button>
+                <button
+                  onClick={() => setShowWorkspaceModal(false)}
+                  className="p-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700"
+                  title="Close Workspace Pop-Up (ESC)"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* STICKY TAB NAVIGATION BAR */}
+            <div className="px-4 md:px-6 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-between overflow-x-auto custom-scrollbar shrink-0 select-none shadow-xs sticky top-0 z-20">
+              <div className="flex items-center gap-1">
+                {TABS.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setWorkspaceTab(tab.id)}
+                    className={`px-4 py-3 text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer border-b-2 whitespace-nowrap ${
+                      workspaceTab === tab.id
+                        ? 'border-[#00bda5] text-[#00bda5] bg-teal-50/40 dark:bg-zinc-900'
+                        : 'border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800/50'
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    {tab.badge !== null && tab.badge !== undefined && (
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                        workspaceTab === tab.id
+                          ? 'bg-teal-100 text-teal-800 dark:bg-teal-950/40 dark:text-teal-300'
+                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+                      }`}>
+                        {tab.badge}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {/* Reminders Shortcut Button */}
+              <button
+                onClick={() => setShowRemindersModal(true)}
+                className="px-3 py-1.5 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700 shadow-xs my-1 shrink-0"
+              >
+                <Bell size={13} className="text-teal-600 dark:text-teal-400" />
+                <span>Reminders</span>
+                {followUpCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400 font-extrabold text-[10px]">
+                    {followUpCount}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* TAB CONTENT WORKSPACE CANVAS */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar bg-zinc-50/40 dark:bg-zinc-950 p-2 md:p-4 relative">
+              {workspaceTab === 'Overview' && (
+                <OverviewTab application={selectedApp} onNavigateTab={(tab) => setWorkspaceTab(tab)} />
+              )}
+              {workspaceTab === 'Workflow' && (
+                <WorkflowTab application={selectedApp} onUpdateStage={handleUpdateStage} />
+              )}
+              {workspaceTab === 'Documents' && (
+                <DocumentsTab application={selectedApp} />
+              )}
+              {workspaceTab === 'Recruiter' && (
+                <RecruiterTab application={selectedApp} onSaveContacts={handleSaveContacts} />
+              )}
+              {workspaceTab === 'Timeline' && (
+                <TimelineTab application={selectedApp} />
+              )}
+              {workspaceTab === 'Notes' && (
+                <NotesTab application={selectedApp} onSaveNotesList={handleSaveNotesList} />
+              )}
+              {workspaceTab === 'History' && (
+                <HistoryTab application={selectedApp} />
+              )}
+            </div>
+
+          </div>
         </div>
       )}
 
-      {/* STAGE METADATA POPUP SHEET */}
-      {activeStageEditPopup && selectedApp && (
-        <div className="fixed inset-0 z-55 flex items-center justify-center bg-black/60 backdrop-blur-xs select-text animate-fadeIn">
-          {/* Backdrop Click Intercept */}
-          <div className="absolute inset-0 z-0" onClick={() => setActiveStageEditPopup(null)} />
-          
-          <div className="w-[450px] max-w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-2xl p-6 relative z-10 space-y-4 max-h-[85vh] overflow-y-auto animate-scaleUp text-zinc-850 dark:text-zinc-200">
-            
-            <div className="flex justify-between items-center pb-3 border-b border-zinc-200 dark:border-zinc-800 select-none">
-              <div>
-                <span className="text-[8.5px] bg-[#00bda5]/15 text-[#00bda5] px-2 py-0.5 rounded font-black uppercase tracking-wider border border-[#00bda5]/15">
-                  Metadata Options
-                </span>
-                <h3 className="text-sm font-black text-zinc-950 dark:text-zinc-50 mt-2">
-                  {activeStageEditPopup} details for {selectedApp?.company_name}
-                </h3>
-              </div>
-              <button
-                onClick={() => setActiveStageEditPopup(null)}
-                className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-900 rounded-lg text-zinc-500 border-none cursor-pointer bg-transparent"
-              >
+      {/* MODAL 1: EDIT JOB DETAILS MODAL */}
+      {showEditJobModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-fade-in">
+          <form onSubmit={handleEditJobDetails} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-md p-5 space-y-4 shadow-2xl text-zinc-900 dark:text-zinc-100">
+            <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-3">
+              <h3 className="text-sm font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                <FileEdit size={16} className="text-teal-600 dark:text-teal-400" />
+                Edit Application Details
+              </h3>
+              <button type="button" onClick={() => setShowEditJobModal(false)} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-white">
                 <X size={16} />
               </button>
             </div>
 
-            <div className="space-y-4 text-xs">
-              
-              {/* Ready to Apply Checklists */}
-              {activeStageEditPopup === 'Ready To Apply' && (
-                <div className="space-y-3.5">
-                  {['Resume Ready', 'Cover Letter Ready', 'Portfolio Added', 'Referral'].map((chk) => (
-                    <label key={chk} className="flex items-center gap-3 font-bold text-zinc-700 dark:text-zinc-400 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={!!popupFields[chk]}
-                        onChange={(e) => setPopupFields({ ...popupFields, [chk]: e.target.checked })}
-                        className="w-4 h-4 rounded text-[#00bda5] border-zinc-300 focus:ring-[#00bda5] dark:bg-zinc-950 dark:border-zinc-800"
-                      />
-                      <span>{chk}</span>
-                    </label>
-                  ))}
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Ready notes</label>
-                    <textarea
-                      value={popupFields.notes || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, notes: e.target.value })}
-                      placeholder="Notes for applying..."
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-800 dark:text-zinc-200 font-sans"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Applied Popup Fields */}
-              {activeStageEditPopup === 'Applied' && (
-                <div className="space-y-3.5">
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Application Date</label>
-                    <input
-                      type="date"
-                      value={popupFields.applied_date || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, applied_date: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-600"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Resume Version Used</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. v1 (Tailored)"
-                      value={popupFields.resume_version || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, resume_version: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-600"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Job Description URL</label>
-                    <input
-                      type="text"
-                      placeholder="https://company.com/job..."
-                      value={popupFields.job_url || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, job_url: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-600"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Assessment Popup Fields */}
-              {activeStageEditPopup === 'Assessment' && (
-                <div className="space-y-3.5">
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Status</label>
-                    <select
-                      value={popupFields.status || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, status: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-600"
-                    >
-                      <option value="">Select Status</option>
-                      {['Passed', 'Failed', 'Scheduled', 'Waiting', 'Ghosted'].map((opt) => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Assessment Link</label>
-                    <input
-                      type="text"
-                      placeholder="HackerRank link..."
-                      value={popupFields.assess_link || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, assess_link: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-600"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Recruiter Contact Popup Fields */}
-              {activeStageEditPopup === 'Recruiter' && (
-                <div className="space-y-3.5">
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Recruiter Name</label>
-                    <input
-                      type="text"
-                      placeholder="John Doe"
-                      value={popupFields.recruiter_name || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, recruiter_name: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-600"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Recruiter Email</label>
-                    <input
-                      type="email"
-                      placeholder="recruiter@company.com"
-                      value={popupFields.recruiter_email || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, recruiter_email: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-600"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">LinkedIn Profile</label>
-                    <input
-                      type="text"
-                      placeholder="https://linkedin.com/in/..."
-                      value={popupFields.linkedin || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, linkedin: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-hidden text-zinc-600"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Status</label>
-                    <select
-                      value={popupFields.status || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, status: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
-                    >
-                      <option value="">Select Status</option>
-                      {['Waiting', 'Responded', 'Follow Up', 'Ghosted'].map(opt => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
-
-              {/* Interview Popup Fields */}
-              {activeStageEditPopup === 'Interview' && (
-                <div className="space-y-3.5">
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Interview Type</label>
-                    <select
-                      value={popupFields.type || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, type: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
-                    >
-                      <option value="">Select Type</option>
-                      {['Technical', 'Managerial', 'HR'].map(opt => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Round Number</label>
-                    <input
-                      type="number"
-                      placeholder="e.g. 1"
-                      value={popupFields.round || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, round: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Outcome</label>
-                    <select
-                      value={popupFields.outcome || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, outcome: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
-                    >
-                      <option value="">Select Outcome</option>
-                      {['Passed', 'Failed', 'Rescheduled', 'Waiting'].map(opt => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
-
-              {/* Final Round Popup Fields */}
-              {activeStageEditPopup === 'Final Round' && (
-                <div className="space-y-3.5">
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Outcome</label>
-                    <select
-                      value={popupFields.outcome || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, outcome: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
-                    >
-                      <option value="">Select Outcome</option>
-                      {['Passed', 'Failed', 'Waiting'].map(opt => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
-
-              {/* Offer Received Popup Fields */}
-              {activeStageEditPopup === 'Offer' && (
-                <div className="space-y-3.5">
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Salary Parameters</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. $140,000 base + options"
-                      value={popupFields.salary || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, salary: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Negotiation Remarks</label>
-                    <input
-                      type="text"
-                      placeholder="Counter offered base..."
-                      value={popupFields.negotiation || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, negotiation: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Accepted Fields */}
-              {activeStageEditPopup === 'Accepted' && (
-                <div className="space-y-3.5">
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Expected Joining Date</label>
-                    <input
-                      type="date"
-                      value={popupFields.joining_date || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, joining_date: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Package Details</label>
-                    <input
-                      type="text"
-                      placeholder="Final confirmed package details..."
-                      value={popupFields.package_details || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, package_details: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Rejected Fields */}
-              {activeStageEditPopup === 'Rejected' && (
-                <div className="space-y-3.5">
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Reason</label>
-                    <select
-                      value={popupFields.reason || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, reason: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
-                    >
-                      <option value="">Select Reason</option>
-                      {['Salary too low', 'Selected another company', 'Didn\'t clear', 'Company withdrew'].map(opt => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
-
-              {/* Archived Fields */}
-              {activeStageEditPopup === 'Archived' && (
-                <div className="space-y-3.5">
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block">Reason</label>
-                    <select
-                      value={popupFields.reason || ''}
-                      onChange={(e) => setPopupFields({ ...popupFields, reason: e.target.value })}
-                      className="w-full text-xs p-2.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600"
-                    >
-                      <option value="">Select Reason</option>
-                      {['Old application', 'No response', 'Closed'].map(opt => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
-
-              {/* Save footer buttons */}
-              <div className="flex justify-end gap-2 pt-3 border-t border-zinc-200 dark:border-zinc-800 select-none">
-                <button
-                  onClick={() => setActiveStageEditPopup(null)}
-                  className="px-4 py-2 text-[10px] font-black uppercase tracking-wider hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-500 rounded-xl border-none bg-transparent cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => handleSaveStageMetadata(activeStageEditPopup)}
-                  className="px-4.5 py-2 bg-[#00bda5] hover:bg-[#00a894] text-white font-black text-[10px] uppercase tracking-wider rounded-xl border-none cursor-pointer shadow-xs"
-                >
-                  Save Changes
-                </button>
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Company Name</label>
+                <input
+                  type="text"
+                  value={jobFormData.company_name}
+                  onChange={(e) => setJobFormData({ ...jobFormData, company_name: e.target.value })}
+                  className="w-full p-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-teal-500"
+                />
               </div>
 
+              <div>
+                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Role Title</label>
+                <input
+                  type="text"
+                  value={jobFormData.job_title}
+                  onChange={(e) => setJobFormData({ ...jobFormData, job_title: e.target.value })}
+                  className="w-full p-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-teal-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Location</label>
+                <input
+                  type="text"
+                  value={jobFormData.location}
+                  onChange={(e) => setJobFormData({ ...jobFormData, location: e.target.value })}
+                  className="w-full p-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-teal-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Job URL</label>
+                <input
+                  type="url"
+                  value={jobFormData.job_url}
+                  onChange={(e) => setJobFormData({ ...jobFormData, job_url: e.target.value })}
+                  className="w-full p-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-teal-500"
+                />
+              </div>
             </div>
 
-          </div>
+            <div className="flex justify-end gap-2 pt-2 border-t border-zinc-200 dark:border-zinc-800">
+              <button type="button" onClick={() => setShowEditJobModal(false)} className="px-4 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-bold text-xs rounded-xl cursor-pointer">
+                Cancel
+              </button>
+              <button type="submit" className="px-4 py-2 bg-[#00bda5] hover:bg-[#00a38e] text-white font-bold text-xs rounded-xl cursor-pointer border-none shadow-xs">
+                Save Changes
+              </button>
+            </div>
+          </form>
         </div>
       )}
+
+      {/* MODAL 2: REMINDERS MODAL */}
+      <RemindersModal
+        application={selectedApp}
+        isOpen={showRemindersModal}
+        onClose={() => setShowRemindersModal(false)}
+        onSaveReminders={handleSaveReminders}
+      />
 
     </div>
   );
@@ -1341,4 +838,3 @@ export default function JobTrackerPage() {
     </JobTrackerErrorBoundary>
   );
 }
-

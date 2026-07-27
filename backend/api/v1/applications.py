@@ -36,7 +36,27 @@ class ApplicationUpdateRequest(BaseModel):
     notes: Optional[str] = None
     recruiter_notes: Optional[str] = None
     interview_notes: Optional[str] = None
+    salary_expectations: Optional[str] = None
     reminder: Optional[Dict[str, Any]] = None
+    contacts: Optional[List[Dict[str, Any]]] = None
+    notes_list: Optional[List[Dict[str, Any]]] = None
+    reminders: Optional[List[Dict[str, Any]]] = None
+    history: Optional[List[Dict[str, Any]]] = None
+    cover_letter_status: Optional[str] = None
+    resume_status: Optional[str] = None
+    next_action: Optional[str] = None
+    next_action_due_at: Optional[str] = None
+    last_activity_at: Optional[str] = None
+    employment_type: Optional[str] = None
+    seniority: Optional[str] = None
+    key_skills: Optional[List[str]] = None
+
+class EmailGenerateRequest(BaseModel):
+    purpose: str = "Initial Recruiter Outreach"
+    recruiter_name: Optional[str] = None
+    recruiter_title: Optional[str] = None
+    tone: Optional[str] = "Professional and enthusiastic"
+    user_instructions: Optional[str] = None
 
 @router.get("/")
 async def list_applications(
@@ -163,4 +183,90 @@ async def delete_application(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete application: {str(e)}"
+        )
+
+@router.post("/{id}/generate-email")
+async def generate_application_email(
+    id: str,
+    request: EmailGenerateRequest,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ApplicationRepository = Depends(get_application_repository)
+):
+    try:
+        app = repo.get_by_id(id, user["id"])
+        if not app:
+            raise HTTPException(status_code=404, detail="Application session not found.")
+        
+        role = app.get("job_title") or "Target Role"
+        company = app.get("company_name") or "Target Company"
+        recruiter = request.recruiter_name or "Hiring Manager"
+
+        purpose = request.purpose or "Initial Recruiter Outreach"
+
+        if "Outreach" in purpose:
+            subject = f"Inquiry regarding {role} position at {company}"
+            body = (
+                f"Dear {recruiter},\n\n"
+                f"I hope this email finds you well. I recently applied for the {role} position at {company} and wanted to express my enthusiasm for the opportunity.\n\n"
+                f"With my background in building scalable software systems and delivering measurable results, I am confident I can make a strong contribution to your team.\n\n"
+                f"I would welcome the opportunity to discuss how my qualifications align with {company}'s current priorities.\n\n"
+                f"Thank you for your time and consideration.\n\n"
+                f"Best regards,"
+            )
+        elif "Follow-up" in purpose:
+            subject = f"Follow-up on Application: {role} - {company}"
+            body = (
+                f"Dear {recruiter},\n\n"
+                f"I hope you are having a productive week. I am following up on my application for the {role} role at {company}.\n\n"
+                f"I remain very interested in the position and would appreciate any updates regarding the next steps in your recruitment process.\n\n"
+                f"Thank you again for your time and assistance.\n\n"
+                f"Best regards,"
+            )
+        elif "Thank" in purpose:
+            subject = f"Thank you - {role} Interview"
+            body = (
+                f"Dear {recruiter},\n\n"
+                f"Thank you for taking the time to speak with me today regarding the {role} position at {company}.\n\n"
+                f"Our conversation reinforced my excitement about joining your team. Please let me know if you need any additional information from my side.\n\n"
+                f"Best regards,"
+            )
+        elif "Confirmation" in purpose:
+            subject = f"Interview Confirmation: {role} at {company}"
+            body = (
+                f"Dear {recruiter},\n\n"
+                f"Thank you for scheduling our upcoming interview for the {role} position at {company}.\n\n"
+                f"I am writing to confirm my availability. I look forward to speaking with you.\n\n"
+                f"Best regards,"
+            )
+        elif "Offer" in purpose:
+            subject = f"Offer Clarification: {role} Position - {company}"
+            body = (
+                f"Dear {recruiter},\n\n"
+                f"Thank you very much for extending the offer for the {role} position at {company}! I am thrilled about the opportunity.\n\n"
+                f"Before finalizing, I would appreciate a brief conversation to clarify a few details regarding the start date and onboarding schedule.\n\n"
+                f"Thank you again for this offer!\n\n"
+                f"Best regards,"
+            )
+        else:
+            subject = f"Regarding {role} Application - {company}"
+            body = (
+                f"Dear {recruiter},\n\n"
+                f"I hope you are doing well. I am reaching out regarding the {role} role at {company}.\n\n"
+                f"Please let me know if there are any updates or if you need further details regarding my background.\n\n"
+                f"Best regards,"
+            )
+
+        return {
+            "status": "success",
+            "subject": subject,
+            "body": body,
+            "purpose": purpose,
+            "recruiter_name": recruiter
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate email: {str(e)}"
         )

@@ -57,7 +57,7 @@ export default function ContactSupportPage() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto w-full animate-fadeIn py-8">
+    <div className="w-full animate-fadeIn py-8">
       
       <div className="text-center mb-10">
         <div className="w-16 h-16 bg-blue-500/10 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-6">

@@ -40,6 +40,14 @@
     --tf-radius-control: 10px;
     --tf-radius-pill: 999px;
 
+    --app-header-height: 64px;
+    --page-padding-mobile: 16px;
+    --page-padding-tablet: 24px;
+    --page-padding-desktop: 36px;
+    --page-padding-wide: 56px;
+    --content-wide-max: 1760px;
+    --content-reading-max: 920px;
+
 
     --af-bg: var(--tf-bg);
     --af-surface: var(--tf-surface);
@@ -134,6 +142,58 @@
   h1, h2, h3, h4, p { text-wrap: pretty; }
 
   ::selection { background: rgba(46, 91, 255, .15); }
+}
+
+@layer components {
+  .app-main {
+    width: 100%;
+    min-height: calc(100vh - var(--app-header-height));
+    overflow-x: hidden;
+  }
+
+  .page-container {
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 28px var(--page-padding-mobile) 48px;
+  }
+
+  .page-container--full {
+    max-width: none;
+  }
+
+  .page-container--wide {
+    max-width: var(--content-wide-max);
+    margin-inline: auto;
+  }
+
+  .page-container--reading {
+    max-width: var(--content-reading-max);
+    margin-inline: auto;
+  }
+
+  .page-container--header {
+    height: 100%;
+    padding-block: 0;
+  }
+
+  .page-container--workspace {
+    height: 100%;
+    min-height: 0;
+    padding-block: 0;
+  }
+
+  @media (min-width: 640px) {
+    .page-container { padding-inline: var(--page-padding-tablet); }
+  }
+
+  @media (min-width: 1024px) {
+    .page-container { padding-inline: var(--page-padding-desktop); }
+  }
+
+  @media (min-width: 1440px) {
+    .page-container { padding-inline: var(--page-padding-wide); }
+  }
 }
 
 /* Scrollbar */

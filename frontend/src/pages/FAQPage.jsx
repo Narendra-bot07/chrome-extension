@@ -30,7 +30,7 @@ export default function FAQPage() {
   ];
 
   return (
-    <div className="max-w-3xl mx-auto w-full animate-fadeIn py-8">
+    <div className="w-full animate-fadeIn py-8">
       
       <div className="text-center mb-12">
         <div className="w-16 h-16 bg-emerald-500/10 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6">
