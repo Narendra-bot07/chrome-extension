@@ -4,6 +4,7 @@ import {
   Sparkles, RotateCcw, ChevronUp, ChevronDown, FileText, AlertTriangle, RefreshCw
 } from 'lucide-react';
 import { toRenderableResume } from '../../utils/renderableResume';
+import { getTemplateComponent } from '../../templates';
 
 type ZoomMode = 'fit_width' | 'fit_page' | 'actual_size';
 type PagePreference = 'auto' | 'prefer_one_page' | 'prefer_two_pages';
@@ -16,6 +17,7 @@ interface ResumePreviewProps {
   resumeVersionId?: string;
   companyName?: string;
   onCompositionChange?: (plan: any) => void;
+  interactiveLayoutMode?: boolean;
 }
 
 export default function ResumePreview({
@@ -25,7 +27,8 @@ export default function ResumePreview({
   apiUrl = 'http://localhost:8000',
   resumeVersionId,
   companyName = 'Company',
-  onCompositionChange
+  onCompositionChange,
+  interactiveLayoutMode = false
 }: ResumePreviewProps) {
   // 1. Zoom and Viewport States
   const [zoomMode, setZoomMode] = useState<ZoomMode>(() => {
@@ -50,6 +53,7 @@ export default function ResumePreview({
   const [artifactFilename, setArtifactFilename] = useState<string>('');
   const [pageCount, setPageCount] = useState<number>(1);
   const [loadingPdf, setLoadingPdf] = useState<boolean>(false);
+  const [showLiveLayout, setShowLiveLayout] = useState<boolean>(interactiveLayoutMode);
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
 
   // 4. Status Messages
@@ -168,7 +172,7 @@ export default function ResumePreview({
     const requestId = ++renderRequestIdRef.current;
     try {
       setLoadingPdf(true);
-      setStatusMessage('Recomposing resume…');
+      setStatusMessage(interactiveLayoutMode ? 'Live layout preview' : 'Recomposing resume…');
       setWarningMessage(null);
 
       const res = await fetch(`${apiUrl}/api/render-unified-pdf`, {
@@ -223,6 +227,7 @@ export default function ResumePreview({
         if (onCompositionChange) {
           onCompositionChange(data.composition_plan);
         }
+        if (interactiveLayoutMode) setShowLiveLayout(false);
       }
     } catch (err) {
       if ((err as Error)?.name === 'AbortError') return;
@@ -234,8 +239,18 @@ export default function ResumePreview({
 
   useEffect(() => {
     const controller = new AbortController();
-    fetchUnifiedPdfArtifact(pagePreference, controller.signal);
-    return () => controller.abort();
+    if (interactiveLayoutMode) {
+      setShowLiveLayout(true);
+      setStatusMessage('Live layout preview');
+    }
+    const timer = window.setTimeout(
+      () => fetchUnifiedPdfArtifact(pagePreference, controller.signal),
+      interactiveLayoutMode ? 650 : 0
+    );
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [resumeData, selectedTemplate, pagePreference, companyName]);
 
   // Scroll Active Page Indicator
@@ -311,6 +326,7 @@ export default function ResumePreview({
 
   const pillClass = "bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 shadow-sm rounded-xl flex items-center p-1 text-sm text-zinc-700 dark:text-zinc-300 h-10";
   const btnClass = "hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg px-2.5 py-1.5 transition-colors flex items-center gap-1.5 font-medium disabled:opacity-50 text-xs cursor-pointer";
+  const LiveTemplateComponent = getTemplateComponent(selectedTemplate);
 
   return (
     <div className={containerClasses} ref={containerRef}>
@@ -513,7 +529,7 @@ export default function ResumePreview({
       >
         
         {/* Loading Overlay during Recomposition */}
-        {loadingPdf && (
+        {loadingPdf && !interactiveLayoutMode && (
           <div className="absolute inset-0 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-xs z-40 flex flex-col items-center justify-center gap-3">
             <RefreshCw size={28} className="animate-spin text-[#00bda5]" />
             <span className="text-sm font-extrabold text-zinc-800 dark:text-zinc-200">
@@ -535,7 +551,15 @@ export default function ResumePreview({
             className="shadow-2xl bg-white ring-1 ring-zinc-200/70 dark:ring-zinc-800 rounded-sm overflow-hidden text-zinc-900"
             style={{ width: '8.5in', minHeight: pageCount === 2 ? '22.5in' : '11in' }}
           >
-            {pdfBlobUrl ? (
+            {interactiveLayoutMode && (showLiveLayout || loadingPdf) ? (
+              <div className="w-full bg-white">
+                <LiveTemplateComponent
+                  resume={resumeData}
+                  sectionOrder={sectionOrder}
+                  layoutLevel={Number(resumeData?.layout_level ?? 4)}
+                />
+              </div>
+            ) : pdfBlobUrl ? (
               <iframe
                 src={`${pdfBlobUrl}#toolbar=0&navpanes=0&view=FitH`}
                 title="Final resume PDF preview"

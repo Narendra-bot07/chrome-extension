@@ -376,6 +376,7 @@ function DownloadPage({ onClose }) {
           selectedTemplate={selectedTemplate || 'ExecutiveATS'}
           resumeVersionId={parsedResume?.id}
           companyName={companyName || 'Company'}
+          interactiveLayoutMode={true}
         />
 
         {/* Compile Loading Glassmorphic Overlay */}

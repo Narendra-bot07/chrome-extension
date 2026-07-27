@@ -698,11 +698,15 @@ export default function ResumeEditorView({
 
   const renderStructuralBlock = (section, index) => (
     <Draggable key={section} draggableId={`layout-${section}`} index={index}>
-      {provided => (
+      {(provided, snapshot) => (
         <div
           ref={provided.innerRef}
           {...provided.draggableProps}
-          className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm transition hover:border-slate-300 hover:shadow"
+          className={`flex items-center justify-between rounded-xl border bg-white px-3 py-2.5 shadow-sm
+            transition-[transform,box-shadow,border-color,opacity] duration-200 ease-out will-change-transform
+            ${snapshot.isDragging
+              ? 'border-teal-400 shadow-xl opacity-95'
+              : 'border-slate-200 hover:border-slate-300 hover:shadow'}`}
         >
           <div className="flex min-w-0 items-center gap-2">
             <span

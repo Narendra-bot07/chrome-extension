@@ -85,10 +85,12 @@ export function getParamsForLevel(level: number): LayoutParams {
   return {
     paddingX: Math.round(32 + (56 - 32) * t),
     paddingY: Math.round(20 + (50 - 20) * t),
-    sectionGap: Math.round(6 + (24 - 6) * t),
-    itemGap: Math.round(4 + (16 - 4) * t),
-    bulletGap: 1 + (5 - 1) * t,
-    lineHeight: 1.25 + (1.55 - 1.25) * t,
+    // Keep exactly one compact visual line between major sections. Fields and
+    // records inside each section remain tightly packed.
+    sectionGap: Math.round(8 + (10 - 8) * t),
+    itemGap: Math.round(0 + (2 - 0) * t),
+    bulletGap: 0,
+    lineHeight: 1.15 + (1.32 - 1.15) * t,
     fontSize: 9.0 + (11.5 - 9.0) * t,
     nameSize: Math.round(20 + (32 - 20) * t),
     sectionTitleSize: Math.round(11 + (15 - 11) * t)
@@ -278,20 +280,20 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
 
       case 'education':
         return (
-          <div className="flex flex-col" style={{ gap: `${params.itemGap}px` }}>
+          <div className="flex flex-col" style={{ gap: 0, lineHeight: 1.05 }}>
             {education.map((edu: any, i: number) => (
-              <div key={i} className="break-inside-avoid" style={{ breakInside: 'avoid-page' }}>
+              <div key={i} className="break-inside-avoid" style={{ breakInside: 'avoid-page', lineHeight: 1.05, margin: 0, padding: 0 }}>
                 <div className="flex justify-between items-baseline flex-wrap gap-x-2" style={{ fontSize: `${params.fontSize}px` }}>
                   <h3 className="font-bold text-zinc-950">
                     {edu.degree} {edu.field_of_study ? `in ${edu.field_of_study}` : ''}
                   </h3>
                   <span className="text-[9.5px] font-bold uppercase shrink-0 text-zinc-700">{edu.start_date} - {edu.end_date || 'Present'}</span>
                 </div>
-                <div className="flex justify-between items-center text-zinc-800 font-semibold mt-0.5" style={{ fontSize: `${params.fontSize - 0.5}px` }}>
+                <div className="flex justify-between items-center text-zinc-800 font-semibold" style={{ fontSize: `${params.fontSize - 0.5}px`, lineHeight: 1.05 }}>
                   <span>{edu.institution}</span>
                   {edu.location && <span className="text-zinc-600 font-normal">{edu.location}</span>}
                 </div>
-                {edu.gpa && <div className="text-[9.5px] text-zinc-600 mt-0.5">GPA: {edu.gpa}</div>}
+                {edu.gpa && <div className="text-[9.5px] text-zinc-600 leading-none">GPA: {edu.gpa}</div>}
               </div>
             ))}
           </div>
@@ -394,7 +396,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
 
         if (isSidebar) {
           return (
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1">
               {validSkillEntries.map(([cat, list]: any) => {
                 const items = Array.isArray(list) 
                   ? list.filter(item => item && String(item).trim() !== '')
@@ -419,15 +421,30 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
           );
         }
         return (
-          <div className="flex flex-col" style={{ gap: `${params.bulletGap}px` }}>
+          <div
+            className="flex flex-col"
+            style={{ gap: 0, lineHeight: 1.05, margin: 0, padding: 0 }}
+          >
             {validSkillEntries.map(([cat, list]: any) => {
               const items = Array.isArray(list) 
                 ? list.filter(item => item && String(item).trim() !== '')
                 : String(list).split(',').map(s => s.trim()).filter(Boolean);
               return (
-                <div key={cat} className="grid grid-cols-4 gap-2 text-zinc-900" style={{ fontSize: `${params.fontSize}px` }}>
-                  <span className="font-bold col-span-1 capitalize">{cat}:</span>
-                  <span className="col-span-3 font-semibold">{items.join(', ')}</span>
+                <div
+                  key={cat}
+                  className="grid text-zinc-900"
+                  style={{
+                    gridTemplateColumns: '135px minmax(0, 1fr)',
+                    columnGap: '8px',
+                    rowGap: 0,
+                    fontSize: `${params.fontSize}px`,
+                    lineHeight: 1.05,
+                    margin: 0,
+                    padding: '1px 0'
+                  }}
+                >
+                  <span className="font-bold capitalize">{cat}:</span>
+                  <span className="font-semibold">{items.join(', ')}</span>
                 </div>
               );
             })}
@@ -437,17 +454,17 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
 
       case 'certifications':
         return (
-          <div className="flex flex-col" style={{ gap: `${params.itemGap}px` }}>
+          <div className="flex flex-col" style={{ gap: 0, lineHeight: 1.05 }}>
             {certificationRecords.map((cert: any) => (
-              <div key={cert.id} className="break-inside-avoid" style={{ breakInside: 'avoid-page', fontSize: `${params.fontSize}px` }}>
+              <div key={cert.id} className="break-inside-avoid" style={{ breakInside: 'avoid-page', fontSize: `${params.fontSize}px`, lineHeight: 1.05, margin: 0, padding: '1px 0' }}>
                 {cert.title && <div className="font-bold text-zinc-950">{cert.title}</div>}
                 {cert.description && (
-                  <div className="text-zinc-800 mt-0.5 pl-3 relative">
+                  <div className="text-zinc-800 pl-3 relative leading-none">
                     <span className="absolute left-0">•</span>{renderTextWithLinks(cert.description)}
                   </div>
                 )}
                 {(cert.organization || cert.date || cert.links?.length) && (
-                  <div className="text-zinc-600 mt-0.5 text-[9.5px]">
+                  <div className="text-zinc-600 text-[9.5px] leading-none">
                     {[cert.organization, cert.date].filter(Boolean).join(' · ')}
                     {(cert.links || []).filter((link: any) =>
                       link.owner_type === 'certification' && link.owner_id === cert.id
@@ -563,10 +580,10 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
       <div 
         data-resume-layout="single-column"
         className="font-sans bg-white text-zinc-900"
-        style={{ width: '816px', minHeight: '1056px', padding: `${params.paddingY}px ${params.paddingX}px`, fontSize: `${params.fontSize}px` }}
+        style={{ width: '816px', minHeight: '1056px', padding: `${params.paddingY}px ${params.paddingX}px`, fontSize: `${params.fontSize}px`, lineHeight: params.lineHeight }}
       >
         {/* Centered Header for Classic ATS */}
-        <header className="border-b border-zinc-400 pb-3 mb-4 text-center">
+        <header className="border-b border-zinc-400 pb-2 mb-1 text-center">
           <h1 className="font-extrabold uppercase text-zinc-950 tracking-tight leading-none" style={{ fontSize: `${params.nameSize}px` }}>
             {candidateName}
           </h1>
@@ -593,7 +610,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
             return (
               <section key={sectionId} data-section={sectionId} style={{ marginBottom: `${params.sectionGap}px` }}>
                 <h2 
-                  className="font-bold uppercase tracking-wider text-zinc-900 border-b border-zinc-400 pb-0.5 mb-2"
+                  className="font-bold uppercase tracking-wider text-zinc-900 border-b border-zinc-400 pb-0.5 mb-1"
                   style={{ fontSize: `${params.sectionTitleSize}px`, breakAfter: 'avoid-page' }}
                 >
                   {sectionLabel(sectionId)}
@@ -616,10 +633,10 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
       <div 
         data-resume-layout="single-column"
         className="font-serif bg-white text-zinc-900"
-        style={{ width: '816px', minHeight: '1056px', padding: `${params.paddingY + 8}px ${params.paddingX + 8}px`, fontSize: `${params.fontSize}px` }}
+        style={{ width: '816px', minHeight: '1056px', padding: `${params.paddingY + 8}px ${params.paddingX + 8}px`, fontSize: `${params.fontSize}px`, lineHeight: params.lineHeight }}
       >
         {/* Centered Executive Header */}
-        <header className="text-center mb-6">
+        <header className="text-center mb-1">
           <h1 className="font-extrabold text-zinc-950 uppercase tracking-wider leading-tight" style={{ fontSize: `${params.nameSize + 2}px` }}>
             {candidateName}
           </h1>
@@ -649,7 +666,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
             return (
               <section key={sectionId} data-section={sectionId} style={{ marginBottom: `${params.sectionGap + 2}px` }}>
                 <h2 
-                  className="font-extrabold uppercase tracking-wider text-zinc-950 border-b-2 border-zinc-800 pb-1 mb-2 font-serif"
+                  className="font-extrabold uppercase tracking-wider text-zinc-950 border-b-2 border-zinc-800 pb-1 mb-1 font-serif"
                   style={{ fontSize: `${params.sectionTitleSize}px`, breakAfter: 'avoid-page' }}
                 >
                   {sectionLabel(sectionId)}
@@ -677,19 +694,19 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
       <div 
         data-resume-layout="sidebar"
         className="font-sans bg-white text-zinc-900 flex flex-row min-h-[1056px]"
-        style={{ width: '816px' }}
+        style={{ width: '816px', lineHeight: params.lineHeight }}
       >
         {/* Left Sidebar */}
         <div className="w-[32%] bg-slate-50 border-r border-slate-200 p-6 flex flex-col shrink-0">
           {/* Optional Photo */}
           {config.profilePhoto && personal_info.photo_url && (
-            <div className="flex justify-center mb-4">
+            <div className="flex justify-center mb-1">
               {renderProfilePhoto('w-24 h-24', 'shadow-md')}
             </div>
           )}
 
           {/* Header Info in Sidebar */}
-          <div className="mb-5 pb-4 border-b border-slate-200">
+          <div className="mb-1 pb-2 border-b border-slate-200">
             <h1 className="font-extrabold text-slate-950 uppercase leading-tight tracking-tight text-xl">
               {candidateName}
             </h1>
@@ -701,7 +718,10 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
           </div>
 
           {/* Contact Details Vertical */}
-          <div className="flex flex-col gap-2 mb-6 font-semibold text-slate-800 text-[9.5px]">
+          <div
+            className="flex flex-col mb-1 font-semibold text-slate-800 text-[9.5px]"
+            style={{ gap: '3px', lineHeight: 1.05 }}
+          >
             {contacts.map((item, i) => (
               <a key={i} href={item.key === 'location' ? undefined : linkHref(item.key, item.val)} className="flex items-center gap-2 hover:underline truncate">
                 <span className="text-slate-600">{item.icon}</span>
@@ -711,11 +731,11 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
           </div>
 
           {/* Sidebar Sections */}
-          <div className="flex flex-col gap-5">
+          <div className="flex flex-col" style={{ gap: `${params.sectionGap}px` }}>
             {sidebarList.map(sectionId => (
               <section key={sectionId} data-section={sectionId}>
                 <h2 
-                  className="font-extrabold uppercase tracking-wider text-slate-900 border-b border-slate-300 pb-1 mb-2 text-[11px]"
+                  className="font-extrabold uppercase tracking-wider text-slate-900 border-b border-slate-300 pb-1 mb-1 text-[11px]"
                   style={{ breakAfter: 'avoid-page' }}
                 >
                   {sectionLabel(sectionId)}
@@ -731,7 +751,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
           {mainList.map(sectionId => (
             <section key={sectionId} data-section={sectionId} style={{ marginBottom: `${params.sectionGap}px` }}>
               <h2 
-                className="font-extrabold uppercase tracking-wider text-slate-900 border-l-4 border-slate-800 pl-2 mb-2 text-xs"
+                className="font-extrabold uppercase tracking-wider text-slate-900 border-l-4 border-slate-800 pl-2 mb-1 text-xs"
                 style={{ fontSize: `${params.sectionTitleSize}px`, breakAfter: 'avoid-page' }}
               >
                 {sectionLabel(sectionId)}
@@ -753,10 +773,10 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
       <div 
         data-resume-layout="single-column"
         className="font-sans bg-white text-zinc-900"
-        style={{ width: '816px', minHeight: '1056px', padding: `${params.paddingY}px ${params.paddingX}px`, fontSize: `${params.fontSize}px` }}
+        style={{ width: '816px', minHeight: '1056px', padding: `${params.paddingY}px ${params.paddingX}px`, fontSize: `${params.fontSize}px`, lineHeight: params.lineHeight }}
       >
         {/* Tech Hero Header */}
-        <header className="border-b-2 border-indigo-500 pb-4 mb-5 flex justify-between items-start gap-4">
+        <header className="border-b-2 border-indigo-500 pb-2 mb-1 flex justify-between items-start gap-2">
           <div className="flex-1">
             <h1 className="font-extrabold text-indigo-950 uppercase tracking-tight leading-none" style={{ fontSize: `${params.nameSize + 2}px` }}>
               {candidateName}
@@ -791,7 +811,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
             return (
               <section key={sectionId} data-section={sectionId} style={{ marginBottom: `${params.sectionGap}px` }}>
                 <h2 
-                  className="font-black uppercase tracking-wide text-indigo-950 border-b border-zinc-200 pb-1 mb-2"
+                  className="font-black uppercase tracking-wide text-indigo-950 border-b border-zinc-200 pb-1 mb-1"
                   style={{ fontSize: `${params.sectionTitleSize}px`, breakAfter: 'avoid-page' }}
                 >
                   {sectionLabel(sectionId)}
@@ -814,10 +834,10 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
       <div 
         data-resume-layout="sidebar"
         className="font-sans bg-white text-zinc-900 min-h-[1056px]"
-        style={{ width: '816px' }}
+        style={{ width: '816px', lineHeight: params.lineHeight }}
       >
         {/* Left Accent Banner Header */}
-        <header className="bg-zinc-900 text-white p-6 mb-5 flex justify-between items-center gap-6">
+        <header className="bg-zinc-900 text-white p-4 mb-1 flex justify-between items-center gap-2">
           <div className="flex-1">
             <h1 className="font-extrabold text-white uppercase tracking-tight text-2xl leading-tight">
               {candidateName}
@@ -848,7 +868,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
             return (
               <section key={sectionId} data-section={sectionId} style={{ marginBottom: `${params.sectionGap}px` }}>
                 <h2 
-                  className="font-bold uppercase tracking-wider text-zinc-900 border-b border-zinc-300 pb-0.5 mb-2"
+                  className="font-bold uppercase tracking-wider text-zinc-900 border-b border-zinc-300 pb-0.5 mb-1"
                   style={{ fontSize: `${params.sectionTitleSize}px`, breakAfter: 'avoid-page' }}
                 >
                   {sectionLabel(sectionId)}
@@ -874,10 +894,10 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
       <div 
         data-resume-layout="two-column"
         className="font-serif bg-white text-zinc-900 p-8 min-h-[1056px]"
-        style={{ width: '816px' }}
+        style={{ width: '816px', lineHeight: params.lineHeight }}
       >
         {/* Executive Header */}
-        <header className="border-b-2 border-amber-900/30 pb-4 mb-6 flex justify-between items-end gap-6">
+        <header className="border-b-2 border-amber-900/30 pb-2 mb-1 flex justify-between items-end gap-2">
           <div className="flex-1">
             <h1 className="font-black uppercase tracking-tight text-zinc-950 leading-tight" style={{ fontSize: `${params.nameSize + 2}px` }}>
               {candidateName}
@@ -907,7 +927,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
             {mainList.map(sectionId => (
               <section key={sectionId} data-section={sectionId} style={{ marginBottom: `${params.sectionGap}px` }}>
                 <h2 
-                  className="font-serif font-extrabold uppercase tracking-wider text-amber-950 border-b border-amber-900/30 pb-0.5 mb-2"
+                  className="font-serif font-extrabold uppercase tracking-wider text-amber-950 border-b border-amber-900/30 pb-0.5 mb-1"
                   style={{ fontSize: `${params.sectionTitleSize}px`, breakAfter: 'avoid-page' }}
                 >
                   {sectionLabel(sectionId)}
@@ -925,7 +945,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
             {sidebarList.map(sectionId => (
               <section key={sectionId} data-section={sectionId} style={{ marginBottom: `${params.sectionGap}px` }}>
                 <h2 
-                  className="font-serif font-extrabold uppercase tracking-wider text-amber-950 border-b border-amber-900/30 pb-0.5 mb-2 text-[11px]"
+                  className="font-serif font-extrabold uppercase tracking-wider text-amber-950 border-b border-amber-900/30 pb-0.5 mb-1 text-[11px]"
                   style={{ breakAfter: 'avoid-page' }}
                 >
                   {sectionLabel(sectionId)}
