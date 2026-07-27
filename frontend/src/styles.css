@@ -57,6 +57,13 @@
     --af-radius: 8px;
     --af-radius-lg: 12px;
     --af-sidebar: 240px;
+    --tf-radius-card: 16px;
+    --tf-radius-control: 10px;
+    --tf-radius-pill: 999px;
+
+    /* Skeleton Tokens */
+    --tf-skeleton-base: #ECEEF2;
+    --tf-skeleton-highlight: #F7F8FA;
   }
 
   .dark {
@@ -83,6 +90,10 @@
     --tf-status-warning: #B7791F;
     --tf-status-danger: #D0342C;
     --tf-status-neutral: #9BA3AF;
+
+    /* Dark Mode Skeleton Tokens */
+    --tf-skeleton-base: #2A2D32;
+    --tf-skeleton-highlight: #343840;
   }
 
 
@@ -139,22 +150,61 @@
 .font-small { font-size: 13px; line-height: 20px; letter-spacing: 0; font-weight: 400; }
 .font-caption { font-size: 12px; line-height: 16px; letter-spacing: 0.01em; font-weight: 500; text-transform: uppercase; }
 
-/* Skeleton Loader Shimmer */
-@keyframes tf-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+/* Skeleton Loader Shimmer & Pulse Animation */
+@keyframes tf-skeleton-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes tf-skeleton-pulse {
+  0%, 100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+@keyframes tf-fade-in-up {
+  0% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .tf-skeleton {
-  background-color: var(--tf-surface-2);
-  border-radius: 6px;
-  background-image: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.08) 50%, transparent 100%);
+  background-color: var(--tf-skeleton-base);
+  background-image: linear-gradient(
+    90deg,
+    var(--tf-skeleton-base) 0%,
+    var(--tf-skeleton-highlight) 50%,
+    var(--tf-skeleton-base) 100%
+  );
   background-size: 200% 100%;
-  animation: tf-shimmer 1.4s infinite linear;
+  border-radius: 8px;
+  animation: tf-skeleton-shimmer 1.6s ease-in-out infinite, tf-skeleton-pulse 1.6s ease-in-out infinite;
 }
 
-.dark .tf-skeleton {
-  background-image: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.04) 50%, transparent 100%);
+.animate-fade-in-up {
+  animation: tf-fade-in-up 200ms ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tf-skeleton {
+    animation: tf-skeleton-pulse 2s ease-in-out infinite !important;
+    background-image: none !important;
+  }
+  .animate-fade-in-up {
+    animation: none !important;
+  }
 }
 
 /* Standard Card */
@@ -174,7 +224,7 @@
 
 /* Global Compatibility Mappings */
 #root .bg-white { background-color: var(--tf-surface); }
-#root .bg-zinc-50, #root .bg-slate-50, #root .bg-[#FAFAFB], #root .bg-[#0C0D10] { background-color: var(--tf-bg); }
+#root .bg-zinc-50, #root .bg-slate-50, #root .bg-\[\#FAFAFB\], #root .bg-\[\#0C0D10\] { background-color: var(--tf-bg); }
 #root .bg-zinc-100, #root .bg-slate-100 { background-color: var(--tf-surface-2); }
 #root .border-zinc-100, #root .border-zinc-200, #root .border-slate-100, #root .border-slate-200 { border-color: var(--tf-border); }
 #root .text-zinc-950, #root .text-zinc-900, #root .text-slate-950, #root .text-slate-900 { color: var(--tf-text); }
@@ -217,9 +267,25 @@
     margin: 0 !important;
     padding: 0 !important;
     width: 210mm !important;
-    height: 297mm !important;
+    height: auto !important;
+    min-height: 297mm !important;
+    overflow: visible !important;
     box-shadow: none !important;
     border: none !important;
+  }
+
+  /* Entries stay together by default. The bounded renderer repair may add
+     data-controlled-entry-splits only after proving that the avoid rule
+     creates an otherwise unnecessary extra page. */
+  [data-controlled-entry-splits="true"] [data-section="experience"] .break-inside-avoid,
+  [data-controlled-entry-splits="true"] [data-section="projects"] .break-inside-avoid {
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+  }
+  [data-controlled-entry-splits="true"] [data-section="experience"] li,
+  [data-controlled-entry-splits="true"] [data-section="projects"] li {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
   }
 }
 

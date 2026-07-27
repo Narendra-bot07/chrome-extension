@@ -251,6 +251,7 @@ function Layout() {
   const jdUsed = jdUsage?.used || 0;
   const jdRemaining = jdUsage?.remaining;
   const jdPercent = jdLimit ? Math.min(100, (jdUsed / jdLimit) * 100) : 0;
+  const quotaUsageDisplay = jdLimit ? `${jdUsed}/${jdLimit}` : `${jdUsed}/∞`;
 
   const navItems = [
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -265,18 +266,18 @@ function Layout() {
       <InteractiveAuroraBackground />
       <FlowParticleBackground />
 
-      {/* Mobile Overlay */}
+      {/* Mobile/Sidepanel Slide-over Backdrop Overlay */}
       {sidebarOpen && (
         <div 
-          className="fixed inset-0 bg-[#0A0B0D]/50 z-30 md:hidden transition-opacity"
+          className="fixed inset-0 bg-[#0A0B0D]/60 backdrop-blur-xs z-40 transition-opacity"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
-      {/* 1. OPTIONAL MOBILE SLIDE-OVER SIDEBAR */}
+      {/* 1. SLIDE-OVER DRAWER SIDEBAR */}
       <aside 
-        className={`transition-all duration-200 ease-enter z-40 fixed inset-y-0 left-0 h-full border-r border-tf-border bg-tf-surface flex flex-col justify-between ${
-          sidebarOpen ? 'w-[240px] translate-x-0 shadow-2xl' : 'w-0 -translate-x-full pointer-events-none hidden'
+        className={`transition-all duration-300 ease-out z-50 fixed inset-y-0 left-0 h-full border-r border-tf-border bg-tf-surface flex flex-col justify-between ${
+          sidebarOpen ? 'w-[250px] translate-x-0 shadow-2xl' : 'w-0 -translate-x-full pointer-events-none hidden'
         }`}
       >
         <div className="flex flex-col gap-5 p-3">
@@ -293,7 +294,7 @@ function Layout() {
               )}
             </Link>
             <button 
-              className="md:hidden text-tf-text-tertiary hover:text-tf-text"
+              className="text-tf-text-tertiary hover:text-tf-text p-1 rounded-md"
               onClick={() => setSidebarOpen(false)}
             >
               <X size={16} />
@@ -309,6 +310,7 @@ function Layout() {
                 <Link
                   key={item.path}
                   to={item.path}
+                  onClick={() => setSidebarOpen(false)}
                   className={`relative flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-colors ${
                     isActive 
                       ? 'text-tf-text bg-tf-surface-2 before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[2px] before:bg-tf-accent' 
@@ -323,120 +325,76 @@ function Layout() {
           </nav>
         </div>
 
-        {/* Sidebar Footer (Usage + Profile) */}
-        {sidebarOpen && (
-          <div className="p-3 space-y-3 border-t border-tf-border">
-            {/* JD Usage Mini Card */}
-            <div className="border border-tf-border bg-tf-surface-2 rounded-md p-3 space-y-2">
-              <div className="flex justify-between items-center text-xs">
-                <span className="text-[11px] font-medium text-tf-text-tertiary uppercase tracking-wider">PLAN</span>
-                <span className="font-medium text-tf-text">
-                  {subscription?.plan?.name || profile.subscription_plan}
-                </span>
-              </div>
-              <div className="space-y-1">
-                <div className="flex justify-between text-xs text-tf-text-secondary">
-                  <span>Extractions</span>
-                  <span className="font-medium text-tf-text">
-                    {jdLimit ? `${jdUsed}/${jdLimit}` : `${jdUsed}/∞`}
-                  </span>
-                </div>
-                <div className="w-full h-1 bg-tf-border rounded-full overflow-hidden">
-                  <div 
-                    className="bg-tf-accent h-full transition-all duration-200"
-                    style={{ width: `${jdPercent}%` }}
-                  />
-                </div>
-              </div>
-              <Link to="/subscription" className="block pt-1">
-                <Button variant="secondary" size="sm" className="w-full h-7 text-xs">
-                  Upgrade Plan
-                </Button>
-              </Link>
+        {/* Sidebar Footer */}
+        <div className="p-3 border-t border-tf-border space-y-3">
+          <div className="p-3 rounded-xl bg-tf-surface-2/60 border border-tf-border/50 space-y-2">
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-tf-text-tertiary font-bold uppercase text-[10px]">Plan</span>
+              <span className="font-bold text-tf-text capitalize">{profile?.subscription_plan || 'Free'}</span>
             </div>
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-tf-text-tertiary font-bold uppercase text-[10px]">Extractions</span>
+              <span className="font-semibold text-tf-text">{quotaUsageDisplay}</span>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="w-full h-7 text-xs"
+              onClick={() => {
+                setSidebarOpen(false);
+                navigate('/subscription');
+              }}
+            >
+              Upgrade Plan
+            </Button>
+          </div>
 
-            {/* Profile Drop-up */}
-            <div className="relative">
-              {profileDropupOpen && (
-                <div className="absolute bottom-full left-0 right-0 mb-2 rounded-md border border-tf-border bg-tf-surface shadow-modal overflow-hidden z-50 py-1">
-                  <button
-                    onClick={() => {
-                      setProfileDropupOpen(false);
-                      navigate('/profile');
-                    }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] font-medium text-tf-text hover:bg-tf-surface-2 transition-colors"
-                  >
-                    <User size={16} />
-                    Account
-                  </button>
-                  <button
-                    onClick={() => {
-                      setProfileDropupOpen(false);
-                      navigate('/subscription');
-                    }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] font-medium text-tf-text hover:bg-tf-surface-2 transition-colors"
-                  >
-                    <Zap size={16} />
-                    Subscription
-                  </button>
-                  <div className="border-t border-tf-border my-1" />
-                  <button
-                    onClick={logout}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] font-medium text-tf-danger hover:bg-tf-danger/10 transition-colors"
-                  >
-                    <LogOut size={16} />
-                    Sign out
-                  </button>
-                </div>
-              )}
-
-              <button
-                onClick={() => setProfileDropupOpen((open) => !open)}
-                className="w-full border border-tf-border rounded-md p-2 flex items-center gap-2.5 text-left bg-tf-surface hover:bg-tf-surface-2 transition-colors"
-              >
-                <div className="w-7 h-7 shrink-0 rounded-full bg-tf-accent text-tf-accent-fg flex items-center justify-center font-medium text-xs">
-                  {(profile.full_name || user?.metadata?.full_name || user?.email || 'N').charAt(0).toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-medium text-tf-text truncate leading-tight">
-                    {profile.full_name || user?.metadata?.full_name || 'Narendra'}
-                  </p>
-                  <p className="text-xs text-tf-text-tertiary truncate leading-tight">
-                    {profile.email || user?.email || 'user@example.com'}
-                  </p>
-                </div>
-              </button>
+          <div className="flex items-center gap-2.5 p-2 rounded-xl bg-tf-surface-2/40 border border-tf-border/40">
+            <div className="w-8 h-8 rounded-full bg-tf-accent/20 text-tf-accent font-bold text-xs flex items-center justify-center shrink-0">
+              {profile?.full_name?.charAt(0) || user?.email?.charAt(0)?.toUpperCase() || 'U'}
+            </div>
+            <div className="flex flex-col text-left leading-none overflow-hidden">
+              <span className="text-xs font-semibold text-tf-text truncate max-w-[120px]">
+                {profile?.full_name || user?.email?.split('@')[0] || 'User'}
+              </span>
+              <span className="text-[10px] text-tf-text-tertiary truncate max-w-[120px]">
+                {user?.email}
+              </span>
             </div>
           </div>
-        )}
+        </div>
       </aside>
 
-      {/* 2. MAIN CONTAINER */}
+      {/* RIGHT MAIN VIEW PORT */}
       <div className="flex-1 flex flex-col justify-between overflow-hidden relative">
         
-        {/* TOPBAR (60px) */}
-        <header className="h-[60px] px-4 sm:px-6 border-b border-tf-border bg-tf-surface flex justify-between items-center z-20 shrink-0 select-none">
-          <div className="flex items-center gap-6">
-            {/* Sidebar toggle for mobile/compact */}
+        {/* GLASS TOPBAR (64px) */}
+        <header className="h-[64px] px-3 sm:px-6 border-b border-tf-border/50 bg-tf-surface/75 backdrop-blur-md backdrop-saturate-150 flex justify-between items-center z-20 shrink-0 select-none shadow-2xs transition-colors duration-200">
+          <div className="flex items-center gap-3 sm:gap-4 shrink-0">
+            {/* Sidebar toggle button (Visible only when tab/window size is shrunk) */}
             <button 
-              className="p-1.5 rounded-md text-tf-text-secondary hover:text-tf-text hover:bg-tf-surface-2 transition-colors md:hidden"
-              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="p-1.5 rounded-xl border border-tf-border/60 bg-tf-surface-2/60 backdrop-blur-md text-tf-text-secondary hover:text-tf-text transition-all md:hidden shrink-0 cursor-pointer"
+              onClick={() => setSidebarOpen(true)}
+              title="Open Navigation Menu"
             >
               <Menu size={18} />
             </button>
 
             {/* TailorFlow Brand Logo */}
-            <Link to="/dashboard" className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-[#2E5BFF] to-[#00BDA5] flex items-center justify-center text-white font-extrabold text-sm shadow-xs">
+            <Link to="/dashboard" className="flex items-center gap-2.5 shrink-0 group">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#2E5BFF] via-[#1E48E0] to-[#00BDA5] flex items-center justify-center text-white font-extrabold text-sm shadow-md group-hover:scale-105 transition-transform">
                 T
               </div>
-              <span className="text-base font-bold tracking-tight text-tf-text hidden sm:inline">
+              <span className="text-base font-bold tracking-tight text-tf-text hidden xs:inline">
                 TailorFlow
               </span>
             </Link>
+          </div>
 
-            {/* Horizontal Navigation Tabs */}
-            <nav className="hidden md:flex items-center gap-1 bg-tf-surface-2/60 p-1 rounded-xl border border-tf-border/50">
+          {/* Right Group: Right-Aligned Glass Nav Tabs + Control Buttons */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Right-Aligned Glassmorphic Top Navigation Tabs */}
+            <nav className="hidden md:flex items-center gap-1.5 p-1 rounded-2xl bg-tf-surface-2/60 backdrop-blur-md border border-tf-border/60 shadow-2xs">
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = currentPath === item.path || (item.path === '/resume-detect' && currentPath.startsWith('/resume-'));
@@ -444,10 +402,10 @@ function Layout() {
                   <Link
                     key={item.path}
                     to={item.path}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all duration-200 ${
                       isActive
-                        ? 'bg-tf-accent/15 text-tf-accent border border-tf-accent/20 shadow-2xs dark:bg-tf-accent/20'
-                        : 'text-tf-text-secondary hover:text-tf-text hover:bg-tf-surface'
+                        ? 'bg-tf-accent/15 text-tf-accent border border-tf-accent/30 backdrop-blur-md shadow-2xs font-bold dark:bg-tf-accent/25'
+                        : 'text-tf-text-secondary hover:text-tf-text hover:bg-tf-surface/70 hover:backdrop-blur-xs'
                     }`}
                   >
                     <Icon size={14} />
@@ -456,21 +414,19 @@ function Layout() {
                 );
               })}
             </nav>
-          </div>
 
-          <div className="flex items-center gap-3">
-            {/* Theme Toggle */}
+            {/* Theme Toggle Glass Button */}
             <button 
-              className="p-2 rounded-lg border border-tf-border bg-tf-surface text-tf-text-secondary hover:text-tf-text hover:bg-tf-surface-2 transition-colors cursor-pointer"
+              className="p-2 rounded-xl border border-tf-border/60 bg-tf-surface-2/50 backdrop-blur-md text-tf-text-secondary hover:text-tf-text hover:bg-tf-surface-2/80 transition-all cursor-pointer shadow-2xs"
               onClick={toggleDarkMode}
               title="Toggle dark / light theme"
             >
               {darkMode ? <Sun size={16} /> : <Moon size={16} />}
             </button>
 
-            {/* Notification Bell */}
+            {/* Notification Bell Glass Button */}
             <button 
-              className="relative p-2 rounded-lg border border-tf-border bg-tf-surface text-tf-text-secondary hover:text-tf-text hover:bg-tf-surface-2 transition-colors cursor-pointer"
+              className="relative p-2 rounded-xl border border-tf-border/60 bg-tf-surface-2/50 backdrop-blur-md text-tf-text-secondary hover:text-tf-text hover:bg-tf-surface-2/80 transition-all cursor-pointer shadow-2xs"
               title="Notifications"
             >
               <Bell size={16} />
@@ -479,21 +435,21 @@ function Layout() {
               </span>
             </button>
 
-            {/* User Profile Dropdown Pill */}
+            {/* User Profile Dropdown Glass Pill */}
             {(() => {
               const displayName = profile?.full_name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Narendra';
               const avatarInitial = displayName.charAt(0).toUpperCase();
 
               return (
-                <div className="relative border-l border-tf-border pl-3" ref={profileMenuRef}>
+                <div className="relative border-l border-tf-border/60 pl-2.5" ref={profileMenuRef}>
                   <button
                     onClick={() => setProfileMenuOpen((prev) => !prev)}
-                    className="flex items-center gap-2.5 p-1 rounded-xl hover:bg-tf-surface-2 transition cursor-pointer select-none"
+                    className="flex items-center gap-2.5 p-1 rounded-xl hover:bg-tf-surface-2/70 backdrop-blur-md transition cursor-pointer select-none border border-transparent hover:border-tf-border/50"
                   >
                     <div className="w-8 h-8 rounded-full bg-tf-accent/20 text-tf-accent border border-tf-accent/30 font-bold text-xs flex items-center justify-center uppercase shadow-2xs">
                       {avatarInitial}
                     </div>
-                    <div className="hidden lg:flex flex-col text-left leading-tight">
+                    <div className="hidden md:flex flex-col text-left leading-tight">
                       <span className="text-xs font-semibold text-tf-text truncate max-w-[110px]">
                         {displayName}
                       </span>
@@ -501,7 +457,7 @@ function Layout() {
                         {profile?.subscription_plan || 'Free'}
                       </span>
                     </div>
-                    <ChevronDown size={14} className="text-tf-text-tertiary hidden lg:inline" />
+                    <ChevronDown size={14} className="text-tf-text-tertiary hidden md:inline" />
                   </button>
 
                   {/* Profile Dropdown Menu */}

@@ -1,10 +1,13 @@
 import React from 'react';
+import { AnimatedSkeleton } from './Loading/AnimatedSkeleton';
 
 export function Skeleton({ className = '', ...props }) {
   return (
-    <div 
-      className={`tf-skeleton rounded-sm ${className}`} 
+    <AnimatedSkeleton 
+      className={className} 
       {...props} 
     />
   );
 }
+
+export default Skeleton;

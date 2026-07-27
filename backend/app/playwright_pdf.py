@@ -207,6 +207,54 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
             pdf_bytes = page.pdf(**pdf_args)
             pdf_page_count = len(PdfReader(BytesIO(pdf_bytes)).pages)
             planned_page_count = int(final_composition_plan.get("page_count") or 0)
+            if (
+                pdf_page_count > planned_page_count
+                and resume_height > 1115
+            ):
+                # A forced section boundary can compound with Chromium's
+                # natural pagination and add a blank/partial extra page.
+                # Overflowing documents already have a physical boundary, so
+                # remove only composition-owned breaks and render once more.
+                removed_breaks = page.evaluate(
+                    """
+                    () => {
+                      const nodes = Array.from(
+                        document.querySelectorAll('[data-composition-break="final-plan"]')
+                      );
+                      nodes.forEach(node => {
+                        node.style.breakBefore = '';
+                        node.style.pageBreakBefore = '';
+                        delete node.dataset.compositionBreak;
+                      });
+                      return nodes.length;
+                    }
+                    """
+                )
+                if removed_breaks:
+                    pdf_bytes = page.pdf(**pdf_args)
+                    pdf_page_count = len(PdfReader(BytesIO(pdf_bytes)).pages)
+                if pdf_page_count > planned_page_count:
+                    # Keep normal entries indivisible. Only when that rule has
+                    # physically produced an unnecessary extra page, allow
+                    # experience/project entries to split at their LI bullet
+                    # boundaries; individual bullets remain indivisible.
+                    page.evaluate(
+                        """
+                        () => {
+                          const root = document.querySelector('#resume-print-container');
+                          if (root) root.dataset.controlledEntrySplits = 'true';
+                        }
+                        """
+                    )
+                    pdf_bytes = page.pdf(**pdf_args)
+                    pdf_page_count = len(PdfReader(BytesIO(pdf_bytes)).pages)
+                    if pdf_page_count == planned_page_count:
+                        final_composition_plan.setdefault(
+                            "optimization_actions", []
+                        ).append("controlled_split_at_bullet_boundaries")
+                        final_composition_plan.setdefault(
+                            "validation_report", {}
+                        )["controlled_entry_splits"] = True
             if pdf_page_count != planned_page_count:
                 raise ValueError(
                     f"Preview and PDF pagination differed (PDF={pdf_page_count}, Plan={planned_page_count}); "

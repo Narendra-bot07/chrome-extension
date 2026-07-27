@@ -25,6 +25,31 @@ class DensityLevel(str, Enum):
     DENSE = "Dense"
 
 
+class PageMode(str, Enum):
+    AUTO = "auto"
+    ONE_PAGE = "one_page"
+    TWO_PAGE = "two_page"
+
+
+PAGE_MODE_ALIASES = {
+    "auto": PageMode.AUTO,
+    "one": PageMode.ONE_PAGE,
+    "one_page": PageMode.ONE_PAGE,
+    "prefer_one_page": PageMode.ONE_PAGE,
+    "two": PageMode.TWO_PAGE,
+    "two_page": PageMode.TWO_PAGE,
+    "prefer_two_pages": PageMode.TWO_PAGE,
+}
+
+SAFETY_LIMITS = {
+    "minimum_font_pt": 8.5,
+    "minimum_line_height": 1.05,
+    "minimum_vertical_margin_mm": 8.0,
+    "minimum_horizontal_margin_mm": 10.0,
+    "minimum_divider_px": 0.4,
+}
+
+
 class ContentProfile(BaseModel):
     estimated_section_heights: dict[str, float]
     paragraph_density: float
@@ -73,6 +98,17 @@ class ValidationStatus(BaseModel):
 
 
 class CompositionPlan(BaseModel):
+    requested_mode: PageMode = PageMode.AUTO
+    target_page_count: int = Field(default=1, ge=1, le=2)
+    status: str = "PASS"
+    reason: str = ""
+    confidence: float = Field(default=1.0, ge=0, le=1)
+    hard_constraints: dict[str, Any] = Field(default_factory=dict)
+    section_layout_modes: dict[str, str] = Field(default_factory=dict)
+    sections_to_compact: list[str] = Field(default_factory=list)
+    preferred_page_breaks: list[str] = Field(default_factory=list)
+    page_utilization: list[float] = Field(default_factory=list)
+    safe_limits_reached: list[str] = Field(default_factory=list)
     page_count: int = Field(ge=1, le=2)
     density: DensityLevel
     applied_optimizations: list[str]
@@ -120,7 +156,7 @@ NON_SPLITTABLE_SECTIONS = [
 class ResumeCompositionAgent:
     """Professional Resume Composition Agent."""
 
-    def __init__(self, max_repair_iterations: int = 5) -> None:
+    def __init__(self, max_repair_iterations: int = 8) -> None:
         self.max_repair_iterations = max_repair_iterations
 
     def analyze_content(
@@ -235,10 +271,16 @@ class ResumeCompositionAgent:
         profile: ContentProfile,
         strategy: DensityLevel,
         section_order: list[str],
+        force_one_page: bool = False,
     ) -> tuple[dict[str, Any], list[OptimizationStepResult], float]:
         """Step 4: 12-Step Progressive Space Optimization Pass."""
 
         spacing_profile = {
+            "margin_top_mm": 12.0 if strategy == DensityLevel.COMFORTABLE else 10.0,
+            "margin_bottom_mm": 12.0 if strategy == DensityLevel.COMFORTABLE else 10.0,
+            "margin_left_mm": 14.0,
+            "margin_right_mm": 14.0,
+            "body_font_pt": 10.5 if strategy == DensityLevel.COMFORTABLE else 9.5,
             "padding_top_px": 28.0 if strategy == DensityLevel.COMFORTABLE else 20.0,
             "padding_bottom_px": 28.0 if strategy == DensityLevel.COMFORTABLE else 20.0,
             "section_gap_px": 18.0 if strategy == DensityLevel.COMFORTABLE else 12.0,
@@ -257,20 +299,20 @@ class ResumeCompositionAgent:
         steps_history: list[OptimizationStepResult] = []
         total_space_recovered = 0.0
 
-        # Define 12 explicit optimization steps
+        # Ordered, bounded, presentation-only adjustments. Content is immutable.
         optimizations = [
-            ("1. Reduce top spacing", "padding_top_px", 12.0, 10.0),
-            ("2. Reduce section spacing", "section_gap_px", len(section_order) * 3.0, 15.0),
-            ("3. Reduce divider margins", "divider_margin_px", len(section_order) * 2.0, 10.0),
-            ("4. Reduce divider thickness", "divider_thickness_px", 2.0, 2.0),
-            ("5. Reduce heading spacing", "heading_spacing_px", len(section_order) * 2.0, 8.0),
-            ("6. Reduce bullet spacing", "bullet_spacing_px", profile.bullet_density * len(section_order) * 1.5, 12.0),
-            ("7. Reduce paragraph spacing", "line_height", 18.0, 14.0),
-            ("8. Compact Skills", "skills_style", 20.0, 20.0),
-            ("9. Compact Education", "education_style", 15.0, 15.0),
-            ("10. Compact Certifications", "certifications_style", 12.0, 12.0),
-            ("11. Reduce bottom whitespace", "padding_bottom_px", 12.0, 10.0),
-            ("12. Rebalance columns", "columns_rebalance", 10.0, 8.0),
+            ("remove_empty_nodes", "empty_nodes", 8.0, 8.0),
+            ("deduplicate_parent_child_margins", "margin_collapse", 10.0, 10.0),
+            ("reduce_section_spacing", "section_gap_px", len(section_order) * 3.0, 15.0),
+            ("reduce_heading_divider_spacing", "divider_margin_px", len(section_order) * 2.0, 10.0),
+            ("reduce_entry_spacing", "entry_spacing_px", 18.0, 12.0),
+            ("reduce_bullet_spacing", "bullet_spacing_px", profile.bullet_density * len(section_order) * 1.5, 12.0),
+            ("compact_header_and_metadata", "header_style", 18.0, 14.0),
+            ("compact_skills", "skills_style", 20.0, 20.0),
+            ("compact_education", "education_style", 15.0, 15.0),
+            ("compact_certifications_achievements", "certifications_style", 12.0, 12.0),
+            ("reduce_line_height", "line_height", 22.0, 14.0),
+            ("reduce_margins_and_font", "safe_geometry", 28.0, 18.0),
         ]
 
         for step_idx, (name, param, max_saving, typical_saving) in enumerate(optimizations, 1):
@@ -307,11 +349,17 @@ class ResumeCompositionAgent:
             elif param == "bullet_spacing_px":
                 spacing_profile["bullet_spacing_px"] = max(1.0, spacing_profile["bullet_spacing_px"] - 1.0)
             elif param == "line_height":
-                spacing_profile["line_height"] = 1.22
+                spacing_profile["line_height"] = max(SAFETY_LIMITS["minimum_line_height"], 1.10)
             elif param in {"skills_style", "education_style", "certifications_style"}:
                 spacing_profile[param] = "compact"
             elif param == "padding_bottom_px":
                 spacing_profile["padding_bottom_px"] = max(10.0, spacing_profile["padding_bottom_px"] - 6.0)
+            elif param == "safe_geometry":
+                spacing_profile["margin_top_mm"] = SAFETY_LIMITS["minimum_vertical_margin_mm"]
+                spacing_profile["margin_bottom_mm"] = SAFETY_LIMITS["minimum_vertical_margin_mm"]
+                spacing_profile["margin_left_mm"] = SAFETY_LIMITS["minimum_horizontal_margin_mm"]
+                spacing_profile["margin_right_mm"] = SAFETY_LIMITS["minimum_horizontal_margin_mm"]
+                spacing_profile["body_font_pt"] = SAFETY_LIMITS["minimum_font_pt"]
 
             steps_history.append(
                 OptimizationStepResult(
@@ -452,8 +500,13 @@ class ResumeCompositionAgent:
         page_size: str = "A4",
         ats_constraints: dict[str, Any] | None = None,
         requested_section_order: list[str] | None = None,
+        page_mode: str | PageMode = PageMode.AUTO,
     ) -> CompositionPlan:
         """Main entry point: execute 5 steps with repair loop."""
+
+        mode = page_mode if isinstance(page_mode, PageMode) else PAGE_MODE_ALIASES.get(str(page_mode).lower())
+        if mode is None:
+            raise ValueError(f"Unsupported page mode: {page_mode}")
 
         # Step 1: Content Analysis
         priority = self.rank_section_priority(resume, requested_section_order)
@@ -469,7 +522,7 @@ class ResumeCompositionAgent:
 
             # Step 4: Space Optimization
             spacing_profile, steps_results, recovered_space = self.execute_space_optimization(
-                content_profile, strategy, section_order
+                content_profile, strategy, section_order, mode == PageMode.ONE_PAGE
             )
 
             applied_opts = [res.optimization_name for res in steps_results if res.applied]
@@ -480,6 +533,18 @@ class ResumeCompositionAgent:
                 final_height, section_order, content_profile
             )
 
+            status = "PASS"
+            reason = ""
+            target_page_count = page_count if mode == PageMode.AUTO else (2 if mode == PageMode.TWO_PAGE else 1)
+            if mode == PageMode.TWO_PAGE:
+                page_count = 2
+                page_assignment, measurements = self._force_two_page_balance(
+                    section_order, content_profile, final_height
+                )
+            elif mode == PageMode.ONE_PAGE and page_count != 1:
+                status = "ONE_PAGE_UNSAFE"
+                reason = "The content cannot fit on one page without reducing readability."
+
             # Validation
             val_status = self.validate_plan(
                 resume, section_order, page_count, page_assignment, measurements
@@ -487,6 +552,17 @@ class ResumeCompositionAgent:
 
             if val_status.valid or iteration == self.max_repair_iterations - 1:
                 return CompositionPlan(
+                    requested_mode=mode,
+                    target_page_count=target_page_count,
+                    status=status,
+                    reason=reason,
+                    confidence=0.98 if val_status.valid else 0.72,
+                    hard_constraints={"preserve_all_content": True, **SAFETY_LIMITS},
+                    section_layout_modes={s: ("compact" if s in {"skills", "education", "certifications", "achievements"} and strategy != DensityLevel.COMFORTABLE else "standard") for s in section_order},
+                    sections_to_compact=[s for s in section_order if s in {"skills", "education", "certifications", "achievements"} and strategy != DensityLevel.COMFORTABLE],
+                    preferred_page_breaks=[s for s, page in page_assignment.items() if page == 2][:1],
+                    page_utilization=[round(measurements.page1_height_px / PAGE_PRINTABLE_HEIGHT_PX, 3)] + ([round((measurements.page2_height_px or 0) / PAGE_PRINTABLE_HEIGHT_PX, 3)] if page_count == 2 else []),
+                    safe_limits_reached=list(SAFETY_LIMITS) if status == "ONE_PAGE_UNSAFE" else [],
                     page_count=page_count,
                     density=strategy,
                     applied_optimizations=applied_opts,
@@ -523,6 +599,28 @@ class ResumeCompositionAgent:
             repair_iterations=self.max_repair_iterations,
         )
 
+    def _force_two_page_balance(
+        self, section_order: list[str], profile: ContentProfile, final_height: float
+    ) -> tuple[dict[str, int], Measurements]:
+        """Choose a deterministic whole-section break closest to balanced utilization."""
+        heights = profile.estimated_section_heights
+        candidates = []
+        for index in range(1, len(section_order)):
+            page1 = 110.0 + sum(heights.get(s, 0.0) for s in section_order[:index])
+            page2 = sum(heights.get(s, 0.0) for s in section_order[index:])
+            p2_sections = section_order[index:]
+            orphan_penalty = 1000 if len(p2_sections) == 1 and p2_sections[0] in {"education", "certifications", "achievements"} else 0
+            utilization_penalty = max(0.0, PAGE_PRINTABLE_HEIGHT_PX * .25 - page2) * 2
+            candidates.append((abs(page1 - page2) + orphan_penalty + utilization_penalty, index, page1, page2))
+        _, split, page1, page2 = min(candidates, default=(0, 1, final_height / 2, final_height / 2))
+        assignment = {s: (1 if i < split else 2) for i, s in enumerate(section_order)}
+        return assignment, Measurements(
+            total_height_px=round(final_height, 1), page_capacity_px=PAGE_PRINTABLE_HEIGHT_PX * 2,
+            remaining_height_px=round(max(0.0, PAGE_PRINTABLE_HEIGHT_PX * 2 - final_height), 1),
+            page_fill_ratio=round(min(1.0, final_height / (PAGE_PRINTABLE_HEIGHT_PX * 2)), 3),
+            page_break_index=split, page1_height_px=round(page1, 1), page2_height_px=round(page2, 1),
+        )
+
 
 def compose_resume_layout(
     resume: dict[str, Any],
@@ -531,6 +629,7 @@ def compose_resume_layout(
     page_size: str = "A4",
     ats_constraints: dict[str, Any] | None = None,
     requested_section_order: list[str] | None = None,
+    page_mode: str | PageMode = PageMode.AUTO,
 ) -> CompositionPlan:
     """Convenience helper to invoke the Resume Composition Agent."""
     agent = ResumeCompositionAgent()
@@ -541,4 +640,5 @@ def compose_resume_layout(
         page_size=page_size,
         ats_constraints=ats_constraints,
         requested_section_order=requested_section_order,
+        page_mode=page_mode,
     )

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Dict, Any, Optional
 from schemas.resume import RenderableResume, ResumeStructure
 from schemas.jobs import JobAnalysis
@@ -58,16 +58,25 @@ class ResumePatch(BaseModel):
     projects: Dict[str, Dict[str, str]] = {}
 
 class TailoringReport(BaseModel):
+    model_config = ConfigDict(extra="allow")
     changes_made: List[str] = []
     resume_match_before: int = 0
     resume_match_after: int = 0
     ats_score_before: int = 0
     ats_score_after: int = 0
-    patch: ResumePatch
+    patch: Optional[ResumePatch] = Field(default_factory=ResumePatch)
     ats_analysis_id: Optional[str] = None
     breakdown_before: Optional[Dict[str, Any]] = None
     breakdown_after: Optional[Dict[str, Any]] = None
     suggestion_impacts: Optional[List[Dict[str, Any]]] = None
+
+    # Legacy fields compatibility
+    summary_before: str = ""
+    summary_after: str = ""
+    added_skills: List[str] = []
+    rewritten_bullets: List[Dict[str, Any]] = []
+    score_before: int = 0
+    score_after: int = 0
 
 class GapsAnalysis(BaseModel):
     missing_keywords: List[str] = []

@@ -1,6 +1,7 @@
-from pydantic import BaseModel, ConfigDict, Field
-from typing import List, Optional, Dict, Any
-from schemas.resume import ResumeLayoutModel
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import List, Optional, Dict, Any, Union
+from schemas.resume import ResumeLayoutModel, RenderableResume
+from schemas.tailoring import TailorRequest, DownloadPDFRequest, CoverLetterRequest, TailoringReport, ResumePatch
 
 class PersonalInfo(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -20,15 +21,45 @@ class ExperienceItem(BaseModel):
     location: str = ""
     start_date: str = ""
     end_date: str = ""
-    description: List[str] = []
+    description: Union[List[str], str] = Field(default_factory=list)
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def normalize_description(cls, v):
+        if isinstance(v, str):
+            items = [item.strip(" •\t\r") for item in v.replace("\r", "").split("\n") if item.strip()]
+            return items if items else [v.strip()]
+        if isinstance(v, list):
+            return [str(item).strip() for item in v if item]
+        return []
 
 class ProjectItem(BaseModel):
     model_config = ConfigDict(extra="allow")
     name: str = ""
     role: str = ""
-    technology_stack: List[str] = []
+    technology_stack: Union[List[str], str] = Field(default_factory=list)
     link: str = ""
-    description: List[str] = []
+    description: Union[List[str], str] = Field(default_factory=list)
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def normalize_description(cls, v):
+        if isinstance(v, str):
+            items = [item.strip(" •\t\r") for item in v.replace("\r", "").split("\n") if item.strip()]
+            return items if items else [v.strip()]
+        if isinstance(v, list):
+            return [str(item).strip() for item in v if item]
+        return []
+
+    @field_validator("technology_stack", mode="before")
+    @classmethod
+    def normalize_tech_stack(cls, v):
+        if isinstance(v, str):
+            items = [item.strip() for item in v.split(",") if item.strip()]
+            return items if items else [v.strip()]
+        if isinstance(v, list):
+            return [str(item).strip() for item in v if item]
+        return []
 
 class EducationItem(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -79,18 +110,6 @@ class ResumeStructure(BaseModel):
     layout_model: Optional[ResumeLayoutModel] = None
     raw_text: Optional[str] = ""
 
-
-class RenderableResume(ResumeStructure):
-    model_config = ConfigDict(extra="forbid")
-    objective: str = ""
-    internships: List[ExperienceItem] = []
-    candidate_links: List[Dict[str, Any]] = []
-    profile_links: List[Dict[str, Any]] = []
-    unresolved_links: List[Dict[str, Any]] = []
-    link_review: List[Dict[str, Any]] = []
-    links_intelligence_version: Optional[int] = None
-    raw_text: Optional[str] = Field(default="", exclude=True)
-
 class JobAnalysis(BaseModel):
     is_job_related: bool = True
     reason: Optional[str] = ""
@@ -137,90 +156,52 @@ class ComparisonResult(BaseModel):
     summary_suggestion: Optional[SummarySuggestion] = None
     key_action_items: List[str] = []
 
-
-class DownloadPDFRequest(BaseModel):
-    resume: RenderableResume
-    original_resume: Optional[RenderableResume] = None
-    intentional_removals: List[str] = []
-    approved_additions: List[str] = []
-    template_name: str = "modern"
-
-class CoverLetterResult(BaseModel):
-    recipient_name: str = "Hiring Manager"
-    company_name: str = ""
-    date: str = ""
-    salutation: str = "Dear Hiring Manager,"
-    body: str = ""
-    signoff: str = "Sincerely,\n[Your Name]"
-
-class CoverLetterRequest(BaseModel):
-    resume: ResumeStructure
-    job: JobAnalysis
-
-# Multi-Editor Architecture Schemas
-
-class ResumePatch(BaseModel):
-    summary: Optional[str] = None
-    skills_append: List[str] = []
-    # Keyed by item_index (stringified int), then bullet_index (stringified int)
-    experience: Dict[str, Dict[str, str]] = {}
-    projects: Dict[str, Dict[str, str]] = {}
-
-class TailoringReport(BaseModel):
-    changes_made: List[str] = []
-    resume_match_before: int = 0
-    resume_match_after: int = 0
-    ats_score_before: int = 0
-    ats_score_after: int = 0
-    patch: ResumePatch
-    ats_analysis_id: Optional[str] = None
-    breakdown_before: Optional[Dict[str, Any]] = None
-    breakdown_after: Optional[Dict[str, Any]] = None
-    suggestion_impacts: Optional[List[Dict[str, Any]]] = None
-
-class GapsAnalysis(BaseModel):
-    missing_keywords: List[str] = []
-
-class SummaryEditorOutput(BaseModel):
-    updated_summary: str
-    change_reason: str
-
-class SkillsEditorOutput(BaseModel):
-    skills_to_append: List[str]
-    change_reason: str
-
-class BulletUpdate(BaseModel):
-    bullet_index: int
-    updated_bullet: str
+class MissingSkillItem(BaseModel):
+    skill: str
+    importance: str  # "High", "Medium", "Low"
+    category: str
     reason: str
 
+class BulletRewriteItem(BaseModel):
+    section: str  # "experience" or "projects"
+    item_index: int
+    bullet_index: int
+    original: str
+    suggested: str
+    targeted_skills: List[str]
+    reason: str
+
+class SectionGapDetail(BaseModel):
+    section_name: str
+    current_score: int
+    gaps_found: List[str]
+    improvement_ideas: List[str]
+
+class GapsAnalysis(BaseModel):
+    overall_match_score: int
+    summary_feedback: str
+    missing_skills: List[MissingSkillItem]
+    bullet_rewrites: List[BulletRewriteItem]
+    section_breakdown: List[SectionGapDetail]
+
+class SummaryEditorOutput(BaseModel):
+    summary: str
+    added_keywords: List[str]
+
+class SkillsEditorOutput(BaseModel):
+    skills: List[str]
+    skills_categories: Dict[str, List[str]]
+
 class ExperienceEditorOutput(BaseModel):
-    updates: List[BulletUpdate] = []
+    experience: List[ExperienceItem]
 
 class ProjectEditorOutput(BaseModel):
-    updates: List[BulletUpdate] = []
+    projects: List[ProjectItem]
 
-class TailorRequest(BaseModel):
-    resume: RenderableResume
-    patch: ResumePatch
-
-# Multi-Agent Platform Redesign Schemas
-
-class TailoringStrategy(BaseModel):
-    summary_focus: str
-    skills_to_add: List[str]
-    experience_goals: Dict[str, str] = {} # Bullet-by-bullet focus guide for experience indexes
-    project_goals: Dict[str, str] = {} # Bullet-by-bullet focus guide for project indexes
-    reasoning: str
-
-class FactVerificationResult(BaseModel):
-    is_valid: bool
-    hallucinations: List[str] = [] # List of any fabricated facts/metrics/dates
-    corrections: Dict[str, str] = {} # Keyed by path e.g. "experience.0.description.1" -> corrected text
-
-class ReviewReport(BaseModel):
-    score: int = 0 # 0-100 rating
-    strengths: List[str] = []
-    weaknesses: List[str] = []
-    actionable_feedback: List[str] = []
-
+class CoverLetterResult(BaseModel):
+    cover_letter: str
+    recipient_name: Optional[str] = "Hiring Manager"
+    recipient_title: Optional[str] = "Recruiter"
+    company_name: Optional[str] = ""
+    job_title: Optional[str] = ""
+    key_highlights: List[str] = []

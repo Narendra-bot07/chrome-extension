@@ -1,6 +1,7 @@
 import React from 'react';
 import { Check, Sparkles, ShieldCheck, ArrowRight, RefreshCw, FileText, CalendarDays, Clock3, History, Eye, Star, X, Upload } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { InlineAIThinking, SkeletonCard } from './ui/Loading';
 
 const sectionOptions = [
   { id: 'summary', title: 'Summary' },
@@ -125,22 +126,15 @@ function ResumeTailoringConfigView({
     }`}>
       {/* Loading Overlay */}
       {loading && (
-        <div className="absolute inset-0 bg-white dark:bg-zinc-950/98 backdrop-blur-xs z-50 flex flex-col items-center justify-center p-6 text-center animate-fadeIn">
-          <div className="w-12 h-12 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center relative mb-5">
-            <RefreshCw className="text-[#00bda5] animate-spin" size={18} />
-          </div>
-          <div className="space-y-3 max-w-[280px]">
-            <h3 className="text-xs font-black uppercase tracking-widest text-zinc-950 dark:text-zinc-50">
-              Tailoring Resume
-            </h3>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium min-h-[2.5rem] leading-relaxed">
-              {loadingMessages[loadingStep]}
-            </p>
-            <div className="w-44 h-1 bg-zinc-100 dark:bg-zinc-900 rounded-full overflow-hidden border border-zinc-200/50 dark:border-zinc-800 mx-auto mt-2">
-              <div 
-                className="h-full bg-[#00bda5] transition-all duration-500 rounded-full"
-                style={{ width: `${((loadingStep + 1) / loadingMessages.length) * 100}%` }}
-              />
+        <div className="absolute inset-0 bg-tf-surface/95 backdrop-blur-md z-50 flex flex-col items-center justify-center p-6 text-center animate-fade-in-up">
+          <div className="w-full max-w-sm space-y-4">
+            <InlineAIThinking 
+              stages={loadingMessages} 
+              className="shadow-sm" 
+            />
+            <div className="space-y-3">
+              <SkeletonCard numRows={2} />
+              <SkeletonCard numRows={2} />
             </div>
           </div>
         </div>

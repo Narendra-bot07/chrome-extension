@@ -69,7 +69,6 @@ export default function PrintLayout() {
       const isA4 = format.toLowerCase() === 'a4';
       
       const targetWidth = isA4 ? '8.27in' : '8.5in';
-      const targetMinHeight = isA4 ? '11.69in' : '11in';
       const MAX_HEIGHT = isA4 ? 1115 : 1045; // A4 has 1122px max, Letter has 1056px max at 96 DPI
       
       // Force matching size constraints onto the template container
@@ -112,6 +111,15 @@ export default function PrintLayout() {
           )
         });
         window.__FINAL_COMPOSITION_PLAN__ = finalPlan;
+        const plannedBreak = finalPlan.page_breaks[0];
+        if (plannedBreak) {
+          const breakNode = el.querySelector(`[data-section="${plannedBreak}"]`) as HTMLElement | null;
+          if (breakNode) {
+            breakNode.style.breakBefore = 'page';
+            breakNode.style.pageBreakBefore = 'always';
+            breakNode.dataset.compositionBreak = 'final-plan';
+          }
+        }
         setFittingComplete(true);
       } else {
         // Overflowing! Check if we should compress further
@@ -140,15 +148,10 @@ export default function PrintLayout() {
                 || `safe_compression_${index + 1}`
             )
           });
-          const plannedBreak = finalPlan.page_breaks[0];
-          if (plannedBreak) {
-            const breakNode = el.querySelector(`[data-section="${plannedBreak}"]`) as HTMLElement | null;
-            if (breakNode) {
-              breakNode.style.breakBefore = 'page';
-              breakNode.style.pageBreakBefore = 'always';
-              breakNode.dataset.compositionBreak = 'final-plan';
-            }
-          }
+          // This content already exceeds one physical page. Adding a CSS
+          // break here can stack with Chromium's natural fragmentation and
+          // create a spurious third page. The measured boundary remains in
+          // the plan, while Chromium paginates the complete content naturally.
           window.__FINAL_COMPOSITION_PLAN__ = finalPlan;
           setFittingComplete(true);
         }

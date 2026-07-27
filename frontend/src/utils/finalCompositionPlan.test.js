@@ -88,13 +88,15 @@ test('every measured section is preserved in the page plan', () => {
   assert.equal(plan.validation_report.content_preserved, true);
 });
 
-test('prefer two pages does not create a nearly empty second page', () => {
+test('explicit two-page mode intentionally creates two measured pages', () => {
   const plan = buildMeasuredCompositionPlan({
     contentHeight: 500,
     sectionMeasurements: sections.slice(0, 2),
     preference: 'two'
   });
-  assert.equal(plan.page_count, 1);
+  assert.equal(plan.page_count, 2);
+  assert.equal(plan.preference, 'two');
+  assert.equal(plan.pages.length, 2);
 });
 
 test('repeated composition is deterministic', () => {

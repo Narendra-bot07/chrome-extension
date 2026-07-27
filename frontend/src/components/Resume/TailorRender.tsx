@@ -133,7 +133,8 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
   } = resume;
 
   const categorizedSkills = categorizeSkills(skills, skills_categories);
-  const candidateName = normalizePersonName(personal_info.name);
+  const rawCandidateName = personal_info?.name || personal_info?.full_name || personal_info?.candidate_name || resume?.name || resume?.full_name || (personal_info?.email ? personal_info.email.split('@')[0].replace(/[0-9_.]+/g, ' ') : '');
+  const candidateName = normalizePersonName(rawCandidateName);
   const achievementRecords = normalizeDetailedRecords(achievements, 'achievement');
   const certificationRecords = normalizeDetailedRecords(certifications, 'certification');
 

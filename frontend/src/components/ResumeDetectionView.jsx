@@ -30,8 +30,10 @@ import {
   GitCompare,
   TrendingUp,
   BarChart3,
-  ArrowUpRight
+  Zap,
+  Briefcase
 } from 'lucide-react';
+import { InlineAIThinking, SkeletonCard } from './ui/Loading';
 import { useApp } from '../context/AppContext';
 import TailorRender from './Resume/TailorRender';
 import { ResumeDropzoneOverlay } from './Resume/ResumeDropzoneOverlay';
@@ -788,9 +790,10 @@ export default function ResumeDetectionView({
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
               
               {loadingSideDrawer ? (
-                <div className="py-16 text-center space-y-2 text-zinc-500">
-                  <RefreshCw size={24} className="animate-spin mx-auto text-[#00bda5]" />
-                  <p className="text-xs font-bold">Loading saved version metrics...</p>
+                <div className="py-4 space-y-4">
+                  <InlineAIThinking statusText="Loading saved version metrics..." />
+                  <SkeletonCard numRows={2} />
+                  <SkeletonCard numRows={2} />
                 </div>
               ) : sideDrawerTab === 'versions' ? (
 
@@ -973,9 +976,18 @@ export default function ResumeDetectionView({
 
                   {/* Comparison Results Card */}
                   {loadingCompare ? (
-                    <div className="py-16 text-center space-y-2 text-zinc-500">
-                      <RefreshCw size={24} className="animate-spin mx-auto text-indigo-600" />
-                      <p className="text-xs font-bold">Analyzing version diffs & score improvements...</p>
+                    <div className="py-4 space-y-4">
+                      <InlineAIThinking 
+                        stages={[
+                          "Analyzing version diffs...",
+                          "Computing score improvements...",
+                          "Finalizing comparison metrics..."
+                        ]} 
+                      />
+                      <div className="grid grid-cols-2 gap-3">
+                        <SkeletonCard numRows={2} />
+                        <SkeletonCard numRows={2} />
+                      </div>
                     </div>
                   ) : compareResult ? (
                     <div className="space-y-4 animate-fade-in">

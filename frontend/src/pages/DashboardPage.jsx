@@ -7,6 +7,7 @@ import {
   Send, Search, Clock, Award, XCircle, ChevronDown, ArrowRight, Sparkles, AlertCircle
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
+import { FadeSwap, PageLoadingState } from '../components/ui/Loading';
 
 // Safe Error Boundary for Dashboard
 class DashboardErrorBoundary extends React.Component {
@@ -116,7 +117,8 @@ function DashboardContent() {
     loadDashboardData();
   }, [session]);
 
-  const userName = profile?.full_name?.split(' ')[0] || user?.user_metadata?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'Narendra';
+  const rawName = profile?.full_name?.split(' ')[0] || user?.user_metadata?.full_name?.split(' ')[0] || (user?.email ? user.email.split('@')[0].replace(/[0-9]/g, '') : 'Narendra');
+  const userName = rawName ? rawName.charAt(0).toUpperCase() + rawName.slice(1).toLowerCase() : 'Narendra';
 
   // ==========================================
   // 100% ACCURATE LIVE DATABASE CALCULATIONS
@@ -228,17 +230,30 @@ function DashboardContent() {
   });
 
   return (
-    <div className="flex-1 flex flex-col gap-6 font-sans max-w-7xl mx-auto pb-12 select-none text-tf-text">
-      
-      {/* 1. GREETING HEADER */}
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold tracking-tight text-tf-text flex items-center gap-2">
-          Good morning, {userName} 👋
-        </h1>
-        <p className="text-xs text-tf-text-secondary font-medium">
-          Track. Optimize. Land your dream role.
-        </p>
-      </div>
+    <FadeSwap
+      isLoading={loading}
+      skeleton={
+        <PageLoadingState
+          type="dashboard"
+          stages={[
+            'Loading your workspace...',
+            'Fetching analytics & metrics...',
+            'Preparing pipeline stages...'
+          ]}
+        />
+      }
+    >
+      <div className="flex-1 flex flex-col gap-6 font-sans max-w-7xl mx-auto pb-12 select-none text-tf-text">
+        
+        {/* 1. GREETING HEADER */}
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-bold tracking-tight text-tf-text flex items-center gap-2">
+            Good morning, {userName} 👋
+          </h1>
+          <p className="text-xs text-tf-text-secondary font-medium">
+            Track. Optimize. Land your dream role.
+          </p>
+        </div>
 
       {/* 2. TOP 4 DYNAMIC METRIC CARDS WITH SPARKLINES */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -373,7 +388,7 @@ function DashboardContent() {
             </div>
 
             {/* CONNECTED HORIZONTAL PIPELINE STAGES */}
-            <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 relative">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 relative">
               
               {/* Stage 1: Applied */}
               <div className="bg-tf-surface-2/70 border border-tf-border rounded-xl p-3.5 space-y-3 relative">
@@ -873,6 +888,7 @@ function DashboardContent() {
       </div>
 
     </div>
+    </FadeSwap>
   );
 }
 

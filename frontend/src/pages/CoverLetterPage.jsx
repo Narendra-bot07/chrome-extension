@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
+import { CoverLetterRender } from '../components/CoverLetterRender';
 import { useNavigate } from 'react-router-dom';
 import {
   FileText,
@@ -28,8 +29,31 @@ import {
 // Helper to format paragraphs cleanly
 function formatParagraphs(text) {
   if (!text) return [];
-  if (Array.isArray(text)) return text;
-  return String(text).split('\n\n').filter(p => p.trim());
+  if (Array.isArray(text)) return text.map(p => String(p).trim()).filter(Boolean);
+
+  let str = String(text).trim();
+
+  // Strip leading salutation if embedded
+  str = str.replace(/^(Dear\s+[^,\n]+,|\bTo Whom It May Concern,|\bDear\s+Hiring\s+(Manager|Team),)\s*/i, '');
+
+  // Strip trailing signoff if embedded
+  str = str.replace(/\s*(Sincerely,|Best regards,|Warm regards,|Regards,|Thank you,)\s*[^\n]*$/i, '');
+
+  const normalized = str.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  let chunks = normalized.split(/\n\s*\n/);
+  if (chunks.length <= 1 && normalized.includes('\n')) {
+    chunks = normalized.split('\n');
+  }
+
+  return chunks
+    .map(p => p.trim())
+    .filter(p => {
+      if (!p) return false;
+      if (/^(Dear|To Whom|Hiring Manager)/i.test(p) && p.length < 40) return false;
+      if (/^(Sincerely|Regards|Best regards|Warm regards|Thank you)/i.test(p) && p.length < 50) return false;
+      return true;
+    });
 }
 
 // -----------------------------------------------------------------------------
@@ -56,7 +80,6 @@ function CoverLetterVectorRender({ coverLetter, context, templateKey = 'classic_
     ? coverLetter
     : (coverLetter?.content || coverLetter?.body || (typeof generatedCoverLetter === 'object' ? generatedCoverLetter?.content : ''));
 
-  // Extract body text excluding header/signoff if embedded
   let bodyText = rawText || '';
   if (salutation && bodyText.includes(salutation)) {
     bodyText = bodyText.split(salutation)[1] || bodyText;
@@ -70,20 +93,20 @@ function CoverLetterVectorRender({ coverLetter, context, templateKey = 'classic_
   const themeColor = settings.theme_color || (templateKey === 'modern_corporate' ? '#1d4ed8' : '#0f172a');
   const fontFamily = settings.font || (templateKey === 'executive_professional' ? 'Georgia, serif' : 'Inter, sans-serif');
   const fontSize = settings.font_size ? `${settings.font_size}pt` : '10.5pt';
-  const lineHeight = settings.line_height || 1.5;
-  const paragraphGap = settings.paragraph_spacing ? `${settings.paragraph_spacing}px` : '14px';
+  const lineHeight = settings.line_height || 1.65;
+  const paragraphGap = settings.paragraph_spacing ? `${settings.paragraph_spacing}px` : '18px';
 
   // TEMPLATE 1: CLASSIC ATS (Clean, left-aligned, maximum parser compatibility)
   if (templateKey === 'classic_ats') {
     return (
       <div
-        className="w-full bg-white text-zinc-900 p-12 space-y-6 select-text text-left"
+        className="w-full bg-white text-zinc-900 p-10 md:p-14 space-y-6 select-text text-left shadow-lg border border-zinc-200 rounded-sm"
         style={{ fontFamily, fontSize, lineHeight }}
       >
         {/* Header */}
-        <div className="border-b border-zinc-900 pb-4 space-y-1">
-          <h1 className="text-xl font-bold tracking-tight text-zinc-900 uppercase">{name}</h1>
-          <div className="text-[10px] text-zinc-600 space-x-2 font-medium">
+        <div className="border-b border-zinc-900 pb-5 space-y-1.5 mb-6">
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-900 uppercase">{name}</h1>
+          <div className="text-xs text-zinc-600 space-x-2 font-medium">
             {email && <span>{email}</span>}
             {phone && <span>· {phone}</span>}
             {location && <span>· {location}</span>}
@@ -91,7 +114,7 @@ function CoverLetterVectorRender({ coverLetter, context, templateKey = 'classic_
         </div>
 
         {/* Date & Recipient */}
-        <div className="space-y-3 pt-2">
+        <div className="space-y-2 my-6">
           <div className="text-xs font-semibold text-zinc-600">{date}</div>
           <div className="text-xs font-bold text-zinc-800 leading-snug">
             <div>{recipient}</div>
@@ -100,21 +123,21 @@ function CoverLetterVectorRender({ coverLetter, context, templateKey = 'classic_
         </div>
 
         {/* Salutation */}
-        <div className="font-bold text-zinc-900 text-xs pt-1">{salutation}</div>
+        <div className="font-bold text-zinc-900 text-sm mt-6 mb-5">{salutation}</div>
 
         {/* Paragraphs */}
-        <div className="space-y-4">
+        <div className="space-y-5 my-6">
           {paragraphs.map((para, idx) => (
-            <p key={idx} className="text-xs text-zinc-800 text-justify leading-relaxed" style={{ marginBottom: paragraphGap }}>
+            <p key={idx} className="text-xs md:text-sm text-zinc-800 text-justify leading-relaxed font-normal" style={{ marginBottom: paragraphGap, lineHeight: 1.65 }}>
               {para}
             </p>
           ))}
         </div>
 
         {/* Signoff */}
-        <div className="pt-6 space-y-3">
+        <div className="mt-10 pt-6 border-t border-zinc-150 space-y-4">
           <p className="text-xs font-semibold text-zinc-800">{signoff}</p>
-          <p className="text-xs font-bold text-zinc-900 uppercase">{name}</p>
+          <p className="text-sm font-bold text-zinc-900 uppercase tracking-wide">{name}</p>
         </div>
       </div>
     );
@@ -124,20 +147,20 @@ function CoverLetterVectorRender({ coverLetter, context, templateKey = 'classic_
   if (templateKey === 'modern_corporate') {
     return (
       <div
-        className="w-full bg-white text-zinc-900 p-12 space-y-6 select-text text-left"
+        className="w-full bg-white text-zinc-900 p-10 md:p-14 space-y-6 select-text text-left shadow-lg border border-zinc-200 rounded-sm"
         style={{ fontFamily, fontSize, lineHeight }}
       >
         {/* Modern Accent Header */}
-        <div className="flex items-start justify-between border-b-2 pb-5" style={{ borderColor: themeColor }}>
-          <div className="space-y-1">
-            <h1 className="text-2xl font-black text-zinc-900" style={{ color: themeColor }}>
+        <div className="flex items-start justify-between border-b-2 pb-6 mb-7" style={{ borderColor: themeColor }}>
+          <div className="space-y-1.5">
+            <h1 className="text-2.5xl font-black text-zinc-900" style={{ color: themeColor }}>
               {name}
             </h1>
             <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">
               Application for {job.title || 'Target Role'}
             </p>
           </div>
-          <div className="text-[10px] font-semibold text-zinc-600 text-right space-y-0.5">
+          <div className="text-xs font-semibold text-zinc-600 text-right space-y-1">
             {email && <div>{email}</div>}
             {phone && <div>{phone}</div>}
             {location && <div>{location}</div>}
@@ -145,8 +168,8 @@ function CoverLetterVectorRender({ coverLetter, context, templateKey = 'classic_
         </div>
 
         {/* Date & Recipient Grid */}
-        <div className="flex justify-between items-start pt-2 text-xs">
-          <div className="space-y-0.5">
+        <div className="flex justify-between items-start my-6 text-xs">
+          <div className="space-y-1">
             <span className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider block">Recipient</span>
             <div className="font-bold text-zinc-900">{recipient}</div>
             <div className="font-semibold text-zinc-600">{company}</div>
@@ -158,21 +181,21 @@ function CoverLetterVectorRender({ coverLetter, context, templateKey = 'classic_
         </div>
 
         {/* Salutation */}
-        <div className="font-bold text-zinc-900 text-xs pt-2">{salutation}</div>
+        <div className="font-bold text-zinc-900 text-sm mt-6 mb-5">{salutation}</div>
 
         {/* Paragraphs */}
-        <div className="space-y-4">
+        <div className="space-y-5 my-6">
           {paragraphs.map((para, idx) => (
-            <p key={idx} className="text-xs text-zinc-800 text-justify leading-relaxed" style={{ marginBottom: paragraphGap }}>
+            <p key={idx} className="text-xs md:text-sm text-zinc-800 text-justify leading-relaxed font-normal" style={{ marginBottom: paragraphGap, lineHeight: 1.65 }}>
               {para}
             </p>
           ))}
         </div>
 
         {/* Signoff */}
-        <div className="pt-6 space-y-4 border-t border-zinc-100">
+        <div className="mt-10 pt-6 space-y-4 border-t border-zinc-150">
           <p className="text-xs font-semibold text-zinc-800">{signoff}</p>
-          <p className="text-xs font-bold text-zinc-900" style={{ color: themeColor }}>{name}</p>
+          <p className="text-sm font-bold text-zinc-900 uppercase tracking-wide" style={{ color: themeColor }}>{name}</p>
         </div>
       </div>
     );
@@ -181,13 +204,13 @@ function CoverLetterVectorRender({ coverLetter, context, templateKey = 'classic_
   // TEMPLATE 3: EXECUTIVE PROFESSIONAL (Refined typography, formal spacing, premium header)
   return (
     <div
-      className="w-full bg-white text-zinc-900 p-12 space-y-6 select-text text-left font-serif"
+      className="w-full bg-white text-zinc-900 p-10 md:p-14 space-y-6 select-text text-left font-serif shadow-lg border border-zinc-200 rounded-sm"
       style={{ fontFamily: 'Georgia, serif', fontSize, lineHeight }}
     >
       {/* Executive Header */}
-      <div className="text-center border-b border-zinc-300 pb-5 space-y-1.5">
-        <h1 className="text-2xl font-bold tracking-widest text-zinc-900 uppercase">{name}</h1>
-        <div className="text-[10px] text-zinc-600 space-x-3 font-sans uppercase tracking-wider font-semibold">
+      <div className="text-center border-b border-zinc-300 pb-6 mb-7 space-y-2">
+        <h1 className="text-2.5xl font-bold tracking-widest text-zinc-900 uppercase">{name}</h1>
+        <div className="text-xs text-zinc-600 space-x-3 font-sans uppercase tracking-wider font-semibold">
           {email && <span>{email}</span>}
           {phone && <span>| {phone}</span>}
           {location && <span>| {location}</span>}
@@ -195,7 +218,7 @@ function CoverLetterVectorRender({ coverLetter, context, templateKey = 'classic_
       </div>
 
       {/* Date & Recipient */}
-      <div className="space-y-3 pt-2 font-sans">
+      <div className="space-y-3 my-6 font-sans">
         <div className="text-xs text-zinc-600 italic">{date}</div>
         <div className="text-xs font-bold text-zinc-900">
           <div>{recipient}</div>
@@ -204,21 +227,21 @@ function CoverLetterVectorRender({ coverLetter, context, templateKey = 'classic_
       </div>
 
       {/* Salutation */}
-      <div className="font-bold text-zinc-900 text-xs pt-1">{salutation}</div>
+      <div className="font-bold text-zinc-900 text-sm mt-6 mb-5">{salutation}</div>
 
       {/* Paragraphs */}
-      <div className="space-y-4">
+      <div className="space-y-5 my-6">
         {paragraphs.map((para, idx) => (
-          <p key={idx} className="text-xs text-zinc-800 text-justify leading-relaxed" style={{ marginBottom: paragraphGap }}>
+          <p key={idx} className="text-xs md:text-sm text-zinc-800 text-justify leading-relaxed font-normal" style={{ marginBottom: paragraphGap, lineHeight: 1.65 }}>
             {para}
           </p>
         ))}
       </div>
 
       {/* Signoff */}
-      <div className="pt-8 space-y-4 font-sans">
+      <div className="mt-10 pt-6 space-y-4 font-sans border-t border-zinc-150">
         <p className="text-xs font-semibold text-zinc-800">{signoff}</p>
-        <p className="text-xs font-bold text-zinc-900 uppercase tracking-wider">{name}</p>
+        <p className="text-sm font-bold text-zinc-900 uppercase tracking-wider">{name}</p>
       </div>
     </div>
   );
@@ -851,20 +874,13 @@ export default function CoverLetterPage() {
               </div>
             )}
 
-            {pdfBlobUrl ? (
-              <iframe
-                title="Exact Cover Letter PDF Artifact Preview"
-                src={`${pdfBlobUrl}#toolbar=0&navpanes=0&scrollbar=0`}
-                className="w-full h-full border-none pointer-events-auto"
-              />
-            ) : (
-              <CoverLetterVectorRender
-                coverLetter={activeContent}
-                context={coverLetterContext}
-                templateKey={selectedTemplate}
-                settings={currentSettings}
-              />
-            )}
+            <CoverLetterRender
+              coverLetter={activeContent}
+              context={coverLetterContext}
+              templateKey={selectedTemplate}
+              settings={currentSettings}
+              className="shadow-none border-none"
+            />
           </div>
 
         </div>
@@ -882,7 +898,7 @@ export default function CoverLetterPage() {
           </div>
           <div className="flex-1 bg-zinc-950 overflow-auto p-8 flex justify-center items-start">
             <div className="w-[816px] min-h-[1056px] bg-white shadow-2xl rounded-sm p-12 text-zinc-900">
-              <CoverLetterVectorRender
+              <CoverLetterRender
                 coverLetter={activeContent}
                 context={coverLetterContext}
                 templateKey={selectedTemplate}

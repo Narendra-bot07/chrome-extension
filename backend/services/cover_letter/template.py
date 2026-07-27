@@ -119,10 +119,10 @@ def review_cover_letter_composition(
         issues.append("EXCESSIVE_HORIZONTAL_MARGIN")
     if (
         int(metrics.get("page_count") or 1) == 1
-        and word_count >= 250
+        and word_count >= 280
         and (
-            bottom_whitespace / page_height > 0.45
-            or vertical_utilization < 0.38
+            bottom_whitespace / page_height > 0.52
+            or vertical_utilization < 0.32
         )
     ):
         issues.append("EXCESSIVE_BOTTOM_WHITESPACE")
@@ -134,7 +134,7 @@ def review_cover_letter_composition(
         issues.append("HEADER_TOO_SMALL")
     if plan.spacing.paragraph_gap_px < 6:
         issues.append("PARAGRAPH_SPACING_TOO_TIGHT")
-    if plan.spacing.paragraph_gap_px > 10:
+    if plan.spacing.paragraph_gap_px > 24:
         issues.append("PARAGRAPH_SPACING_TOO_LARGE")
     if metrics.get("clipped"):
         issues.append("TEXT_CLIPPED")
@@ -170,13 +170,13 @@ def repair_cover_letter_plan(
         )
     if "EXCESSIVE_BOTTOM_WHITESPACE" in issues:
         repaired.typography.body_font_pt = min(
-            11.5, repaired.typography.body_font_pt + 0.35
+            12.5, repaired.typography.body_font_pt + 0.4
         )
         repaired.typography.line_height = min(
-            1.45, repaired.typography.line_height + 0.04
+            1.65, repaired.typography.line_height + 0.05
         )
         repaired.spacing.paragraph_gap_px = min(
-            10, repaired.spacing.paragraph_gap_px + 1
+            20, repaired.spacing.paragraph_gap_px + 2
         )
         repaired.vertical_alignment = "balanced"
     if "EXCESSIVE_TOP_WHITESPACE" in issues:

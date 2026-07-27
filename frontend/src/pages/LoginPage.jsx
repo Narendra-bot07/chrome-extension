@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { Mail, Lock, User, ChevronRight, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useGoogleLogin } from '@react-oauth/google';
+import { Button } from '../components/ui/Button';
+import { Input } from '../components/ui/Input';
 
 const isExtension = typeof chrome !== 'undefined' && chrome.identity;
 

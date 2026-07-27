@@ -627,12 +627,19 @@ async def api_render_unified_pdf(request: UnifiedRenderRequest):
         resume=resume_dict,
         template_name=template,
         requested_section_order=resume_dict.get("section_order"),
+        page_mode=request.page_preference,
     )
+    renderer_resume = dict(resume_dict)
+    renderer_resume["_page_preference"] = {
+        "prefer_one_page": "one", "one_page": "one", "one": "one",
+        "prefer_two_pages": "two", "two_page": "two", "two": "two",
+    }.get(request.page_preference, "auto")
+    renderer_resume["_composition"] = composition_plan.model_dump(mode="json")
 
     try:
         render_res = await run_in_threadpool(
             generate_pdf_via_playwright,
-            json.dumps(resume_dict),
+            json.dumps(renderer_resume),
             template
         )
         if isinstance(render_res, tuple):
@@ -656,7 +663,12 @@ async def api_render_unified_pdf(request: UnifiedRenderRequest):
 
     pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
     page_count = int(plan_meta.get("page_count") or composition_plan.page_count)
-    status_msg = "Fits cleanly on 1 page" if page_count == 1 else "2 pages selected to preserve readability"
+    if composition_plan.requested_mode.value == "auto":
+        status_msg = "Auto selected a clean one-page layout." if page_count == 1 else "Auto selected two pages to preserve readability."
+    elif composition_plan.requested_mode.value == "one_page":
+        status_msg = "Optimized successfully for one page." if page_count == 1 else "One page would reduce readability. Review the best attempt or switch modes."
+    else:
+        status_msg = "Content balanced across two pages."
     personal = resume_dict.get("personal_info") or {}
     clean_part = lambda value, fallback: re.sub(
         r"[^A-Za-z0-9_-]+", "_", str(value or fallback).strip()
@@ -667,17 +679,31 @@ async def api_render_unified_pdf(request: UnifiedRenderRequest):
     )
 
     final_plan_dict = {
+        "requested_mode": composition_plan.requested_mode.value,
+        "target_page_count": composition_plan.target_page_count,
+        "actual_page_count": page_count,
+        "status": "ONE_PAGE_UNSAFE" if composition_plan.requested_mode.value == "one_page" and page_count != 1 else "PASS",
+        "reason": (composition_plan.reason or "The content cannot fit on one page without reducing readability.") if composition_plan.requested_mode.value == "one_page" and page_count != 1 else "",
+        "overflow_px": 0,
+        "safe_limits_reached": composition_plan.safe_limits_reached if page_count != 1 else [],
         "page_count": page_count,
-        "density": composition_plan.density.value.lower(),
-        "page_size": "A4",
-        "margins": {"top": "0", "right": "0", "bottom": "0", "left": "0"},
-        "typography": {"fontFamily": "font-sans"},
-        "section_order": composition_plan.section_order,
-        "page_breaks": [composition_plan.final_measurements.page_break_index] if composition_plan.final_measurements.page_break_index else [],
+        "density": plan_meta.get("density", composition_plan.density.value.lower()),
+        "density_profile": plan_meta.get("density", composition_plan.density.value.lower()),
+        "page_size": plan_meta.get("page_size", "A4"),
+        "margins": plan_meta.get("margins", composition_plan.spacing_profile),
+        "typography": plan_meta.get("typography", {"fontFamily": "font-sans"}),
+        "spacing": {"section": plan_meta.get("section_spacing", {}), "entry": plan_meta.get("entry_spacing", {})},
+        "section_order": plan_meta.get("section_order", composition_plan.section_order),
+        "page_breaks": plan_meta.get("page_breaks", composition_plan.preferred_page_breaks),
+        "section_measurements": plan_meta.get("section_measurements", {}),
         "section_positions": plan_meta.get("section_positions", {}),
         "measurement_hash": measurement_hash,
         "render_hash": render_hash,
-        "validation_report": composition_plan.validation_status.model_dump(mode="json"),
+        "page_utilization": plan_meta.get("page_utilization", composition_plan.page_utilization),
+        "optimization_actions": plan_meta.get("optimization_actions", composition_plan.applied_optimizations),
+        "validation_report": plan_meta.get("validation_report", composition_plan.validation_status.model_dump(mode="json")),
+        "composition_engine_version": "page-mode-v1",
+        "composition_plan_hash": plan_meta.get("composition_plan_hash") or measurement_hash,
         "user_preference_applied": request.page_preference,
         "status_message": status_msg
     }
@@ -873,17 +899,20 @@ async def api_render_cover_letter(request: CoverLetterRenderRequest):
         plan = repaired
 
     if visual_review is None or visual_review.status != "PASS":
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
-                "message": (
-                    "The cover letter could not reach professional visual "
-                    "quality within three bounded repair attempts."
-                ),
-                "issues": visual_review.issues if visual_review else [],
-                "last_plan": plan.model_dump(mode="json"),
-            },
-        )
+        if last_valid_artifact:
+            plan, pdf_bytes, page_count, metrics, visual_review = last_valid_artifact
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "message": (
+                        "The cover letter could not reach professional visual "
+                        "quality within three bounded repair attempts."
+                    ),
+                    "issues": visual_review.issues if visual_review else [],
+                    "last_plan": plan.model_dump(mode="json"),
+                },
+            )
 
     if (
         request.settings.page_mode == "force_one_page"

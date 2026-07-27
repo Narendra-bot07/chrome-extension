@@ -40,42 +40,36 @@ const uniqueAchievementEvidence = values => {
   return kept;
 };
 
+const credentialKeywords = [
+  'certified', 'certification', 'certificate', 'license', 'licence', 'aws',
+  'azure', 'gcp', 'comptia', 'cisco', 'pmp', 'scrum', 'itil', 'cissp', 'oracle'
+];
+
+const isCredential = item => {
+  const text = typeof item === 'string'
+    ? item
+    : [item?.name, item?.title, item?.issuing_organization, item?.issuer].filter(Boolean).join(' ');
+  const fp = fingerprint(text);
+  if (!fp) return false;
+  if (credentialKeywords.some(keyword => fp.includes(keyword))) return true;
+  return Boolean(item?.issue_date || item?.credential_id || item?.credential_url || item?.url);
+};
+
 const achievementText = item => {
   if (typeof item === 'string') return cleanText(item);
   if (!item || typeof item !== 'object') return '';
-  const title = cleanText(item.title || item.name || item.achievement || item.award);
-  const descriptions = [
-    item.description,
-    item.details,
-    item.summary,
-    item.result,
-    ...(Array.isArray(item.bullets) ? item.bullets : []),
-    ...(Array.isArray(item.highlights) ? item.highlights : [])
-  ].flat().filter(Boolean).map(cleanText);
-  const detail = unique(descriptions).join(' ');
-  return title && detail && !fingerprint(detail).startsWith(fingerprint(title))
-    ? `${title} — ${detail}`
-    : detail || title;
+  const title = cleanText(item.title || item.name || item.award);
+  const description = cleanText(item.description || item.summary || item.details);
+  if (title && description && !fingerprint(description).startsWith(fingerprint(title))) {
+    return `${title} — ${description}`;
+  }
+  return title || description;
 };
 
-const isCredential = item => {
-  if (!item || typeof item !== 'object') return false;
-  const combined = cleanText([
-    item.name, item.title, item.description, item.details
-  ].filter(Boolean).join(' '));
-  const explicitlyCredentialed = /\b(certifi|credential|course|training|license)\b/i.test(combined);
-  const achievementLike = /\b(hackathon|finalist|scholar(?:ship)?|competitive programming|leetcode|volunteer|leadership|student chapter|membership|selected (?:among|as)|top \d+)\b/i.test(combined);
-  if (achievementLike && !explicitlyCredentialed) return false;
-  return Boolean(
-    item.credential_id || item.credential_url || item.url ||
-    item.issuing_organization || item.issue_date || item.expiration_date ||
-    explicitlyCredentialed
-  );
+const certificationTitle = item => {
+  if (typeof item === 'string') return fingerprint(item);
+  return fingerprint(item?.name || item?.title || item?.certificate_name || '');
 };
-
-const certificationTitle = item => fingerprint(
-  typeof item === 'string' ? item : item?.name || item?.title || ''
-);
 
 const splitDetailedText = value => {
   const text = cleanText(value);
@@ -99,8 +93,6 @@ export function toRenderableResume(record) {
   });
 
   // Older parser versions and imported resume providers use equivalent names.
-  // Normalize them at the content boundary so review never loses valid source
-  // content merely because a field used a supported alias.
   output.summary = structuredClone(
     source.summary
     || source.professional_summary
@@ -113,12 +105,48 @@ export function toRenderableResume(record) {
     source.objective || source.career_objective || ''
   );
 
-  const personal = source.personal_info || {};
+  const personal = {
+    ...(record?.personal_info || {}),
+    ...(source?.personal_info || {})
+  };
+
+  const rawName = personal.name 
+    || personal.full_name 
+    || personal.candidate_name 
+    || source.name 
+    || source.full_name 
+    || record?.name 
+    || record?.full_name 
+    || record?.parsed_content?.name;
+
+  let resolvedName = cleanText(rawName);
+
+  if (!resolvedName) {
+    const rawText = String(source.raw_text || record.raw_text || '').trim();
+    if (rawText) {
+      const firstLine = rawText.split('\n')[0]?.trim();
+      if (firstLine && firstLine.length < 50 && !firstLine.includes('@') && !firstLine.includes('http')) {
+        resolvedName = cleanText(firstLine);
+      }
+    }
+  }
+
+  if (!resolvedName && personal.email && typeof personal.email === 'string') {
+    const emailPrefix = personal.email.split('@')[0].replace(/[0-9_.]+/g, ' ').trim();
+    if (emailPrefix) {
+      resolvedName = emailPrefix.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    }
+  }
+
   output.personal_info = Object.fromEntries(
     PERSONAL_FIELDS
       .filter(field => personal[field] !== undefined && personal[field] !== null && personal[field] !== '')
       .map(field => [field, structuredClone(personal[field])])
   );
+
+  if (resolvedName) {
+    output.personal_info.name = resolvedName;
+  }
 
   const explicitAchievements = [];
   const achievementCredentials = [];
@@ -151,60 +179,19 @@ export function toRenderableResume(record) {
   output.certifications = unique(credentialItems.filter(item => {
     const title = certificationTitle(item);
     return !achievementTitles.has(title) || isCredential(item);
-  }).map(item => {
+  }));
+
+  output.certifications = output.certifications.map(item => {
     if (typeof item === 'string') {
-      const detailed = splitDetailedText(item);
-      return { name: detailed.title, ...(detailed.description ? { description: detailed.description } : {}) };
+      const split = splitDetailedText(item);
+      return split.description
+        ? { name: split.title, issuing_organization: split.description }
+        : { name: split.title };
     }
     const normalized = structuredClone(item);
     if (!normalized.name && normalized.title) normalized.name = normalized.title;
     return normalized;
-  }));
-
-  const sectionAliases = {
-    experience: ['experience', 'work_experience', 'employment_history'],
-    internships: ['internships', 'internship_experience'],
-    projects: ['projects', 'personal_projects', 'academic_projects'],
-    education: ['education', 'academic_background'],
-    publications: ['publications', 'research', 'research_publications'],
-    languages: ['languages'],
-    volunteer_experience: ['volunteer_experience', 'volunteering'],
-    open_source: ['open_source', 'open_source_contributions'],
-    leadership: ['leadership', 'leadership_experience'],
-    extracurricular_activities: ['extracurricular_activities', 'activities'],
-    custom_sections: ['custom_sections']
-  };
-  for (const field of [
-    'experience', 'internships', 'projects', 'education', 'publications',
-    'languages', 'volunteer_experience', 'open_source', 'leadership',
-    'extracurricular_activities', 'custom_sections'
-  ]) {
-    const alias = sectionAliases[field].find(key => Array.isArray(source[key]));
-    output[field] = alias ? structuredClone(source[alias]) : [];
-  }
-  for (const field of ['experience', 'internships', 'projects']) {
-    output[field] = output[field].map(item => {
-      if (!item || typeof item !== 'object') return item;
-      const normalized = structuredClone(item);
-      const description = normalized.description
-        ?? normalized.bullet_points
-        ?? normalized.bullets
-        ?? normalized.responsibilities
-        ?? normalized.highlights;
-      normalized.description = Array.isArray(description)
-        ? structuredClone(description)
-        : (description ? [cleanText(description)] : []);
-      return normalized;
-    });
-  }
-  output.skills = unique(Array.isArray(source.skills) ? source.skills.map(cleanText).filter(Boolean) : []);
-  output.interests = unique(Array.isArray(source.interests) ? source.interests.map(cleanText).filter(Boolean) : []);
-  output.skills_categories = source.skills_categories && typeof source.skills_categories === 'object'
-    ? structuredClone(source.skills_categories)
-    : {};
-  output.links = source.links && typeof source.links === 'object' ? structuredClone(source.links) : {};
+  });
 
   return repairResumeLinks(output);
 }
-
-export const RENDERABLE_RESUME_FIELDS = Object.freeze([...TOP_LEVEL_FIELDS]);

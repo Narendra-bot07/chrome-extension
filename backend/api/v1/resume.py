@@ -408,7 +408,7 @@ async def save_resume_layout(
         "header_config": layout.header.model_dump(mode="json"),
         "main_column_order": layout.main_column,
         "sidebar_order": layout.sidebar,
-        "hidden_sections": layout.hidden_sections,
+        "hidden_sections": getattr(layout, "hidden_sections", []),
         "updated_at": record.get("updated_at"),
     }
 

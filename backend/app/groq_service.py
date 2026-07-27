@@ -36,7 +36,7 @@ def parse_resume(raw_text: str, api_key: Optional[str] = None) -> ResumeStructur
     structured_llm = llm.with_structured_output(ResumeStructure)
     
     prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an expert ATS-parsing assistant. Analyze the unstructured resume text and extract it into the structured JSON schema format. Capture all experiences, education, skills, projects, and certifications. If a section is missing, fill with default empty values. In `skills_categories`, group all extracted technical skills into distinct logical categories (e.g., 'Languages', 'Frameworks/Libraries', 'Databases', 'Cloud/DevOps', 'CS Fundamentals', 'Data Engineering', etc.) where keys are the category names and values are lists of skills belonging to that category."),
+        ("system", "You are an expert ATS-parsing assistant. Analyze the unstructured resume text and extract it into the structured JSON schema format. Capture all experiences, education, skills, projects, and certifications. If a section is missing, fill with default empty values. IMPORTANT: In `experience` and `projects`, `description` MUST be a JSON array of strings (bullet point strings), e.g. [\"bullet point 1\", \"bullet point 2\"]. In `skills_categories`, group all extracted technical skills into distinct logical categories (e.g., 'Languages', 'Frameworks/Libraries', 'Databases', 'Cloud/DevOps', 'CS Fundamentals', 'Data Engineering', etc.) where keys are the category names and values are lists of skills belonging to that category."),
         ("human", "{text}")
     ])
     

@@ -24,11 +24,11 @@ export const DENSITY_PROFILES = Object.freeze({
 });
 
 export const COMPOSITION_LIMITS = Object.freeze({
-  minBodyFontSize: 9,
-  minLineHeight: 1.1,
-  minMarginPx: 14,
-  maxOnePageAttempts: 6,
-  maxRebalanceAttempts: 3,
+  minBodyFontSize: 8.5,
+  minLineHeight: 1.05,
+  minMarginPx: 8,
+  maxOnePageAttempts: 8,
+  maxRebalanceAttempts: 5,
   maxRendererRepairs: 2,
   maxPages: 2
 });
@@ -59,9 +59,17 @@ function chooseBalancedBreak(sections, contentHeight, pageHeight) {
       && firstPage >= pageHeight * 0.35
       && secondPage >= pageHeight * 0.28;
   });
-  return valid.sort((left, right) =>
+  const balanced = valid.sort((left, right) =>
     Math.abs(finite(left.offset) - target) - Math.abs(finite(right.offset) - target)
-  )[0] || null;
+  )[0];
+  if (balanced) return balanced;
+  // Explicit two-page mode still needs a deterministic physical boundary for
+  // short resumes; pick the closest complete-section boundary to the midpoint.
+  return sections.slice(1)
+    .filter(section => finite(section.offset) > 0 && finite(section.offset) < contentHeight)
+    .sort((left, right) =>
+      Math.abs(finite(left.offset) - target) - Math.abs(finite(right.offset) - target)
+    )[0] || null;
 }
 
 function paginate(sections, pageCount, contentHeight, pageHeight) {
@@ -134,9 +142,7 @@ export function buildMeasuredCompositionPlan({
     .filter(section => section.id);
   const sectionOrder = unique(sections.map(section => section.id));
   const naturalPageCount = Math.max(1, Math.ceil(measuredHeight / safeHeight));
-  const canPreferTwo = preference === 'two'
-    && sections.length >= 2
-    && measuredHeight >= safeHeight * 0.72;
+  const canPreferTwo = preference === 'two' && sections.length >= 2;
   const pageCount = Math.min(
     COMPOSITION_LIMITS.maxPages,
     Math.max(canPreferTwo ? 2 : 1, naturalPageCount)

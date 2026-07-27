@@ -3,7 +3,6 @@ import {
   Eye, ZoomIn, ZoomOut, Expand, Shrink, Printer, Download,
   Sparkles, RotateCcw, ChevronUp, ChevronDown, FileText, AlertTriangle, RefreshCw
 } from 'lucide-react';
-import { getTemplateComponent } from '../../templates';
 import { toRenderableResume } from '../../utils/renderableResume';
 
 type ZoomMode = 'fit_width' | 'fit_page' | 'actual_size';
@@ -54,12 +53,13 @@ export default function ResumePreview({
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
 
   // 4. Status Messages
-  const [statusMessage, setStatusMessage] = useState<string>('Best layout selected automatically');
+  const [statusMessage, setStatusMessage] = useState<string>('Auto selected a clean one-page layout.');
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
 
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollWrapperRef = useRef<HTMLDivElement>(null);
+  const renderRequestIdRef = useRef(0);
 
   // Touch Pinch-to-Zoom Gesture Handlers
   const touchStartDistRef = useRef<number | null>(null);
@@ -165,8 +165,10 @@ export default function ResumePreview({
     signal?: AbortSignal
   ) => {
     if (!resumeData) return;
+    const requestId = ++renderRequestIdRef.current;
     try {
       setLoadingPdf(true);
+      setStatusMessage('Recomposing resume…');
       setWarningMessage(null);
 
       const res = await fetch(`${apiUrl}/api/render-unified-pdf`, {
@@ -192,6 +194,7 @@ export default function ResumePreview({
       }
 
       const data = await res.json();
+      if (requestId !== renderRequestIdRef.current) return;
       if (data.success && data.pdf_base64) {
         const byteCharacters = atob(data.pdf_base64);
         const byteNumbers = new Array(byteCharacters.length);
@@ -212,18 +215,9 @@ export default function ResumePreview({
         const pCount = data.page_count || 1;
         setPageCount(pCount);
 
-        // Status Feedback Logic
-        if (pref === 'auto') {
-          setStatusMessage('Best layout selected automatically');
-        } else if (pref === 'prefer_one_page') {
-          if (pCount === 1) {
-            setStatusMessage('Optimized for one page');
-          } else {
-            setStatusMessage('Two pages required for readability');
-            setWarningMessage('This resume needs two pages to preserve readability. No content was removed.');
-          }
-        } else if (pref === 'prefer_two_pages') {
-          setStatusMessage('Balanced across two pages');
+        setStatusMessage(data.status_message || data.composition_plan?.status_message || 'Resume recomposed.');
+        if (data.composition_plan?.status === 'ONE_PAGE_UNSAFE') {
+          setWarningMessage('This resume cannot fit safely on one page without compromising readability.');
         }
 
         if (onCompositionChange) {
@@ -234,7 +228,7 @@ export default function ResumePreview({
       if ((err as Error)?.name === 'AbortError') return;
       console.warn('Backend PDF recomposition fallback triggered', err);
     } finally {
-      setLoadingPdf(false);
+      if (requestId === renderRequestIdRef.current) setLoadingPdf(false);
     }
   };
 
@@ -311,7 +305,6 @@ export default function ResumePreview({
     }
   };
 
-  const TemplateComponent = getTemplateComponent(selectedTemplate);
   const containerClasses = isFullscreen
     ? "fixed inset-0 z-[100] flex flex-col bg-zinc-900 text-zinc-100 overflow-hidden"
     : "flex flex-col h-full bg-[#f4f5f7] dark:bg-zinc-950 overflow-hidden relative";
@@ -474,7 +467,7 @@ export default function ResumePreview({
 
         {/* Right: Actions (Print & Download PDF) */}
         <div className="flex items-center gap-2">
-          <button className={btnClass} onClick={() => window.print()}>
+          <button className={btnClass} onClick={() => pdfBlobUrl && window.open(pdfBlobUrl, '_blank')} disabled={!pdfBlobUrl || loadingPdf}>
             <Printer size={14} />
             <span className="hidden sm:inline">Print</span>
           </button>
@@ -499,11 +492,13 @@ export default function ResumePreview({
             <span>{warningMessage}</span>
           </div>
           <button
-            onClick={() => setWarningMessage(null)}
-            className="text-amber-600 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-100 font-extrabold cursor-pointer"
+            onClick={() => setPagePreference('auto')}
+            className="text-amber-700 dark:text-amber-300 font-extrabold cursor-pointer"
           >
-            Dismiss
+            Switch to Auto
           </button>
+          <button onClick={() => setPagePreference('prefer_two_pages')} className="text-amber-700 dark:text-amber-300 font-extrabold cursor-pointer">Use 2 Pages</button>
+          <button onClick={() => setWarningMessage(null)} className="text-amber-700 dark:text-amber-300 font-extrabold cursor-pointer">Use Best One-Page Attempt</button>
         </div>
       )}
 
@@ -522,7 +517,7 @@ export default function ResumePreview({
           <div className="absolute inset-0 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-xs z-40 flex flex-col items-center justify-center gap-3">
             <RefreshCw size={28} className="animate-spin text-[#00bda5]" />
             <span className="text-sm font-extrabold text-zinc-800 dark:text-zinc-200">
-              Optimizing resume layout…
+              Recomposing resume…
             </span>
             <span className="text-xs text-zinc-500 dark:text-zinc-400">
               Measuring fonts, margins, and section boundaries
@@ -530,17 +525,24 @@ export default function ResumePreview({
           </div>
         )}
 
-        {/* Scaled PDF Canvas Document */}
+        {/* The exact immutable PDF artifact used by Download. */}
         <div
           className="origin-top flex flex-col items-center transition-transform duration-200 ease-out space-y-6"
           style={{ transform: `scale(${zoom})`, transformOrigin: 'top center' }}
         >
           <div
             id="resume-print-container"
-            className="shadow-2xl bg-white ring-1 ring-zinc-200/70 dark:ring-zinc-800 rounded-sm overflow-hidden flex flex-col gap-6 select-text text-zinc-900"
+            className="shadow-2xl bg-white ring-1 ring-zinc-200/70 dark:ring-zinc-800 rounded-sm overflow-hidden text-zinc-900"
             style={{ width: '8.5in', minHeight: pageCount === 2 ? '22.5in' : '11in' }}
           >
-            <TemplateComponent resume={resumeData} sectionOrder={sectionOrder} />
+            {pdfBlobUrl ? (
+              <iframe
+                src={`${pdfBlobUrl}#toolbar=0&navpanes=0&view=FitH`}
+                title="Final resume PDF preview"
+                className="w-full border-0 bg-white"
+                style={{ height: pageCount === 2 ? '23.38in' : '11.69in' }}
+              />
+            ) : null}
           </div>
         </div>
 
