@@ -53,7 +53,11 @@ function CompanyLogo({
 
   return (
     <span
-      className={`relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-xl border border-zinc-200 bg-white text-xs font-extrabold text-teal-700 shadow-2xs dark:border-zinc-700 dark:bg-zinc-900 dark:text-teal-400 ${className}`}
+      className={`relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-xl text-xs font-extrabold text-teal-700 dark:text-teal-400 ${
+        loaded && !failed
+          ? 'border border-zinc-200 bg-white shadow-2xs dark:border-zinc-700 dark:bg-zinc-900'
+          : 'border border-teal-100 bg-teal-50 shadow-2xs dark:border-zinc-700 dark:bg-zinc-800'
+      } ${className}`}
       style={{ width: dimension, height: dimension }}
       aria-label={!loaded || failed ? companyName : undefined}
     >

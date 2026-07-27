@@ -342,7 +342,13 @@ function DashboardContent() {
               ↗ {successRate}% <span className="text-tf-text-tertiary font-normal pl-0.5">vs last month</span>
             </span>
             <svg className="w-16 h-6 text-purple-500 overflow-visible" viewBox="0 0 80 30" fill="none">
-              <path d="M0 25 Q 20 28, 35 15 T 70 8 T 80 5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+              <path
+                d={successRate <= 0 ? "M0 24 L 80 24" : "M0 25 Q 20 28, 35 15 T 70 8 T 80 5"}
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                opacity={successRate <= 0 ? 0.35 : 1}
+              />
             </svg>
           </div>
         </div>
@@ -363,7 +369,13 @@ function DashboardContent() {
           <div className="flex items-center justify-between mt-4">
             <span className="text-[11px] font-normal text-tf-text-tertiary">Across all stages</span>
             <svg className="w-16 h-6 text-blue-500 overflow-visible" viewBox="0 0 80 30" fill="none">
-              <path d="M0 22 Q 25 25, 45 18 T 70 10 T 80 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+              <path
+                d={activeAppsCount <= 0 ? "M0 24 L 80 24" : activeAppsCount < 5 ? "M0 24 Q 40 22, 80 12" : "M0 22 Q 25 25, 45 18 T 70 10 T 80 6"}
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                opacity={activeAppsCount <= 0 ? 0.35 : 1}
+              />
             </svg>
           </div>
         </div>
@@ -384,7 +396,13 @@ function DashboardContent() {
           <div className="flex items-center justify-between mt-4">
             <span className="text-[11px] font-normal text-tf-text-tertiary">This month</span>
             <svg className="w-16 h-6 text-amber-500 overflow-visible" viewBox="0 0 80 30" fill="none">
-              <path d="M0 26 Q 20 22, 40 24 T 65 12 T 80 8" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+              <path
+                d={interviewApps.length <= 0 ? "M0 24 L 80 24" : interviewApps.length < 3 ? "M0 24 Q 40 20, 80 10" : "M0 26 Q 20 22, 40 24 T 65 12 T 80 8"}
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                opacity={interviewApps.length <= 0 ? 0.35 : 1}
+              />
             </svg>
           </div>
         </div>
@@ -405,7 +423,13 @@ function DashboardContent() {
           <div className="flex items-center justify-between mt-4">
             <span className="text-[11px] font-normal text-tf-text-tertiary">Keep it up! 🚀</span>
             <svg className="w-16 h-6 text-emerald-500 overflow-visible" viewBox="0 0 80 30" fill="none">
-              <path d="M0 24 Q 25 26, 45 20 T 70 12 T 80 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+              <path
+                d={offerApps.length <= 0 ? "M0 24 L 80 24" : offerApps.length < 3 ? "M0 24 Q 40 22, 80 10" : "M0 24 Q 25 26, 45 20 T 70 12 T 80 6"}
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                opacity={offerApps.length <= 0 ? 0.35 : 1}
+              />
             </svg>
           </div>
         </div>

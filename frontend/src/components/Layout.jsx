@@ -19,6 +19,7 @@ import { InteractiveAuroraBackground } from './layout/InteractiveAuroraBackgroun
 import { FlowParticleBackground } from './layout/FlowParticleBackground';
 import { PageContainer } from './layout/PageContainer';
 import { getPageLayout } from './layout/pageLayout';
+import { ApplicationLogo, UserAvatar } from './ApplicationLogo';
 
 
 
@@ -287,9 +288,7 @@ function Layout() {
           {/* Logo Header */}
           <div className="h-[44px] flex items-center justify-between px-2">
             <Link to="/dashboard" className="flex items-center gap-2.5 overflow-hidden">
-              <div className="w-7 h-7 rounded-md bg-tf-accent flex items-center justify-center text-tf-accent-fg font-semibold text-xs shrink-0">
-                T
-              </div>
+              <ApplicationLogo size={36} />
               {sidebarOpen && (
                 <span className="text-sm font-semibold tracking-tight text-tf-text truncate">
                   TailorFlow
@@ -353,9 +352,7 @@ function Layout() {
           </div>
 
           <div className="flex items-center gap-2.5 p-2 rounded-xl bg-tf-surface-2/40 border border-tf-border/40">
-            <div className="w-8 h-8 rounded-full bg-tf-accent/20 text-tf-accent font-bold text-xs flex items-center justify-center shrink-0">
-              {profile?.full_name?.charAt(0) || user?.email?.charAt(0)?.toUpperCase() || 'U'}
-            </div>
+            <UserAvatar user={user} profile={profile} size={36} />
             <div className="flex flex-col text-left leading-none overflow-hidden">
               <span className="text-xs font-semibold text-tf-text truncate max-w-[120px]">
                 {profile?.full_name || user?.email?.split('@')[0] || 'User'}
@@ -386,9 +383,10 @@ function Layout() {
 
             {/* TailorFlow Brand Logo */}
             <Link to="/dashboard" className="flex items-center gap-2.5 shrink-0 group">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#2E5BFF] via-[#1E48E0] to-[#00BDA5] flex items-center justify-center text-white font-extrabold text-sm shadow-md group-hover:scale-105 transition-transform">
-                T
-              </div>
+              <ApplicationLogo
+                size={40}
+                className="transition-transform group-hover:scale-105"
+              />
               <span className="text-base font-bold tracking-tight text-tf-text hidden xs:inline">
                 TailorFlow
               </span>
@@ -442,17 +440,13 @@ function Layout() {
             {/* User Profile Dropdown Glass Pill */}
             {(() => {
               const displayName = profile?.full_name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Narendra';
-              const avatarInitial = displayName.charAt(0).toUpperCase();
-
               return (
                 <div className="relative border-l border-tf-border/60 pl-2.5" ref={profileMenuRef}>
                   <button
                     onClick={() => setProfileMenuOpen((prev) => !prev)}
                     className="flex items-center gap-2.5 p-1 rounded-xl hover:bg-tf-surface-2/70 backdrop-blur-md transition cursor-pointer select-none border border-transparent hover:border-tf-border/50"
                   >
-                    <div className="w-8 h-8 rounded-full bg-tf-accent/20 text-tf-accent border border-tf-accent/30 font-bold text-xs flex items-center justify-center uppercase shadow-2xs">
-                      {avatarInitial}
-                    </div>
+                    <UserAvatar user={user} profile={profile} size={36} />
                     <div className="hidden md:flex flex-col text-left leading-tight">
                       <span className="text-xs font-semibold text-tf-text truncate max-w-[110px]">
                         {displayName}

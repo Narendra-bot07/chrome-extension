@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { UserAvatar } from '../components/ApplicationLogo';
 import {
   Activity,
   AlertTriangle,
@@ -124,11 +125,6 @@ export default function ProfilePage() {
     };
     fetchSessions();
   }, [activeSubTab, session, apiUrl]);
-
-  const getInitials = (name) => {
-    if (!name) return 'U';
-    return name.split(' ').map(part => part[0]).join('').substring(0, 2).toUpperCase();
-  };
 
   const handleUpdateProfile = async (e) => {
     e.preventDefault();
@@ -262,9 +258,7 @@ export default function ProfilePage() {
                 <h2 className={`text-[18px] font-semibold ${title}`}>Profile Information</h2>
                 <div className={`${cardClass} flex flex-col md:flex-row items-start md:items-center justify-between gap-6`}>
                   <div className="flex items-center gap-5">
-                    <div className="w-[72px] h-[72px] rounded-full bg-gradient-to-tr from-[#4F46E5] to-[#3B82F6] flex items-center justify-center text-white text-[24px] font-bold shadow-sm">
-                      {getInitials(profile.full_name || user?.full_name)}
-                    </div>
+                    <UserAvatar user={user} profile={profile} size={72} />
                     <div>
                       <h3 className={`text-[20px] font-bold ${title}`}>{profile.full_name || user?.full_name || 'User'}</h3>
                       <p className={`text-[14px] ${muted}`}>{profile.email || user?.email || 'No email available'}</p>
