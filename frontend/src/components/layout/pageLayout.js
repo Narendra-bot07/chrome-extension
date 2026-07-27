@@ -2,12 +2,11 @@ const FULL_ROUTES = new Set([
   '/tailor', '/job-tracker', '/resume-parse', '/resume-review',
   '/tailor-config', '/tailor-progress', '/review-changes', '/templates',
   '/download', '/cover-letter', '/settings/job-preferences',
-  '/onboarding/job-preferences'
+  '/onboarding/job-preferences', '/profile', '/settings/security'
 ]);
 
 const WIDE_ROUTES = new Set([
-  '/', '/dashboard', '/resume-detect', '/profile', '/settings/security',
-  '/subscription'
+  '/', '/dashboard', '/resume-detect', '/subscription'
 ]);
 
 const WORKSPACE_ROUTES = new Set([

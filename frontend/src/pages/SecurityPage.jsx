@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useApp } from '../context/AppContext';
 import { 
   Shield, 
@@ -13,8 +14,17 @@ import {
   ChevronLeft,
   Globe,
   Eye,
-  EyeOff
+  EyeOff,
+  KeyRound,
+  CheckCircle2,
+  Lock,
+  ExternalLink,
+  ShieldCheck,
+  Laptop
 } from 'lucide-react';
+import { Button } from '../components/ui/Button';
+import { Input } from '../components/ui/Input';
+import { cardVariants, staggerContainer, fadeUp } from '../utils/motion';
 
 export default function SecurityPage() {
   const { session, darkMode, handleLogout } = useApp();
@@ -26,6 +36,8 @@ export default function SecurityPage() {
   const [showNewPw, setShowNewPw] = useState(false);
   const [showConfirmPw, setShowConfirmPw] = useState(false);
   const [passwordStatus, setPasswordStatus] = useState({ loading: false, error: '', message: '' });
+  const [revokingId, setRevokingId] = useState(null);
+  const [revokingAll, setRevokingAll] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -66,11 +78,10 @@ export default function SecurityPage() {
 
   const revokeSession = async (sessionId, isCurrent) => {
     if (isCurrent) {
-      // Log out locally via AppContext
       handleLogout();
       return;
     }
-    
+    setRevokingId(sessionId);
     try {
       const token = session?.access_token;
       const res = await fetch(`http://localhost:8000/api/v1/sessions/${sessionId}`, {
@@ -82,10 +93,13 @@ export default function SecurityPage() {
       }
     } catch (err) {
       console.error("Failed to revoke session:", err);
+    } finally {
+      setRevokingId(null);
     }
   };
 
   const revokeAllOthers = async () => {
+    setRevokingAll(true);
     try {
       const token = session?.access_token;
       const res = await fetch(`http://localhost:8000/api/v1/sessions/all/others`, {
@@ -97,13 +111,15 @@ export default function SecurityPage() {
       }
     } catch (err) {
       console.error("Failed to revoke other sessions:", err);
+    } finally {
+      setRevokingAll(false);
     }
   };
 
   const changePassword = async (event) => {
     event.preventDefault();
     if (passwordForm.new_password !== passwordForm.confirm_password) {
-      setPasswordStatus({ loading: false, error: 'Passwords do not match.', message: '' });
+      setPasswordStatus({ loading: false, error: 'New password and confirmation do not match.', message: '' });
       return;
     }
     setPasswordStatus({ loading: true, error: '', message: '' });
@@ -117,7 +133,7 @@ export default function SecurityPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Password could not be changed.');
       setPasswordForm({ current_password: '', new_password: '', confirm_password: '' });
-      setPasswordStatus({ loading: false, error: '', message: data.message });
+      setPasswordStatus({ loading: false, error: '', message: data.message || 'Password updated successfully!' });
       fetchSessions();
     } catch (error) {
       setPasswordStatus({ loading: false, error: error.message, message: '' });
@@ -125,245 +141,191 @@ export default function SecurityPage() {
   };
 
   const getDeviceIcon = (deviceType) => {
-    if (deviceType === 'Mobile') return <Smartphone className="w-5 h-5 text-indigo-500" />;
-    if (deviceType === 'Tablet') return <Tablet className="w-5 h-5 text-indigo-500" />;
-    return <Monitor className="w-5 h-5 text-indigo-500" />;
+    if (deviceType === 'Mobile') return <Smartphone className="w-5 h-5 text-tf-accent" />;
+    if (deviceType === 'Tablet') return <Tablet className="w-5 h-5 text-tf-accent" />;
+    return <Laptop className="w-5 h-5 text-tf-accent" />;
   };
 
   const formatDate = (dateStr) => {
+    if (!dateStr) return 'Just now';
     return new Date(dateStr).toLocaleString('en-US', {
       month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
     });
   };
 
+  // Password strength score (0 to 4)
+  const getPasswordStrength = (pw) => {
+    if (!pw) return { score: 0, label: '', color: 'bg-zinc-200 dark:bg-zinc-800' };
+    let score = 0;
+    if (pw.length >= 8) score++;
+    if (/[A-Z]/.test(pw)) score++;
+    if (/[0-9]/.test(pw)) score++;
+    if (/[^A-Za-z0-9]/.test(pw)) score++;
+
+    if (score <= 1) return { score: 1, label: 'Weak', color: 'bg-rose-500', width: 'w-1/4' };
+    if (score === 2) return { score: 2, label: 'Fair', color: 'bg-amber-500', width: 'w-2/4' };
+    if (score === 3) return { score: 3, label: 'Good', color: 'bg-blue-500', width: 'w-3/4' };
+    return { score: 4, label: 'Strong', color: 'bg-emerald-500', width: 'w-full' };
+  };
+
+  const pwStrength = getPasswordStrength(passwordForm.new_password);
+
   return (
-    <div className={`min-h-screen font-sans ${darkMode ? 'bg-[#000000] text-white' : 'bg-[#FAFAFB] text-[#111827]'}`}>
-      <div className="max-w-4xl mx-auto p-6 md:p-12">
-        
-        {/* Header */}
-        <div className="flex items-center gap-4 mb-8">
+    <motion.div
+      variants={staggerContainer}
+      initial="initial"
+      animate="animate"
+      className="w-full max-w-7xl mx-auto px-4 sm:px-6 md:px-8 py-6 space-y-8 select-none text-tf-text"
+    >
+      {/* 1. Header Section */}
+      <motion.div variants={fadeUp} className="flex items-center justify-between">
+        <div className="flex items-center gap-3 sm:gap-4">
           <button 
             onClick={() => navigate(-1)}
-            className={`p-2 rounded-xl border ${darkMode ? 'border-zinc-800 hover:bg-zinc-800' : 'border-zinc-200 hover:bg-zinc-100'} transition`}
+            className="p-2 rounded-xl border border-tf-border bg-tf-surface hover:bg-tf-surface-2 text-tf-text-secondary hover:text-tf-text transition shadow-2xs cursor-pointer"
+            title="Go Back"
           >
-            <ChevronLeft className="w-5 h-5" />
+            <ChevronLeft size={18} />
           </button>
           <div>
-            <h1 className="text-2xl font-black tracking-tight">Security & Sessions</h1>
-            <p className={`text-sm mt-1 ${darkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
-              Manage your password and active login sessions
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-tf-text flex items-center gap-2.5">
+              <Shield className="w-6 h-6 text-tf-accent" />
+              Security & Active Sessions
+            </h1>
+            <p className="text-xs sm:text-sm text-tf-text-secondary mt-0.5">
+              Manage your authentication credentials, active devices, and session security.
             </p>
           </div>
         </div>
 
-        {/* Sessions Section */}
-        <div className="space-y-6">
-          {account && (
-            <div className={`rounded-2xl border p-5 ${darkMode ? 'border-zinc-800 bg-zinc-900' : 'border-zinc-200 bg-white'}`}>
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <div className="text-sm font-bold">Password</div>
-                  <div className={`mt-1 text-xs ${darkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
-                    {account.has_password_credential ? 'TailorFlow password credential' : 'Managed by Google'}
-                  </div>
-                </div>
-                {!account.has_password_credential && (
-                  <a href="https://myaccount.google.com/security" target="_blank" rel="noreferrer" className="rounded-xl border border-indigo-200 px-4 py-2 text-xs font-semibold text-indigo-600">
-                    Manage Google Account
-                  </a>
-                )}
-              </div>
-              {account.has_password_credential && (
-                <form onSubmit={changePassword} className="mt-5 grid gap-4 border-t border-zinc-200 pt-5 dark:border-zinc-800 md:grid-cols-3">
-                  <div>
-                    <label className="block text-xs font-semibold mb-1">Current password</label>
-                    <div className="relative">
-                      <input
-                        required
-                        type={showCurrentPw ? 'text' : 'password'}
-                        value={passwordForm.current_password}
-                        onChange={(e) => setPasswordForm((p) => ({ ...p, current_password: e.target.value }))}
-                        className="w-full rounded-xl border border-zinc-200 bg-transparent px-3 py-2.5 pr-10 text-xs outline-none focus:border-teal-500 dark:border-zinc-700"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowCurrentPw(!showCurrentPw)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-white border-none bg-transparent cursor-pointer"
-                        aria-label={showCurrentPw ? 'Hide current password' : 'Show current password'}
-                      >
-                        {showCurrentPw ? <EyeOff size={15} /> : <Eye size={15} />}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold mb-1">New password</label>
-                    <div className="relative">
-                      <input
-                        required
-                        minLength={10}
-                        maxLength={128}
-                        type={showNewPw ? 'text' : 'password'}
-                        value={passwordForm.new_password}
-                        onChange={(e) => setPasswordForm((p) => ({ ...p, new_password: e.target.value }))}
-                        className="w-full rounded-xl border border-zinc-200 bg-transparent px-3 py-2.5 pr-10 text-xs outline-none focus:border-teal-500 dark:border-zinc-700"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowNewPw(!showNewPw)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-white border-none bg-transparent cursor-pointer"
-                        aria-label={showNewPw ? 'Hide new password' : 'Show new password'}
-                      >
-                        {showNewPw ? <EyeOff size={15} /> : <Eye size={15} />}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold mb-1">Confirm password</label>
-                    <div className="relative">
-                      <input
-                        required
-                        type={showConfirmPw ? 'text' : 'password'}
-                        value={passwordForm.confirm_password}
-                        onChange={(e) => setPasswordForm((p) => ({ ...p, confirm_password: e.target.value }))}
-                        className="w-full rounded-xl border border-zinc-200 bg-transparent px-3 py-2.5 pr-10 text-xs outline-none focus:border-teal-500 dark:border-zinc-700"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowConfirmPw(!showConfirmPw)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-white border-none bg-transparent cursor-pointer"
-                        aria-label={showConfirmPw ? 'Hide confirm password' : 'Show confirm password'}
-                      >
-                        {showConfirmPw ? <EyeOff size={15} /> : <Eye size={15} />}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="md:col-span-3 flex flex-wrap items-center gap-3">
-                    <button disabled={passwordStatus.loading} className="rounded-xl bg-teal-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-teal-700 disabled:opacity-60">{passwordStatus.loading ? 'Updating…' : 'Change password'}</button>
-                    <button type="button" onClick={() => navigate('/forgot-password', { state: { email: account.email } })} className="text-xs font-bold text-teal-600">Forgot Password?</button>
-                    {passwordStatus.error && <span role="alert" className="text-xs font-semibold text-rose-600">{passwordStatus.error}</span>}
-                    {passwordStatus.message && <span className="text-xs font-semibold text-emerald-600">{passwordStatus.message}</span>}
-                  </div>
-                </form>
-              )}
-            </div>
-          )}
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold flex items-center gap-2">
-              <Shield className="w-5 h-5 text-indigo-500" />
-              Active Sessions
-            </h2>
-            {sessions.length > 1 && (
-              <button
-                onClick={revokeAllOthers}
-                className="text-sm font-semibold text-rose-500 hover:text-rose-600 px-3 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 transition"
-              >
-                Log out all other devices
-              </button>
-            )}
-          </div>
-
-          {loading ? (
-            <div className="animate-pulse space-y-4">
-              <div className={`h-24 rounded-2xl ${darkMode ? 'bg-zinc-900' : 'bg-white border border-zinc-200'}`}></div>
-              <div className={`h-24 rounded-2xl ${darkMode ? 'bg-zinc-900' : 'bg-white border border-zinc-200'}`}></div>
-            </div>
-          ) : (
-            <div className="grid gap-4">
-              {sessions.map((s) => (
-                <div key={s.session_id} className={`p-5 rounded-2xl border flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all hover:shadow-sm ${darkMode ? 'bg-[#0f0f11] border-zinc-800' : 'bg-white border-zinc-200'}`}>
-                  
-                  <div className="flex items-start gap-4">
-                    <div className={`p-3 rounded-xl ${darkMode ? 'bg-zinc-900' : 'bg-zinc-50'} shrink-0`}>
-                      {getDeviceIcon(s.device_type)}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-3 mb-1">
-                        <h3 className="font-bold text-[15px]">
-                          {s.operating_system} {s.operating_system_version}
-                        </h3>
-                        {s.is_current && (
-                          <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-md bg-emerald-100 text-emerald-700 border border-emerald-200">
-                            Current Device
-                          </span>
-                        )}
-                      </div>
-                      
-                      <div className={`text-[13px] flex flex-wrap items-center gap-x-4 gap-y-1 ${darkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
-                        <span className="flex items-center gap-1.5">
-                          <Globe className="w-3.5 h-3.5" /> 
-                          {s.browser} {s.browser_version}
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          <MapPin className="w-3.5 h-3.5" /> 
-                          {s.city}, {s.state}, {s.country}
-                        </span>
-                        <span className="flex items-center gap-1.5 font-mono text-[11px] bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">
-                          IP: {s.ip_address.replace(/\.\d+$/, '.*')}
-                        </span>
-                      </div>
-
-                      <div className={`text-[12px] flex items-center gap-4 mt-3 ${darkMode ? 'text-zinc-500' : 'text-zinc-400'}`}>
-                        <span className="flex items-center gap-1.5">
-                          <Clock className="w-3 h-3" />
-                          Logged in: {formatDate(s.login_time)}
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          <Activity className="w-3 h-3" />
-                          Last active: {formatDate(s.last_active)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => revokeSession(s.session_id, s.is_current)}
-                    className={`shrink-0 px-4 py-2 rounded-xl text-sm font-semibold border transition flex items-center gap-2
-                      ${s.is_current 
-                        ? (darkMode ? 'text-zinc-300 border-zinc-700 hover:bg-zinc-800' : 'text-zinc-700 border-zinc-200 hover:bg-zinc-50')
-                        : 'text-rose-600 border-rose-200 hover:bg-rose-50 bg-white'
-                      }`}
-                  >
-                    <LogOut className="w-4 h-4" />
-                    {s.is_current ? 'Log out' : 'Revoke'}
-                  </button>
-
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
+          <ShieldCheck size={16} />
+          <span>Account Protected</span>
         </div>
+      </motion.div>
 
-        {/* Danger Zone */}
-        <div className="mt-12 pt-8 border-t border-zinc-200 dark:border-zinc-800">
-          <h2 className="text-lg font-bold text-rose-500 flex items-center gap-2 mb-4">
-            <AlertTriangle className="w-5 h-5" />
-            Danger Zone
-          </h2>
-          <div className={`p-5 rounded-2xl border border-rose-200 bg-rose-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4`}>
+
+
+      {/* 3. Active Sessions Card */}
+      <motion.div variants={cardVariants} className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md p-6 sm:p-8 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-xs space-y-6">
+        <div className="flex items-center justify-between gap-4 pb-4 border-b border-tf-border">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-tf-accent/10 text-tf-accent">
+              <Monitor size={20} />
+            </div>
             <div>
-              <h3 className="font-bold text-rose-700">Delete Account</h3>
-              <p className="text-sm text-rose-600 mt-1">
-                Permanently delete your account, resumes, and active sessions. This action cannot be undone.
-              </p>
+              <h2 className="text-base font-bold text-tf-text">Active Devices & Sessions</h2>
+              <p className="text-xs text-tf-text-secondary mt-0.5">Devices currently signed into your TailorFlow account</p>
             </div>
-            <button className="px-4 py-2 rounded-xl text-sm font-bold bg-rose-500 hover:bg-rose-600 text-white transition shrink-0">
-              Delete Account
-            </button>
           </div>
+
+          {sessions.length > 1 && (
+            <Button
+              variant="danger"
+              size="sm"
+              isLoading={revokingAll}
+              onClick={revokeAllOthers}
+            >
+              <LogOut size={13} />
+              <span>Log Out All Other Devices</span>
+            </Button>
+          )}
         </div>
 
-      </div>
-    </div>
+        {loading ? (
+          <div className="animate-pulse space-y-3">
+            <div className="h-20 rounded-xl bg-tf-surface-2 border border-tf-border" />
+            <div className="h-20 rounded-xl bg-tf-surface-2 border border-tf-border" />
+          </div>
+        ) : (
+          <div className="space-y-3.5">
+            {sessions.map((s) => (
+              <div 
+                key={s.session_id} 
+                className={`p-4 sm:p-5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all duration-200 ${
+                  s.is_current 
+                    ? 'border-tf-accent/30 bg-tf-accent/5 dark:bg-tf-accent/10' 
+                    : 'border-tf-border bg-tf-surface hover:bg-tf-surface-2/60'
+                }`}
+              >
+                <div className="flex items-start gap-3.5 min-w-0">
+                  <div className="p-2.5 rounded-xl bg-tf-surface-2 border border-tf-border/60 shrink-0 mt-0.5">
+                    {getDeviceIcon(s.device_type)}
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <h3 className="font-bold text-sm text-tf-text">
+                        {s.operating_system} {s.operating_system_version}
+                      </h3>
+                      {s.is_current ? (
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          Current Device
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="text-xs text-tf-text-secondary flex flex-wrap items-center gap-x-4 gap-y-1">
+                      <span className="flex items-center gap-1.5">
+                        <Globe size={13} className="text-tf-text-tertiary" /> 
+                        {s.browser} {s.browser_version}
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <MapPin size={13} className="text-tf-text-tertiary" /> 
+                        {s.city || 'Local'}, {s.country || 'Host'}
+                      </span>
+                      <span className="font-mono text-[11px] bg-tf-surface-2 border border-tf-border px-1.5 py-0.5 rounded text-tf-text-tertiary">
+                        IP: {s.ip_address ? s.ip_address.replace(/\.\d+$/, '.*') : '127.0.0.*'}
+                      </span>
+                    </div>
+
+                    <div className="text-[11px] text-tf-text-tertiary flex items-center gap-4 pt-1">
+                      <span className="flex items-center gap-1">
+                        <Clock size={12} />
+                        Logged in: {formatDate(s.login_time)}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Clock size={12} />
+                        Last active: {formatDate(s.last_active)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <Button
+                  variant={s.is_current ? "ghost" : "danger"}
+                  size="sm"
+                  isLoading={revokingId === s.session_id}
+                  onClick={() => revokeSession(s.session_id, s.is_current)}
+                  className="shrink-0 self-start sm:self-center"
+                >
+                  <LogOut size={13} />
+                  <span>{s.is_current ? 'Log Out' : 'Revoke'}</span>
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </motion.div>
+
+      {/* 4. Danger Zone Card */}
+      <motion.div variants={cardVariants} className="p-6 sm:p-8 rounded-2xl border border-rose-500/20 bg-rose-500/5 dark:bg-rose-500/10 space-y-4">
+        <div className="flex items-center gap-3 text-rose-600 dark:text-rose-400 font-bold text-base">
+          <AlertTriangle size={20} />
+          <h2>Danger Zone</h2>
+        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h3 className="font-bold text-sm text-tf-text">Delete Account & Permanent Cleanup</h3>
+            <p className="text-xs text-tf-text-secondary mt-0.5 leading-relaxed max-w-xl">
+              Permanently remove your account credentials, saved resumes, job tracker records, and active sessions. This action is irreversible.
+            </p>
+          </div>
+          <Button variant="danger" size="md" onClick={() => alert("Account deletion requires contacting support or confirming email verification.")}>
+            Delete Account
+          </Button>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }
-
-// Ensure Activity icon is accessible (using a custom SVG since Activity wasn't in lucide imports directly at top)
-const Activity = ({ className }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-  </svg>
-);
-

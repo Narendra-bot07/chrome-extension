@@ -404,6 +404,7 @@ html.dark #root .dashboard-kpi-card:hover {
 }
 
 .dark #root .notification-glass {
+  position: absolute;
   background-color: rgba(21, 24, 29, 0.56);
 }
 
