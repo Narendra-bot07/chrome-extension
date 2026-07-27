@@ -7,6 +7,7 @@ from api.dependencies import get_application_repository
 from repositories.application_repository import ApplicationRepository
 from app.analytics.events.tracking.analytics_service import AnalyticsService
 from core.database import get_db_connection
+from services.notifications import NotificationService
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 
@@ -114,6 +115,11 @@ async def create_application(
                 "current_stage": request.current_stage or "Ready To Apply"
             }
         )
+        NotificationService(conn).emit(
+            user["id"], "application.created",
+            {"company": request.company_name, "application_id": str(record["id"])},
+            "application", str(record["id"]), f"application_created:{record['id']}"
+        )
         
         return record
     except Exception as e:
@@ -131,6 +137,7 @@ async def update_application(
     conn = Depends(get_db_connection)
 ):
     try:
+        previous = repo.get_by_id(id, user["id"])
         # Filter request data to only fields that were set
         update_data = {k: v for k, v in request.dict().items() if v is not None}
         record = repo.update(id, user["id"], update_data)
@@ -156,6 +163,14 @@ async def update_application(
                 resource_id=id,
                 metadata={"new_stage": request.current_stage}
             )
+            if previous and previous.get("current_stage") != request.current_stage:
+                NotificationService(conn).emit(
+                    user["id"], "application.stage_changed",
+                    {"company": record.get("company_name") or "This application",
+                     "application_id": id, "old_stage": previous.get("current_stage") or "Unknown",
+                     "new_stage": request.current_stage},
+                    "application", id, f"application_stage:{id}:{request.current_stage}"
+                )
             
         return record
     except HTTPException as he:

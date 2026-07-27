@@ -289,24 +289,28 @@ function DownloadPage({ onClose }) {
 
   if (loading) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center min-h-[600px] h-[calc(100vh-140px)] w-full bg-zinc-950 text-zinc-300 gap-3 rounded-2xl border border-zinc-800">
-        <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#00bda5]/20 border-t-[#00bda5]" />
-        <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Loading Final Resume Studio...</span>
+      <div className="p-4 md:p-5 w-full h-[calc(100vh-80px)] flex-1 flex flex-col min-h-0">
+        <div className="flex-1 flex flex-col items-center justify-center min-h-[500px] h-full w-full bg-zinc-950 text-zinc-300 gap-3 rounded-2xl border border-zinc-800">
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#00bda5]/20 border-t-[#00bda5]" />
+          <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Loading Final Resume Studio...</span>
+        </div>
       </div>
     );
   }
 
   if (!activeResume) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center min-h-[600px] h-[calc(100vh-140px)] w-full bg-zinc-950 text-zinc-300 gap-4 p-6 text-center rounded-2xl border border-zinc-800">
-        <div className="text-base font-extrabold text-zinc-100">No Active Resume Loaded</div>
-        <p className="text-xs text-zinc-400 max-w-sm">Please select or parse a resume first before building final composition.</p>
-        <button
-          onClick={() => navigate('/templates')}
-          className="px-4 py-2.5 bg-[#00bda5] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl hover:bg-[#00a894] transition cursor-pointer shadow-sm"
-        >
-          Select Template
-        </button>
+      <div className="p-4 md:p-5 w-full h-[calc(100vh-80px)] flex-1 flex flex-col min-h-0">
+        <div className="flex-1 flex flex-col items-center justify-center min-h-[500px] h-full w-full bg-zinc-950 text-zinc-300 gap-4 p-6 text-center rounded-2xl border border-zinc-800">
+          <div className="text-base font-extrabold text-zinc-100">No Active Resume Loaded</div>
+          <p className="text-xs text-zinc-400 max-w-sm">Please select or parse a resume first before building final composition.</p>
+          <button
+            onClick={() => navigate('/templates')}
+            className="px-4 py-2.5 bg-[#00bda5] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl hover:bg-[#00a894] transition cursor-pointer shadow-sm"
+          >
+            Select Template
+          </button>
+        </div>
       </div>
     );
   }
@@ -318,7 +322,8 @@ function DownloadPage({ onClose }) {
   const editorIsSplit = ['sidebar', 'two-column', 'marissa'].includes(selectedLayout);
 
   return (
-    <div className="flex-1 flex min-h-[700px] h-[calc(100vh-140px)] w-full bg-zinc-950 overflow-hidden relative rounded-2xl border border-zinc-800 shadow-2xl">
+    <div className="p-4 md:p-5 w-full h-[calc(100vh-80px)] flex-1 flex flex-col min-h-0 overflow-hidden select-none">
+      <div className="flex-1 flex min-h-0 h-full w-full bg-zinc-950 overflow-hidden relative rounded-2xl border border-zinc-800 shadow-2xl">
       
       {/* LEFT SIDE: Editor Panel */}
       <div className={`${editorIsSplit ? 'w-[48%] min-w-[500px]' : 'w-[42%] min-w-[380px]'} border-r border-zinc-200 dark:border-zinc-800 flex flex-col h-full bg-white shrink-0 z-10 shadow-lg`}>
@@ -472,6 +477,7 @@ function DownloadPage({ onClose }) {
         </div>
       )}
 
+    </div>
     </div>
   );
 }

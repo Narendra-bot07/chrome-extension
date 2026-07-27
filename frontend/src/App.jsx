@@ -32,6 +32,7 @@ import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import EmailSentPage from './pages/EmailSentPage';
+import NotificationSettingsPage from './pages/NotificationSettingsPage';
 
 function ProtectedRoute({ children }) {
   const { user, loadingAuth } = useApp();
@@ -126,6 +127,7 @@ function AppRoutes() {
         <Route path="/job-tracker" element={<JobTrackerPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/settings/security" element={<SecurityPage />} />
+        <Route path="/settings/notifications" element={<NotificationSettingsPage />} />
         <Route path="/security" element={<Navigate to="/settings/security" replace />} />
         <Route path="/resume-detect" element={<ResumeDetectPage />} />
         <Route path="/resume-parse" element={<ResumeParsePage />} />

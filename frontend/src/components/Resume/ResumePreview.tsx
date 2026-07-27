@@ -227,7 +227,6 @@ export default function ResumePreview({
         if (onCompositionChange) {
           onCompositionChange(data.composition_plan);
         }
-        if (interactiveLayoutMode) setShowLiveLayout(false);
       }
     } catch (err) {
       if ((err as Error)?.name === 'AbortError') return;
@@ -551,7 +550,7 @@ export default function ResumePreview({
             className="shadow-2xl bg-white ring-1 ring-zinc-200/70 dark:ring-zinc-800 rounded-sm overflow-hidden text-zinc-900"
             style={{ width: '8.5in', minHeight: pageCount === 2 ? '22.5in' : '11in' }}
           >
-            {interactiveLayoutMode && (showLiveLayout || loadingPdf) ? (
+            {interactiveLayoutMode ? (
               <div className="w-full bg-white">
                 <LiveTemplateComponent
                   resume={resumeData}

@@ -20,6 +20,7 @@ import { FlowParticleBackground } from './layout/FlowParticleBackground';
 import { PageContainer } from './layout/PageContainer';
 import { getPageLayout } from './layout/pageLayout';
 import { ApplicationLogo, UserAvatar } from './ApplicationLogo';
+import NotificationCenter from './notifications/NotificationCenter';
 
 
 
@@ -242,6 +243,7 @@ function Layout() {
       case '/cover-letter': return 'Draft Cover Letter';
       case '/subscription': return 'Subscription';
       case '/settings/security': return 'Security';
+      case '/settings/notifications': return 'Notifications';
       case '/settings/job-preferences':
       case '/onboarding/job-preferences': return 'Job Preferences';
       case '/support/search': return 'Help Search';
@@ -429,16 +431,7 @@ function Layout() {
               {darkMode ? <Sun size={16} /> : <Moon size={16} />}
             </button>
 
-            {/* Notification Bell Glass Button */}
-            <button 
-              className="relative p-2 rounded-xl border border-tf-border/60 bg-tf-surface-2/50 backdrop-blur-md text-tf-text-secondary hover:text-tf-text hover:bg-tf-surface-2/80 transition-all cursor-pointer shadow-2xs"
-              title="Notifications"
-            >
-              <Bell size={16} />
-              <span className="absolute -top-1 -right-1 w-4 h-4 bg-tf-accent text-white text-[9px] font-black rounded-full flex items-center justify-center border-2 border-tf-surface">
-                3
-              </span>
-            </button>
+            <NotificationCenter token={session?.access_token} />
 
             {/* User Profile Dropdown Glass Pill */}
             {(() => {
@@ -477,6 +470,16 @@ function Layout() {
 
                       {/* Menu Items */}
                       <div className="py-1">
+                        <button
+                          onClick={() => {
+                            setProfileMenuOpen(false);
+                            navigate('/settings/notifications');
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-medium text-tf-text hover:bg-tf-surface-2 transition cursor-pointer"
+                        >
+                          <Bell size={15} className="text-tf-text-secondary" />
+                          <span>Notification Settings</span>
+                        </button>
                         <button
                           onClick={() => {
                             setProfileMenuOpen(false);

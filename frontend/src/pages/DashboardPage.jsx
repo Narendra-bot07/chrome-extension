@@ -10,6 +10,7 @@ import {
 import { Button } from '../components/ui/Button';
 import { FadeSwap, PageLoadingState } from '../components/ui/Loading';
 import CompanyLogo from '../components/CompanyLogoView';
+import { notificationApi } from '../services/notificationApi';
 
 // Safe Error Boundary for Dashboard
 class DashboardErrorBoundary extends React.Component {
@@ -163,6 +164,7 @@ function DashboardContent() {
 
   // Reminders Modal Popup State
   const [showRemindersModal, setShowRemindersModal] = useState(false);
+  const [persistedReminders, setPersistedReminders] = useState([]);
 
   const handleDismissBanner = () => {
     setDismissedBanner(true);
@@ -173,6 +175,10 @@ function DashboardContent() {
     const loadDashboardData = async () => {
       try {
         await fetchApplications();
+        if (session?.access_token) {
+          const reminders = await notificationApi.reminders(session.access_token);
+          setPersistedReminders(reminders.filter(item => !['completed', 'cancelled'].includes(item.status)));
+        }
       } catch (err) {
         console.error("Dashboard fetch error:", err);
       } finally {
@@ -420,22 +426,21 @@ function DashboardContent() {
   });
 
   const allReminders = useMemo(() => {
-    return [...interviewApps, ...screeningApps, ...appliedApps].map((app, idx) => {
-      const d = new Date(app.last_activity || app.created_at || Date.now());
+    return persistedReminders.map((reminder, idx) => {
+      const d = new Date(reminder.snoozed_until || reminder.due_at);
       const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
       return {
-        id: app.id || idx,
+        id: reminder.id || idx,
         month: months[d.getMonth()],
         day: d.getDate(),
-        title: app.current_stage === 'Interview' ? 'Technical Interview' : app.current_stage === 'Screening' ? 'Screening Round' : 'Application Follow-up',
-        company: app.company_name || 'Target Company',
-        role: app.job_title || 'Software Engineer',
-        stage: app.current_stage || 'Applied',
-        jobUrl: app.job_url,
-        time: formatRelativeTime(app.created_at)
+        title: reminder.title,
+        company: reminder.company_name || 'Personal reminder',
+        role: reminder.job_title || reminder.description || 'Career action',
+        stage: reminder.status,
+        time: formatRelativeTime(reminder.due_at)
       };
     });
-  }, [interviewApps, screeningApps, appliedApps]);
+  }, [persistedReminders]);
 
   const isProfileIncomplete = !profile?.phone_number || !parsedResume;
 

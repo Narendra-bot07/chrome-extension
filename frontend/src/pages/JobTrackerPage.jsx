@@ -91,7 +91,13 @@ function JobTrackerContent() {
   const [stageFilter, setStageFilter] = useState('All'); // 'All' | 'Active' | 'Preparing' | 'Applied' | 'Interviewing' | 'Offers' | 'Closed'
   const [readinessFilter, setReadinessFilter] = useState('All'); // 'All' | 'resume_pending' | 'cover_letter_pending' | 'followup_due'
   const [sortBy, setSortBy] = useState('last_activity');
-  const [viewMode, setViewMode] = useState('cards'); // 'cards' | 'list'
+  const [viewMode, setViewMode] = useState(() => {
+    return localStorage.getItem('tailorflow.job_tracker_view_mode') || 'list';
+  });
+  const handleSetViewMode = (mode) => {
+    setViewMode(mode);
+    localStorage.setItem('tailorflow.job_tracker_view_mode', mode);
+  };
   const [loading, setLoading] = useState(true);
 
   // Active Workspace Tab inside Pop-Up Modal
@@ -526,7 +532,7 @@ function JobTrackerContent() {
               {/* View Switcher */}
               <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl border border-zinc-200 dark:border-zinc-700">
                 <button
-                  onClick={() => setViewMode('cards')}
+                  onClick={() => handleSetViewMode('cards')}
                   className={`p-1.5 rounded-lg transition-all cursor-pointer ${
                     viewMode === 'cards'
                       ? 'bg-white dark:bg-zinc-900 text-teal-600 dark:text-teal-400 shadow-xs'
@@ -537,7 +543,7 @@ function JobTrackerContent() {
                   <LayoutGrid size={15} />
                 </button>
                 <button
-                  onClick={() => setViewMode('list')}
+                  onClick={() => handleSetViewMode('list')}
                   className={`p-1.5 rounded-lg transition-all cursor-pointer ${
                     viewMode === 'list'
                       ? 'bg-white dark:bg-zinc-900 text-teal-600 dark:text-teal-400 shadow-xs'

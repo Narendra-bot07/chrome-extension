@@ -702,18 +702,15 @@ export default function ResumeEditorView({
         <div
           ref={provided.innerRef}
           {...provided.draggableProps}
-          className={`flex items-center justify-between rounded-xl border bg-white px-3 py-2.5 shadow-sm
-            transition-[transform,box-shadow,border-color,opacity] duration-200 ease-out will-change-transform
+          {...provided.dragHandleProps}
+          className={`flex items-center justify-between rounded-xl border bg-white px-3 py-2.5 shadow-sm select-none cursor-grab active:cursor-grabbing
+            transition-[transform,box-shadow,border-color,opacity] duration-150 ease-out will-change-transform
             ${snapshot.isDragging
-              ? 'border-teal-400 shadow-xl opacity-95'
-              : 'border-slate-200 hover:border-slate-300 hover:shadow'}`}
+              ? 'border-teal-400 shadow-xl opacity-95 scale-[1.02]'
+              : 'border-slate-200 hover:border-slate-350 hover:shadow'}`}
         >
           <div className="flex min-w-0 items-center gap-2">
-            <span
-              {...provided.dragHandleProps}
-              className="cursor-grab text-slate-400 active:cursor-grabbing"
-              aria-label={`Move ${section.replaceAll('_', ' ')}`}
-            >
+            <span className="text-slate-400">
               <GripVertical size={14} />
             </span>
             <span className="rounded-lg bg-slate-100 p-1.5">
@@ -726,8 +723,8 @@ export default function ResumeEditorView({
           {!['summary', 'experience', 'education', 'skills'].includes(section) && (
             <button
               type="button"
-              onClick={() => toggleLayoutSectionVisibility(section)}
-              className="border-0 bg-transparent p-1 text-slate-400 transition hover:text-slate-700"
+              onClick={(e) => { e.stopPropagation(); toggleLayoutSectionVisibility(section); }}
+              className="border-0 bg-transparent p-1 text-slate-400 transition hover:text-slate-700 cursor-pointer"
               title={`Hide ${section.replaceAll('_', ' ')}`}
               aria-label={`Hide ${section.replaceAll('_', ' ')}`}
             >

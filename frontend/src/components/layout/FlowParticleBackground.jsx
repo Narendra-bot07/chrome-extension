@@ -28,84 +28,121 @@ function FlowParticleCanvasInner() {
     if (!ctx) return;
 
     // Check media queries
-    const isReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const isTouchDevice = window.matchMedia('(hover: none), (pointer: coarse)').matches;
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const touchQuery = window.matchMedia('(hover: none), (pointer: coarse)');
+    let isReducedMotion = motionQuery.matches;
+    let isTouchDevice = touchQuery.matches;
 
     let animId = null;
     let width = 0;
     let height = 0;
     let dpr = Math.min(window.devicePixelRatio || 1, 1.5);
 
-    // Pointer state tracking in refs (no React state re-renders)
+    // Pointer state tracking
     const pointer = {
       x: -1000,
       y: -1000,
-      lastX: -1000,
-      lastY: -1000,
-      vx: 0,
-      vy: 0,
-      lastTime: 0,
       active: false
     };
 
-    // Color Theme Extractor
-    const themeColors = {
-      primary: '#2E5BFF',
-      secondary: '#00BDA5',
-      isDark: false
+    // Color Palette Definitions for Light and Dark Modes
+    const getPalette = (isDark) => {
+      if (isDark) {
+        return {
+          blue: '#60A5FA',    // soft blue
+          purple: '#A78BFA',  // muted purple
+          teal: '#2DD4BF',    // light teal
+          cyan: '#38BDF8'     // pale cyan
+        };
+      }
+      return {
+        blue: '#4F46E5',    // soft blue/indigo
+        purple: '#7C3AED',  // muted purple
+        teal: '#00BDA5',    // light teal
+        cyan: '#06B6D4'     // pale cyan
+      };
     };
 
-    const updateThemeColors = () => {
-      const computed = getComputedStyle(document.documentElement);
-      const pri = computed.getPropertyValue('--tf-accent-primary').trim();
-      const sec = computed.getPropertyValue('--tf-accent-secondary').trim();
-      
-      if (pri) themeColors.primary = pri;
-      if (sec) themeColors.secondary = sec;
-      themeColors.isDark = document.documentElement.classList.contains('dark');
-    };
+    let isDarkTheme = document.documentElement.classList.contains('dark');
+    let palette = getPalette(isDarkTheme);
 
-    updateThemeColors();
+    const updateTheme = () => {
+      isDarkTheme = document.documentElement.classList.contains('dark');
+      palette = getPalette(isDarkTheme);
+    };
 
     // Theme MutationObserver
-    const themeObserver = new MutationObserver(() => updateThemeColors());
+    const themeObserver = new MutationObserver(() => updateTheme());
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
 
-    // Determine particle count based on screen size
+    // Higher particle count for cursor swarm effect
     const getParticleCount = (w) => {
-      if (isTouchDevice) return 22;
-      if (w > 1280) return 50;
-      if (w > 768) return 38;
-      return 24;
+      if (isReducedMotion) {
+        return w > 768 ? 14 : 8;
+      }
+      if (w > 1440) return 85;
+      if (w > 1024) return 70;
+      if (w > 640) return 42;
+      return 22;
     };
 
     let particles = [];
 
-    // Helper to create particle
-    const createParticle = (w, h) => {
+    // Helper to create a single floating head particle
+    const createParticle = (w, h, index) => {
       const angle = Math.random() * Math.PI * 2;
-      const speed = 0.4 + Math.random() * 0.6; // 8 - 20 px/sec at 60fps
-      const size = 1.5 + Math.random() * 1.5;
-      const baseTail = 8 + Math.random() * 8;
-      const colorType = Math.random() > 0.4 ? 'primary' : 'secondary';
-      const opacityMultiplier = 0.8 + Math.random() * 0.4;
+      const categoryRoll = Math.random();
+      
+      let radius;
+      let speed;
+      let category;
+
+      if (categoryRoll < 0.60) {
+        // Small: 4px–6px diameter => 2px–3px radius
+        radius = 2.0 + Math.random() * 1.0;
+        speed = 0.20 + Math.random() * 0.15;
+        category = 'small';
+      } else if (categoryRoll < 0.88) {
+        // Medium: 7px–9px diameter => 3.5px–4.5px radius
+        radius = 3.5 + Math.random() * 1.0;
+        speed = 0.30 + Math.random() * 0.15;
+        category = 'medium';
+      } else {
+        // Large: 10px–12px diameter => 5px–6px radius
+        radius = 5.0 + Math.random() * 1.2;
+        speed = 0.40 + Math.random() * 0.20;
+        category = 'large';
+      }
+
+      // Pick color from palette
+      const colorRoll = Math.random();
+      let colorKey = 'teal';
+      if (colorRoll < 0.35) colorKey = 'teal';
+      else if (colorRoll < 0.65) colorKey = 'blue';
+      else if (colorRoll < 0.88) colorKey = 'purple';
+      else colorKey = 'cyan';
+
+      const baseVx = Math.cos(angle) * speed;
+      const baseVy = Math.sin(angle) * speed;
+      // 60% of particles are cursor swarm followers
+      const isSwarmFollower = index % 10 < 6;
 
       return {
         x: Math.random() * w,
         y: Math.random() * h,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        baseVx: Math.cos(angle) * speed,
-        baseVy: Math.sin(angle) * speed,
+        radius,
         speed,
         baseSpeed: speed,
-        tailLength: baseTail,
-        baseTailLength: baseTail,
-        cursorInfluence: 0,
+        vx: baseVx,
+        vy: baseVy,
+        baseVx,
+        baseVy,
         noisePhase: Math.random() * 100,
-        colorType,
-        opacityMultiplier,
-        size
+        swirlPhase: Math.random() * Math.PI * 2,
+        colorKey,
+        proximityHighlight: 0,
+        category,
+        isSwarmFollower
       };
     };
 
@@ -124,10 +161,10 @@ function FlowParticleCanvasInner() {
 
       const targetCount = getParticleCount(width);
       if (particles.length === 0) {
-        particles = Array.from({ length: targetCount }, () => createParticle(width, height));
+        particles = Array.from({ length: targetCount }, (_, i) => createParticle(width, height, i));
       } else if (particles.length < targetCount) {
         while (particles.length < targetCount) {
-          particles.push(createParticle(width, height));
+          particles.push(createParticle(width, height, particles.length));
         }
       } else if (particles.length > targetCount) {
         particles.length = targetCount;
@@ -137,55 +174,18 @@ function FlowParticleCanvasInner() {
     handleResize();
     window.addEventListener('resize', handleResize);
 
-    // Static rendering for prefers-reduced-motion
-    if (isReducedMotion) {
-      ctx.clearRect(0, 0, width, height);
-      particles.forEach(p => {
-        const colorHex = p.colorType === 'primary' ? themeColors.primary : themeColors.secondary;
-        ctx.fillStyle = colorHex;
-        ctx.globalAlpha = 0.2;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fill();
-      });
-      return () => {
-        window.removeEventListener('resize', handleResize);
-        themeObserver.disconnect();
-      };
-    }
-
-    // Pointer Event Listener
+    // Pointer Event Listeners
     const handlePointerMove = (e) => {
       if (isTouchDevice || document.visibilityState === 'hidden') return;
-      const now = performance.now();
-      
-      if (!pointer.active || pointer.lastTime === 0) {
-        pointer.x = e.clientX;
-        pointer.y = e.clientY;
-        pointer.lastX = e.clientX;
-        pointer.lastY = e.clientY;
-        pointer.lastTime = now;
-        pointer.active = true;
-        return;
-      }
-
-      const dt = Math.max(16, now - pointer.lastTime);
-      const dx = e.clientX - pointer.lastX;
-      const dy = e.clientY - pointer.lastY;
-
-      pointer.vx = dx / dt;
-      pointer.vy = dy / dt;
       pointer.x = e.clientX;
       pointer.y = e.clientY;
-      pointer.lastX = e.clientX;
-      pointer.lastY = e.clientY;
-      pointer.lastTime = now;
+      pointer.active = true;
     };
 
     const handlePointerLeave = () => {
       pointer.active = false;
-      pointer.vx = 0;
-      pointer.vy = 0;
+      pointer.x = -1000;
+      pointer.y = -1000;
     };
 
     if (!isTouchDevice) {
@@ -193,106 +193,88 @@ function FlowParticleCanvasInner() {
       window.addEventListener('pointerleave', handlePointerLeave);
     }
 
+    // Media query listener
+    const handleMotionChange = (e) => {
+      isReducedMotion = e.matches;
+      handleResize();
+    };
+
+    motionQuery.addEventListener?.('change', handleMotionChange);
+
     // Main Physics & Render Loop
-    let lastFrameTime = performance.now();
-
-    const renderLoop = (time) => {
-      const deltaTime = Math.min((time - lastFrameTime) / 1000, 0.1);
-      lastFrameTime = time;
-
+    const renderLoop = () => {
       ctx.clearRect(0, 0, width, height);
 
-      // Pointer velocity calculations
-      const pSpeed = Math.sqrt(pointer.vx * pointer.vx + pointer.vy * pointer.vy);
-      const MAX_P_SPEED = 2.0;
-      const normPSpeed = Math.min(pSpeed / MAX_P_SPEED, 1);
-      const normPVx = pSpeed > 0.01 ? pointer.vx / pSpeed : 0;
-      const normPVy = pSpeed > 0.01 ? pointer.vy / pSpeed : 0;
-      const RADIUS = 220;
-
-      // Update & Draw Particles
       particles.forEach((p) => {
-        // 1. Steering Noise for Gentle Natural Curve
-        p.noisePhase += 0.008;
-        const steerAngle = Math.sin(p.noisePhase) * 0.15;
+        // 1. Natural Direction Steering
+        p.noisePhase += 0.005;
+        p.swirlPhase += 0.02;
+        const steerAngle = Math.sin(p.noisePhase) * 0.09;
         const currentAngle = Math.atan2(p.baseVy, p.baseVx) + steerAngle;
-        p.baseVx = Math.cos(currentAngle) * p.baseSpeed;
-        p.baseVy = Math.sin(currentAngle) * p.baseSpeed;
+        const currentSpeed = isReducedMotion ? p.baseSpeed * 0.15 : p.baseSpeed;
+        p.baseVx = Math.cos(currentAngle) * currentSpeed;
+        p.baseVy = Math.sin(currentAngle) * currentSpeed;
 
-        // 2. Cursor Force Field Interaction
-        if (pointer.active && !isTouchDevice) {
-          const dx = p.x - pointer.x;
-          const dy = p.y - pointer.y;
+        // 2. Cursor Swarm Attraction & Flow Physics
+        if (pointer.active && !isTouchDevice && !isReducedMotion) {
+          const dx = pointer.x - p.x;
+          const dy = pointer.y - p.y;
           const distSq = dx * dx + dy * dy;
+          const dist = Math.sqrt(distSq);
 
-          if (distSq < RADIUS * RADIUS) {
-            const dist = Math.sqrt(distSq);
-            const rawInf = 1 - dist / RADIUS;
-            const influence = rawInf * rawInf; // Non-linear falloff
+          const radiusLimit = p.isSwarmFollower ? 450 : 250;
 
-            p.cursorInfluence = Math.min(p.cursorInfluence + influence * 0.1, 1);
+          if (dist < radiusLimit && dist > 1) {
+            const normX = dx / dist;
+            const normY = dy / dist;
+            
+            // Tangential force for smooth orbital swirl around cursor
+            const tangX = -normY;
+            const tangY = normX;
 
-            // Apply direction push
-            const pushForce = normPSpeed * influence * 1.4;
-            p.vx += normPVx * pushForce;
-            p.vy += normPVy * pushForce;
+            const pullStrength = p.isSwarmFollower ? 0.09 : 0.03;
+            const falloff = Math.pow(1 - dist / radiusLimit, 1.4);
+
+            const attractX = normX * pullStrength * falloff * (1 + Math.sin(p.swirlPhase) * 0.25);
+            const attractY = normY * pullStrength * falloff * (1 + Math.cos(p.swirlPhase) * 0.25);
+            const swirlForce = 0.025 * falloff * Math.sin(p.swirlPhase);
+
+            p.vx += attractX + tangX * swirlForce;
+            p.vy += attractY + tangY * swirlForce;
+
+            // Highlight brightness when following/near cursor
+            p.proximityHighlight = Math.min(p.proximityHighlight + falloff * 0.15, 0.20);
           }
         }
 
-        // 3. Momentum Damping & Base Velocity Steering
-        p.cursorInfluence *= 0.95;
-        p.vx = p.vx * 0.97 + p.baseVx * 0.03;
-        p.vy = p.vy * 0.97 + p.baseVy * 0.03;
+        // 3. Smooth Velocity Damping
+        p.proximityHighlight *= 0.94;
+        p.vx = p.vx * 0.95 + p.baseVx * 0.05;
+        p.vy = p.vy * 0.95 + p.baseVy * 0.05;
 
         // 4. Update Position
         p.x += p.vx;
         p.y += p.vy;
 
-        // 5. Smooth Viewport Wrapping
-        const margin = 30;
+        // 5. Smooth Viewport Boundary Wrapping
+        const margin = 24;
         if (p.x < -margin) p.x = width + margin;
         if (p.x > width + margin) p.x = -margin;
         if (p.y < -margin) p.y = height + margin;
         if (p.y > height + margin) p.y = -margin;
 
-        // 6. Calculate Tail & Speed
-        const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
-        const speedBoost = Math.min(speed * 3.5, 14);
-        p.tailLength = p.baseTailLength + speedBoost;
+        // 6. Calculate Opacity (Strictly bounded 0.15 - 0.45)
+        const hexColor = palette[p.colorKey] || palette.teal;
+        const targetOpacityBase = isDarkTheme 
+          ? (p.category === 'large' ? 0.38 : p.category === 'medium' ? 0.30 : 0.22) 
+          : (p.category === 'large' ? 0.28 : p.category === 'medium' ? 0.22 : 0.16);
+        const finalAlpha = Math.min(Math.max(targetOpacityBase + p.proximityHighlight, 0.15), 0.45);
 
-        // 7. Render Particle & Tapered Tail
-        const colorHex = p.colorType === 'primary' ? themeColors.primary : themeColors.secondary;
-        const baseOpacity = themeColors.isDark ? 0.28 : 0.14;
-        const alpha = Math.min(baseOpacity * p.opacityMultiplier + p.cursorInfluence * 0.15, 0.4);
-
-        // Direction vector opposite to velocity
-        const vLen = speed || 1;
-        const dirX = -(p.vx / vLen);
-        const dirY = -(p.vy / vLen);
-
-        const tailX = p.x + dirX * p.tailLength;
-        const tailY = p.y + dirY * p.tailLength;
-
-        // Draw Tapered Gradient Tail
-        const grad = ctx.createLinearGradient(p.x, p.y, tailX, tailY);
-        grad.addColorStop(0, colorHex);
-        grad.addColorStop(1, 'transparent');
-
-        ctx.strokeStyle = grad;
-        ctx.lineWidth = p.size;
-        ctx.lineCap = 'round';
-        ctx.globalAlpha = alpha;
-
+        // 7. Render Floating Head Only (NO TAILS)
+        ctx.fillStyle = hexColor;
+        ctx.globalAlpha = finalAlpha;
         ctx.beginPath();
-        ctx.moveTo(p.x, p.y);
-        ctx.lineTo(tailX, tailY);
-        ctx.stroke();
-
-        // Draw Head Glowing Dot
-        ctx.fillStyle = colorHex;
-        ctx.globalAlpha = Math.min(alpha * 1.3, 0.6);
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size * 0.85, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
         ctx.fill();
       });
 
@@ -301,15 +283,11 @@ function FlowParticleCanvasInner() {
 
     animId = requestAnimationFrame(renderLoop);
 
-    // Page Visibility API
+    // Page Visibility API - Pause loop when tab hidden
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
         if (animId) cancelAnimationFrame(animId);
       } else {
-        pointer.lastTime = 0;
-        pointer.vx = 0;
-        pointer.vy = 0;
-        lastFrameTime = performance.now();
         animId = requestAnimationFrame(renderLoop);
       }
     };
@@ -325,6 +303,7 @@ function FlowParticleCanvasInner() {
         window.removeEventListener('pointerleave', handlePointerLeave);
       }
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      motionQuery.removeEventListener?.('change', handleMotionChange);
       themeObserver.disconnect();
     };
   }, []);

@@ -88,3 +88,31 @@ class EmailService:
             "Your TailorFlow password was changed. If this was not you, contact support immediately.",
             self._shell("Password changed", "<p style=\"line-height:1.6\">Your password was changed successfully. If this was not you, contact support immediately.</p>"),
         )
+
+    def send_notification(
+        self, recipient: str, title: str, message: str,
+        action_label: str | None = None, action_url: str | None = None,
+    ) -> bool:
+        """Send a privacy-safe notification email using the shared SMTP transport."""
+        safe_title = html.escape(title)
+        safe_message = html.escape(message)
+        content = f'<p style="line-height:1.65">{safe_message}</p>'
+        text = f"{title}\n\n{message}"
+        if action_label and action_url:
+            absolute_url = (
+                action_url if action_url.startswith(("http://", "https://"))
+                else f"{settings.FRONTEND_URL.rstrip('/')}/#{action_url}"
+            )
+            content += (
+                f'<p><a href="{html.escape(absolute_url)}" '
+                'style="display:inline-block;padding:12px 18px;background:#168b7e;'
+                'color:#fff;text-decoration:none;border-radius:10px;font-weight:700">'
+                f"{html.escape(action_label)}</a></p>"
+            )
+            text += f"\n\n{action_label}: {absolute_url}"
+        return self.send(
+            recipient,
+            f"{title} | TailorFlow",
+            text,
+            self._shell(title, content),
+        )

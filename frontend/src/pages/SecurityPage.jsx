@@ -11,7 +11,9 @@ import {
   Clock, 
   AlertTriangle,
   ChevronLeft,
-  Globe
+  Globe,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 export default function SecurityPage() {
@@ -20,6 +22,9 @@ export default function SecurityPage() {
   const [loading, setLoading] = useState(true);
   const [account, setAccount] = useState(null);
   const [passwordForm, setPasswordForm] = useState({ current_password: '', new_password: '', confirm_password: '' });
+  const [showCurrentPw, setShowCurrentPw] = useState(false);
+  const [showNewPw, setShowNewPw] = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
   const [passwordStatus, setPasswordStatus] = useState({ loading: false, error: '', message: '' });
   const navigate = useNavigate();
 
@@ -169,16 +174,72 @@ export default function SecurityPage() {
                 )}
               </div>
               {account.has_password_credential && (
-                <form onSubmit={changePassword} className="mt-5 grid gap-3 border-t border-zinc-200 pt-5 dark:border-zinc-800 md:grid-cols-3">
-                  <label className="text-xs font-semibold">Current password
-                    <input required type="password" value={passwordForm.current_password} onChange={(e) => setPasswordForm((p) => ({ ...p, current_password: e.target.value }))} className="mt-2 w-full rounded-xl border border-zinc-200 bg-transparent px-3 py-2.5 outline-none focus:border-teal-500 dark:border-zinc-700" />
-                  </label>
-                  <label className="text-xs font-semibold">New password
-                    <input required minLength={10} maxLength={128} type="password" value={passwordForm.new_password} onChange={(e) => setPasswordForm((p) => ({ ...p, new_password: e.target.value }))} className="mt-2 w-full rounded-xl border border-zinc-200 bg-transparent px-3 py-2.5 outline-none focus:border-teal-500 dark:border-zinc-700" />
-                  </label>
-                  <label className="text-xs font-semibold">Confirm password
-                    <input required type="password" value={passwordForm.confirm_password} onChange={(e) => setPasswordForm((p) => ({ ...p, confirm_password: e.target.value }))} className="mt-2 w-full rounded-xl border border-zinc-200 bg-transparent px-3 py-2.5 outline-none focus:border-teal-500 dark:border-zinc-700" />
-                  </label>
+                <form onSubmit={changePassword} className="mt-5 grid gap-4 border-t border-zinc-200 pt-5 dark:border-zinc-800 md:grid-cols-3">
+                  <div>
+                    <label className="block text-xs font-semibold mb-1">Current password</label>
+                    <div className="relative">
+                      <input
+                        required
+                        type={showCurrentPw ? 'text' : 'password'}
+                        value={passwordForm.current_password}
+                        onChange={(e) => setPasswordForm((p) => ({ ...p, current_password: e.target.value }))}
+                        className="w-full rounded-xl border border-zinc-200 bg-transparent px-3 py-2.5 pr-10 text-xs outline-none focus:border-teal-500 dark:border-zinc-700"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowCurrentPw(!showCurrentPw)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-white border-none bg-transparent cursor-pointer"
+                        aria-label={showCurrentPw ? 'Hide current password' : 'Show current password'}
+                      >
+                        {showCurrentPw ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold mb-1">New password</label>
+                    <div className="relative">
+                      <input
+                        required
+                        minLength={10}
+                        maxLength={128}
+                        type={showNewPw ? 'text' : 'password'}
+                        value={passwordForm.new_password}
+                        onChange={(e) => setPasswordForm((p) => ({ ...p, new_password: e.target.value }))}
+                        className="w-full rounded-xl border border-zinc-200 bg-transparent px-3 py-2.5 pr-10 text-xs outline-none focus:border-teal-500 dark:border-zinc-700"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPw(!showNewPw)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-white border-none bg-transparent cursor-pointer"
+                        aria-label={showNewPw ? 'Hide new password' : 'Show new password'}
+                      >
+                        {showNewPw ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold mb-1">Confirm password</label>
+                    <div className="relative">
+                      <input
+                        required
+                        type={showConfirmPw ? 'text' : 'password'}
+                        value={passwordForm.confirm_password}
+                        onChange={(e) => setPasswordForm((p) => ({ ...p, confirm_password: e.target.value }))}
+                        className="w-full rounded-xl border border-zinc-200 bg-transparent px-3 py-2.5 pr-10 text-xs outline-none focus:border-teal-500 dark:border-zinc-700"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPw(!showConfirmPw)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-white border-none bg-transparent cursor-pointer"
+                        aria-label={showConfirmPw ? 'Hide confirm password' : 'Show confirm password'}
+                      >
+                        {showConfirmPw ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="md:col-span-3 flex flex-wrap items-center gap-3">
                     <button disabled={passwordStatus.loading} className="rounded-xl bg-teal-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-teal-700 disabled:opacity-60">{passwordStatus.loading ? 'Updating…' : 'Change password'}</button>
                     <button type="button" onClick={() => navigate('/forgot-password', { state: { email: account.email } })} className="text-xs font-bold text-teal-600">Forgot Password?</button>

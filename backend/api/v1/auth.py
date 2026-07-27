@@ -17,6 +17,7 @@ from repositories.job_preferences_repository import JobPreferencesRepository
 from app.services.account_security_service import AccountSecurityService, normalize_email
 from app.services.email_service import EmailService
 from core.config import settings
+from services.notifications import NotificationService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 RESET_CONFIRMATION = "If an account exists for this email, a reset link has been sent."
@@ -32,6 +33,10 @@ async def forgot_password(payload: ForgotPasswordRequest, request: Request, back
         token = service.issue_token("password_reset_tokens", user["id"], timedelta(minutes=settings.PASSWORD_RESET_MINUTES), request)
         service.audit("password_reset_requested", user["id"], ip=ip, user_agent=request.headers.get("user-agent", ""))
         conn.commit()
+        NotificationService(conn).emit(
+            str(user["id"]), "security.password_reset_requested", {},
+            "user", str(user["id"]), f"password_reset_requested:{user['id']}:{datetime.datetime.utcnow().strftime('%Y%m%d%H')}"
+        )
         background_tasks.add_task(EmailService().send_password_reset, user["email"], token)
     return {"status": "success", "message": RESET_CONFIRMATION}
 
@@ -98,6 +103,10 @@ async def change_password(payload: ChangePasswordRequest, request: Request, back
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     background_tasks.add_task(EmailService().send_password_changed, email)
+    NotificationService(conn).emit(
+        user["id"], "security.password_changed", {}, "user", user["id"],
+        f"password_changed:{user['id']}:{datetime.datetime.utcnow().isoformat()}"
+    )
     return {"status": "success", "message": "Password changed. Other devices have been signed out."}
 
 @router.post("/register")
