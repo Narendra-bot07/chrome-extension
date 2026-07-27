@@ -1,0 +1,115 @@
+/* Final dark-only material layer. Loaded after the shared design system. */
+.dark {
+  --tf-bg: #101216;
+  --tf-surface: #181b20;
+  --tf-surface-2: #20242a;
+  --tf-surface-3: #292e35;
+  --tf-surface-floating: rgba(29, 33, 39, 0.7);
+  --tf-border: rgba(255, 255, 255, 0.072);
+  --tf-border-strong: rgba(255, 255, 255, 0.13);
+  --tf-text: #f4f5f7;
+  --tf-text-secondary: #acb3bd;
+  --tf-text-tertiary: #777f8b;
+  --tf-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.26), 0 8px 24px rgba(0, 0, 0, 0.1);
+  --tf-shadow-md: 0 2px 6px rgba(0, 0, 0, 0.26), 0 18px 48px rgba(0, 0, 0, 0.2);
+  --tf-shadow-floating: 0 8px 20px rgba(0, 0, 0, 0.28), 0 32px 80px rgba(0, 0, 0, 0.38);
+}
+
+.dark .adaptive-ambient {
+  background:
+    radial-gradient(circle at 18% -8%, rgba(90, 121, 180, 0.14), transparent 34rem),
+    radial-gradient(circle at 92% 22%, rgba(71, 125, 119, 0.08), transparent 32rem),
+    radial-gradient(circle at 50% 112%, rgba(96, 80, 132, 0.065), transparent 38rem),
+    linear-gradient(145deg, #12151a 0%, #101216 52%, #0d0f13 100%);
+}
+
+.dark .adaptive-ambient__light { opacity: 0.055; filter: blur(140px); animation-duration: 42s; }
+.dark .adaptive-ambient__noise { opacity: 0.018; mix-blend-mode: soft-light; }
+
+.dark #root .tf-card,
+.dark #root .bg-tf-surface,
+.dark #root .bg-white,
+.dark #root [class*="dark:bg-zinc-900"] {
+  background-color: rgba(24, 27, 32, 0.96);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 34%);
+  border-color: var(--tf-border);
+  box-shadow: var(--tf-shadow-sm);
+  backdrop-filter: none;
+}
+
+.dark #root .surface-glass,
+.dark #root .notification-glass,
+.dark #root [role="dialog"],
+.dark #root [role="menu"] {
+  position: relative;
+  isolation: isolate;
+  background-color: rgba(25, 29, 35, 0.66);
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.018) 42%, rgba(0, 0, 0, 0.035)),
+    radial-gradient(900px circle at 16% -20%, rgba(255, 255, 255, 0.075), transparent 42%);
+  border-color: rgba(255, 255, 255, 0.105);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.025),
+    var(--tf-shadow-floating);
+  backdrop-filter: blur(24px) saturate(125%);
+  -webkit-backdrop-filter: blur(24px) saturate(125%);
+}
+
+.dark #root .notification-glass { background-color: rgba(21, 24, 29, 0.56); }
+
+.dark #root .surface-glass::before,
+.dark #root .notification-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0.34;
+  background: radial-gradient(
+    420px circle at var(--tf-cursor-x, 50vw) var(--tf-cursor-y, 24vh),
+    rgba(255, 255, 255, 0.105),
+    transparent 44%
+  );
+  background-attachment: fixed;
+}
+
+.dark #root input,
+.dark #root textarea,
+.dark #root select {
+  background-color: rgba(13, 15, 19, 0.58);
+  border-color: rgba(255, 255, 255, 0.09);
+  color: var(--tf-text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.018);
+}
+
+.dark #root input:hover,
+.dark #root textarea:hover,
+.dark #root select:hover { border-color: rgba(255, 255, 255, 0.15); }
+
+.dark #root input:focus,
+.dark #root textarea:focus,
+.dark #root select:focus {
+  border-color: color-mix(in srgb, var(--tf-accent) 70%, white);
+  box-shadow: var(--tf-shadow-focus);
+}
+
+.dark #root button:not(:disabled),
+.dark #root [role="button"]:not(:disabled) {
+  transition:
+    transform var(--tf-motion-hover) var(--tf-spring),
+    color var(--tf-motion-hover) var(--tf-spring),
+    background-color var(--tf-motion-hover) var(--tf-spring),
+    border-color var(--tf-motion-hover) var(--tf-spring),
+    box-shadow var(--tf-motion-hover) var(--tf-spring);
+}
+.dark #root button:not(:disabled):hover,
+.dark #root [role="button"]:not(:disabled):hover { transform: translateY(-1px); }
+.dark #root button:not(:disabled):active,
+.dark #root [role="button"]:not(:disabled):active { transform: scale(0.98); }
+
+@media (hover: none), (pointer: coarse) {
+  .dark #root .surface-glass::before,
+  .dark #root .notification-glass::before { display: none; }
+}

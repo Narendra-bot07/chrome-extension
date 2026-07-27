@@ -199,7 +199,9 @@ async def update_application(
                     "application", id, f"application_stage:{id}:{request.current_stage}"
                 )
 
-        # Auto-schedule 5:00 AM early morning 1-day-prior email reminder if event date is provided
+        # Preserve the entered next action on the application and schedule one
+        # durable reminder for it. Re-editing the date updates the existing
+        # stage-created reminder instead of leaving stale reminders behind.
         due_date_val = request.next_action_due_at or update_data.get("next_action_due_at")
         if due_date_val:
             reminder_time = calculate_early_morning_reminder_time(due_date_val)
@@ -207,6 +209,11 @@ async def update_application(
             job_title = record.get("job_title") or "Role"
             stage = request.current_stage or record.get("current_stage") or "Follow-up"
             note_str = request.next_action or request.notes or ""
+            reminder_type = (
+                "interview_event"
+                if stage in ("Interview", "Final Round", "Assessment")
+                else "application_followup"
+            )
 
             title = f"Reminder: {stage} for {company}"
             description = f"1-day reminder (5:00 AM): You have an event/follow-up scheduled tomorrow ({due_date_val}) for {job_title} at {company}. {note_str}".strip()
@@ -214,19 +221,43 @@ async def update_application(
             try:
                 with conn.cursor() as cur:
                     cur.execute("""
-                        INSERT INTO reminders (user_id, application_id, reminder_type, title, description, due_at, status)
-                        VALUES (%s, %s, %s, %s, %s, %s, 'scheduled')
+                        UPDATE reminders
+                           SET reminder_type=%s, title=%s, description=%s,
+                               due_at=%s, status='scheduled', snoozed_until=NULL,
+                               completed_at=NULL, updated_at=now()
+                         WHERE id = (
+                            SELECT id FROM reminders
+                             WHERE user_id=%s AND application_id=%s
+                               AND created_by='stage_change'
+                               AND status IN ('scheduled','due','snoozed','overdue')
+                             ORDER BY created_at DESC
+                             LIMIT 1
+                         )
                     """, (
-                        user["id"],
-                        id,
-                        "event_reminder",
+                        reminder_type,
                         title,
                         description,
-                        reminder_time
+                        reminder_time,
+                        user["id"],
+                        id
                     ))
+                    if cur.rowcount == 0:
+                        cur.execute("""
+                            INSERT INTO reminders
+                                (user_id, application_id, reminder_type, title,
+                                 description, due_at, status, created_by)
+                            VALUES (%s, %s, %s, %s, %s, %s, 'scheduled', 'stage_change')
+                        """, (
+                            user["id"], id, reminder_type, title,
+                            description, reminder_time
+                        ))
                     conn.commit()
             except Exception as e:
-                print(f"[Applications API] Reminder scheduling notice: {e}")
+                conn.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Application was saved, but its reminder could not be scheduled: {str(e)}"
+                )
 
         return record
     except HTTPException as he:

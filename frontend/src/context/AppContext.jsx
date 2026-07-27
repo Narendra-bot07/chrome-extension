@@ -16,6 +16,14 @@ export function AppProvider({ children }) {
   // Theme & Settings
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
 
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [darkMode]);
+
   // Supabase Authentication states
   const [user, setUser] = useState(null);
   const [session, setSession] = useState(null);
@@ -104,6 +112,11 @@ export function AppProvider({ children }) {
     setDarkMode(prev => {
       const next = !prev;
       localStorage.setItem('theme', next ? 'dark' : 'light');
+      if (next) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
       return next;
     });
   };
@@ -506,11 +519,18 @@ export function AppProvider({ children }) {
         },
         body: JSON.stringify(bodyData)
       });
-      if (res.ok) {
-        await fetchApplications();
+      if (!res.ok) {
+        const errorBody = await res.json().catch(() => ({}));
+        throw new Error(errorBody.detail || "Failed to save stage details and reminder.");
       }
+      const updatedApplication = await res.json();
+      setApplications(current => current.map(item => (
+        item.id === appId ? { ...item, ...updatedApplication } : item
+      )));
+      return updatedApplication;
     } catch (err) {
       console.error("Failed to update application stage:", err);
+      throw err;
     }
   };
 

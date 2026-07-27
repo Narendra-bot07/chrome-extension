@@ -98,7 +98,7 @@ function JobTrackerContent() {
     setViewMode(mode);
     localStorage.setItem('tailorflow.job_tracker_view_mode', mode);
   };
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => applications.length === 0);
 
   // Active Workspace Tab inside Pop-Up Modal
   const [workspaceTab, setWorkspaceTab] = useState('Workflow');
@@ -117,13 +117,26 @@ function JobTrackerContent() {
   });
 
   useEffect(() => {
+    let active = true;
     const loadData = async () => {
-      setLoading(true);
-      await fetchApplications();
-      setLoading(false);
+      if (applications.length === 0) setLoading(true);
+      try {
+        await Promise.race([
+          fetchApplications(),
+          new Promise(resolve => setTimeout(resolve, 8000))
+        ]);
+      } catch (error) {
+        console.error('Job Tracker refresh failed:', error);
+      } finally {
+        if (active) setLoading(false);
+      }
     };
     loadData();
-  }, []);
+    return () => { active = false; };
+    // fetchApplications is intentionally omitted because AppContext recreates
+    // it each render; session identity is the stable refresh boundary.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.access_token, apiUrl]);
 
   // Keyboard Access: ESC key closes modal
   useEffect(() => {

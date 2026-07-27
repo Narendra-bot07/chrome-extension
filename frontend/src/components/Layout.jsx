@@ -16,7 +16,6 @@ import SupportModal from './modals/SupportModal';
 import { FlowStepper } from './FlowStepper';
 import { classifyBrowserPageUrl } from '../services/jdExtractionFlow';
 import { InteractiveAuroraBackground } from './layout/InteractiveAuroraBackground';
-import { AmbientFlowBackground } from './layout/AmbientFlowBackground';
 import { PageContainer } from './layout/PageContainer';
 import { getPageLayout } from './layout/pageLayout';
 import { ApplicationLogo, UserAvatar } from './ApplicationLogo';
@@ -271,9 +270,8 @@ function Layout() {
 
   return (
     <div className={`w-full h-screen flex overflow-hidden font-sans bg-tf-bg text-tf-text relative ${darkMode ? 'dark' : ''}`}>
-      {/* Global Interactive Ambient Aurora & Flow Backgrounds */}
+      {/* Global Interactive Ambient Aurora Background */}
       <InteractiveAuroraBackground />
-      <AmbientFlowBackground />
 
       {/* Mobile/Sidepanel Slide-over Backdrop Overlay */}
       {sidebarOpen && (

@@ -155,9 +155,9 @@ function DashboardContent() {
   const applications = rawApps || [];
   const navigate = useNavigate();
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => applications.length === 0);
   const [hoveredPointIndex, setHoveredPointIndex] = useState(-1);
-  const [trendTimeframe, setTrendTimeframe] = useState('Last 30 days');
+  const [trendTimeframe, setTrendTimeframe] = useState('Last 7 days');
   const [trendDropdownOpen, setTrendDropdownOpen] = useState(false);
   const [trendActivity, setTrendActivity] = useState([]);
   const [pipelineFilter, setPipelineFilter] = useState('All Jobs');
@@ -178,21 +178,36 @@ function DashboardContent() {
   };
 
   useEffect(() => {
+    let active = true;
     const loadDashboardData = async () => {
-      try {
-        await fetchApplications();
-        if (session?.access_token) {
-          const reminders = await notificationApi.reminders(session.access_token);
-          setPersistedReminders(reminders.filter(item => !['completed', 'cancelled'].includes(item.status)));
+      if (applications.length === 0) {
+        setLoading(true);
+        try {
+          await fetchApplications();
+        } catch (err) {
+          console.error("Dashboard fetch error:", err);
+        } finally {
+          if (active) setLoading(false);
         }
-      } catch (err) {
-        console.error("Dashboard fetch error:", err);
-      } finally {
-        setLoading(false);
+      } else {
+        if (active) setLoading(false);
+        fetchApplications().catch(err => console.error("Background refresh error:", err));
       }
     };
     loadDashboardData();
-  }, [session]);
+
+    if (session?.access_token) {
+      notificationApi.reminders(session.access_token)
+        .then(reminders => {
+          if (active) {
+            setPersistedReminders(reminders.filter(item => !['completed', 'cancelled'].includes(item.status)));
+          }
+        })
+        .catch(error => console.warn('Dashboard reminders unavailable:', error));
+    }
+
+    return () => { active = false; };
+  }, [session?.access_token, apiUrl]);
 
   useEffect(() => {
     const token = session?.access_token || localStorage.getItem('access_token');
@@ -367,7 +382,7 @@ function DashboardContent() {
     }
 
     return items;
-  }, [applications, interviewApps, screeningApps, avgResumeScore, profile, parsedResume, navigate]);
+  }, [applications, interviewApps, screeningApps, recentResumeScore, profile, parsedResume, navigate]);
 
   // Derive Recent Timeline Activities
   const recentActivities = useMemo(() => {

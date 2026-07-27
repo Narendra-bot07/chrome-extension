@@ -1,6 +1,13 @@
 -- TailorFlow notification, domain-event, delivery, preference, and reminder system.
 create extension if not exists pgcrypto;
 
+-- Stage notes and follow-up dates are application data first. Keeping them on
+-- the application makes them available after reload and lets reminders link
+-- back to the exact next action that created them.
+alter table public.applications
+  add column if not exists next_action text,
+  add column if not exists next_action_due_at timestamptz;
+
 do $$ begin
   create type notification_category as enum ('profile','resume','cover_letter','application','interview','recruiter','reminder','ai_insight','security','subscription','product','achievement','system');
 exception when duplicate_object then null; end $$;

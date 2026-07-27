@@ -38,6 +38,8 @@ export function WorkflowTab({ application, onUpdateStage }) {
   const [popupStage, setPopupStage] = useState(null);
   const [popupNote, setPopupNote] = useState('');
   const [popupDate, setPopupDate] = useState('');
+  const [popupError, setPopupError] = useState('');
+  const [isSavingStage, setIsSavingStage] = useState(false);
 
   // Auto-Center Active Stage or Board Center on Load/Update
   useEffect(() => {
@@ -104,6 +106,7 @@ export function WorkflowTab({ application, onUpdateStage }) {
       setPopupStage(stageObj);
       setPopupNote('');
       setPopupDate('');
+      setPopupError('');
     }
   };
 
@@ -117,12 +120,15 @@ export function WorkflowTab({ application, onUpdateStage }) {
     setPopupStage(stageObj);
     setPopupNote('');
     setPopupDate('');
+    setPopupError('');
   };
 
   const handleConfirmStageMove = async (e) => {
     e.preventDefault();
     if (!popupStage) return;
 
+    setIsSavingStage(true);
+    setPopupError('');
     try {
       await onUpdateStage(application.id, popupStage.id, popupNote, popupDate);
       setToastMessage(`Moved application to ${popupStage.label}`);
@@ -130,6 +136,9 @@ export function WorkflowTab({ application, onUpdateStage }) {
       setTimeout(() => setToastMessage(''), 3000);
     } catch (err) {
       console.error("Failed to update stage:", err);
+      setPopupError(err?.message || 'Could not save the stage details and reminder. Please try again.');
+    } finally {
+      setIsSavingStage(false);
     }
   };
 
@@ -395,6 +404,11 @@ export function WorkflowTab({ application, onUpdateStage }) {
                   className="w-full p-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-teal-500 text-xs"
                 />
               </div>
+              {popupError && (
+                <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] font-semibold text-rose-600 dark:text-rose-300">
+                  {popupError}
+                </div>
+              )}
             </div>
 
             {/* Action Buttons */}
@@ -408,9 +422,10 @@ export function WorkflowTab({ application, onUpdateStage }) {
               </button>
               <button
                 type="submit"
-                className="px-4 py-1.5 bg-[#00bda5] hover:bg-[#00a38e] text-white font-bold text-xs rounded-xl cursor-pointer border-none shadow-xs"
+                disabled={isSavingStage}
+                className="px-4 py-1.5 bg-[#00bda5] hover:bg-[#00a38e] disabled:cursor-wait disabled:opacity-60 text-white font-bold text-xs rounded-xl cursor-pointer border-none shadow-xs"
               >
-                Confirm Move to {popupStage.label}
+                {isSavingStage ? 'Saving…' : `Confirm Move to ${popupStage.label}`}
               </button>
             </div>
           </form>

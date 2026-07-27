@@ -312,11 +312,403 @@ html.dark #root .dashboard-kpi-card:hover {
   }
 }
 
+/* ==========================================================================
+   Dark theme: Apple-inspired Liquid Glass
+   Strictly scoped to .dark. Light theme is intentionally unaffected.
+   ========================================================================== */
+.dark {
+  --tf-cursor-x: 50vw;
+  --tf-cursor-y: 24vh;
+  --tf-bg: #101216;
+  --tf-surface: #181b20;
+  --tf-surface-2: #20242a;
+  --tf-surface-3: #292e35;
+  --tf-surface-floating: rgba(29, 33, 39, 0.7);
+  --tf-border: rgba(255, 255, 255, 0.072);
+  --tf-border-strong: rgba(255, 255, 255, 0.13);
+  --tf-text: #f4f5f7;
+  --tf-text-secondary: #acb3bd;
+  --tf-text-tertiary: #777f8b;
+  --tf-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.26), 0 8px 24px rgba(0, 0, 0, 0.1);
+  --tf-shadow-md: 0 2px 6px rgba(0, 0, 0, 0.26), 0 18px 48px rgba(0, 0, 0, 0.2);
+  --tf-shadow-floating: 0 8px 20px rgba(0, 0, 0, 0.28), 0 32px 80px rgba(0, 0, 0, 0.38);
+}
+
+.dark .adaptive-ambient {
+  background:
+    radial-gradient(circle at 18% -8%, rgba(90, 121, 180, 0.14), transparent 34rem),
+    radial-gradient(circle at 92% 22%, rgba(71, 125, 119, 0.08), transparent 32rem),
+    radial-gradient(circle at 50% 112%, rgba(96, 80, 132, 0.065), transparent 38rem),
+    linear-gradient(145deg, #12151a 0%, #101216 52%, #0d0f13 100%);
+}
+
+.dark .adaptive-ambient__light {
+  opacity: 0.055;
+  filter: blur(140px);
+  animation-duration: 42s;
+}
+
+.dark .adaptive-ambient__noise {
+  opacity: 0.018;
+  mix-blend-mode: soft-light;
+}
+
+/* Surface 1: deliberately matte, paper-like and stable. */
+.dark #root .tf-card,
+.dark #root .bg-tf-surface,
+.dark #root .bg-white,
+.dark #root [class*="dark:bg-zinc-900"] {
+  background-color: rgba(24, 27, 32, 0.96);
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 34%);
+  border-color: var(--tf-border);
+  box-shadow: var(--tf-shadow-sm);
+  backdrop-filter: none;
+}
+
+/* Surface 2: liquid glass is reserved for floating and navigational UI. */
+.dark #root .surface-glass,
+.dark #root .notification-glass {
+  position: relative;
+  isolation: isolate;
+  background-color: rgba(25, 29, 35, 0.66);
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.018) 42%, rgba(0, 0, 0, 0.035)),
+    radial-gradient(900px circle at 16% -20%, rgba(255, 255, 255, 0.075), transparent 42%);
+  border-color: rgba(255, 255, 255, 0.105);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.025),
+    var(--tf-shadow-floating);
+  backdrop-filter: blur(24px) saturate(125%);
+  -webkit-backdrop-filter: blur(24px) saturate(125%);
+}
+
+.dark #root .surface-glass::before,
+.dark #root .notification-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0.34;
+  background:
+    radial-gradient(
+      420px circle at var(--tf-cursor-x) var(--tf-cursor-y),
+      rgba(255, 255, 255, 0.105),
+      transparent 44%
+    );
+  background-attachment: fixed;
+  transition: opacity 200ms var(--tf-spring);
+}
+
+.dark #root .notification-glass {
+  background-color: rgba(21, 24, 29, 0.56);
+}
+
+.dark #root [role="dialog"],
+.dark #root [role="menu"] {
+  background-color: rgba(24, 28, 34, 0.72);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.07), transparent 38%);
+  border-color: rgba(255, 255, 255, 0.105);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.075),
+    var(--tf-shadow-floating);
+  backdrop-filter: blur(24px) saturate(125%);
+  -webkit-backdrop-filter: blur(24px) saturate(125%);
+}
+
+.dark #root .surface-glass:hover::before,
+.dark #root .notification-glass:hover::before {
+  opacity: 0.48;
+}
+
+/* Inputs stay crisp; selected/focused controls receive one restrained ring. */
+.dark #root input,
+.dark #root textarea,
+.dark #root select {
+  background-color: rgba(13, 15, 19, 0.58);
+  border-color: rgba(255, 255, 255, 0.09);
+  color: var(--tf-text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.018);
+}
+
+.dark #root input:hover,
+.dark #root textarea:hover,
+.dark #root select:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.dark #root input:focus,
+.dark #root textarea:focus,
+.dark #root select:focus {
+  border-color: color-mix(in srgb, var(--tf-accent) 70%, white);
+  box-shadow: var(--tf-shadow-focus);
+}
+
+/* Soft physical motion, without glow or color-shifting. */
+.dark #root button:not(:disabled),
+.dark #root [role="button"]:not(:disabled) {
+  transition:
+    transform var(--tf-motion-hover) var(--tf-spring),
+    color var(--tf-motion-hover) var(--tf-spring),
+    background-color var(--tf-motion-hover) var(--tf-spring),
+    border-color var(--tf-motion-hover) var(--tf-spring),
+    box-shadow var(--tf-motion-hover) var(--tf-spring);
+}
+
+.dark #root button:not(:disabled):hover,
+.dark #root [role="button"]:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.dark #root button:not(:disabled):active,
+.dark #root [role="button"]:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+@media (hover: none), (pointer: coarse) {
+  .dark #root .surface-glass::before,
+  .dark #root .notification-glass::before { display: none; }
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--tf-border); border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--tf-border-strong); }
+
+/* ==========================================================================
+   Adaptive Surface UI
+   Shared product foundation: four surfaces, one motion language, three levels
+   of elevation, and a strict 8px-based rhythm.
+   ========================================================================== */
+@layer base {
+  :root {
+    --tf-bg: #f8f9fb;
+    --tf-surface: #ffffff;
+    --tf-surface-2: #f3f4f6;
+    --tf-surface-3: #e9ebef;
+    --tf-surface-floating: rgba(255, 255, 255, 0.82);
+    --tf-border: #e2e5e9;
+    --tf-border-strong: #cfd4da;
+    --tf-text: #111318;
+    --tf-text-secondary: #5f6875;
+    --tf-text-tertiary: #8a929e;
+    --tf-accent: #3b82f6;
+    --tf-accent-hover: #2563eb;
+    --tf-success: #22c55e;
+    --tf-warning: #f59e0b;
+    --tf-danger: #ef4444;
+    --tf-ai: #8b5cf6;
+    --tf-teal: #14b8a6;
+
+    --tf-space-1: 4px;
+    --tf-space-2: 8px;
+    --tf-space-3: 12px;
+    --tf-space-4: 16px;
+    --tf-space-5: 20px;
+    --tf-space-6: 24px;
+    --tf-space-8: 32px;
+    --tf-space-10: 40px;
+    --tf-space-12: 48px;
+    --tf-space-16: 64px;
+
+    --tf-radius-sm: 8px;
+    --tf-radius-control: 12px;
+    --tf-radius-card: 18px;
+    --tf-radius-panel: 24px;
+    --tf-radius-modal: 32px;
+    --tf-radius-pill: 999px;
+
+    --tf-shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.03);
+    --tf-shadow-md: 0 8px 24px rgba(16, 24, 40, 0.08), 0 2px 6px rgba(16, 24, 40, 0.04);
+    --tf-shadow-floating: 0 24px 64px rgba(16, 24, 40, 0.16), 0 8px 20px rgba(16, 24, 40, 0.08);
+    --tf-shadow-focus: 0 0 0 3px rgba(59, 130, 246, 0.2);
+
+    --tf-spring: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --tf-motion-hover: 150ms;
+    --tf-motion-dropdown: 200ms;
+    --tf-motion-page: 250ms;
+    --tf-motion-modal: 300ms;
+  }
+
+  .dark {
+    --tf-bg: #111318;
+    --tf-surface: #181b20;
+    --tf-surface-2: #20242a;
+    --tf-surface-3: #292e35;
+    --tf-surface-floating: rgba(28, 32, 38, 0.82);
+    --tf-border: rgba(255, 255, 255, 0.075);
+    --tf-border-strong: rgba(255, 255, 255, 0.14);
+    --tf-text: #f3f4f6;
+    --tf-text-secondary: #a8afb9;
+    --tf-text-tertiary: #747d89;
+    --tf-accent: #60a5fa;
+    --tf-accent-hover: #7db5fb;
+    --tf-success: #4ade80;
+    --tf-warning: #fbbf24;
+    --tf-danger: #f87171;
+    --tf-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24), 0 1px 3px rgba(0, 0, 0, 0.16);
+    --tf-shadow-md: 0 10px 28px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.18);
+    --tf-shadow-floating: 0 28px 72px rgba(0, 0, 0, 0.48), 0 8px 24px rgba(0, 0, 0, 0.28);
+  }
+
+  body { font-size: 14px; line-height: 1.5; }
+  h1 { font-size: 28px; line-height: 1.2; letter-spacing: -0.025em; }
+  h2 { font-size: 24px; line-height: 1.25; letter-spacing: -0.02em; }
+  h3 { font-size: 20px; line-height: 1.3; letter-spacing: -0.015em; }
+
+  button, a, input, textarea, select {
+    transition:
+      color var(--tf-motion-hover) var(--tf-spring),
+      background-color var(--tf-motion-hover) var(--tf-spring),
+      border-color var(--tf-motion-hover) var(--tf-spring),
+      opacity var(--tf-motion-hover) var(--tf-spring),
+      transform var(--tf-motion-hover) var(--tf-spring),
+      box-shadow var(--tf-motion-hover) var(--tf-spring);
+  }
+
+  input, textarea, select {
+    border-radius: var(--tf-radius-control);
+  }
+}
+
+@layer components {
+  .adaptive-ambient {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 14% 4%, rgba(59, 130, 246, 0.055), transparent 32rem),
+      radial-gradient(circle at 88% 18%, rgba(20, 184, 166, 0.04), transparent 30rem),
+      var(--tf-bg);
+  }
+
+  .adaptive-ambient__light {
+    position: absolute;
+    width: 42rem;
+    height: 42rem;
+    border-radius: 50%;
+    filter: blur(120px);
+    opacity: 0.035;
+    animation: tf-ambient-drift 32s var(--tf-spring) infinite alternate;
+  }
+  .adaptive-ambient__light--primary { left: -16rem; top: -18rem; background: #3b82f6; }
+  .adaptive-ambient__light--accent { right: -18rem; bottom: -20rem; background: #14b8a6; animation-delay: -16s; }
+  .adaptive-ambient__noise {
+    position: absolute;
+    inset: 0;
+    opacity: 0.012;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 160 160' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .surface-glass {
+    background: var(--tf-surface-floating);
+    backdrop-filter: blur(18px) saturate(125%);
+    -webkit-backdrop-filter: blur(18px) saturate(125%);
+    box-shadow: var(--tf-shadow-sm);
+  }
+
+  .notification-glass {
+    background: #ffffff !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: var(--tf-shadow-floating);
+  }
+  .dark .notification-glass,
+  .dark #root .notification-glass {
+    background: #111318 !important;
+    background-color: #111318 !important;
+    background-image: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .tf-card {
+    background: var(--tf-surface);
+    border: 1px solid var(--tf-border);
+    border-radius: var(--tf-radius-card);
+    box-shadow: var(--tf-shadow-sm);
+  }
+  .tf-card--metric { border-radius: var(--tf-radius-card); }
+  .tf-card--ai { border-color: color-mix(in srgb, var(--tf-ai) 24%, var(--tf-border)); }
+  .tf-card--alert { border-left: 3px solid var(--tf-warning); }
+  .tf-card--document { background: color-mix(in srgb, var(--tf-surface) 96%, var(--tf-bg)); }
+  .tf-card--interactive,
+  .tf-button {
+    transition: transform var(--tf-motion-hover) var(--tf-spring), box-shadow var(--tf-motion-hover) var(--tf-spring), border-color var(--tf-motion-hover) var(--tf-spring), background-color var(--tf-motion-hover) var(--tf-spring);
+  }
+  .tf-card--interactive:hover,
+  .tf-button:not(:disabled):hover { transform: translateY(-1px); box-shadow: var(--tf-shadow-md); }
+  .tf-card--interactive:active,
+  .tf-button:not(:disabled):active { transform: scale(0.98); }
+
+  .tf-button__loading { display: inline-flex; align-items: center; gap: 3px; }
+  .tf-button__loading i {
+    width: 3px;
+    height: 10px;
+    border-radius: 8px;
+    background: currentColor;
+    opacity: 0.35;
+    animation: tf-loading-wave 900ms var(--tf-spring) infinite;
+  }
+  .tf-button__loading i:nth-child(2) { animation-delay: 100ms; }
+  .tf-button__loading i:nth-child(3) { animation-delay: 200ms; }
+
+  /* Surface 1 must remain matte. Glass is opt-in via .surface-glass. */
+  html.dark #root .bg-tf-surface,
+  html.dark #root .bg-white,
+  html.dark #root [class*="dark:bg-zinc-900"] {
+    background-color: var(--tf-surface);
+    background-image: none;
+    border-color: var(--tf-border);
+    box-shadow: var(--tf-shadow-sm);
+    backdrop-filter: none;
+  }
+  html.dark #root .surface-glass {
+    background: var(--tf-surface-floating);
+    backdrop-filter: blur(18px) saturate(125%);
+  }
+  html.dark #root .tf-button:not(:disabled):hover {
+    transform: translateY(-1px);
+    box-shadow: var(--tf-shadow-md);
+  }
+  html.dark #root .tf-button:not(:disabled):active {
+    transform: scale(0.98);
+  }
+}
+
+@keyframes tf-ambient-drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(32px, 20px, 0) scale(1.04); }
+}
+@keyframes tf-loading-wave {
+  0%, 100% { transform: scaleY(0.55); opacity: 0.3; }
+  50% { transform: scaleY(1); opacity: 0.9; }
+}
+@keyframes tf-loading-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.96); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+/* Legacy loading affordances inherit the system motion without rotation. */
+.animate-spin {
+  animation: tf-loading-pulse 900ms var(--tf-spring) infinite !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
 
 /* Typography Utility Hierarchy (Scale Specs) */
 .font-display { font-size: 32px; line-height: 40px; letter-spacing: -0.02em; font-weight: 600; }

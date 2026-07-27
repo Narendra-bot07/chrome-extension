@@ -1,13 +1,24 @@
 import React from 'react';
+import { motion } from 'framer-motion';
+import { cardVariants } from '../../utils/motion';
 
-export function Card({ children, className = '', hover = false, ...props }) {
+export function Card({ children, className = '', hover = false, variant = 'information', animateEntrance = false, ...props }) {
+  const Component = animateEntrance ? motion.div : 'div';
+  const animationProps = animateEntrance ? {
+    variants: cardVariants,
+    initial: "initial",
+    animate: "animate",
+    exit: "exit"
+  } : {};
+
   return (
-    <div 
-      className={`bg-tf-surface border border-tf-border rounded-lg shadow-sm transition-colors duration-150 ${hover ? 'hover:border-tf-border-strong hover:bg-tf-surface-2' : ''} ${className}`}
+    <Component 
+      className={`tf-card tf-card--${variant} ${hover ? 'tf-card--interactive' : ''} ${className}`}
+      {...animationProps}
       {...props}
     >
       {children}
-    </div>
+    </Component>
   );
 }
 

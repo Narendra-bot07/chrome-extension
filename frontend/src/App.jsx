@@ -39,7 +39,7 @@ function ProtectedRoute({ children }) {
   
   if (loadingAuth) {
     return (
-      <div className="min-h-screen bg-[#FAFAFB] dark:bg-[#0C0D10] flex flex-col items-center justify-center">
+      <div className="min-h-screen bg-[#FAFAFB] dark:bg-[#15171c] text-zinc-900 dark:text-zinc-100 flex flex-col items-center justify-center transition-colors">
         <div className="w-72 space-y-3" role="status" aria-label="Verifying your session">
           <div className="h-8 w-32 rounded-lg bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
           <div className="h-3 w-full rounded bg-zinc-100 dark:bg-zinc-900 animate-pulse" />
