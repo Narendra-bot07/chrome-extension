@@ -6,19 +6,20 @@ class ApplicationRepository:
     def __init__(self, conn):
         self.conn = conn
 
-    def create(self, user_id: str, company_name: str, job_title: str, location: Optional[str], job_url: Optional[str], resume_version: Optional[str], cover_letter_version: Optional[str], ats_score: Optional[float], resume_match_score: Optional[float], current_stage: str = 'Ready To Apply', timeline: List[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def create(self, user_id: str, company_name: str, company_domain: Optional[str], job_title: str, location: Optional[str], job_url: Optional[str], resume_version: Optional[str], cover_letter_version: Optional[str], ats_score: Optional[float], resume_match_score: Optional[float], current_stage: str = 'Ready To Apply', timeline: List[Dict[str, Any]] = None) -> Dict[str, Any]:
         if timeline is None:
             timeline = []
         
         query = """
-            INSERT INTO public.applications (user_id, company_name, job_title, location, job_url, resume_version, cover_letter_version, ats_score, resume_match_score, current_stage, timeline)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO public.applications (user_id, company_name, company_domain, job_title, location, job_url, resume_version, cover_letter_version, ats_score, resume_match_score, current_stage, timeline)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
         """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (
                 user_id,
                 company_name,
+                company_domain,
                 job_title,
                 location,
                 job_url,

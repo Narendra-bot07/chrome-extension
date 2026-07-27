@@ -931,6 +931,9 @@ COMPANY IDENTITY:
   parent/public employer brand on the same page, return the public brand.
 - Do not blindly copy legal suffixes or requisition/entity codes into company_name.
 - Do not infer a parent brand without supporting page/domain evidence.
+- company_domain is the official employer hostname only when supported by the source URL,
+  canonical URL, structured metadata, or explicit company website evidence. Return null
+  for third-party job boards or uncertainty. Never append ".com" to company_name.
 
 EXPLICIT SKILL COVERAGE:
 - Scan the entire description, responsibilities, mandatory qualifications, and preferred

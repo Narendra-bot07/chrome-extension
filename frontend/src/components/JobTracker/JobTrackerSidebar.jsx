@@ -4,6 +4,7 @@ import {
   FileText, CheckCircle2, AlertCircle, Sparkles, ExternalLink,
   ChevronDown, Calendar, Layers, ShieldCheck
 } from 'lucide-react';
+import CompanyLogo from '../CompanyLogoView';
 
 const FILTER_TABS = [
   { id: 'All', label: 'All' },
@@ -39,15 +40,6 @@ export function JobTrackerSidebar({
   sortBy,
   setSortBy
 }) {
-  const getCompanyInitials = (name) => {
-    if (!name) return 'JB';
-    const parts = name.trim().split(' ');
-    if (parts.length >= 2) {
-      return (parts[0][0] + parts[1][0]).toUpperCase();
-    }
-    return name.slice(0, 2).toUpperCase();
-  };
-
   const getStageColor = (stage) => {
     switch (stage) {
       case 'Applied': return 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-800';
@@ -213,9 +205,12 @@ export function JobTrackerSidebar({
               >
                 {/* Header: Company Logo/Initials, Role, Company */}
                 <div className="flex items-start gap-2.5">
-                  <div className="w-9 h-9 rounded-lg bg-teal-50 dark:bg-zinc-800 border border-teal-100 dark:border-zinc-700 flex items-center justify-center text-teal-700 dark:text-teal-400 font-extrabold text-xs shrink-0 shadow-inner">
-                    {getCompanyInitials(app.company_name)}
-                  </div>
+                  <CompanyLogo
+                    companyName={app.company_name}
+                    companyDomain={app.company_domain}
+                    size={36}
+                    className="rounded-lg"
+                  />
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-1">

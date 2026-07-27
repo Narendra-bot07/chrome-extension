@@ -3,6 +3,7 @@ import {
   FileText, Sparkles, MapPin, Clock, MoreVertical, Eye, Layers, 
   FileEdit, Bell, ExternalLink, Calendar, CheckCircle2, ChevronRight
 } from 'lucide-react';
+import CompanyLogo from '../CompanyLogoView';
 
 export function JobCard({ 
   application, 
@@ -15,13 +16,6 @@ export function JobCard({
   const [showMenu, setShowMenu] = useState(false);
 
   if (!application) return null;
-
-  const getCompanyInitials = (name) => {
-    if (!name) return 'JB';
-    const parts = name.trim().split(' ');
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-    return name.slice(0, 2).toUpperCase();
-  };
 
   const getStageColor = (stage) => {
     switch (stage) {
@@ -70,9 +64,11 @@ export function JobCard({
       {/* CARD HEADER */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-xl bg-teal-50 dark:bg-zinc-800 border border-teal-100 dark:border-zinc-700 flex items-center justify-center text-teal-700 dark:text-teal-400 font-black text-xs shrink-0 shadow-2xs">
-            {getCompanyInitials(application.company_name)}
-          </div>
+          <CompanyLogo
+            companyName={application.company_name}
+            companyDomain={application.company_domain}
+            size={40}
+          />
 
           <div className="min-w-0">
             <h3 className="text-sm font-extrabold text-zinc-900 dark:text-white truncate group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors">

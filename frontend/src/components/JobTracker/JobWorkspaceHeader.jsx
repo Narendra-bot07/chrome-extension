@@ -3,6 +3,7 @@ import {
   Building, MapPin, Calendar, ExternalLink, Layers, Edit3, Archive, Trash2, 
   Sparkles, FileText, CheckCircle2, Award
 } from 'lucide-react';
+import CompanyLogo from '../CompanyLogoView';
 
 export function JobWorkspaceHeader({
   application,
@@ -39,7 +40,13 @@ export function JobWorkspaceHeader({
     <header className="p-4 md:p-6 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4 select-none shadow-xs">
       
       {/* Role, Company, Location Metadata */}
-      <div className="space-y-2 min-w-0">
+      <div className="flex min-w-0 items-start gap-3">
+        <CompanyLogo
+          companyName={application.company_name}
+          companyDomain={application.company_domain}
+          size={48}
+        />
+        <div className="min-w-0 space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-xl md:text-2xl font-black text-zinc-900 dark:text-white tracking-tight truncate">
             {application.job_title || 'Untitled Position'}
@@ -89,6 +96,7 @@ export function JobWorkspaceHeader({
             <span className="text-zinc-600 dark:text-zinc-300 font-semibold">ATS Score:</span>
             <strong className="text-emerald-700 dark:text-emerald-400 font-extrabold">{atsScore}/100</strong>
           </div>
+        </div>
         </div>
       </div>
 

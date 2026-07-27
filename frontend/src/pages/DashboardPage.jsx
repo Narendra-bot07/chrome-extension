@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { FadeSwap, PageLoadingState } from '../components/ui/Loading';
+import CompanyLogo from '../components/CompanyLogoView';
 
 // Safe Error Boundary for Dashboard
 class DashboardErrorBoundary extends React.Component {
@@ -763,14 +764,15 @@ function DashboardContent() {
                     const companyName = item.company_name || 'Company';
                     const roleName = item.job_title || 'Software Engineer';
                     const stage = item.current_stage || 'Applied';
-                    const initial = companyName.charAt(0).toUpperCase();
-
                     return (
                       <div key={item.id || idx} className="flex items-center justify-between p-2 rounded-xl hover:bg-tf-surface-2 transition">
                         <div className="flex items-center gap-3">
-                          <div className="w-7 h-7 rounded-lg bg-tf-accent/10 text-tf-accent font-bold text-xs flex items-center justify-center">
-                            {initial}
-                          </div>
+                          <CompanyLogo
+                            companyName={companyName}
+                            companyDomain={item.company_domain}
+                            size={28}
+                            className="rounded-lg"
+                          />
                           <div>
                             <div className="text-xs font-semibold text-tf-text truncate max-w-[120px]">{companyName}</div>
                             <div className="text-[10px] text-tf-text-tertiary truncate max-w-[120px]">{roleName}</div>

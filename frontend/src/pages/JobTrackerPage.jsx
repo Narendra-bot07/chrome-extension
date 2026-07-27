@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Button } from '../components/ui/Button';
+import CompanyLogo from '../components/CompanyLogoView';
 
 // Job Tracker Components
 import JobCard from '../components/JobTracker/JobCard';
@@ -600,8 +601,18 @@ function JobTrackerContent() {
                       className="hover:bg-teal-50/40 dark:hover:bg-zinc-800/50 cursor-pointer transition-colors"
                     >
                       <td className="p-4 font-bold text-zinc-900 dark:text-white">
-                        <div>{app.job_title}</div>
-                        <div className="text-[11px] font-medium text-zinc-500">{app.company_name}</div>
+                        <div className="flex items-center gap-3">
+                          <CompanyLogo
+                            companyName={app.company_name}
+                            companyDomain={app.company_domain}
+                            size={32}
+                            className="rounded-lg"
+                          />
+                          <div className="min-w-0">
+                            <div className="truncate">{app.job_title}</div>
+                            <div className="truncate text-[11px] font-medium text-zinc-500">{app.company_name}</div>
+                          </div>
+                        </div>
                       </td>
                       <td className="p-4 font-semibold text-teal-600 dark:text-teal-400">
                         {app.current_stage || 'Ready To Apply'}

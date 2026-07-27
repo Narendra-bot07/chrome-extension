@@ -12,6 +12,7 @@ router = APIRouter(prefix="/applications", tags=["applications"])
 
 class ApplicationCreateRequest(BaseModel):
     company_name: str
+    company_domain: Optional[str] = None
     job_title: str
     location: Optional[str] = None
     job_url: Optional[str] = None
@@ -24,6 +25,7 @@ class ApplicationCreateRequest(BaseModel):
 
 class ApplicationUpdateRequest(BaseModel):
     company_name: Optional[str] = None
+    company_domain: Optional[str] = None
     job_title: Optional[str] = None
     location: Optional[str] = None
     job_url: Optional[str] = None
@@ -89,6 +91,7 @@ async def create_application(
         record = repo.create(
             user_id=user["id"],
             company_name=request.company_name,
+            company_domain=request.company_domain,
             job_title=request.job_title,
             location=request.location,
             job_url=request.job_url,

@@ -29,6 +29,13 @@ class ExtractedJob(BaseModel):
             "clearly establishes that relationship."
         ),
     )
+    company_domain: Optional[str] = Field(
+        None,
+        description=(
+            "Official employer hostname supported by the source page or structured "
+            "metadata, for example microsoft.com. Never construct it from company_name."
+        ),
+    )
     location: Optional[str] = Field(
         None, description="Evidence-supported job location, without unrelated locations."
     )

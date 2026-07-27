@@ -1453,6 +1453,7 @@ export function AppProvider({ children }) {
     }
     const appData = {
       company_name: companyName || "",
+      company_domain: jobAnalysis?.company_domain || jobAnalysis?.analysis?.company_domain || null,
       job_title: jobTitle || "",
       location: jobAnalysis?.location || "Remote",
       job_url: lastAnalyzedUrl || "",
