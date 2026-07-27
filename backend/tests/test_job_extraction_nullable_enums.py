@@ -27,3 +27,22 @@ def test_job_modes_still_normalize_provider_labels():
 
     assert job.workplace_type == "onsite"
     assert job.employment_type == "full_time"
+
+
+def test_provider_null_collections_are_accepted_and_normalized_to_lists():
+    collection_fields = (
+        "responsibilities",
+        "requirements",
+        "preferred_qualifications",
+        "skills",
+        "suggested_skills",
+        "benefits",
+    )
+    schema = ExtractedJob.model_json_schema()
+
+    for field in collection_fields:
+        assert {"type": "null"} in schema["properties"][field]["anyOf"]
+
+    job = ExtractedJob.model_validate({field: None for field in collection_fields})
+    for field in collection_fields:
+        assert getattr(job, field) == []

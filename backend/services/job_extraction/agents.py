@@ -919,7 +919,9 @@ def source_builder_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
 EXTRACTION_PROMPT = """You are the evidence-grounded extraction agent for one job posting.
 Read ALL supplied primary and supplementary evidence before producing ExtractedJob.
 
-Never invent factual values; use null/empty lists only when evidence is genuinely absent.
+Never invent factual values. For collection fields (responsibilities, requirements,
+preferred_qualifications, skills, suggested_skills, and benefits), always return a JSON
+array and use [] when evidence is genuinely absent. Use null only for absent scalar fields.
 
 COMPANY IDENTITY:
 - company_name is the recognizable public employer brand supported by domain, metadata,

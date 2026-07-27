@@ -53,16 +53,16 @@ class ExtractedJob(BaseModel):
     description: Optional[str] = Field(
         None, description="Clean role overview and job description supported by the selected evidence."
     )
-    responsibilities: list[str] = Field(
+    responsibilities: Optional[list[str]] = Field(
         default_factory=list, description="Distinct duties and expected outcomes."
     )
-    requirements: list[str] = Field(
+    requirements: Optional[list[str]] = Field(
         default_factory=list, description="Mandatory education, experience, and qualifications."
     )
-    preferred_qualifications: list[str] = Field(
+    preferred_qualifications: Optional[list[str]] = Field(
         default_factory=list, description="Explicitly preferred or nice-to-have qualifications."
     )
-    skills: list[str] = Field(
+    skills: Optional[list[str]] = Field(
         default_factory=list,
         description=(
             "All explicit evidence-supported skills: languages, tools, platforms, "
@@ -72,7 +72,7 @@ class ExtractedJob(BaseModel):
             "responsibilities or qualification examples."
         ),
     )
-    suggested_skills: list[str] = Field(
+    suggested_skills: Optional[list[str]] = Field(
         default_factory=list,
         description=(
             "Atomic, high-confidence ATS skill recommendations inferred from the role "
@@ -91,9 +91,17 @@ class ExtractedJob(BaseModel):
     valid_through: Optional[str] = None
     source_url: Optional[str] = None
 
-    @field_validator("benefits", mode="before")
+    @field_validator(
+        "responsibilities",
+        "requirements",
+        "preferred_qualifications",
+        "skills",
+        "suggested_skills",
+        "benefits",
+        mode="before",
+    )
     @classmethod
-    def normalize_benefits(cls, value: Any) -> list[str]:
+    def normalize_optional_lists(cls, value: Any) -> list[str]:
         return [] if value is None else value
 
     @field_validator("workplace_type", mode="before")

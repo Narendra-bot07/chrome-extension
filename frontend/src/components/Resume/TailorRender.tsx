@@ -284,7 +284,10 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
             {education.map((edu: any, i: number) => (
               <div key={i} className="break-inside-avoid" style={{ breakInside: 'avoid-page', lineHeight: 1.05, margin: 0, padding: 0 }}>
                 <div className="flex justify-between items-baseline flex-wrap gap-x-2" style={{ fontSize: `${params.fontSize}px` }}>
-                  <h3 className="font-bold text-zinc-950">
+                  <h3
+                    className="font-bold text-zinc-950"
+                    style={{ fontSize: `${params.fontSize}px`, lineHeight: 1.1 }}
+                  >
                     {edu.degree} {edu.field_of_study ? `in ${edu.field_of_study}` : ''}
                   </h3>
                   <span className="text-[9.5px] font-bold uppercase shrink-0 text-zinc-700">{edu.start_date} - {edu.end_date || 'Present'}</span>
@@ -305,7 +308,12 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
             {experience.map((exp: any, i: number) => (
               <div key={i} className="break-inside-avoid" style={{ breakInside: 'avoid-page' }}>
                 <div className="flex justify-between items-baseline flex-wrap gap-x-2" style={{ fontSize: `${params.fontSize}px` }}>
-                  <h3 className="font-bold text-zinc-950">{exp.role}</h3>
+                  <h3
+                    className="font-bold text-zinc-950"
+                    style={{ fontSize: `${params.fontSize}px`, lineHeight: 1.1 }}
+                  >
+                    {exp.role}
+                  </h3>
                   <span className="text-[9.5px] font-bold uppercase shrink-0 text-zinc-700">{exp.start_date} - {exp.end_date || 'Present'}</span>
                 </div>
                 <div className="flex justify-between items-center text-zinc-800 font-semibold mt-0.5" style={{ fontSize: `${params.fontSize - 0.5}px` }}>
@@ -338,7 +346,10 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
                 style={{ breakInside: 'avoid-page' }}
               >
                 <div className="flex justify-between items-baseline flex-wrap gap-x-2" style={{ fontSize: `${params.fontSize}px` }}>
-                  <h3 className="font-bold text-zinc-950 flex items-center gap-1.5">
+                  <h3
+                    className="font-bold text-zinc-950 flex items-center gap-1.5"
+                    style={{ fontSize: `${params.fontSize}px`, lineHeight: 1.1 }}
+                  >
                     {proj.name}
                     {(proj.links || []).filter((link: any) =>
                       link.owner_type === 'project' && link.owner_id === proj.id
