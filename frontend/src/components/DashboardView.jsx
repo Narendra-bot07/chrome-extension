@@ -69,7 +69,7 @@ function DashboardView({
             </div>
             <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
               <div 
-                className="h-full bg-emerald-500 transition-all duration-500 ease-out" 
+                className="h-full bg-emerald-500" 
                 style={{ width: `${totalOptimizations === 0 ? 0 : (selectedOptimizations / totalOptimizations) * 100}%` }}
               />
             </div>

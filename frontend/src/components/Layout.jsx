@@ -16,7 +16,7 @@ import SupportModal from './modals/SupportModal';
 import { FlowStepper } from './FlowStepper';
 import { classifyBrowserPageUrl } from '../services/jdExtractionFlow';
 import { InteractiveAuroraBackground } from './layout/InteractiveAuroraBackground';
-import { FlowParticleBackground } from './layout/FlowParticleBackground';
+import { AmbientFlowBackground } from './layout/AmbientFlowBackground';
 import { PageContainer } from './layout/PageContainer';
 import { getPageLayout } from './layout/pageLayout';
 import { ApplicationLogo, UserAvatar } from './ApplicationLogo';
@@ -271,9 +271,9 @@ function Layout() {
 
   return (
     <div className={`w-full h-screen flex overflow-hidden font-sans bg-tf-bg text-tf-text relative ${darkMode ? 'dark' : ''}`}>
-      {/* Global Interactive Ambient Aurora & Data Flow Backgrounds */}
+      {/* Global Interactive Ambient Aurora & Flow Backgrounds */}
       <InteractiveAuroraBackground />
-      <FlowParticleBackground />
+      <AmbientFlowBackground />
 
       {/* Mobile/Sidepanel Slide-over Backdrop Overlay */}
       {sidebarOpen && (
@@ -440,18 +440,10 @@ function Layout() {
                 <div className="relative border-l border-tf-border/60 pl-2.5" ref={profileMenuRef}>
                   <button
                     onClick={() => setProfileMenuOpen((prev) => !prev)}
-                    className="flex items-center gap-2.5 p-1 rounded-xl hover:bg-tf-surface-2/70 backdrop-blur-md transition cursor-pointer select-none border border-transparent hover:border-tf-border/50"
+                    className="p-1 rounded-full hover:bg-tf-surface-2/70 backdrop-blur-md transition cursor-pointer select-none border border-transparent hover:border-tf-border/50 flex items-center justify-center"
+                    title={displayName}
                   >
                     <UserAvatar user={user} profile={profile} size={36} />
-                    <div className="hidden md:flex flex-col text-left leading-tight">
-                      <span className="text-xs font-semibold text-tf-text truncate max-w-[110px]">
-                        {displayName}
-                      </span>
-                      <span className="text-[10px] text-tf-text-tertiary font-medium capitalize">
-                        {profile?.subscription_plan || 'Free'}
-                      </span>
-                    </div>
-                    <ChevronDown size={14} className="text-tf-text-tertiary hidden md:inline" />
                   </button>
 
                   {/* Profile Dropdown Menu */}
@@ -613,7 +605,11 @@ function Layout() {
 
         {/* VIEW OUTLET */}
         <main className={`app-main flex-1 min-h-0 flex flex-col ${pageLayout.workspace ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-          <PageContainer mode={pageLayout.mode} workspace={pageLayout.workspace} className="flex-1 flex flex-col">
+          <PageContainer
+            mode={pageLayout.mode}
+            workspace={pageLayout.workspace}
+            className={`flex-1 flex flex-col ${currentPath === '/job-tracker' ? 'page-container--tracker' : ''}`}
+          >
             {!profilePromptDismissed
               && currentPath !== '/profile'
               && profile?.email

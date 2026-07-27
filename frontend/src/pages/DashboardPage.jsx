@@ -92,39 +92,44 @@ function useCountUp(endValue, duration = 650) {
   return count;
 }
 
-// Company Favicon Component with Initial Fallback
-function CompanyFavicon({ companyName, jobUrl, className = "w-5 h-5" }) {
+import { resolveCompanyDomain, getInitials } from '../components/companyLogoUtils';
+
+// Company Favicon Component with Smart Job Board Filtering and Initial Fallback
+function CompanyFavicon({ companyName, jobUrl, companyDomain, className = "w-5 h-5" }) {
   const [hasError, setHasError] = useState(false);
 
-  let domain = '';
-  if (jobUrl) {
-    try {
-      domain = new URL(jobUrl).hostname.replace(/^www\./, '');
-    } catch (e) {}
-  }
+  const domain = useMemo(
+    () => resolveCompanyDomain(companyDomain, companyName, jobUrl),
+    [companyDomain, companyName, jobUrl]
+  );
 
-  if (!domain && companyName) {
-    const cleanCo = companyName.toLowerCase().replace(/[^a-z0-9]/g, '');
-    domain = `${cleanCo}.com`;
-  }
+  useEffect(() => {
+    setHasError(false);
+  }, [domain]);
 
-  const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=64` : null;
+  const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64` : null;
 
   if (faviconUrl && !hasError) {
     return (
       <img
         src={faviconUrl}
         alt={companyName || 'Company'}
+        onLoad={(e) => {
+          // Google S2 Favicon API returns a 16x16 default fallback globe when a domain lacks a favicon.
+          if (e.target.naturalWidth <= 16 && e.target.naturalHeight <= 16 && !domain.includes('google')) {
+            setHasError(true);
+          }
+        }}
         onError={() => setHasError(true)}
-        className={`${className} object-contain bg-white rounded-md shadow-2xs border border-zinc-200/50 shrink-0`}
+        className={`${className} object-contain bg-white rounded-md shadow-2xs border border-zinc-200/50 shrink-0 p-0.5`}
       />
     );
   }
 
-  const initial = (companyName || 'C').charAt(0).toUpperCase();
+  const initials = getInitials(companyName);
   return (
-    <div className={`${className} bg-tf-accent/15 text-tf-accent font-black text-[10px] flex items-center justify-center rounded-md shrink-0 border border-tf-accent/20`}>
-      {initial}
+    <div className={`${className} bg-teal-500/15 text-teal-600 dark:text-teal-400 font-extrabold text-[9px] flex items-center justify-center rounded-md shrink-0 border border-teal-500/20 uppercase tracking-tighter`}>
+      {initials}
     </div>
   );
 }
@@ -151,9 +156,10 @@ function DashboardContent() {
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
-  const [hoveredPointIndex, setHoveredPointIndex] = useState(3);
+  const [hoveredPointIndex, setHoveredPointIndex] = useState(-1);
   const [trendTimeframe, setTrendTimeframe] = useState('Last 30 days');
   const [trendDropdownOpen, setTrendDropdownOpen] = useState(false);
+  const [trendActivity, setTrendActivity] = useState([]);
   const [pipelineFilter, setPipelineFilter] = useState('All Jobs');
   const [pipelineDropdownOpen, setPipelineDropdownOpen] = useState(false);
 
@@ -187,6 +193,23 @@ function DashboardContent() {
     };
     loadDashboardData();
   }, [session]);
+
+  useEffect(() => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token) return;
+    const days = trendTimeframe === 'Last 7 days' ? 7 : trendTimeframe === 'Last 90 days' ? 90 : 30;
+    const controller = new AbortController();
+    fetch(`${apiUrl}/api/v1/analytics/trend?days=${days}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal
+    })
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('Trend request failed')))
+      .then(data => setTrendActivity(data.series || []))
+      .catch(error => {
+        if (error.name !== 'AbortError') setTrendActivity([]);
+      });
+    return () => controller.abort();
+  }, [apiUrl, session?.access_token, trendTimeframe]);
 
   // Clean First Name Resolution
   const rawName = profile?.preferred_name 
@@ -250,13 +273,36 @@ function DashboardContent() {
   const acceptedCount = applications.filter(a => a && a.current_stage === 'Accepted').length;
   const successRate = appsSubmitted === 0 ? 0 : Math.round(((acceptedCount + offerApps.length) / appsSubmitted) * 100);
 
-  const matchApps = applications.filter(a => a && a.resume_match_score != null);
-  const avgResumeScore = matchApps.length > 0
-    ? Math.round(matchApps.reduce((sum, a) => sum + Number(a.resume_match_score), 0) / matchApps.length)
-    : (parsedResume ? 82 : 64);
+  // Recent Resume ATS Score Calculation (Most Recent Application or Master Resume)
+  const sortedScoredApps = useMemo(() => {
+    return [...applications]
+      .filter(a => a && (a.ats_score != null || a.resume_match_score != null))
+      .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
+  }, [applications]);
+
+  const recentScoredApp = sortedScoredApps[0];
+
+  const recentResumeScore = useMemo(() => {
+    if (recentScoredApp) {
+      return Math.round(Number(recentScoredApp.ats_score ?? recentScoredApp.resume_match_score));
+    }
+    if (parsedResume && (parsedResume.ats_score != null || parsedResume.score != null)) {
+      return Math.round(Number(parsedResume.ats_score ?? parsedResume.score));
+    }
+    return 78;
+  }, [recentScoredApp, parsedResume]);
+
+  const recentScoreSubtitle = useMemo(() => {
+    if (recentScoredApp) {
+      const company = recentScoredApp.company_name;
+      return company ? `${company}` : 'Recent match';
+    }
+    if (parsedResume) return 'Primary Resume';
+    return 'Target Score';
+  }, [recentScoredApp, parsedResume]);
 
   // Animated KPI Counts
-  const displayScore = useCountUp(avgResumeScore);
+  const displayScore = useCountUp(recentResumeScore);
   const displayActive = useCountUp(activeAppsCount);
   const displaySuccess = useCountUp(successRate);
   const displayInterviews = useCountUp(interviewApps.length);
@@ -294,13 +340,13 @@ function DashboardContent() {
       });
     }
 
-    if (avgResumeScore < 85) {
+    if (recentResumeScore < 85) {
       items.push({
         id: 'optimize-resume',
         icon: Sparkles,
         type: 'Optimizer',
         title: 'Resume score can improve',
-        subtitle: `Your current average match rate is ${avgResumeScore}/100`,
+        subtitle: `Your recent ATS match score is ${recentResumeScore}/100`,
         actionLabel: 'Optimize',
         onAction: () => navigate('/resume-detect')
       });
@@ -362,52 +408,48 @@ function DashboardContent() {
   const pOffer = totalTracked > 0 ? Math.round((offerApps.length / totalTracked) * 100) : 0;
   const pRejected = totalTracked > 0 ? Math.round((rejectedApps.length / totalTracked) * 100) : 0;
 
-  // Trendline data points
+  // Complete daily histogram data, including zero-activity dates.
   const trendPoints = useMemo(() => {
     const daysCount = trendTimeframe === 'Last 7 days' ? 7 : trendTimeframe === 'Last 90 days' ? 90 : 30;
-    const points = [];
-    const now = Date.now();
-    const interval = (daysCount * 86400000) / 4;
-
-    for (let i = 4; i >= 0; i--) {
-      const targetTime = now - i * interval;
-      const d = new Date(targetTime);
-      const dateLabel = `${d.getMonth() + 1}/${d.getDate()}`;
-      
-      const count = applications.filter(a => {
-        const appTime = new Date(a.created_at || a.updated_at || now).getTime();
-        return Math.abs(appTime - targetTime) <= interval / 2;
-      }).length;
-
-      points.push({ label: dateLabel, count, timestamp: targetTime });
-    }
-
-    const maxCount = Math.max(...points.map(p => p.count), 1);
-    const maxScale = Math.max(maxCount + 2, 8);
-
-    return points.map((pt, idx) => {
-      const x = 30 + idx * 60;
-      const y = 102 - (pt.count / maxScale) * 80;
-      return { ...pt, x, y, maxScale };
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const counts = Object.fromEntries(
+      trendActivity.map(item => [String(item.activity_date).slice(0, 10), Number(item.count) || 0])
+    );
+    const points = Array.from({ length: daysCount }, (_, index) => {
+      const date = new Date(today);
+      date.setDate(today.getDate() - (daysCount - 1 - index));
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      return {
+        label: `${date.getMonth() + 1}/${date.getDate()}`,
+        accessibleLabel: date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }),
+        count: counts[key] || 0,
+        timestamp: date.getTime()
+      };
     });
-  }, [applications, trendTimeframe]);
+    const maxCount = Math.max(...points.map(p => p.count), 1);
+    const maxScale = Math.max(maxCount, 4);
+    return points.map(point => ({ ...point, maxScale }));
+  }, [trendActivity, trendTimeframe]);
 
   const activeHoveredPoint = trendPoints[hoveredPointIndex] || trendPoints[trendPoints.length - 1];
-
-  const buildSvgPath = (pts) => {
-    if (!pts || pts.length === 0) return '';
-    let d = `M ${pts[0].x} ${pts[0].y}`;
-    for (let i = 0; i < pts.length - 1; i++) {
-      const curr = pts[i];
-      const next = pts[i + 1];
-      const cp1x = curr.x + (next.x - curr.x) / 2;
-      const cp1y = curr.y;
-      const cp2x = curr.x + (next.x - curr.x) / 2;
-      const cp2y = next.y;
-      d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${next.x} ${next.y}`;
-    }
-    return d;
-  };
+  const trendLine = useMemo(() => {
+    const width = Math.max(480, trendPoints.length * 42);
+    const left = 34;
+    const right = 14;
+    const top = 10;
+    const baseline = 112;
+    const scale = trendPoints[0]?.maxScale || 4;
+    const points = trendPoints.map((point, index) => ({
+      ...point,
+      x: trendPoints.length === 1
+        ? width / 2
+        : left + (index / (trendPoints.length - 1)) * (width - left - right),
+      y: baseline - (point.count / scale) * (baseline - top)
+    }));
+    const path = points.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.y}`).join(' ');
+    return { width, left, right, top, baseline, scale, points, path };
+  }, [trendPoints]);
 
   const displayRecentApps = applications.slice(0, 5);
 
@@ -510,12 +552,12 @@ function DashboardContent() {
       {/* 3. REFINED KPI CARDS WITH DISTINCT HIERARCHY */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         
-        {/* Primary KPI Card 1: Resume Score */}
+        {/* Primary KPI Card 1: Recent ATS Score */}
         <div className="dashboard-kpi-card bg-white/80 dark:bg-zinc-900/80 border border-purple-500/30 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
           <div className="flex justify-between items-start">
             <div className="space-y-1">
               <div className="flex items-center gap-1.5">
-                <span className="text-xs font-bold text-purple-600 dark:text-purple-400 uppercase tracking-wider">Primary</span>
+                <span className="text-xs font-bold text-purple-600 dark:text-purple-400 uppercase tracking-wider">PRIMARY</span>
                 <span className="text-xs font-semibold text-tf-text-tertiary">• Score</span>
               </div>
               <div className="text-3xl font-extrabold tracking-tight text-tf-text flex items-baseline gap-1">
@@ -526,7 +568,7 @@ function DashboardContent() {
                 <motion.div
                   className="h-full rounded-full bg-purple-500/70"
                   initial={{ width: 0 }}
-                  animate={{ width: `${Math.max(0, Math.min(100, avgResumeScore || 0))}%` }}
+                  animate={{ width: `${Math.max(0, Math.min(100, recentResumeScore || 0))}%` }}
                   transition={{ duration: 0.7, ease: [0.2, 0, 0, 1] }}
                 />
               </div>
@@ -536,8 +578,8 @@ function DashboardContent() {
             </div>
           </div>
           <div className="flex items-center justify-between mt-4 pt-2 border-t border-purple-500/10">
-            <span className="text-[11px] font-semibold text-purple-600 dark:text-purple-400">
-              {avgResumeScore >= 80 ? 'Optimized match' : '3 improvements'}
+            <span className="text-[11px] font-semibold text-purple-600 dark:text-purple-400 truncate max-w-[110px]" title={recentScoreSubtitle}>
+              {recentResumeScore >= 80 ? (recentScoreSubtitle || 'Optimized match') : '3 improvements'}
             </span>
             <button
               onClick={() => navigate('/resume-detect')}
@@ -730,7 +772,7 @@ function DashboardContent() {
                         className="flex items-center justify-between text-[11px] p-1.5 rounded-lg hover:bg-tf-surface transition cursor-pointer"
                       >
                         <div className="flex items-center gap-1.5 min-w-0">
-                          <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} className="w-4 h-4" />
+                          <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} companyDomain={item.company_domain} className="w-4 h-4" />
                           <span className="font-semibold text-tf-text truncate max-w-[80px]">{item.company_name}</span>
                         </div>
                         <span className="text-[10px] text-tf-text-tertiary shrink-0">{formatRelativeTime(item.created_at)}</span>
@@ -772,7 +814,7 @@ function DashboardContent() {
                         className="flex items-center justify-between text-[11px] p-1.5 rounded-lg hover:bg-tf-surface transition cursor-pointer"
                       >
                         <div className="flex items-center gap-1.5 min-w-0">
-                          <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} className="w-4 h-4" />
+                          <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} companyDomain={item.company_domain} className="w-4 h-4" />
                           <span className="font-semibold text-tf-text truncate max-w-[80px]">{item.company_name}</span>
                         </div>
                         <span className="text-[10px] text-tf-text-tertiary shrink-0">{formatRelativeTime(item.created_at)}</span>
@@ -814,7 +856,7 @@ function DashboardContent() {
                         className="flex items-center justify-between text-[11px] p-1.5 rounded-lg hover:bg-tf-surface transition cursor-pointer"
                       >
                         <div className="flex items-center gap-1.5 min-w-0">
-                          <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} className="w-4 h-4" />
+                          <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} companyDomain={item.company_domain} className="w-4 h-4" />
                           <span className="font-semibold text-tf-text truncate max-w-[80px]">{item.company_name}</span>
                         </div>
                         <span className="text-[10px] text-tf-text-tertiary shrink-0">{formatRelativeTime(item.created_at)}</span>
@@ -856,7 +898,7 @@ function DashboardContent() {
                         className="flex items-center justify-between text-[11px] p-1.5 rounded-lg hover:bg-tf-surface transition cursor-pointer"
                       >
                         <div className="flex items-center gap-1.5 min-w-0">
-                          <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} className="w-4 h-4" />
+                          <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} companyDomain={item.company_domain} className="w-4 h-4" />
                           <span className="font-semibold text-tf-text truncate max-w-[80px]">{item.company_name}</span>
                         </div>
                         <span className="text-[10px] text-tf-text-tertiary shrink-0">{formatRelativeTime(item.created_at)}</span>
@@ -898,7 +940,7 @@ function DashboardContent() {
                         className="flex items-center justify-between text-[11px] p-1.5 rounded-lg hover:bg-tf-surface transition cursor-pointer"
                       >
                         <div className="flex items-center gap-1.5 min-w-0">
-                          <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} className="w-4 h-4" />
+                          <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} companyDomain={item.company_domain} className="w-4 h-4" />
                           <span className="font-semibold text-tf-text truncate max-w-[80px]">{item.company_name}</span>
                         </div>
                         <span className="text-[10px] text-tf-text-tertiary shrink-0">{formatRelativeTime(item.created_at)}</span>
@@ -928,8 +970,8 @@ function DashboardContent() {
             <div className="bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-5 shadow-xs space-y-4 flex flex-col justify-between relative">
               <div className="flex items-center justify-between relative z-20">
                 <div>
-                  <h3 className="text-xs font-bold text-tf-text">Application Trend</h3>
-                  <p className="text-[11px] text-tf-text-tertiary">Extraction & tailoring frequency</p>
+                  <h3 className="text-xs font-bold text-tf-text">Resume Activity</h3>
+                  <p className="text-[11px] text-tf-text-tertiary">Parsing and tailoring events by day</p>
                 </div>
 
                 <div className="relative">
@@ -949,7 +991,7 @@ function DashboardContent() {
                           onClick={() => {
                             setTrendTimeframe(opt);
                             setTrendDropdownOpen(false);
-                            setHoveredPointIndex(3);
+                            setHoveredPointIndex(-1);
                           }}
                           className={`w-full text-left px-3 py-1.5 text-[11px] font-medium transition cursor-pointer ${
                             trendTimeframe === opt ? 'bg-tf-accent/15 text-tf-accent font-bold' : 'text-tf-text hover:bg-tf-surface-2'
@@ -963,89 +1005,99 @@ function DashboardContent() {
                 </div>
               </div>
 
-              {/* Interactive Area Chart */}
-              <div className="relative pt-6 pb-2">
-                <svg className="w-full h-40 overflow-visible select-none" viewBox="0 0 300 120">
-                  <defs>
-                    <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#8B5CF6" stopOpacity="0.4" />
-                      <stop offset="100%" stopColor="#8B5CF6" stopOpacity="0.0" />
-                    </linearGradient>
-                  </defs>
-                  
-                  <line x1="0" y1="25" x2="300" y2="25" stroke="currentColor" strokeOpacity="0.08" />
-                  <line x1="0" y1="64" x2="300" y2="64" stroke="currentColor" strokeOpacity="0.08" />
-                  <line x1="0" y1="102" x2="300" y2="102" stroke="currentColor" strokeOpacity="0.08" />
-
-                  <text x="0" y="28" fill="currentColor" opacity="0.4" fontSize="9">{trendPoints[0]?.maxScale || 15}</text>
-                  <text x="0" y="68" fill="currentColor" opacity="0.4" fontSize="9">{Math.round((trendPoints[0]?.maxScale || 15) / 2)}</text>
-                  <text x="0" y="106" fill="currentColor" opacity="0.4" fontSize="9">0</text>
-
-                  {trendPoints.length > 1 && (
-                    <path
-                      d={`${buildSvgPath(trendPoints)} L ${trendPoints[trendPoints.length - 1].x} 102 L ${trendPoints[0].x} 102 Z`}
-                      fill="url(#areaGradient)"
-                    />
-                  )}
-
-                  {trendPoints.length > 1 && (
-                    <path
-                      d={buildSvgPath(trendPoints)}
-                      fill="none"
-                      stroke="#8B5CF6"
-                      strokeWidth="3.5"
-                      strokeLinecap="round"
-                    />
-                  )}
-
-                  {trendPoints.map((pt, idx) => {
-                    const isHovered = hoveredPointIndex === idx;
-                    const isSpike = pt.count > 0;
-
-                    return (
-                      <g key={idx} className="cursor-pointer" onMouseEnter={() => setHoveredPointIndex(idx)}>
-                        <circle cx={pt.x} cy={pt.y} r="16" fill="transparent" />
-                        
-                        {(isHovered || (isSpike && idx === trendPoints.length - 1)) && (
-                          <circle cx={pt.x} cy={pt.y} r={isHovered ? "10" : "8"} fill="#8B5CF6" opacity="0.35" className="animate-ping" />
-                        )}
-
-                        <circle
-                          cx={pt.x}
-                          cy={pt.y}
-                          r={isHovered ? "6" : isSpike ? "5" : "3.5"}
-                          fill={isSpike ? "#8B5CF6" : "#A78BFA"}
-                          stroke="#ffffff"
-                          strokeWidth={isHovered ? "3" : "2"}
-                          className="transition-all duration-200"
-                        />
-                      </g>
-                    );
-                  })}
-                </svg>
-
+              {/* Daily histogram: one visible bar and date for every day. */}
+              <div className="relative pt-2">
                 {activeHoveredPoint && (
-                  <div 
-                    className="absolute -top-1 transition-all duration-300 -translate-x-1/2 bg-zinc-900/95 dark:bg-zinc-900/95 border border-zinc-700 text-white px-3 py-1.5 rounded-xl shadow-2xl text-center z-10 select-none pointer-events-none"
-                    style={{ left: `${(activeHoveredPoint.x / 300) * 100}%` }}
-                  >
-                    <div className="text-[10px] font-medium text-zinc-400">{activeHoveredPoint.label}</div>
-                    <div className="text-xs font-bold text-white whitespace-nowrap">
-                      {activeHoveredPoint.count} {activeHoveredPoint.count === 1 ? 'Extraction' : 'Extractions'}
-                    </div>
+                  <div className="mb-3 flex items-center justify-between rounded-xl border border-purple-500/15 bg-purple-500/5 px-3 py-2">
+                    <span className="text-[10px] font-semibold text-tf-text-secondary">{activeHoveredPoint.accessibleLabel}</span>
+                    <span className="text-[11px] font-bold text-purple-500">
+                      {activeHoveredPoint.count} {activeHoveredPoint.count === 1 ? 'activity' : 'activities'}
+                    </span>
                   </div>
                 )}
+                <div className="min-w-0 overflow-x-auto pb-2">
+                  <svg
+                    className="h-[174px] select-none"
+                    width={trendLine.width}
+                    viewBox={`0 0 ${trendLine.width} 154`}
+                    role="img"
+                    aria-label={`Resume activity trend for ${trendTimeframe.toLowerCase()}`}
+                  >
+                    <defs>
+                      <linearGradient id="trendLineArea" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#A855F7" stopOpacity="0.28" />
+                        <stop offset="100%" stopColor="#A855F7" stopOpacity="0.01" />
+                      </linearGradient>
+                    </defs>
 
-                <div className="flex justify-between text-[10px] text-tf-text-tertiary pt-2 px-2 font-medium">
-                  {trendPoints.map((pt, idx) => (
-                    <span 
-                      key={idx}
-                      onClick={() => setHoveredPointIndex(idx)}
-                      className={`cursor-pointer transition-colors ${hoveredPointIndex === idx ? 'text-purple-500 font-bold scale-105' : 'hover:text-tf-text'}`}
-                    >
-                      {pt.label}
-                    </span>
-                  ))}
+                    {[trendLine.top, (trendLine.top + trendLine.baseline) / 2, trendLine.baseline].map((y, index) => (
+                      <g key={y}>
+                        <line
+                          x1={trendLine.left}
+                          y1={y}
+                          x2={trendLine.width - trendLine.right}
+                          y2={y}
+                          stroke="currentColor"
+                          strokeOpacity={index === 2 ? 0.18 : 0.1}
+                        />
+                        <text x="2" y={y + 3} fill="currentColor" opacity="0.45" fontSize="9">
+                          {index === 0 ? trendLine.scale : index === 1 ? Math.round(trendLine.scale / 2) : 0}
+                        </text>
+                      </g>
+                    ))}
+
+                    {trendLine.points.length > 1 && (
+                      <>
+                        <path
+                          d={`${trendLine.path} L ${trendLine.points.at(-1).x} ${trendLine.baseline} L ${trendLine.points[0].x} ${trendLine.baseline} Z`}
+                          fill="url(#trendLineArea)"
+                        />
+                        <path
+                          d={trendLine.path}
+                          fill="none"
+                          stroke="#A855F7"
+                          strokeWidth="3"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </>
+                    )}
+
+                    {trendLine.points.map((point, index) => {
+                      const selected = hoveredPointIndex === index;
+                      return (
+                        <g
+                          key={point.timestamp}
+                          className="cursor-pointer"
+                          tabIndex="0"
+                          role="button"
+                          aria-label={`${point.accessibleLabel}: ${point.count} resume activities`}
+                          onMouseEnter={() => setHoveredPointIndex(index)}
+                          onFocus={() => setHoveredPointIndex(index)}
+                          onClick={() => setHoveredPointIndex(index)}
+                        >
+                          <rect
+                            x={point.x - 18}
+                            y={trendLine.top}
+                            width="36"
+                            height={trendLine.baseline - trendLine.top}
+                            fill="transparent"
+                          />
+                          <text
+                            x={point.x}
+                            y="140"
+                            textAnchor="middle"
+                            fill={selected ? '#A855F7' : 'currentColor'}
+                            opacity={selected ? 1 : 0.5}
+                            fontSize="8"
+                            fontWeight={selected ? 700 : 500}
+                          >
+                            {point.label}
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </svg>
                 </div>
               </div>
             </div>

@@ -359,7 +359,7 @@ function JobTrackerContent() {
       {/* Subtle Ambient Background Gradient */}
       <div className="absolute inset-0 bg-gradient-to-tr from-teal-500/5 via-blue-500/5 to-purple-500/5 pointer-events-none" />
 
-      <main className="w-full space-y-6 z-10">
+      <main className="w-full space-y-5 z-10 p-4 md:p-5">
 
 
 

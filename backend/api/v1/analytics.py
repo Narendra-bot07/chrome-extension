@@ -1,10 +1,51 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from typing import Dict, Any, List
 from psycopg2.extras import RealDictCursor
 from core.database import get_db_connection
 from core.security import verify_supabase_jwt
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+
+@router.get("/trend")
+async def get_activity_trend(
+    days: int = Query(30, enum=[7, 30, 90]),
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    conn=Depends(get_db_connection),
+):
+    """Return complete daily resume-processing activity, including zero days."""
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            WITH profile_timezone AS (
+              SELECT COALESCE(NULLIF(timezone, ''), 'UTC') AS timezone
+              FROM public.profiles WHERE id=%s
+            ),
+            dates AS (
+              SELECT generate_series(
+                current_date - (%s - 1),
+                current_date,
+                interval '1 day'
+              )::date AS activity_date
+            ),
+            activity AS (
+              SELECT (e.created_at AT TIME ZONE COALESCE(
+                        (SELECT timezone FROM profile_timezone), 'UTC'
+                     ))::date AS activity_date,
+                     COUNT(*)::int AS count
+              FROM public.user_events e
+              WHERE e.user_id=%s
+                AND e.event_type IN ('RESUME_PARSED', 'RESUME_TAILORED')
+                AND e.created_at >= now() - (%s * interval '1 day')
+              GROUP BY 1
+            )
+            SELECT d.activity_date, COALESCE(a.count, 0)::int AS count
+            FROM dates d LEFT JOIN activity a USING(activity_date)
+            ORDER BY d.activity_date
+            """,
+            (user["id"], days, user["id"], days),
+        )
+        return {"days": days, "series": cur.fetchall()}
 
 @router.get("/dashboard")
 async def get_dashboard_metrics(

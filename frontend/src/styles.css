@@ -293,6 +293,12 @@ html.dark #root .dashboard-kpi-card:hover {
     padding-block: 0;
   }
 
+  /* Job Tracker owns its workspace surface. Let that surface reach the shell
+     edges and apply its smaller working gutter internally. */
+  .page-container.page-container--tracker {
+    padding: 0;
+  }
+
   @media (min-width: 640px) {
     .page-container { padding-inline: var(--page-padding-tablet); }
   }

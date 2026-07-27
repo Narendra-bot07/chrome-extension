@@ -356,7 +356,7 @@ export default function JobPreferencesPage() {
     <div className="min-h-full pb-24 space-y-6">
 
       {/* TOP HEADER BANNER: LIVE TARGETING SUMMARY */}
-      <div className="max-w-7xl mx-auto bg-tf-surface border border-tf-border rounded-2xl p-5 shadow-xs space-y-4">
+      <div className="w-full bg-tf-surface border border-tf-border rounded-2xl p-5 shadow-xs space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-3 border-b border-tf-border">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-xl bg-tf-accent/10 border border-tf-accent/20 text-tf-accent flex items-center justify-center">
@@ -423,7 +423,7 @@ export default function JobPreferencesPage() {
       </div>
 
       {/* TWO-COLUMN LAYOUT */}
-      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-5 xl:gap-6">
 
         {/* LEFT SIDEBAR (Sticky Quick Save & Navigation & Completeness) */}
         <aside className="lg:col-span-4 xl:col-span-3 space-y-6">
