@@ -4,9 +4,23 @@ import { Mail, Lock, ChevronRight, Eye, EyeOff, AlertCircle, CheckCircle2 } from
 import { useGoogleLogin } from '@react-oauth/google';
 
 const isExtension = typeof chrome !== 'undefined' && chrome.identity;
+const BASIC_GOOGLE_SCOPES = ['openid', 'email', 'profile'];
+const EXTENDED_GOOGLE_SCOPES = [
+  'https://www.googleapis.com/auth/user.birthday.read',
+  'https://www.googleapis.com/auth/user.gender.read',
+  'https://www.googleapis.com/auth/user.phonenumbers.read',
+  'https://www.googleapis.com/auth/user.addresses.read',
+  'https://www.googleapis.com/auth/user.organization.read',
+  'https://www.googleapis.com/auth/profile.language.read'
+];
+const GOOGLE_PROFILE_SCOPES = (
+  import.meta.env.VITE_ENABLE_GOOGLE_PROFILE_ENRICHMENT === 'true'
+    ? [...BASIC_GOOGLE_SCOPES, ...EXTENDED_GOOGLE_SCOPES]
+    : BASIC_GOOGLE_SCOPES
+).join(' ');
 
 const WebGoogleLoginButton = ({ onSuccess, onError }) => {
-  const loginGoogleWeb = useGoogleLogin({ onSuccess, onError });
+  const loginGoogleWeb = useGoogleLogin({ onSuccess, onError, scope: GOOGLE_PROFILE_SCOPES });
   return (
     <button
       type="button"
@@ -28,6 +42,27 @@ export default function LoginPage() {
   const [loginLoading, setLoginLoading] = useState(false);
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState(null);
+  const [loginNotice, setLoginNotice] = useState(null);
+
+  const handleForgotPassword = async () => {
+    const email = loginEmail.trim();
+    if (!email) {
+      setLoginError('Enter your email address first.');
+      return;
+    }
+    setLoginError(null);
+    try {
+      const res = await fetch('http://localhost:8000/api/v1/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const data = await res.json();
+      setLoginNotice(data.message || 'If an account exists for this email, a reset link has been sent.');
+    } catch {
+      setLoginNotice('If an account exists for this email, a reset link has been sent.');
+    }
+  };
 
   // --- LOGIN SUBMIT ---
   const handleLogin = async (e) => {
@@ -73,6 +108,13 @@ export default function LoginPage() {
         throw new Error(errData.detail || 'Google login failed.');
       }
       const data = await res.json();
+      if (data.google_profile_import) {
+        localStorage.setItem(
+          'tailorflow.google-profile-import-debug',
+          JSON.stringify(data.google_profile_import)
+        );
+        console.info('[TailorFlow] Google profile import', data.google_profile_import);
+      }
       localStorage.setItem('access_token', data.session.access_token);
       window.location.href = '#/';
       window.location.reload();
@@ -86,7 +128,7 @@ export default function LoginPage() {
   const loginGoogleExtension = (errorSetter) => {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || "984139464223-rb9kbtqjseqbepu9ke8j9qhgna1gh05l.apps.googleusercontent.com";
     const redirectUrl = chrome.identity.getRedirectURL();
-    const authUrl = `https://accounts.google.com/o/oauth2/auth?client_id=${clientId}&response_type=token&redirect_uri=${encodeURIComponent(redirectUrl)}&scope=email%20profile%20openid`;
+    const authUrl = `https://accounts.google.com/o/oauth2/auth?client_id=${clientId}&response_type=token&redirect_uri=${encodeURIComponent(redirectUrl)}&scope=${encodeURIComponent(GOOGLE_PROFILE_SCOPES)}&include_granted_scopes=true`;
     
     chrome.identity.launchWebAuthFlow({
       url: authUrl,
@@ -160,7 +202,7 @@ export default function LoginPage() {
 
       {/* RIGHT SIDE LOGIN FORM PANEL */}
       <div className="flex-1 flex items-center justify-center p-6 bg-zinc-50 dark:bg-zinc-950 relative z-10">
-        <div className="w-full max-w-md bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 rounded-3xl p-8 shadow-xl space-y-6">
+        <div className="flex w-full max-w-md flex-col gap-6 rounded-3xl border border-zinc-200/80 bg-white p-8 shadow-xl dark:border-zinc-800 dark:bg-zinc-900">
           
           {/* Header */}
           <div className="text-center space-y-1">
@@ -179,9 +221,15 @@ export default function LoginPage() {
               <span>{loginError}</span>
             </div>
           )}
+          {loginNotice && (
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold text-emerald-700">
+              <CheckCircle2 size={16} />
+              <span>{loginNotice}</span>
+            </div>
+          )}
 
           {/* Form */}
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleLogin} className="order-4 space-y-4">
             <div>
               <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider mb-1">Email Address</label>
               <input
@@ -195,7 +243,12 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider mb-1">Password</label>
+              <div className="mb-1 flex items-center justify-between">
+                <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider">Password</label>
+                <button type="button" onClick={handleForgotPassword} className="text-[10px] font-bold text-[#00bda5] hover:underline">
+                  Forgot password?
+                </button>
+              </div>
               <div className="relative">
                 <input
                   type={showLoginPassword ? "text" : "password"}
@@ -226,7 +279,7 @@ export default function LoginPage() {
           </form>
 
           {/* Social OAuth Buttons */}
-          <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 space-y-3">
+          <div className="order-3 space-y-3 border-b border-zinc-100 pb-5 dark:border-zinc-800">
             <div className="text-center text-[10px] font-bold uppercase tracking-widest text-zinc-400">
               Or continue with
             </div>
@@ -249,7 +302,7 @@ export default function LoginPage() {
           </div>
 
           {/* Toggle to Register Page */}
-          <div className="text-center text-xs text-zinc-500 font-medium">
+          <div className="order-5 text-center text-xs font-medium text-zinc-500">
             Don't have an account?{' '}
             <Link
               to="/register"

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from core.security import verify_supabase_jwt, hash_password, verify_password
 from core.database import get_db_connection
-from schemas.auth import RegisterRequest, LoginRequest, GoogleAuthRequest
+from schemas.auth import RegisterRequest, LoginRequest, GoogleAuthRequest, ForgotPasswordRequest
 from app.services.auth_service import AuthService
 from app.services.session_service import SessionService
 from app.analytics.events.tracking.analytics_service import AnalyticsService
@@ -11,6 +11,13 @@ import datetime
 from repositories.job_preferences_repository import JobPreferencesRepository
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+RESET_CONFIRMATION = "If an account exists for this email, a reset link has been sent."
+
+@router.post("/forgot-password")
+async def forgot_password(payload: ForgotPasswordRequest):
+    # Deliberately neutral to prevent account enumeration. The deployment email
+    # provider can consume this request without changing the public contract.
+    return {"status": "success", "message": RESET_CONFIRMATION}
 
 @router.post("/register")
 async def register_user(
@@ -20,8 +27,11 @@ async def register_user(
     pw_hash = hash_password(payload.password)
     
     query = """
-        INSERT INTO public.users (email, full_name, password_hash, provider)
-        VALUES (%s, %s, %s, 'email')
+        INSERT INTO public.users (
+            email, full_name, password_hash, provider, auth_provider,
+            has_password_credential
+        )
+        VALUES (%s, '', %s, 'email', 'password', TRUE)
         RETURNING id, email, full_name
     """
     try:
@@ -33,13 +43,13 @@ async def register_user(
                     detail="Email already registered."
                 )
             
-            cur.execute(query, (payload.email, payload.full_name or "", pw_hash))
+            cur.execute(query, (payload.email, pw_hash))
             user = cur.fetchone()
 
             # Seed public.profiles for compatibility
             cur.execute(
                 "INSERT INTO public.profiles (id, email, full_name) VALUES (%s, %s, %s)",
-                (user[0], user[1], user[2])
+                (user[0], user[1], "")
             )
             conn.commit()
             
@@ -149,7 +159,11 @@ async def google_login(
             email=idinfo.get("email"),
             full_name=idinfo.get("name", ""),
             avatar_url=idinfo.get("picture", ""),
-            email_verified=idinfo.get("email_verified", False)
+            email_verified=idinfo.get("email_verified", False),
+            first_name=idinfo.get("given_name", ""),
+            last_name=idinfo.get("family_name", ""),
+            locale=idinfo.get("locale", ""),
+            profile_details=idinfo.get("tailorflow_profile") or {}
         )
         
         session_service = SessionService(conn)
@@ -157,6 +171,7 @@ async def google_login(
         
         access_token = auth_service.generate_custom_jwt(user, session_id)
         has_completed_preferences = JobPreferencesRepository(conn).has_completed(user["id"])
+        profile_import = idinfo.get("tailorflow_profile") or {}
         
         # Emit Analytics Event
         analytics_service = AnalyticsService(conn)
@@ -182,6 +197,12 @@ async def google_login(
                         "has_completed_preferences": has_completed_preferences
                     },
                     "has_completed_preferences": has_completed_preferences
+                },
+                "google_profile_import": {
+                    "status": profile_import.get("_import_status", "basic_profile_only"),
+                    "http_status": profile_import.get("_import_http_status"),
+                    "error": profile_import.get("_import_error"),
+                    "populated_fields": profile_import.get("_populated_fields", [])
                 }
             }
     except ValueError as ve:

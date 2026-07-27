@@ -68,6 +68,9 @@ function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileDropupOpen, setProfileDropupOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [profilePromptDismissed, setProfilePromptDismissed] = useState(
+    () => sessionStorage.getItem('tailorflow.profile-prompt-dismissed') === '1'
+  );
   const profileMenuRef = useRef(null);
 
   useEffect(() => {
@@ -586,6 +589,28 @@ function Layout() {
         {/* VIEW OUTLET */}
         <main className={`app-main flex-1 min-h-0 flex flex-col ${pageLayout.workspace ? 'overflow-hidden' : 'overflow-y-auto'}`}>
           <PageContainer mode={pageLayout.mode} workspace={pageLayout.workspace} className="flex-1 flex flex-col">
+            {!profilePromptDismissed
+              && currentPath !== '/profile'
+              && profile?.email
+              && !['first_name', 'last_name', 'username', 'phone_number', 'country', 'timezone']
+                .every(field => String(profile?.[field] || '').trim()) && (
+                <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-tf-accent/20 bg-tf-accent/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs font-medium text-tf-text">
+                    Complete your profile to personalize resumes, cover letters, and job recommendations.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="primary" onClick={() => navigate('/profile')}>
+                      Complete Profile
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => {
+                      sessionStorage.setItem('tailorflow.profile-prompt-dismissed', '1');
+                      setProfilePromptDismissed(true);
+                    }}>
+                      Later
+                    </Button>
+                  </div>
+                </div>
+              )}
             <Outlet />
           </PageContainer>
         </main>

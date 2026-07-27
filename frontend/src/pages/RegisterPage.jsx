@@ -1,12 +1,26 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Mail, Lock, User, ChevronRight, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { ChevronRight, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useGoogleLogin } from '@react-oauth/google';
 
 const isExtension = typeof chrome !== 'undefined' && chrome.identity;
+const BASIC_GOOGLE_SCOPES = ['openid', 'email', 'profile'];
+const EXTENDED_GOOGLE_SCOPES = [
+  'https://www.googleapis.com/auth/user.birthday.read',
+  'https://www.googleapis.com/auth/user.gender.read',
+  'https://www.googleapis.com/auth/user.phonenumbers.read',
+  'https://www.googleapis.com/auth/user.addresses.read',
+  'https://www.googleapis.com/auth/user.organization.read',
+  'https://www.googleapis.com/auth/profile.language.read'
+];
+const GOOGLE_PROFILE_SCOPES = (
+  import.meta.env.VITE_ENABLE_GOOGLE_PROFILE_ENRICHMENT === 'true'
+    ? [...BASIC_GOOGLE_SCOPES, ...EXTENDED_GOOGLE_SCOPES]
+    : BASIC_GOOGLE_SCOPES
+).join(' ');
 
 const WebGoogleLoginButton = ({ onSuccess, onError }) => {
-  const loginGoogleWeb = useGoogleLogin({ onSuccess, onError });
+  const loginGoogleWeb = useGoogleLogin({ onSuccess, onError, scope: GOOGLE_PROFILE_SCOPES });
   return (
     <button
       type="button"
@@ -23,7 +37,6 @@ export default function RegisterPage() {
   const navigate = useNavigate();
 
   // --- REGISTER STATES ---
-  const [regFullName, setRegFullName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regConfirmPassword, setRegConfirmPassword] = useState('');
@@ -68,8 +81,7 @@ export default function RegisterPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: regEmail,
-          password: regPassword,
-          full_name: regFullName
+          password: regPassword
         })
       });
 
@@ -104,6 +116,13 @@ export default function RegisterPage() {
         throw new Error(errData.detail || 'Google signup failed.');
       }
       const data = await res.json();
+      if (data.google_profile_import) {
+        localStorage.setItem(
+          'tailorflow.google-profile-import-debug',
+          JSON.stringify(data.google_profile_import)
+        );
+        console.info('[TailorFlow] Google profile import', data.google_profile_import);
+      }
       localStorage.setItem('access_token', data.session.access_token);
       window.location.href = '#/';
       window.location.reload();
@@ -117,7 +136,7 @@ export default function RegisterPage() {
   const loginGoogleExtension = (errorSetter) => {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || "984139464223-rb9kbtqjseqbepu9ke8j9qhgna1gh05l.apps.googleusercontent.com";
     const redirectUrl = chrome.identity.getRedirectURL();
-    const authUrl = `https://accounts.google.com/o/oauth2/auth?client_id=${clientId}&response_type=token&redirect_uri=${encodeURIComponent(redirectUrl)}&scope=email%20profile%20openid`;
+    const authUrl = `https://accounts.google.com/o/oauth2/auth?client_id=${clientId}&response_type=token&redirect_uri=${encodeURIComponent(redirectUrl)}&scope=${encodeURIComponent(GOOGLE_PROFILE_SCOPES)}&include_granted_scopes=true`;
     
     chrome.identity.launchWebAuthFlow({
       url: authUrl,
@@ -198,7 +217,7 @@ export default function RegisterPage() {
 
       {/* RIGHT SIDE REGISTRATION FORM PANEL */}
       <div className="flex-1 flex items-center justify-center p-6 bg-zinc-50 dark:bg-zinc-950 relative z-10">
-        <div className="w-full max-w-md bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 rounded-3xl p-8 shadow-xl space-y-6">
+        <div className="flex w-full max-w-md flex-col gap-6 rounded-3xl border border-zinc-200/80 bg-white p-8 shadow-xl dark:border-zinc-800 dark:bg-zinc-900">
           
           {/* Header */}
           <div className="text-center space-y-1">
@@ -226,19 +245,7 @@ export default function RegisterPage() {
           )}
 
           {/* Form */}
-          <form onSubmit={handleRegister} className="space-y-4">
-            <div>
-              <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider mb-1">Full Name</label>
-              <input
-                type="text"
-                required
-                value={regFullName}
-                onChange={(e) => setRegFullName(e.target.value)}
-                placeholder="John Doe"
-                className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-semibold text-zinc-900 dark:text-white focus:outline-none focus:border-teal-500"
-              />
-            </div>
-
+          <form onSubmit={handleRegister} className="order-4 space-y-4">
             <div>
               <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider mb-1">Email Address</label>
               <input
@@ -309,7 +316,7 @@ export default function RegisterPage() {
           </form>
 
           {/* Social OAuth Buttons */}
-          <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 space-y-3">
+          <div className="order-3 space-y-3 border-b border-zinc-100 pb-5 dark:border-zinc-800">
             <div className="text-center text-[10px] font-bold uppercase tracking-widest text-zinc-400">
               Or continue with
             </div>
@@ -332,7 +339,7 @@ export default function RegisterPage() {
           </div>
 
           {/* Toggle to Sign In Page */}
-          <div className="text-center text-xs text-zinc-500 font-medium">
+          <div className="order-5 text-center text-xs font-medium text-zinc-500">
             Already have an account?{' '}
             <Link
               to="/login"

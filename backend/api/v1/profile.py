@@ -31,11 +31,12 @@ async def update_profile(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ProfileRepository = Depends(get_profile_repository)
 ):
-    updates = {}
-    if payload.full_name is not None:
-        updates["full_name"] = payload.full_name
-    if payload.avatar_url is not None:
-        updates["avatar_url"] = payload.avatar_url
+    updates = payload.model_dump(exclude_unset=True)
+    if "uploaded_profile_image_url" in updates:
+        uploaded = updates.get("uploaded_profile_image_url") or None
+        updates["uploaded_profile_image_url"] = uploaded
+        updates["avatar_url"] = uploaded
+        updates["profile_image_source"] = "uploaded" if uploaded else None
 
     profile = repo.update(user["id"], updates)
     if not profile:

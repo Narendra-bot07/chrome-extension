@@ -1,5 +1,6 @@
 from psycopg2.extras import RealDictCursor
 from typing import Dict, Any, Optional
+from datetime import datetime, timezone
 
 class ProfileRepository:
     def __init__(self, conn):
@@ -8,7 +9,16 @@ class ProfileRepository:
     def get_by_id(self, profile_id: str) -> Optional[Dict[str, Any]]:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT * FROM public.profiles WHERE id = %s AND deleted_at IS NULL",
+                """
+                SELECT p.*,
+                       u.auth_provider,
+                       u.has_password_credential,
+                       COALESCE(u.email_verified, FALSE) AS email_verified,
+                       u.email_verified_at
+                FROM public.profiles p
+                JOIN public.users u ON u.id = p.id
+                WHERE p.id = %s AND p.deleted_at IS NULL
+                """,
                 (profile_id,)
             )
             profile = cur.fetchone()
@@ -35,16 +45,26 @@ class ProfileRepository:
     def update(self, profile_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         if not updates:
             return {}
-        
+
+        required = ("first_name", "last_name", "username", "phone_number", "country", "timezone")
+        current = self.get_by_id(profile_id) or {}
+        completed = all(
+            str(updates.get(field, current.get(field, "")) or "").strip()
+            for field in required
+        )
+        if completed:
+            updates["profile_completed_at"] = current.get("profile_completed_at") or datetime.now(timezone.utc)
+        updates["profile_confirmed_at"] = datetime.now(timezone.utc)
+        updates["updated_at"] = datetime.now(timezone.utc)
+
         fields = ", ".join([f"{k} = %s" for k in updates.keys()])
         values = list(updates.values()) + [profile_id]
-        
         query = f"UPDATE public.profiles SET {fields} WHERE id = %s RETURNING *"
         
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, values)
             self.conn.commit()
-            return cur.fetchone() or {}
+            return self.get_by_id(profile_id) or {}
 
     def get_credits(self, profile_id: str) -> int:
         profile = self.get_by_id(profile_id)

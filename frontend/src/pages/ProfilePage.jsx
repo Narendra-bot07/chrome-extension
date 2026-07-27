@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { UserAvatar } from '../components/ApplicationLogo';
+import { calculateProfileCompleteness } from '../services/profilePolicy';
 import {
   Activity,
   AlertTriangle,
@@ -51,10 +52,17 @@ export default function ProfilePage() {
   });
   const [sessions, setSessions] = useState([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
-  const [nameInput, setNameInput] = useState('');
+  const [profileForm, setProfileForm] = useState({});
   const [editingName, setEditingName] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [googleImportDebug] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('tailorflow.google-profile-import-debug') || 'null');
+    } catch {
+      return null;
+    }
+  });
 
   const cardClass = `rounded-[18px] border p-6 ${darkMode ? 'bg-[#0f0f11] border-zinc-800' : 'bg-white border-[#E5E7EB]'}`;
   const muted = darkMode ? 'text-[#9CA3AF]' : 'text-[#6B7280]';
@@ -87,7 +95,10 @@ export default function ProfilePage() {
         if (profileRes.ok) {
           const data = await profileRes.json();
           setProfile(data);
-          setNameInput(data.full_name || '');
+          setProfileForm({
+            ...data,
+            timezone: data.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || ''
+          });
         }
 
         const metricsRes = await fetch(`${apiUrl}/api/v1/analytics/dashboard`, {
@@ -131,6 +142,19 @@ export default function ProfilePage() {
     setUpdating(true);
     setMsg(null);
     try {
+      const editableFields = [
+        'first_name', 'last_name', 'preferred_name', 'username', 'date_of_birth',
+        'gender', 'phone_country_code', 'phone_number', 'country', 'state', 'city',
+        'timezone', 'preferred_language', 'uploaded_profile_image_url',
+        'profile_image_source', 'current_title', 'years_experience', 'linkedin_url',
+        'github_url', 'portfolio_url', 'website_url'
+      ];
+      const payload = Object.fromEntries(
+        editableFields.map(field => [field, profileForm[field] ?? null])
+      );
+      payload.full_name = [profileForm.first_name, profileForm.last_name].filter(Boolean).join(' ')
+        || profileForm.full_name
+        || '';
       const token = session?.access_token || localStorage.getItem('access_token');
       const res = await fetch(`${apiUrl}/api/v1/profile/update`, {
         method: 'PUT',
@@ -138,11 +162,12 @@ export default function ProfilePage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ full_name: nameInput })
+        body: JSON.stringify(payload)
       });
       if (!res.ok) throw new Error('Update failed.');
       const data = await res.json();
       setProfile(data);
+      setProfileForm(data);
       setEditingName(false);
       setMsg({ type: 'success', text: 'Profile updated.' });
     } catch (err) {
@@ -150,6 +175,21 @@ export default function ProfilePage() {
     } finally {
       setUpdating(false);
     }
+  };
+
+  const updateProfileField = (field, value) => {
+    setProfileForm(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleProfilePhoto = (file) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setMsg({ type: 'error', text: 'Please choose an image file.' });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => updateProfileField('uploaded_profile_image_url', reader.result);
+    reader.readAsDataURL(file);
   };
 
   const getDeviceIcon = (deviceType) => {
@@ -255,16 +295,62 @@ export default function ProfilePage() {
 
             {activeSubTab === 'PROFILE' && (
               <div className="flex flex-col gap-6 animate-fadeIn">
-                <h2 className={`text-[18px] font-semibold ${title}`}>Profile Information</h2>
+                {googleImportDebug && (
+                  <div className={`rounded-[18px] border p-4 text-xs ${
+                    googleImportDebug.status === 'success'
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                      : 'border-amber-200 bg-amber-50 text-amber-800'
+                  }`}>
+                    <div className="font-bold">Google import diagnostics</div>
+                    <div className="mt-1">Status: {googleImportDebug.status}</div>
+                    {googleImportDebug.http_status && (
+                      <div>HTTP status: {googleImportDebug.http_status}</div>
+                    )}
+                    {googleImportDebug.error && (
+                      <div className="mt-1 break-words">Reason: {googleImportDebug.error}</div>
+                    )}
+                    <div className="mt-1">
+                      Populated fields: {googleImportDebug.populated_fields?.length
+                        ? googleImportDebug.populated_fields.join(', ')
+                        : 'none'}
+                    </div>
+                  </div>
+                )}
+                {(() => {
+                  const completion = calculateProfileCompleteness(profileForm);
+                  return (
+                    <div className={`${cardClass} flex flex-col gap-3`}>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h2 className={`text-[18px] font-semibold ${title}`}>Profile Information</h2>
+                          <p className={`mt-1 text-[13px] ${muted}`}>
+                            Complete your profile to personalize resumes, cover letters, and job recommendations.
+                          </p>
+                        </div>
+                        <span className="text-sm font-bold text-[#4F46E5]">{completion}%</span>
+                      </div>
+                      <div className={`h-2 overflow-hidden rounded-full ${darkMode ? 'bg-zinc-800' : 'bg-zinc-100'}`}>
+                        <div className="h-full rounded-full bg-[#4F46E5] transition-all" style={{ width: `${completion}%` }} />
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div className={`${cardClass} flex flex-col md:flex-row items-start md:items-center justify-between gap-6`}>
                   <div className="flex items-center gap-5">
-                    <UserAvatar user={user} profile={profile} size={72} />
+                    <UserAvatar user={user} profile={{ ...profile, ...profileForm }} size={72} />
                     <div>
-                      <h3 className={`text-[20px] font-bold ${title}`}>{profile.full_name || user?.full_name || 'User'}</h3>
+                      <h3 className={`text-[20px] font-bold ${title}`}>
+                        {profileForm.preferred_name || profileForm.full_name || user?.full_name || 'User'}
+                      </h3>
                       <p className={`text-[14px] ${muted}`}>{profile.email || user?.email || 'No email available'}</p>
-                      <span className="inline-flex mt-2 text-[12px] font-semibold px-2 py-0.5 rounded-full bg-[#10B981]/10 text-[#10B981] border border-[#10B981]/20">
-                        Active Member
-                      </span>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <span className="inline-flex text-[12px] font-semibold px-2 py-0.5 rounded-full bg-[#10B981]/10 text-[#10B981] border border-[#10B981]/20">
+                          {profile.email_verified ? 'Email verified' : 'Email not verified'}
+                        </span>
+                        <span className="inline-flex text-[12px] font-semibold px-2 py-0.5 rounded-full bg-[#4F46E5]/10 text-[#4F46E5] border border-[#4F46E5]/20 capitalize">
+                          {profile.auth_provider || 'password'}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   <button onClick={() => setEditingName(!editingName)} className={`h-10 px-4 rounded-[12px] text-[14px] font-semibold border transition ${darkMode ? 'text-white border-zinc-700 hover:bg-zinc-800' : 'bg-white text-[#6B7280] border-[#E5E7EB] hover:bg-[#F3F4F6]'}`}>
@@ -272,24 +358,74 @@ export default function ProfilePage() {
                   </button>
                 </div>
 
-                {editingName && (
-                  <form onSubmit={handleUpdateProfile} className={`${cardClass} flex flex-col gap-5 animate-fadeIn`}>
-                    <h3 className={`text-[16px] font-semibold ${title}`}>Personal Details</h3>
-                    <label className={`text-[12px] font-medium ${muted}`}>Full Name</label>
-                    <input
-                      type="text"
-                      value={nameInput}
-                      onChange={(e) => setNameInput(e.target.value)}
-                      className={`h-[44px] px-3 rounded-[12px] border text-[14px] focus:outline-none focus:border-[#4F46E5] focus:ring-1 focus:ring-[#4F46E5] ${darkMode ? 'bg-[#0a0a0a] border-zinc-800 text-white' : 'bg-white border-[#E5E7EB] text-[#111827]'}`}
-                      placeholder="John Doe"
-                    />
-                    <div className="flex justify-end">
+                <form onSubmit={handleUpdateProfile} className={`${cardClass} flex flex-col gap-5 animate-fadeIn`}>
+                    <div>
+                      <h3 className={`text-[16px] font-semibold ${title}`}>Personal details</h3>
+                      <p className={`mt-1 text-xs ${muted}`}>Only the six marked fields affect profile completeness.</p>
+                    </div>
+
+                    {editingName && <div className="flex flex-wrap items-center gap-3">
+                      <label className="cursor-pointer rounded-xl bg-[#4F46E5] px-4 py-2 text-xs font-semibold text-white">
+                        Upload photo
+                        <input type="file" accept="image/*" className="hidden" onChange={e => handleProfilePhoto(e.target.files?.[0])} />
+                      </label>
+                      {profile.google_profile_image_url && (
+                        <button type="button" onClick={() => updateProfileField('uploaded_profile_image_url', '')} className="rounded-xl border border-[#E5E7EB] px-4 py-2 text-xs font-semibold">
+                          Use Google photo
+                        </button>
+                      )}
+                      {(profileForm.uploaded_profile_image_url || profile.google_profile_image_url) && (
+                        <button type="button" onClick={() => {
+                          updateProfileField('uploaded_profile_image_url', '');
+                          updateProfileField('google_profile_image_url', '');
+                          updateProfileField('avatar_url', '');
+                        }} className="px-3 py-2 text-xs font-semibold text-rose-600">
+                          Remove photo
+                        </button>
+                      )}
+                    </div>}
+
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      {[
+                        ['first_name', 'First name *', 'text'],
+                        ['last_name', 'Last name *', 'text'],
+                        ['preferred_name', 'Preferred name', 'text'],
+                        ['username', 'Username *', 'text'],
+                        ['date_of_birth', 'Date of birth', 'date'],
+                        ['gender', 'Gender (optional)', 'text'],
+                        ['phone_country_code', 'Country code', 'text'],
+                        ['phone_number', 'Mobile number *', 'tel'],
+                        ['country', 'Country *', 'text'],
+                        ['state', 'State', 'text'],
+                        ['city', 'City', 'text'],
+                        ['timezone', 'Timezone *', 'text'],
+                        ['preferred_language', 'Preferred language', 'text'],
+                        ['current_title', 'Current title', 'text'],
+                        ['years_experience', 'Years of experience', 'number'],
+                        ['linkedin_url', 'LinkedIn', 'url'],
+                        ['github_url', 'GitHub', 'url'],
+                        ['portfolio_url', 'Portfolio', 'url'],
+                        ['website_url', 'Personal website', 'url']
+                      ].map(([field, label, type]) => (
+                        <label key={field} className="space-y-1.5">
+                          <span className={`text-[12px] font-medium ${muted}`}>{label}</span>
+                          <input
+                            type={type}
+                            value={profileForm[field] || ''}
+                            onChange={e => updateProfileField(field, e.target.value)}
+                            disabled={!editingName}
+                            placeholder={editingName ? `Add ${label.replace(' *', '').toLowerCase()}` : 'Not provided'}
+                            className={`h-[44px] w-full rounded-[12px] border px-3 text-[14px] focus:border-[#4F46E5] focus:outline-none focus:ring-1 focus:ring-[#4F46E5] disabled:cursor-default disabled:opacity-80 ${darkMode ? 'bg-[#0a0a0a] border-zinc-800 text-white' : 'bg-white border-[#E5E7EB] text-[#111827]'}`}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    {editingName && <div className="flex justify-end">
                       <button type="submit" disabled={updating} className="h-10 px-6 rounded-[12px] bg-[#4F46E5] hover:bg-[#4338CA] text-white text-[14px] font-semibold disabled:opacity-50">
                         {updating ? 'Saving...' : 'Save Changes'}
                       </button>
-                    </div>
+                    </div>}
                   </form>
-                )}
               </div>
             )}
 
@@ -308,6 +444,23 @@ export default function ProfilePage() {
                 </div>
 
                 <div className={cardClass}>
+                  <div className="mb-5 flex flex-col gap-2 border-b border-[#E5E7EB] pb-5 dark:border-zinc-800">
+                    <div className="flex items-center justify-between">
+                      <span className={`text-sm font-semibold ${title}`}>Authentication provider</span>
+                      <span className="text-sm capitalize">{profile.auth_provider || 'password'}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className={`text-sm font-semibold ${title}`}>Password</span>
+                      <span className={`text-sm ${muted}`}>
+                        {profile.has_password_credential ? 'TailorFlow credential' : 'Managed by Google'}
+                      </span>
+                    </div>
+                    {!profile.has_password_credential && (
+                      <a href="https://myaccount.google.com/security" target="_blank" rel="noreferrer" className="self-start text-sm font-semibold text-[#4F46E5]">
+                        Manage Google Account
+                      </a>
+                    )}
+                  </div>
                   <h3 className={`text-[16px] font-semibold flex items-center gap-2 ${title}`}>
                     <Shield className="w-5 h-5 text-[#4F46E5]" />
                     Active Sessions

@@ -1,5 +1,6 @@
 import React, { memo, useMemo, useState } from 'react';
 import { getInitials } from './companyLogoUtils';
+import { selectProfileImage } from '../services/profilePolicy';
 
 export const APPLICATION_LOGO_SRC = `${import.meta.env.BASE_URL || '/'}application-logo.png`;
 
@@ -41,12 +42,7 @@ export const UserAvatar = memo(function UserAvatar({
 }) {
   const [photoFailed, setPhotoFailed] = useState(false);
   const photoUrl = useMemo(
-    () => profile?.avatar_url
-      || profile?.photo_url
-      || profile?.picture
-      || user?.user_metadata?.avatar_url
-      || user?.user_metadata?.picture
-      || '',
+    () => selectProfileImage(profile, user),
     [profile, user]
   );
   const displayName = profile?.full_name
@@ -70,11 +66,12 @@ export const UserAvatar = memo(function UserAvatar({
   }
 
   return (
-    <ApplicationLogo
-      size={size}
-      className={className}
-      alt="TailorFlow profile placeholder"
-      fallbackLabel={displayName}
-    />
+    <span
+      className={`inline-flex shrink-0 items-center justify-center rounded-full border border-tf-accent/20 bg-tf-accent/10 font-bold uppercase text-tf-accent ${className}`}
+      style={{ width: dimension, height: dimension }}
+      aria-label={displayName}
+    >
+      {getInitials(displayName)}
+    </span>
   );
 });

@@ -4,7 +4,6 @@ from typing import Optional
 class RegisterRequest(BaseModel):
     email: str
     password: str
-    full_name: Optional[str] = None
 
 class LoginRequest(BaseModel):
     email: str
@@ -12,4 +11,7 @@ class LoginRequest(BaseModel):
 
 class GoogleAuthRequest(BaseModel):
     credential: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
 

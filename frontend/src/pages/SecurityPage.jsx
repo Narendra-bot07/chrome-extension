@@ -18,11 +18,26 @@ export default function SecurityPage() {
   const { session, darkMode, handleLogout } = useApp();
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [account, setAccount] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     fetchSessions();
+    fetchAccount();
   }, [session]);
+
+  const fetchAccount = async () => {
+    try {
+      const token = session?.access_token || localStorage.getItem('access_token');
+      if (!token) return;
+      const res = await fetch('http://localhost:8000/api/v1/profile/', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) setAccount(await res.json());
+    } catch (err) {
+      console.error('Failed to load account security metadata:', err);
+    }
+  };
 
   const fetchSessions = async () => {
     try {
@@ -112,6 +127,23 @@ export default function SecurityPage() {
 
         {/* Sessions Section */}
         <div className="space-y-6">
+          {account && (
+            <div className={`rounded-2xl border p-5 ${darkMode ? 'border-zinc-800 bg-zinc-900' : 'border-zinc-200 bg-white'}`}>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-sm font-bold">Password</div>
+                  <div className={`mt-1 text-xs ${darkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                    {account.has_password_credential ? 'TailorFlow password credential' : 'Managed by Google'}
+                  </div>
+                </div>
+                {!account.has_password_credential && (
+                  <a href="https://myaccount.google.com/security" target="_blank" rel="noreferrer" className="rounded-xl border border-indigo-200 px-4 py-2 text-xs font-semibold text-indigo-600">
+                    Manage Google Account
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold flex items-center gap-2">
               <Shield className="w-5 h-5 text-indigo-500" />
