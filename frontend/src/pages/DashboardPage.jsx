@@ -468,36 +468,28 @@ function DashboardContent() {
 
   const displayRecentApps = applications.slice(0, 5);
 
-  const upcomingEvents = [...interviewApps, ...screeningApps].slice(0, 3).map((app, idx) => {
-    const d = new Date(app.last_activity || app.created_at || Date.now());
-    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-    return {
-      id: app.id || idx,
-      month: months[d.getMonth()],
-      day: d.getDate(),
-      title: app.current_stage === 'Interview' ? 'Technical Interview' : 'Screening Round',
-      company: app.company_name || 'Target Company',
-      role: app.job_title || 'Software Engineer',
-      time: formatRelativeTime(app.created_at)
-    };
-  });
-
   const allReminders = useMemo(() => {
     return persistedReminders.map((reminder, idx) => {
-      const d = new Date(reminder.snoozed_until || reminder.due_at);
+      const d = new Date(reminder.event_at || reminder.snoozed_until || reminder.due_at);
       const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
       return {
         id: reminder.id || idx,
+        applicationId: reminder.application_id,
         month: months[d.getMonth()],
         day: d.getDate(),
         title: reminder.title,
         company: reminder.company_name || 'Personal reminder',
         role: reminder.job_title || reminder.description || 'Career action',
+        description: reminder.next_action || reminder.description,
         stage: reminder.status,
-        time: formatRelativeTime(reminder.due_at)
+        time: formatRelativeTime(reminder.snoozed_until || reminder.due_at),
+        dueAt: reminder.snoozed_until || reminder.due_at,
+        eventAt: reminder.event_at
       };
     });
   }, [persistedReminders]);
+
+  const upcomingEvents = allReminders.slice(0, 3);
 
   const isProfileIncomplete = !profile?.phone_number || !parsedResume;
 
@@ -1186,7 +1178,8 @@ function DashboardContent() {
                       <div className="min-w-0">
                         <div className="text-xs font-bold text-tf-text truncate">{evt.title}</div>
                         <div className="text-[10px] text-tf-text-secondary truncate">{evt.company} • {evt.role}</div>
-                        <div className="text-[10px] text-tf-text-tertiary pt-0.5">{evt.time}</div>
+                        {evt.description && <div className="text-[10px] text-tf-text-secondary truncate pt-0.5">{evt.description}</div>}
+                        <div className="text-[10px] text-tf-text-tertiary pt-0.5">Reminder {evt.time}</div>
                       </div>
                     </div>
                   </div>
@@ -1308,6 +1301,7 @@ function DashboardContent() {
                           </span>
                         </div>
                         <p className="text-[11px] text-tf-text-secondary truncate">{rem.company} • {rem.role}</p>
+                        {rem.description && <p className="text-[10px] text-tf-text-secondary truncate">{rem.description}</p>}
                         <p className="text-[10px] text-tf-text-tertiary flex items-center gap-1">
                           <Clock size={11} /> {rem.time}
                         </p>
@@ -1319,7 +1313,11 @@ function DashboardContent() {
                       size="sm"
                       onClick={() => {
                         setShowRemindersModal(false);
-                        navigate(`/job-tracker?appId=${rem.id}`, { state: { selectedAppId: rem.id } });
+                        if (rem.applicationId) {
+                          navigate(`/job-tracker?appId=${rem.applicationId}`, {
+                            state: { selectedAppId: rem.applicationId }
+                          });
+                        }
                       }}
                       className="text-xs shrink-0"
                     >

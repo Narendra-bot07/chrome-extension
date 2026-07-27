@@ -233,6 +233,7 @@ async def update_application(
                              ORDER BY created_at DESC
                              LIMIT 1
                          )
+                        RETURNING id
                     """, (
                         reminder_type,
                         title,
@@ -241,17 +242,36 @@ async def update_application(
                         user["id"],
                         id
                     ))
-                    if cur.rowcount == 0:
+                    reminder_row = cur.fetchone()
+                    if not reminder_row:
                         cur.execute("""
                             INSERT INTO reminders
                                 (user_id, application_id, reminder_type, title,
                                  description, due_at, status, created_by)
                             VALUES (%s, %s, %s, %s, %s, %s, 'scheduled', 'stage_change')
+                            RETURNING id
                         """, (
                             user["id"], id, reminder_type, title,
                             description, reminder_time
                         ))
+                        reminder_row = cur.fetchone()
                     conn.commit()
+                reminder_id = str(reminder_row[0])
+                NotificationService(conn).emit(
+                    user["id"],
+                    "reminder.scheduled",
+                    {
+                        "application_id": id,
+                        "reminder_id": reminder_id,
+                        "company": company,
+                        "reminder_title": title,
+                        "scheduled_label": f"{due_date_val} (reminder at {reminder_time.strftime('%Y-%m-%d %H:%M UTC')})",
+                        "note": note_str or f"Next stage: {stage}",
+                    },
+                    "reminder",
+                    reminder_id,
+                    f"reminder_scheduled:{reminder_id}:{reminder_time.isoformat()}",
+                )
             except Exception as e:
                 conn.rollback()
                 raise HTTPException(

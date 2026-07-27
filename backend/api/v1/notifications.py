@@ -112,7 +112,9 @@ def list_reminders(status: Optional[str] = None, application_id: Optional[str] =
     clauses=["r.user_id=%s"]; params=[user["id"]]
     if status: clauses.append("r.status=%s"); params.append(status)
     if application_id: clauses.append("r.application_id=%s"); params.append(application_id)
-    return _rows(conn, f"""select r.*,a.company_name,a.job_title from reminders r left join applications a on a.id=r.application_id
+    return _rows(conn, f"""select r.*,a.company_name,a.job_title,
+        a.next_action,a.next_action_due_at as event_at
+        from reminders r left join applications a on a.id=r.application_id
         where {' and '.join(clauses)} order by coalesce(r.snoozed_until,r.due_at)""", params)
 
 @reminder_router.post("/", status_code=201)

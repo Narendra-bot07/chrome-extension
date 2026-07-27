@@ -76,7 +76,7 @@ function JobTrackerContent() {
 
   // Auto-open target application modal if appId is present in URL searchParams or location state
   useEffect(() => {
-    const targetAppId = searchParams.get('appId') || location.state?.selectedAppId;
+    const targetAppId = searchParams.get('appId') || searchParams.get('application') || location.state?.selectedAppId;
     if (targetAppId && applications.length > 0) {
       const found = applications.find(a => a && String(a.id) === String(targetAppId));
       if (found) {
