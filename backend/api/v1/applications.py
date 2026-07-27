@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
+from datetime import datetime, time, timedelta, timezone
 
 from core.security import verify_supabase_jwt
 from api.dependencies import get_application_repository
@@ -8,6 +9,32 @@ from repositories.application_repository import ApplicationRepository
 from app.analytics.events.tracking.analytics_service import AnalyticsService
 from core.database import get_db_connection
 from services.notifications import NotificationService
+
+def calculate_early_morning_reminder_time(event_date_val: str) -> datetime:
+    """
+    Calculates reminder time set to 1 day before the target event date at 05:00 AM UTC.
+    If 5:00 AM 1 day before has already passed, defaults to 5 minutes from current time.
+    """
+    now = datetime.now(timezone.utc)
+    if not event_date_val:
+        return now + timedelta(minutes=5)
+    try:
+        clean_str = str(event_date_val).strip()
+        if "T" in clean_str:
+            parsed_dt = datetime.fromisoformat(clean_str.replace("Z", "+00:00"))
+            target_date = parsed_dt.date()
+        else:
+            date_part = clean_str.split()[0]
+            target_date = datetime.strptime(date_part, "%Y-%m-%d").date()
+
+        reminder_date = target_date - timedelta(days=1)
+        reminder_dt = datetime.combine(reminder_date, time(5, 0, 0), tzinfo=timezone.utc)
+
+        if reminder_dt <= now:
+            reminder_dt = now + timedelta(minutes=5)
+        return reminder_dt
+    except Exception:
+        return now + timedelta(minutes=5)
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 
@@ -171,7 +198,36 @@ async def update_application(
                      "new_stage": request.current_stage},
                     "application", id, f"application_stage:{id}:{request.current_stage}"
                 )
-            
+
+        # Auto-schedule 5:00 AM early morning 1-day-prior email reminder if event date is provided
+        due_date_val = request.next_action_due_at or update_data.get("next_action_due_at")
+        if due_date_val:
+            reminder_time = calculate_early_morning_reminder_time(due_date_val)
+            company = record.get("company_name") or "Application"
+            job_title = record.get("job_title") or "Role"
+            stage = request.current_stage or record.get("current_stage") or "Follow-up"
+            note_str = request.next_action or request.notes or ""
+
+            title = f"Reminder: {stage} for {company}"
+            description = f"1-day reminder (5:00 AM): You have an event/follow-up scheduled tomorrow ({due_date_val}) for {job_title} at {company}. {note_str}".strip()
+
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO reminders (user_id, application_id, reminder_type, title, description, due_at, status)
+                        VALUES (%s, %s, %s, %s, %s, %s, 'scheduled')
+                    """, (
+                        user["id"],
+                        id,
+                        "event_reminder",
+                        title,
+                        description,
+                        reminder_time
+                    ))
+                    conn.commit()
+            except Exception as e:
+                print(f"[Applications API] Reminder scheduling notice: {e}")
+
         return record
     except HTTPException as he:
         raise he

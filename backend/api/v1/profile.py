@@ -4,6 +4,7 @@ from core.security import verify_supabase_jwt
 from repositories.profile_repository import ProfileRepository
 from api.dependencies import get_profile_repository
 from schemas.profile import ProfileResponse, ProfileUpdate
+from services.profile_validation import validate_location
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
@@ -32,6 +33,21 @@ async def update_profile(
     repo: ProfileRepository = Depends(get_profile_repository)
 ):
     updates = payload.model_dump(exclude_unset=True)
+    current = repo.get_by_id(user["id"]) or {}
+    merged = {**current, **updates}
+    try:
+        validate_location(merged.get("country"), merged.get("state"), merged.get("city"))
+    except ValueError as exc:
+        field = "city" if merged.get("city") else "state" if merged.get("state") else "country"
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"field": field, "message": str(exc)},
+        )
+    if updates.get("username") and not repo.username_available(updates["username"], user["id"]):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"field": "username", "message": "That username is already taken."},
+        )
     if "uploaded_profile_image_url" in updates:
         uploaded = updates.get("uploaded_profile_image_url") or None
         updates["uploaded_profile_image_url"] = uploaded

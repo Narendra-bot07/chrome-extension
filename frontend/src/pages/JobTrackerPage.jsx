@@ -144,9 +144,9 @@ function JobTrackerContent() {
   };
 
   // Handlers for API Mutations
-  const handleUpdateStage = async (appId, newStage) => {
+  const handleUpdateStage = async (appId, newStage, note = null, date = null) => {
     try {
-      await updateApplicationStage(appId, newStage);
+      await updateApplicationStage(appId, newStage, note, date);
       await fetchApplications();
     } catch (err) {
       console.error("Failed to update application stage:", err);

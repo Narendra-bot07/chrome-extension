@@ -42,6 +42,15 @@ class ProfileRepository:
             self.conn.commit()
             return cur.fetchone() or {}
 
+    def username_available(self, username: str, profile_id: str) -> bool:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """select 1 from public.profiles
+                   where lower(username)=lower(%s) and id<>%s and deleted_at is null limit 1""",
+                (username, profile_id),
+            )
+            return cur.fetchone() is None
+
     def update(self, profile_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         if not updates:
             return {}

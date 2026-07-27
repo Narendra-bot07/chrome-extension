@@ -469,7 +469,7 @@ export function AppProvider({ children }) {
     }
   };
 
-  const updateApplicationStage = async (appId, newStage) => {
+  const updateApplicationStage = async (appId, newStage, note = null, date = null) => {
     try {
       const token = session?.access_token || localStorage.getItem('access_token');
       if (!token || !appId) return;
@@ -479,9 +479,24 @@ export function AppProvider({ children }) {
 
       const updatedTimeline = [...(app.timeline || [])];
       updatedTimeline.push({
-        event: `Moved to ${newStage}`,
+        event: `Moved to ${newStage}${note ? `: ${note}` : ''}${date ? ` (Event Date: ${date})` : ''}`,
         timestamp: new Date().toISOString()
       });
+
+      const bodyData = {
+        current_stage: newStage,
+        timeline: updatedTimeline
+      };
+
+      if (note) {
+        bodyData.next_action = `[${newStage}] ${note}`;
+      }
+      if (date) {
+        bodyData.next_action_due_at = date;
+        if (!bodyData.next_action) {
+          bodyData.next_action = `Event/Follow-up scheduled for ${newStage}`;
+        }
+      }
 
       const res = await fetch(`${apiUrl}/api/v1/applications/${appId}`, {
         method: "PUT",
@@ -489,10 +504,7 @@ export function AppProvider({ children }) {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
-        body: JSON.stringify({
-          current_stage: newStage,
-          timeline: updatedTimeline
-        })
+        body: JSON.stringify(bodyData)
       });
       if (res.ok) {
         await fetchApplications();

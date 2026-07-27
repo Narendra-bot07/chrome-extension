@@ -24,5 +24,7 @@ PyJWT>=2.8.0
 google-auth>=2.29.0
 user-agents
 bcrypt>=4.1.0
+pycountry>=26.2.16
+geonamescache>=3.0.1
 stripe
 razorpay

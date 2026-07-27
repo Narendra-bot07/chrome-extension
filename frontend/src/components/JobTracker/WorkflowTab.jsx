@@ -124,7 +124,7 @@ export function WorkflowTab({ application, onUpdateStage }) {
     if (!popupStage) return;
 
     try {
-      await onUpdateStage(application.id, popupStage.id);
+      await onUpdateStage(application.id, popupStage.id, popupNote, popupDate);
       setToastMessage(`Moved application to ${popupStage.label}`);
       setPopupStage(null);
       setTimeout(() => setToastMessage(''), 3000);

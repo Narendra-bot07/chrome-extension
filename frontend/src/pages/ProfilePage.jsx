@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { UserAvatar } from '../components/ApplicationLogo';
 import { calculateProfileCompleteness } from '../services/profilePolicy';
+import { validateProfile, validateProfileField } from '../services/profileValidation';
 import {
   Activity,
   AlertTriangle,
@@ -56,6 +57,35 @@ export default function ProfilePage() {
   const [editingName, setEditingName] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [touchedFields, setTouchedFields] = useState({});
+  const [geoData, setGeoData] = useState(null);
+  useEffect(() => {
+    let active = true;
+    import('country-state-city').then(module => {
+      if (active) setGeoData(module);
+    });
+    return () => { active = false; };
+  }, []);
+  const countries = useMemo(() => geoData?.Country.getAllCountries() || [], [geoData]);
+  const selectedCountry = useMemo(
+    () => countries.find(item => item.name === profileForm.country) || null,
+    [countries, profileForm.country]
+  );
+  const states = useMemo(
+    () => selectedCountry && geoData ? geoData.State.getStatesOfCountry(selectedCountry.isoCode) : [],
+    [selectedCountry, geoData]
+  );
+  const selectedState = useMemo(
+    () => states.find(item => item.name === profileForm.state) || null,
+    [states, profileForm.state]
+  );
+  const cities = useMemo(
+    () => selectedCountry && selectedState
+      ? geoData?.City.getCitiesOfState(selectedCountry.isoCode, selectedState.isoCode) || []
+      : [],
+    [selectedCountry, selectedState]
+  );
 
   const cardClass = `rounded-[18px] border p-6 ${darkMode ? 'bg-[#0f0f11] border-zinc-800' : 'bg-white border-[#E5E7EB]'}`;
   const muted = darkMode ? 'text-[#9CA3AF]' : 'text-[#6B7280]';
@@ -132,6 +162,13 @@ export default function ProfilePage() {
 
   const handleUpdateProfile = async (e) => {
     e.preventDefault();
+    const validationErrors = validateProfile(profileForm);
+    if (Object.keys(validationErrors).length) {
+      setFieldErrors(validationErrors);
+      setTouchedFields(Object.fromEntries(Object.keys(validationErrors).map(field => [field, true])));
+      setMsg({ type: 'error', text: 'Please correct the highlighted fields.' });
+      return;
+    }
     setUpdating(true);
     setMsg(null);
     try {
@@ -157,12 +194,28 @@ export default function ProfilePage() {
         },
         body: JSON.stringify(payload)
       });
-      if (!res.ok) throw new Error('Update failed.');
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        const detail = error.detail;
+        if (detail?.field) {
+          setFieldErrors(current => ({ ...current, [detail.field]: detail.message }));
+          setTouchedFields(current => ({ ...current, [detail.field]: true }));
+          throw new Error(detail.message);
+        }
+        if (Array.isArray(detail)) {
+          const backendErrors = Object.fromEntries(detail.map(item => [item.loc?.at(-1), item.msg?.replace(/^Value error, /, '')]));
+          setFieldErrors(current => ({ ...current, ...backendErrors }));
+          throw new Error('Please correct the highlighted fields.');
+        }
+        throw new Error(typeof detail === 'string' ? detail : 'Update failed.');
+      }
       const data = await res.json();
       setProfile(data);
       setProfileForm(data);
       setEditingName(false);
       setMsg({ type: 'success', text: 'Profile updated.' });
+      setFieldErrors({});
+      setTouchedFields({});
     } catch (err) {
       setMsg({ type: 'error', text: err.message || 'Failed to update profile.' });
     } finally {
@@ -171,13 +224,46 @@ export default function ProfilePage() {
   };
 
   const updateProfileField = (field, value) => {
-    setProfileForm(prev => ({ ...prev, [field]: value }));
+    setProfileForm(prev => {
+      const next = { ...prev, [field]: value };
+      if (touchedFields[field]) {
+        setFieldErrors(errors => ({ ...errors, [field]: validateProfileField(field, value, next) }));
+      }
+      return next;
+    });
+  };
+
+  const selectCountry = (isoCode) => {
+    const country = countries.find(item => item.isoCode === isoCode);
+    const timezone = country?.timezones?.[0]?.zoneName || '';
+    const callingCode = country?.phonecode
+      ? `+${country.phonecode.replace(/^\+/, '').split(/\s+and\s+/i)[0].replace(/\D/g, '')}`
+      : '';
+    setProfileForm(prev => ({
+      ...prev,
+      country: country?.name || '',
+      phone_country_code: callingCode,
+      state: '',
+      city: '',
+      timezone
+    }));
+    setFieldErrors(errors => ({ ...errors, country: '', phone_country_code: '', state: '', city: '', timezone: '' }));
+  };
+
+  const selectState = (isoCode) => {
+    const state = states.find(item => item.isoCode === isoCode);
+    setProfileForm(prev => ({ ...prev, state: state?.name || '', city: '' }));
+    setFieldErrors(errors => ({ ...errors, state: '', city: '' }));
   };
 
   const handleProfilePhoto = (file) => {
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setMsg({ type: 'error', text: 'Please choose an image file.' });
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setMsg({ type: 'error', text: 'Please choose a JPEG, PNG, or WebP image.' });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setMsg({ type: 'error', text: 'Profile photos must be 5 MB or smaller.' });
       return;
     }
     const reader = new FileReader();
@@ -333,13 +419,13 @@ export default function ProfilePage() {
                 <form onSubmit={handleUpdateProfile} className={`${cardClass} flex flex-col gap-5 animate-fadeIn`}>
                     <div>
                       <h3 className={`text-[16px] font-semibold ${title}`}>Personal details</h3>
-                      <p className={`mt-1 text-xs ${muted}`}>Only the six marked fields affect profile completeness.</p>
+                      <p className={`mt-1 text-xs ${muted}`}>Required fields must be valid before profile completion.</p>
                     </div>
 
                     {editingName && <div className="flex flex-wrap items-center gap-3">
                       <label className="cursor-pointer rounded-xl bg-[#4F46E5] px-4 py-2 text-xs font-semibold text-white">
                         Upload photo
-                        <input type="file" accept="image/*" className="hidden" onChange={e => handleProfilePhoto(e.target.files?.[0])} />
+                        <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={e => handleProfilePhoto(e.target.files?.[0])} />
                       </label>
                       {profile.google_profile_image_url && (
                         <button type="button" onClick={() => updateProfileField('uploaded_profile_image_url', '')} className="rounded-xl border border-[#E5E7EB] px-4 py-2 text-xs font-semibold">
@@ -357,7 +443,73 @@ export default function ProfilePage() {
                       )}
                     </div>}
 
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {!editingName && (
+                      <div className="space-y-6">
+                        {[
+                          {
+                            title: 'Identity',
+                            fields: [
+                              ['Full name', [profileForm.first_name, profileForm.last_name].filter(Boolean).join(' ')],
+                              ['Preferred name', profileForm.preferred_name],
+                              ['Username', profileForm.username ? `@${profileForm.username}` : ''],
+                              ['Date of birth', profileForm.date_of_birth
+                                ? new Date(`${profileForm.date_of_birth}T00:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
+                                : ''],
+                              ['Gender', profileForm.gender?.replaceAll('_', ' ')]
+                            ]
+                          },
+                          {
+                            title: 'Contact & location',
+                            fields: [
+                              ['Mobile', profileForm.phone_number
+                                ? `${profileForm.phone_country_code || ''} ${profileForm.phone_number}`.trim()
+                                : ''],
+                              ['Country', profileForm.country],
+                              ['State / region', profileForm.state],
+                              ['City', profileForm.city],
+                              ['Timezone', profileForm.timezone]
+                            ]
+                          },
+                          {
+                            title: 'Career information',
+                            fields: [
+                              ['Preferred language', profileForm.preferred_language],
+                              ['Current title', profileForm.current_title],
+                              ['Experience', profileForm.years_experience !== null && profileForm.years_experience !== undefined && profileForm.years_experience !== ''
+                                ? `${profileForm.years_experience} years`
+                                : ''],
+                              ['LinkedIn', profileForm.linkedin_url],
+                              ['GitHub', profileForm.github_url],
+                              ['Portfolio', profileForm.portfolio_url],
+                              ['Website', profileForm.website_url]
+                            ]
+                          }
+                        ].map(section => (
+                          <section key={section.title}>
+                            <h4 className={`mb-3 text-[11px] font-bold uppercase tracking-[0.12em] ${muted}`}>{section.title}</h4>
+                            <dl className={`grid grid-cols-1 overflow-hidden rounded-2xl border sm:grid-cols-2 ${darkMode ? 'border-zinc-800 bg-[#0a0a0a]' : 'border-[#E5E7EB] bg-[#FCFCFD]'}`}>
+                              {section.fields.map(([label, value]) => {
+                                const isLink = typeof value === 'string' && /^https?:\/\//i.test(value);
+                                return (
+                                  <div key={label} className={`min-h-[76px] px-4 py-3.5 border-b last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0 ${darkMode ? 'border-zinc-800' : 'border-[#E5E7EB]'}`}>
+                                    <dt className={`text-[11px] font-semibold ${muted}`}>{label}</dt>
+                                    <dd className={`mt-1.5 break-words text-[14px] font-semibold capitalize ${value ? title : muted}`}>
+                                      {isLink ? (
+                                        <a href={value} target="_blank" rel="noreferrer" className="normal-case text-[#4F46E5] hover:underline">
+                                          {value.replace(/^https?:\/\//i, '').replace(/\/$/, '')}
+                                        </a>
+                                      ) : value || 'Not provided'}
+                                    </dd>
+                                  </div>
+                                );
+                              })}
+                            </dl>
+                          </section>
+                        ))}
+                      </div>
+                    )}
+
+                    {editingName && <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                       {[
                         ['first_name', 'First name *', 'text'],
                         ['last_name', 'Last name *', 'text'],
@@ -381,17 +533,89 @@ export default function ProfilePage() {
                       ].map(([field, label, type]) => (
                         <label key={field} className="space-y-1.5">
                           <span className={`text-[12px] font-medium ${muted}`}>{label}</span>
-                          <input
+                          {field === 'country' ? (
+                            <select
+                              value={selectedCountry?.isoCode || ''}
+                              onChange={e => selectCountry(e.target.value)}
+                              disabled={!editingName}
+                              required
+                              className={`h-[44px] w-full rounded-[12px] border px-3 text-[14px] ${darkMode ? 'bg-[#0a0a0a] border-zinc-800 text-white' : 'bg-white border-[#E5E7EB] text-[#111827]'}`}
+                            >
+                              <option value="">Select country</option>
+                              {countries.map(item => <option key={item.isoCode} value={item.isoCode}>{item.name}</option>)}
+                            </select>
+                          ) : field === 'state' ? (
+                            <select
+                              value={selectedState?.isoCode || ''}
+                              onChange={e => selectState(e.target.value)}
+                              disabled={!editingName || !selectedCountry}
+                              className={`h-[44px] w-full rounded-[12px] border px-3 text-[14px] ${darkMode ? 'bg-[#0a0a0a] border-zinc-800 text-white' : 'bg-white border-[#E5E7EB] text-[#111827]'}`}
+                            >
+                              <option value="">{selectedCountry ? 'Select state' : 'Select a country first'}</option>
+                              {states.map(item => <option key={item.isoCode} value={item.isoCode}>{item.name}</option>)}
+                            </select>
+                          ) : field === 'city' ? (
+                            <select
+                              value={profileForm.city || ''}
+                              onChange={e => updateProfileField('city', e.target.value)}
+                              disabled={!editingName || !selectedState}
+                              className={`h-[44px] w-full rounded-[12px] border px-3 text-[14px] ${darkMode ? 'bg-[#0a0a0a] border-zinc-800 text-white' : 'bg-white border-[#E5E7EB] text-[#111827]'}`}
+                            >
+                              <option value="">{selectedState ? 'Select city' : 'Select a state first'}</option>
+                              {cities.map(item => <option key={`${item.name}-${item.latitude}-${item.longitude}`} value={item.name}>{item.name}</option>)}
+                            </select>
+                          ) : field === 'timezone' ? (
+                            <select
+                              value={profileForm.timezone || ''}
+                              onChange={e => updateProfileField('timezone', e.target.value)}
+                              disabled={!editingName}
+                              required
+                              className={`h-[44px] w-full rounded-[12px] border px-3 text-[14px] ${darkMode ? 'bg-[#0a0a0a] border-zinc-800 text-white' : 'bg-white border-[#E5E7EB] text-[#111827]'}`}
+                            >
+                              <option value="">Select timezone</option>
+                              {(selectedCountry?.timezones || []).map(item => <option key={item.zoneName} value={item.zoneName}>{item.zoneName} ({item.gmtOffsetName})</option>)}
+                              {profileForm.timezone && !(selectedCountry?.timezones || []).some(item => item.zoneName === profileForm.timezone) && <option value={profileForm.timezone}>{profileForm.timezone}</option>}
+                            </select>
+                          ) : field === 'gender' ? (
+                            <select
+                              value={profileForm.gender || ''}
+                              onChange={e => updateProfileField('gender', e.target.value)}
+                              disabled={!editingName}
+                              className={`h-[44px] w-full rounded-[12px] border px-3 text-[14px] ${darkMode ? 'bg-[#0a0a0a] border-zinc-800 text-white' : 'bg-white border-[#E5E7EB] text-[#111827]'}`}
+                            >
+                              <option value="">Prefer not to specify</option>
+                              <option value="male">Male</option><option value="female">Female</option>
+                              <option value="non_binary">Non-binary</option><option value="other">Other</option>
+                              <option value="prefer_not_to_say">Prefer not to say</option>
+                            </select>
+                          ) : <input
                             type={type}
                             value={profileForm[field] || ''}
-                            onChange={e => updateProfileField(field, e.target.value)}
+                            onChange={e => updateProfileField(
+                              field,
+                              field === 'phone_number' ? e.target.value.replace(/\D/g, '').slice(0, 14) : e.target.value
+                            )}
+                            inputMode={field === 'phone_number' ? 'numeric' : undefined}
+                            pattern={field === 'phone_number' ? '[0-9]{6,14}' : undefined}
+                            readOnly={field === 'phone_country_code'}
+                            onBlur={e => {
+                              setTouchedFields(current => ({ ...current, [field]: true }));
+                              setFieldErrors(current => ({ ...current, [field]: validateProfileField(field, e.target.value, profileForm) }));
+                            }}
+                            required={['first_name','last_name','username','phone_number','country','timezone'].includes(field)}
+                            min={field === 'years_experience' ? '0' : undefined}
+                            max={field === 'years_experience' ? '80' : undefined}
+                            maxLength={['first_name','last_name','preferred_name'].includes(field) ? 80 : field === 'username' ? 30 : undefined}
+                            aria-invalid={Boolean(fieldErrors[field])}
+                            aria-describedby={fieldErrors[field] ? `${field}-error` : undefined}
                             disabled={!editingName}
                             placeholder={editingName ? `Add ${label.replace(' *', '').toLowerCase()}` : 'Not provided'}
-                            className={`h-[44px] w-full rounded-[12px] border px-3 text-[14px] focus:border-[#4F46E5] focus:outline-none focus:ring-1 focus:ring-[#4F46E5] disabled:cursor-default disabled:opacity-80 ${darkMode ? 'bg-[#0a0a0a] border-zinc-800 text-white' : 'bg-white border-[#E5E7EB] text-[#111827]'}`}
-                          />
+                            className={`h-[44px] w-full rounded-[12px] border px-3 text-[14px] focus:outline-none focus:ring-1 disabled:cursor-default disabled:opacity-80 ${fieldErrors[field] ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500' : 'focus:border-[#4F46E5] focus:ring-[#4F46E5]'} ${darkMode ? 'bg-[#0a0a0a] border-zinc-800 text-white' : 'bg-white border-[#E5E7EB] text-[#111827]'}`}
+                          />}
+                          {fieldErrors[field] && <span id={`${field}-error`} className="block text-[11px] font-medium text-rose-600">{fieldErrors[field]}</span>}
                         </label>
                       ))}
-                    </div>
+                    </div>}
                     {editingName && <div className="flex justify-end">
                       <button type="submit" disabled={updating} className="h-10 px-6 rounded-[12px] bg-[#4F46E5] hover:bg-[#4338CA] text-white text-[14px] font-semibold disabled:opacity-50">
                         {updating ? 'Saving...' : 'Save Changes'}
