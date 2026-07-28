@@ -8,6 +8,9 @@ function ParsedResumeReviewView({
   onUploadDifferent,
   loading
 }) {
+  const recoveryWarnings = parsedResume?.recovery_warnings || [];
+  const canonicalSections = parsedResume?.canonical_resume?.sections || [];
+
   return (
     <div className="flex-1 flex flex-col justify-between h-full select-none text-slate-650 dark:text-slate-350 font-sans">
       
@@ -19,6 +22,30 @@ function ParsedResumeReviewView({
 
       {/* Details Scroll */}
       <div className="flex-1 my-4 space-y-3.5 pr-1.5 scrollbar-thin overflow-y-auto max-h-[350px]">
+        {recoveryWarnings.map((warning, warningIndex) => {
+          const section = canonicalSections.find(item => item.id === warning.section_id);
+          return (
+            <div
+              key={warning.section_id || warningIndex}
+              className="p-3.5 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200"
+            >
+              <p className="text-[10px] font-extrabold">{warning.message}</p>
+              <p className="mt-1 text-[9px] opacity-75">
+                Original text is preserved until you confirm the recovered structure.
+              </p>
+              {section?.items?.map(item => (
+                <div key={item.id} className="mt-2 rounded-lg bg-white/70 p-2 text-[9px] dark:bg-black/20">
+                  <div className="font-bold">{item.title || item.source_text}</div>
+                  {item.description && <div className="mt-0.5">{item.description}</div>}
+                  <div className="mt-1 text-[8px] opacity-60">
+                    Recovery confidence {Math.round((item.confidence || 0) * 100)}%
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+
         {/* Contact info card */}
         <div className="p-3.5 bg-white border border-slate-200 dark:bg-[#0f0f11] dark:border-slate-900 rounded-2xl space-y-2 shadow-3xs">
           <span className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block">Contact Details</span>

@@ -7,6 +7,13 @@ import {
   assessBrowserJobEvidence, captureActiveTabJobEvidence, classifyBrowserPageUrl,
   collectJobSkills, isExtractableHttpUrl, validateJDResponse
 } from '../services/jdExtractionFlow';
+import {
+  createJDPipelineSession,
+  fingerprintJD,
+  readJDPipelineSession,
+  writeJDPipelineSession
+} from '../utils/jobPipelineSession';
+import { buildTailoringComparePayload } from '../utils/tailoringRequest';
 
 const AppContext = createContext();
 
@@ -97,6 +104,8 @@ export function AppProvider({ children }) {
     setParsedResume(null);
     setJobAnalysis(null);
     setComparison(null);
+    setReviewSuggestions([]);
+    setLiveATS(null);
     setTailoredResume(null);
     setCoverLetter(null);
     setJobText('');
@@ -138,7 +147,28 @@ export function AppProvider({ children }) {
   // Data states
   const [parsedResume, setParsedResume] = useState(null);
   const [resumesList, setResumesList] = useState([]);
-  const [jobAnalysis, setJobAnalysis] = useState(null);
+  const initialJDPipelineSession = typeof sessionStorage !== 'undefined'
+    ? readJDPipelineSession(sessionStorage)
+    : null;
+  const [jobAnalysis, setJobAnalysisState] = useState(
+    initialJDPipelineSession?.canonicalJD || null
+  );
+  const canonicalJDRef = useRef(initialJDPipelineSession?.canonicalJD || null);
+  const jdFingerprintRef = useRef(initialJDPipelineSession?.fingerprint || '');
+  const setJobAnalysis = (nextValue) => {
+    const resolved = typeof nextValue === 'function'
+      ? nextValue(canonicalJDRef.current)
+      : nextValue;
+    const canonical = resolved && typeof resolved === 'object'
+      ? structuredClone(resolved)
+      : null;
+    canonicalJDRef.current = canonical;
+    jdFingerprintRef.current = canonical ? fingerprintJD(canonical) : '';
+    setJobAnalysisState(canonical);
+  };
+  const getCanonicalJobAnalysis = () => (
+    canonicalJDRef.current ? structuredClone(canonicalJDRef.current) : null
+  );
   const [jobSessionHydrated, setJobSessionHydrated] = useState(
     () => !(typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local)
   );
@@ -214,7 +244,7 @@ export function AppProvider({ children }) {
         },
         body: JSON.stringify({
           resume: toRenderableResume(parsedResume),
-          job: jobAnalysis,
+          job: getCanonicalJobAnalysis(),
           suggestions: suggestionsToSend
         })
       });
@@ -310,6 +340,9 @@ export function AppProvider({ children }) {
     setJobText('');
     setJobAnalysis(null);
     setComparison(null);
+    setReviewSuggestions([]);
+    setLiveATS(null);
+    setTailoredResume(null);
     setCompanyName('');
     setJobTitle('');
     setJobDetectionMeta(null);
@@ -352,12 +385,25 @@ export function AppProvider({ children }) {
       const sessionStore = chrome.storage.session;
       if (sessionStore) {
         sessionStore.get(['jobExtractionSession', 'resumeReviewSession'], (result) => {
-          if (Array.isArray(result.resumeReviewSession?.suggestions)) {
-            setReviewSuggestions(result.resumeReviewSession.suggestions);
-          }
           const saved = result.jobExtractionSession;
+          const savedJD = saved?.canonicalJD || saved?.jobAnalysis || null;
+          const savedFingerprint = saved?.jdFingerprint || (
+            savedJD ? fingerprintJD(savedJD) : ''
+          );
+          if (
+            Array.isArray(result.resumeReviewSession?.suggestions)
+            && result.resumeReviewSession?.jdFingerprint === savedFingerprint
+          ) {
+            setReviewSuggestions(result.resumeReviewSession.suggestions);
+            if (result.resumeReviewSession.tailoringAudit) {
+              setComparison(previous => ({
+                ...(previous || {}),
+                tailoring_audit: result.resumeReviewSession.tailoringAudit
+              }));
+            }
+          }
           const finishHydration = (activeUrl = '') => {
-            const savedUrl = saved?.lastAnalyzedUrl || saved?.jobAnalysis?.source_url || '';
+            const savedUrl = saved?.lastAnalyzedUrl || savedJD?.source_url || '';
             const savedIdentity = getJobIdentityFromUrl(savedUrl);
             const activeIsJobPage = isExtractableHttpUrl(activeUrl);
             const activeIsExtensionPage = /^chrome-extension:\/\//i.test(activeUrl);
@@ -365,7 +411,7 @@ export function AppProvider({ children }) {
               ? getJobIdentityFromUrl(activeUrl)
               : '';
             const sessionMatchesActiveJob = Boolean(
-              saved?.jobAnalysis
+              savedJD
               && savedIdentity
               && (
                 (activeIdentity && savedIdentity === activeIdentity)
@@ -377,10 +423,10 @@ export function AppProvider({ children }) {
             );
 
             if (sessionMatchesActiveJob) {
-            setJobAnalysis(saved.jobAnalysis);
-            setJobText(saved.jobText || saved.jobAnalysis.description || '');
-            setCompanyName(saved.companyName || saved.jobAnalysis.company || saved.jobAnalysis.company_name || '');
-            setJobTitle(saved.jobTitle || saved.jobAnalysis.title || saved.jobAnalysis.job_title || '');
+            setJobAnalysis(savedJD);
+            setJobText(saved.jobText || savedJD.description || '');
+            setCompanyName(saved.companyName || savedJD.company || savedJD.company_name || '');
+            setJobTitle(saved.jobTitle || savedJD.title || savedJD.job_title || '');
             setLastAnalyzedUrl(savedUrl);
             activeExtractionIdentityRef.current = savedIdentity;
             setCurrentJobIdentity(savedIdentity);
@@ -391,7 +437,7 @@ export function AppProvider({ children }) {
               sourceUrl: savedUrl,
               hasJob: true
             });
-            } else if (saved?.jobAnalysis) {
+            } else if (savedJD) {
               sessionStore.remove('jobExtractionSession');
               console.info('[JD-EXTRACTION][FRONTEND] Stale extraction session rejected', {
                 savedIdentity,
@@ -420,6 +466,7 @@ export function AppProvider({ children }) {
       const savedResume = localStorage.getItem('parsed_resume');
       const savedTailored = localStorage.getItem('tailored_resume');
       const savedTemplate = localStorage.getItem('selected_template');
+      const savedPipelineSession = readJDPipelineSession(sessionStorage);
       const savedJobAnalysis = localStorage.getItem('job_analysis');
       const savedJobText = localStorage.getItem('job_text');
       const savedCompany = localStorage.getItem('company_name');
@@ -444,7 +491,14 @@ export function AppProvider({ children }) {
       if (savedTemplate) {
         setSelectedTemplate(savedTemplate);
       }
-      if (savedJobAnalysis) {
+      if (savedPipelineSession?.canonicalJD) {
+        setJobAnalysis(savedPipelineSession.canonicalJD);
+        if (savedPipelineSession.jobText) setJobText(savedPipelineSession.jobText);
+        if (savedPipelineSession.companyName) setCompanyName(savedPipelineSession.companyName);
+        if (savedPipelineSession.jobTitle) setJobTitle(savedPipelineSession.jobTitle);
+        if (savedPipelineSession.lastAnalyzedUrl) setLastAnalyzedUrl(savedPipelineSession.lastAnalyzedUrl);
+        if (savedPipelineSession.jobDetectionMeta) setJobDetectionMeta(savedPipelineSession.jobDetectionMeta);
+      } else if (savedJobAnalysis) {
         try {
           setJobAnalysis(JSON.parse(savedJobAnalysis));
         } catch (e) {
@@ -457,7 +511,19 @@ export function AppProvider({ children }) {
       if (savedReview) {
         try {
           const review = JSON.parse(savedReview);
-          if (Array.isArray(review?.suggestions)) setReviewSuggestions(review.suggestions);
+          const activeFingerprint = savedPipelineSession?.fingerprint || '';
+          if (
+            Array.isArray(review?.suggestions)
+            && review?.jdFingerprint === activeFingerprint
+          ) {
+            setReviewSuggestions(review.suggestions);
+            if (review.tailoringAudit) {
+              setComparison(previous => ({
+                ...(previous || {}),
+                tailoring_audit: review.tailoringAudit
+              }));
+            }
+          }
         } catch (error) {
           console.warn('Unable to restore resume review session', error);
         }
@@ -586,6 +652,33 @@ export function AppProvider({ children }) {
     return () => chrome.storage.onChanged.removeListener(handleStorageChange);
   }, [isExtension]);
 
+  // Keep the canonical extracted JD synchronized between the side panel and
+  // full extension pages for the lifetime of the Chrome browser session.
+  useEffect(() => {
+    if (!isExtension || !chrome.storage?.onChanged) return;
+    const handleJDSessionChange = (changes, areaName) => {
+      if (areaName !== 'session' || !changes.jobExtractionSession) return;
+      const sessionValue = changes.jobExtractionSession.newValue;
+      const nextJD = sessionValue?.canonicalJD || sessionValue?.jobAnalysis || null;
+      const nextFingerprint = sessionValue?.jdFingerprint || (
+        nextJD ? fingerprintJD(nextJD) : ''
+      );
+      if (nextFingerprint === jdFingerprintRef.current) return;
+      setJobAnalysis(nextJD);
+      setJobText(sessionValue?.jobText || '');
+      setCompanyName(sessionValue?.companyName || '');
+      setJobTitle(sessionValue?.jobTitle || '');
+      setLastAnalyzedUrl(sessionValue?.lastAnalyzedUrl || '');
+      setJobDetectionMeta(sessionValue?.jobDetectionMeta || null);
+      if (!nextJD) {
+        setComparison(null);
+        setReviewSuggestions([]);
+      }
+    };
+    chrome.storage.onChanged.addListener(handleJDSessionChange);
+    return () => chrome.storage.onChanged.removeListener(handleJDSessionChange);
+  }, [isExtension]);
+
   // Save/Remove resume context storage
   useEffect(() => {
     if (parsedResume) {
@@ -610,9 +703,14 @@ export function AppProvider({ children }) {
     if (isExtension) {
       if (!jobSessionHydrated || !chrome.storage.session) return;
       if (jobAnalysis) {
+        const pipelineSession = createJDPipelineSession(jobAnalysis, {
+          jobText, companyName, jobTitle, lastAnalyzedUrl, jobDetectionMeta
+        });
         chrome.storage.session.set({
           jobExtractionSession: {
             jobAnalysis,
+            canonicalJD: pipelineSession.canonicalJD,
+            jdFingerprint: pipelineSession.fingerprint,
             jobText,
             companyName,
             jobTitle,
@@ -626,11 +724,17 @@ export function AppProvider({ children }) {
       return;
     }
     if (jobAnalysis) {
-      localStorage.setItem('job_analysis', JSON.stringify(jobAnalysis));
-      if (jobText) localStorage.setItem('job_text', jobText);
-      if (companyName) localStorage.setItem('company_name', companyName);
-      if (jobTitle) localStorage.setItem('job_title', jobTitle);
+      writeJDPipelineSession(sessionStorage, createJDPipelineSession(jobAnalysis, {
+        jobText, companyName, jobTitle, lastAnalyzedUrl, jobDetectionMeta
+      }));
+      // Remove legacy durable JD storage after migration. The extracted JD is
+      // scoped to the current browser session.
+      localStorage.removeItem('job_analysis');
+      localStorage.removeItem('job_text');
+      localStorage.removeItem('company_name');
+      localStorage.removeItem('job_title');
     } else {
+      writeJDPipelineSession(sessionStorage, null);
       localStorage.removeItem('job_analysis');
       localStorage.removeItem('job_text');
       localStorage.removeItem('company_name');
@@ -644,7 +748,9 @@ export function AppProvider({ children }) {
     const payload = {
       resumeId: parsedResume?.id || null,
       jobIdentity: currentJobIdentity || null,
-      suggestions: reviewSuggestions
+      jdFingerprint: jdFingerprintRef.current || null,
+      suggestions: reviewSuggestions,
+      tailoringAudit: comparison?.tailoring_audit || null
     };
     if (isExtension && chrome.storage.session) {
       if (reviewSuggestions.length) chrome.storage.session.set({ resumeReviewSession: payload });
@@ -654,7 +760,7 @@ export function AppProvider({ children }) {
     } else {
       sessionStorage.removeItem('resume_review_session');
     }
-  }, [reviewSuggestions, parsedResume?.id, currentJobIdentity, isExtension]);
+  }, [reviewSuggestions, parsedResume?.id, currentJobIdentity, comparison?.tailoring_audit, isExtension]);
 
   // Save/Remove tailored resume context storage
   useEffect(() => {
@@ -1695,7 +1801,7 @@ export function AppProvider({ children }) {
   };
 
   // Perform Resume Parsing (Step 4)
-  const handleParseResume = async (fileOverride = null) => {
+  const handleParseResume = async (fileOverride = null, options = {}) => {
     const selectedFile = fileOverride || resumeFile;
     if (!selectedFile && !parsedResume) {
       alert("Please select a resume file to parse.");
@@ -1736,7 +1842,8 @@ export function AppProvider({ children }) {
       const parseRes = await fetch(`${apiUrl}/api/v1/resumes/upload`, {
         method: "POST",
         headers,
-        body: formData
+        body: formData,
+        signal: options?.signal
       });
 
       if (!parseRes.ok) {
@@ -1779,6 +1886,12 @@ export function AppProvider({ children }) {
 
     } catch (error) {
       clearInterval(progressInterval);
+      setLoadingProgress(0);
+      setLoadingMessage("");
+      if (error.name === 'AbortError' || error.message === 'Canceled') {
+        console.info('[RESUME][FRONTEND] Resume upload cancelled by user');
+        return { cancelled: true };
+      }
       console.error(error);
       setApiError(error.message || "Failed to parse resume.");
       navigate('/resume-detect');
@@ -1821,11 +1934,12 @@ export function AppProvider({ children }) {
           "Content-Type": "application/json",
           ...headers
         },
-        body: JSON.stringify({
-          resume_id: activeParsed.id,
+        body: JSON.stringify(buildTailoringComparePayload({
+          resumeId: activeParsed.id,
           resume: toRenderableResume(activeParsed),
-          job: jobAnalysis
-        })
+          job: getCanonicalJobAnalysis(),
+          selectedSections
+        }))
       });
 
       if (!compareRes.ok) {
@@ -1907,16 +2021,17 @@ export function AppProvider({ children }) {
         setLoadingProgress(35);
       }
 
-      // Deterministically recover descriptions and actual PDF annotation URLs
-      // from the immutable source file. This is intentionally not an AI call.
-      if (activeParsed.id && activeParsed.source_preservation_version !== '7.3') {
-        setLoadingMessage("Preserving original descriptions and links...");
+      if (activeParsed.id && activeParsed.source_preservation_version !== '9.1-achievement-segmentation') {
+        setLoadingMessage("AI agent is reconciling the resume with the original source...");
         const recoveryToken = session?.access_token || localStorage.getItem('access_token');
+        const recoveryHeaders = {};
+        if (recoveryToken) recoveryHeaders.Authorization = `Bearer ${recoveryToken}`;
+        if (apiKey) recoveryHeaders['x-groq-key'] = apiKey;
         const recoveryRes = await fetch(
           `${apiUrl}/api/v1/resumes/${activeParsed.id}/recover-source`,
           {
             method: "POST",
-            headers: recoveryToken ? { "Authorization": `Bearer ${recoveryToken}` } : {}
+            headers: recoveryHeaders
           }
         );
         if (!recoveryRes.ok) {
@@ -1940,11 +2055,12 @@ export function AppProvider({ children }) {
           "Content-Type": "application/json",
           ...headers
         },
-        body: JSON.stringify({
-          resume_id: activeParsed.id,
+        body: JSON.stringify(buildTailoringComparePayload({
+          resumeId: activeParsed.id,
           resume: toRenderableResume(activeParsed),
-          job: jobAnalysis
-        })
+          job: getCanonicalJobAnalysis(),
+          selectedSections
+        }))
       });
 
       if (!compareRes.ok) {
@@ -1969,6 +2085,17 @@ export function AppProvider({ children }) {
 
       const list = [];
       const patch = compResult.patch;
+      const auditByPath = new Map(
+        (compResult.tailoring_audit?.edits || []).map(edit => [edit.path, edit])
+      );
+      const auditMetadata = (path, fallbackReason, fallbackImpact) => {
+        const audit = auditByPath.get(path);
+        return {
+          reason: audit?.reason || fallbackReason,
+          atsBenefit: audit?.ats_benefit || fallbackImpact,
+          confidence: Number(audit?.confidence ?? 90)
+        };
+      };
 
       if (selectedSections.includes('summary') && patch.summary) {
         list.push({
@@ -1978,9 +2105,12 @@ export function AppProvider({ children }) {
           status: 'pending',
           original: activeParsed.summary || '',
           suggested: patch.summary,
-          reason: 'Aligns summary with job keywords and targets core requirements.',
+          ...auditMetadata(
+            'summary',
+            'Minimal summary wording improvement.',
+            'Improves natural alignment with the extracted JD.'
+          ),
           atsImpact: 3,
-          confidence: 'High',
           sectionType: 'summary',
           itemIndex: 0,
           bulletIndex: 0
@@ -2002,9 +2132,12 @@ export function AppProvider({ children }) {
               status: 'pending',
               original: originalText,
               suggested: suggested,
-              reason: 'Improves wording and adds relevant ATS keywords.',
+              ...auditMetadata(
+                `experience.${itemIdx}.description.${bulletIdx}`,
+                'Minimal experience bullet wording improvement.',
+                'Improves action verbs and existing-keyword alignment.'
+              ),
               atsImpact: 5,
-              confidence: 'High',
               sectionType: 'experience',
               itemIndex: itemIdx,
               bulletIndex: bulletIdx
@@ -2028,7 +2161,11 @@ export function AppProvider({ children }) {
               status: 'pending',
               original: originalText,
               suggested: suggested,
-              reason: 'Improves wording and adds relevant ATS keywords.',
+              ...auditMetadata(
+                `projects.${itemIdx}.description.${bulletIdx}`,
+                'Minimal project bullet wording improvement.',
+                'Improves readability and existing-keyword alignment.'
+              ),
               atsImpact: 5,
               confidence: 'High',
               sectionType: 'projects',
@@ -2039,23 +2176,8 @@ export function AppProvider({ children }) {
         });
       }
 
-      if (selectedSections.includes('skills') && patch.skills_append && patch.skills_append.length > 0) {
-        patch.skills_append.forEach(skill => {
-          list.push({
-            id: `skills:${String(skill).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-            change_id: `skills:${String(skill).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-            category: 'Skills',
-            status: 'pending',
-            original: '(Skill not present)',
-            suggested: `Add skill: ${skill}`,
-            reason: 'Requested directly in job description requirements.',
-            atsImpact: 2,
-            confidence: 'High',
-            sectionType: 'skills',
-            skillName: skill
-          });
-        });
-      }
+      // Missing JD keywords are reported by ATS analysis, but are never
+      // inserted as candidate skills. Skills remain source-owned evidence.
 
       setReviewSuggestions(list);
       clearInterval(progressInterval);
@@ -2096,19 +2218,24 @@ export function AppProvider({ children }) {
       const tailoredResult = merged.workingResume;
       if (!tailoredResult) throw new Error('The complete reviewed resume is unavailable.');
       setTailoredResume(tailoredResult);
+      setLoading(false);
+      navigate('/templates');
 
       // Re-score the exact resume produced from the user's accepted changes.
-      // Do not persist the projected score for all suggested changes.
+      // Navigation must never wait for the backend scorer. The exact reviewed
+      // resume is already stored locally; refresh ATS intelligence in the
+      // background and abandon a slow request instead of freezing the UI.
       let exactTailoredScore = null;
       try {
         const scoreToken = session?.access_token || localStorage.getItem('access_token');
         const scoreResponse = await fetch(`${apiUrl}/api/score`, {
           method: "POST",
+          signal: AbortSignal.timeout(8000),
           headers: {
             "Content-Type": "application/json",
             ...(scoreToken ? { "Authorization": `Bearer ${scoreToken}` } : {})
           },
-          body: JSON.stringify({ resume: tailoredResult, job: jobAnalysis })
+          body: JSON.stringify({ resume: tailoredResult, job: getCanonicalJobAnalysis() })
         });
         if (scoreResponse.ok) {
           const scoreResult = await scoreResponse.json();
@@ -2128,9 +2255,6 @@ export function AppProvider({ children }) {
       } catch (scoreError) {
         console.warn("Strict ATS scoring unavailable", scoreError);
       }
-
-      setLoading(false);
-      navigate('/templates');
     } catch (err) {
       console.error(err);
       setApiError(err.message || "Failed to apply changes.");
@@ -2174,8 +2298,8 @@ export function AppProvider({ children }) {
       // Existing tailored state may predate the latest deterministic source
       // repair. Refresh it immediately at export and replace only sections the
       // tailoring workflow never edits.
-      if (parsedResume?.id && parsedResume.source_preservation_version !== '7.3') {
-        setLoadingMessage("Repairing original achievement and certification evidence...");
+      if (parsedResume?.id && parsedResume.source_preservation_version !== '9.1-achievement-segmentation') {
+        setLoadingMessage("AI agent is reconciling the complete resume with the original upload...");
         const recoveryToken = session?.access_token || localStorage.getItem('access_token');
         const recoveryResponse = await fetch(
           `${apiUrl}/api/v1/resumes/${parsedResume.id}/recover-source`,
@@ -2223,13 +2347,7 @@ export function AppProvider({ children }) {
           resume: toRenderableResume(finalRes),
           original_resume: toRenderableResume(originalForAudit),
           intentional_removals: [],
-          approved_additions: reviewSuggestions
-            .filter(suggestion =>
-              suggestion.status === 'accepted'
-              && suggestion.sectionType === 'skills'
-              && suggestion.skillName
-            )
-            .map(suggestion => suggestion.skillName),
+          approved_additions: [],
           template_name: selectedTemplate || 'ExecutiveATS'
         })
       });
@@ -2390,7 +2508,7 @@ export function AppProvider({ children }) {
         body: JSON.stringify({
           resume: toRenderableResume(parsedResume),
           job: {
-            ...jobAnalysis,
+            ...getCanonicalJobAnalysis(),
             cover_letter_context: coverLetterContext
           }
         })
@@ -2466,8 +2584,8 @@ export function AppProvider({ children }) {
           headers,
           body: JSON.stringify({
             resume: toRenderableResume(parsedResume),
-            jd: jobAnalysis || {},
-            job: jobAnalysis || {},
+            jd: getCanonicalJobAnalysis() || {},
+            job: getCanonicalJobAnalysis() || {},
             user_answers: answers,
             skipped_questions: skipped
           })
@@ -2739,8 +2857,8 @@ export function AppProvider({ children }) {
         body: JSON.stringify({
           resume: toRenderableResume(activeParsed),
           resume_intelligence: activeParsed.resume_intelligence || null,
-          jd: jobAnalysis,
-          jd_intelligence: jobAnalysis.jd_intelligence || null,
+          jd: getCanonicalJobAnalysis(),
+          jd_intelligence: getCanonicalJobAnalysis()?.jd_intelligence || null,
           resume_id: activeParsed.id || null,
           jd_id: jobAnalysis.id || jobAnalysis.jd_id || null,
           user_answers: contextAnswers,
@@ -2836,6 +2954,9 @@ export function AppProvider({ children }) {
       lastAnalyzedUrl, setLastAnalyzedUrl,
       parsedResume, setParsedResume,
       jobAnalysis, setJobAnalysis,
+      canonicalJobAnalysis: jobAnalysis,
+      jdFingerprint: jdFingerprintRef.current,
+      getCanonicalJobAnalysis,
       comparison, setComparison,
       tailoredResume, setTailoredResume,
       coverLetter, setCoverLetter,

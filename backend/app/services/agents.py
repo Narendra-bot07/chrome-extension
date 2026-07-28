@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from typing import List, Optional, Dict, Any, TypedDict
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
@@ -12,6 +13,46 @@ from app.schemas import (
     FactVerificationResult,
     ReviewReport
 )
+
+
+def enforce_lossless_tailoring(
+    original: ResumeStructure,
+    candidate: ResumeStructure,
+) -> ResumeStructure:
+    """Project AI wording edits onto the immutable source structure.
+
+    Full-schema LLM generation is intentionally treated as an untrusted draft.
+    Only prose fields that have a one-to-one source slot are accepted. All
+    identity, evidence, cardinality, ordering, links, and source-owned sections
+    come from the uploaded resume.
+    """
+    result = original.model_copy(deep=True)
+
+    if candidate.summary and original.summary:
+        result.summary = candidate.summary
+
+    for section in ("experience", "projects"):
+        source_items = getattr(original, section)
+        draft_items = getattr(candidate, section)
+        if len(source_items) != len(draft_items):
+            continue
+        result_items = getattr(result, section)
+        for index, (source_item, draft_item) in enumerate(zip(source_items, draft_items)):
+            source_bullets = list(source_item.description or [])
+            draft_bullets = list(draft_item.description or [])
+            if len(source_bullets) != len(draft_bullets):
+                continue
+            # Metrics are immutable evidence. Reject a rewritten bullet if its
+            # numeric claims differ from the corresponding source bullet.
+            for bullet_index, (source_bullet, draft_bullet) in enumerate(
+                zip(source_bullets, draft_bullets)
+            ):
+                source_metrics = re.findall(r"(?:\$\s*)?\d[\d,.]*(?:%|\+|x|k|m|b)?", source_bullet, re.I)
+                draft_metrics = re.findall(r"(?:\$\s*)?\d[\d,.]*(?:%|\+|x|k|m|b)?", draft_bullet, re.I)
+                if draft_bullet and source_metrics == draft_metrics:
+                    result_items[index].description[bullet_index] = draft_bullet
+
+    return result
 
 # 1. ParserAgent wrapper
 def run_parser_agent(raw_text: str, api_key: Optional[str] = None) -> ResumeStructure:
@@ -79,11 +120,12 @@ def run_resume_tailoring_agent(
     ])
     
     chain = prompt | structured_llm
-    return chain.invoke({
+    candidate = chain.invoke({
         "resume": resume.model_dump_json(),
         "strategy": strategy.model_dump_json(),
         "job": job.model_dump_json()
     })
+    return enforce_lossless_tailoring(resume, candidate)
 
 # 6. FactVerificationAgent
 def run_fact_verification_agent(
@@ -162,11 +204,12 @@ def run_ats_optimization_agent(
     ])
     
     chain = prompt | structured_llm
-    return chain.invoke({
+    candidate = chain.invoke({
         "resume": resume.model_dump_json(),
         "job": job.model_dump_json(include={"title", "required_skills", "keywords", "ats_keywords"}),
         "keywords": ", ".join(gaps.missing_keywords)
     })
+    return enforce_lossless_tailoring(resume, candidate)
 
 # 8. RecruiterReviewAgent
 def run_recruiter_review_agent(
@@ -309,7 +352,10 @@ def hiring_manager_review_node(state: AgentState) -> Dict[str, Any]:
 
 # Graph Node 9: Final Schema Audit & Score aggregation
 def final_audit_node(state: AgentState) -> Dict[str, Any]:
-    final_resume = state["optimized_resume"].model_copy(deep=True)
+    final_resume = enforce_lossless_tailoring(
+        state["original_resume"],
+        state["optimized_resume"],
+    )
     if not final_resume.experience: final_resume.experience = []
     if not final_resume.projects: final_resume.projects = []
     if not final_resume.skills: final_resume.skills = []

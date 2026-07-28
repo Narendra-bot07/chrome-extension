@@ -79,6 +79,7 @@ class CompareRequest(BaseModel):
     resume_id: Optional[str] = None
     resume: Dict[str, Any]
     job: Dict[str, Any]
+    selected_sections: List[str] = []
 
 def normalize_resume_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     from services.resume.renderable import project_renderable_resume
@@ -244,6 +245,12 @@ async def api_compare(
 
         resume = ResumeStructure(**normalize_resume_payload(request.resume))
         job = JobAnalysis(**normalize_job_payload(request.job))
+        from services.resume.tailoring_cache import (
+            TAILORING_ENGINE_VERSION,
+            canonical_selected_sections,
+            tailoring_cache_matches,
+        )
+        selected_sections = canonical_selected_sections(request.selected_sections)
 
         cached_analysis = None
         if resume_id and jd_id:
@@ -252,7 +259,10 @@ async def api_compare(
             except Exception as e:
                 print(f"[ATS-CACHE][BACKEND] Failed to lookup cache: {e}")
 
-        if cached_analysis:
+        cached_breakdown = (cached_analysis or {}).get("breakdown_json") or {}
+        if cached_analysis and tailoring_cache_matches(
+            cached_breakdown, selected_sections
+        ):
             breakdown_json = cached_analysis.get("breakdown_json") or {}
             resume_match_score = cached_analysis.get("resume_match_score") or 0
             ats_score_before = cached_analysis.get("ats_score") or cached_analysis.get("overall_score") or 0
@@ -287,16 +297,21 @@ async def api_compare(
                 ats_analysis_id=str(cached_analysis["id"]),
                 breakdown_before=breakdown_json.get("breakdown_before") or {},
                 breakdown_after=breakdown_json.get("breakdown_after") or {},
-                suggestion_impacts=suggestion_impacts
+                suggestion_impacts=suggestion_impacts,
+                tailoring_audit=breakdown_json.get("tailoring_audit") or {},
             )
 
+        tailoring_generation_succeeded = True
         try:
             comparison = generate_tailoring_patch(
                 resume,
                 job,
-                api_key=x_groq_key
+                api_key=x_groq_key,
+                selected_sections=set(selected_sections),
             )
-        except Exception:
+        except Exception as exc:
+            tailoring_generation_succeeded = False
+            print(f"[TAILORING][BACKEND] Patch generation failed: {exc}")
             comparison = TailoringReport(
                 changes_made=[],
                 ats_score_before=0,
@@ -319,7 +334,15 @@ async def api_compare(
                     "resume_match_after": res_after["resume_match_score"],
                     "ats_score_after": res_after["ats_score"],
                     "patch": comparison.patch.model_dump(),
-                    "changes_made": comparison.changes_made
+                    "changes_made": comparison.changes_made,
+                    "selected_sections": selected_sections,
+                    "tailoring_engine_version": TAILORING_ENGINE_VERSION,
+                    "tailoring_generation_status": (
+                        "completed" if tailoring_generation_succeeded else "failed"
+                    ),
+                    "tailoring_audit": getattr(
+                        comparison, "tailoring_audit", {}
+                    ),
                 }
                 
                 analysis_rec = ats_repo.create_analysis(
@@ -457,7 +480,9 @@ async def api_score_resume(request: CompareRequest, user: Dict[str, Any] = Depen
         return {
             "resume_match_score": res["resume_match_score"],
             "ats_score": res["ats_score"],
-            "breakdown": res["breakdown"]
+            "breakdown": res["breakdown"],
+            "quality_issues": res.get("quality_issues", []),
+            "quality_penalty": res.get("quality_penalty", 0),
         }
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to calculate ATS score: {str(e)}")
@@ -497,6 +522,10 @@ async def api_ats_live_score(request: LiveScoreRequest, user: Dict[str, Any] = D
             "breakdown_before": res_before["breakdown"],
             "breakdown_current": res_current["breakdown"],
             "breakdown_estimated": res_estimated["breakdown"]
+            ,"quality_issues_before": res_before.get("quality_issues", [])
+            ,"quality_issues_current": res_current.get("quality_issues", [])
+            ,"quality_issues_estimated": res_estimated.get("quality_issues", [])
+            ,"quality_penalty_current": res_current.get("quality_penalty", 0)
         }
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to calculate live scores: {str(e)}")

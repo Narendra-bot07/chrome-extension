@@ -7,8 +7,8 @@ export const APPLICATION_LOGO_SRC = `${import.meta.env.BASE_URL || '/'}applicati
 export const ApplicationLogo = memo(function ApplicationLogo({
   size = 40,
   className = '',
-  alt = 'TailorFlow logo',
-  fallbackLabel = 'TailorFlow'
+  alt = 'tailr4u logo',
+  fallbackLabel = 'tailr4u'
 }) {
   const [failed, setFailed] = useState(false);
   const dimension = typeof size === 'number' ? `${size}px` : size;

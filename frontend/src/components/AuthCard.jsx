@@ -32,7 +32,7 @@ export default function AuthCard({ title, subtitle, children, onClose, showClose
           )}
           <Link to="/login" className="mb-7 inline-flex items-center gap-2 text-sm font-extrabold">
             <ApplicationLogo size={34} />
-            TailorFlow
+            tailr4u
           </Link>
           <h1 className="text-2xl font-black tracking-tight">{title}</h1>
           <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">{subtitle}</p>

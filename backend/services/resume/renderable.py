@@ -36,7 +36,7 @@ def _unique(values: list[Any]) -> list[Any]:
 
 def _unique_achievement_evidence(values: list[str]) -> list[str]:
     kept: list[str] = []
-    for value in sorted(values, key=len, reverse=True):
+    for value in values:
         key = _fingerprint(value)
         if not any(
             existing_key == key

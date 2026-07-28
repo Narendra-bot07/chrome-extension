@@ -271,7 +271,7 @@ export function RecruiterTab({ application, onSaveContacts }) {
             AI Contextual Email Assist
           </h4>
           <span className="text-[10px] font-semibold text-zinc-400">
-            Powered by TailorFlow AI
+            Powered by tailr4u
           </span>
         </div>
 

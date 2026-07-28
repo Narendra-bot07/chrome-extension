@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "TailorFlow AI",
+  "name": "tailr4u",
   "version": "1.0.0",
   "description": "ATS-optimization resume tailor. Auto-scans job descriptions, suggests modifications, and generates searchable PDFs.",
   "permissions": [
@@ -22,7 +22,7 @@
     "128": "application-logo.png"
   },
   "action": {
-    "default_title": "Open TailorFlow",
+    "default_title": "Open tailr4u",
     "default_icon": "application-logo.png"
   },
   "side_panel": {

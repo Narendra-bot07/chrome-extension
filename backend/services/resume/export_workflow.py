@@ -131,7 +131,7 @@ class ExportWorkflowState:
     repair_type: RepairType | None = None
     repair_attempt: int = 0
     max_repair_attempts: dict[str, int] = field(default_factory=lambda: {
-        "content": 2, "composition": 3, "rendering": 2,
+        "content": 3, "composition": 8, "rendering": 8,
     })
     unresolved_issues: list[str] = field(default_factory=list)
     last_valid_resume_content: dict[str, Any] | None = None

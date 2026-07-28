@@ -536,7 +536,7 @@ function DashboardContent() {
                   </span>
                 </div>
                 <p className="text-xs text-tf-text-secondary">
-                  Add your contact details and preferred roles to improve TailorFlow recommendation accuracy.
+                  Add your contact details and preferred roles to improve tailr4u recommendation accuracy.
                 </p>
               </div>
             </div>

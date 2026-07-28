@@ -120,7 +120,7 @@ function ResumeReviewView({
   loading
 }) {
   const { 
-    darkMode, apiUrl, apiKey, jobAnalysis, setReviewSuggestions, 
+    darkMode, apiUrl, apiKey, jobAnalysis, jdFingerprint, setReviewSuggestions, 
     comparison, selectedSections, liveATS, isRefineStreaming, setIsRefineStreaming 
   } = useApp();
   const [activeEditSection, setActiveEditSection] = useState(null);
@@ -342,6 +342,64 @@ function ResumeReviewView({
     }
   };
 
+  const handleRefineRecordSection = async (sectionType) => {
+    if (!customPrompt.trim()) return;
+    const records = parsedResume?.[sectionType] || [];
+    if (!records.length) return;
+    setRefining(true);
+    setStreamingSection(sectionType);
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['x-groq-key'] = apiKey;
+      const token = localStorage.getItem('access_token');
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const sectionData = records.map(item => (
+        sectionType === 'education' ? JSON.stringify(item) : String(item)
+      ));
+      const response = await fetch(`${apiUrl}/api/refine-section`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          section_type: sectionType,
+          section_data: sectionData,
+          prompt: customPrompt,
+          job: jobAnalysis,
+          source_resume: parsedResume,
+          working_resume: toRenderableResume(mergeReviewResume(parsedResume, suggestions).workingResume)
+        })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'AI edit failed.');
+      if (!Array.isArray(payload.refined) || payload.refined.length !== records.length) {
+        throw new Error('AI changed the number of records, so the edit was rejected.');
+      }
+      const ids = new Set(records.map((_, index) => `${sectionType}:record:${index}`));
+      const retained = suggestions.filter(item => !ids.has(item.id));
+      const proposed = records.map((record, index) => ({
+        id: `${sectionType}:record:${index}`,
+        change_id: `${sectionType}:record:${index}`,
+        category: labelFor(sectionType),
+        status: 'pending',
+        original: sectionType === 'education' ? JSON.stringify(record) : String(record),
+        suggested: payload.refined[index],
+        reason: 'User-requested wording edit with source structure preserved.',
+        atsImpact: 0,
+        confidence: 'High',
+        sectionType,
+        itemIndex: index,
+        bulletIndex: 0
+      }));
+      setReviewSuggestions([...retained, ...proposed]);
+      setActiveEditSection(null);
+      setCustomPrompt('');
+    } catch (error) {
+      alert(error.message || 'AI edit failed. Original records were preserved.');
+    } finally {
+      setRefining(false);
+      setStreamingSection(null);
+    }
+  };
+
   const renderRefinePanel = (sectionType) => {
     return (
       <div className="p-4 bg-emerald-550/[0.04] dark:bg-emerald-950/10 border border-emerald-500/20 dark:border-emerald-900/30 rounded-xl space-y-3 mt-3 select-none text-left font-sans">
@@ -400,7 +458,9 @@ function ResumeReviewView({
             </button>
           ) : (
             <button
-              onClick={() => handleRefineSection(sectionType)}
+              onClick={() => ['education', 'achievements'].includes(sectionType)
+                ? handleRefineRecordSection(sectionType)
+                : handleRefineSection(sectionType)}
               disabled={refining || isRefineStreaming}
               className="px-4 py-1.5 bg-[#00bda5] hover:bg-[#00a894] disabled:bg-zinc-300 disabled:dark:bg-zinc-800 text-white rounded-lg text-[9px] font-extrabold uppercase tracking-wider transition cursor-pointer border-none flex items-center gap-1 shadow-xs ml-auto"
             >
@@ -427,7 +487,7 @@ function ResumeReviewView({
     const pending = suggestions.filter(s => s.status === 'pending').length;
     const rejected = suggestions.filter(s => s.status === 'rejected').length;
     const reviewed = accepted + rejected;
-    const progressPercent = total > 0 ? Math.round((reviewed / total) * 100) : 0;
+    const progressPercent = total > 0 ? Math.round((reviewed / total) * 100) : 100;
     return { total, accepted, pending, rejected, reviewed, progressPercent };
   }, [suggestions, reviewProgress]);
 
@@ -478,6 +538,11 @@ function ResumeReviewView({
                 Reject
               </button>
             </span>
+            <span className="basis-full mt-0.5 text-[8px] font-sans text-zinc-500 dark:text-zinc-400 no-underline">
+              {change.reason}
+              {change.atsBenefit ? ` · ${change.atsBenefit}` : ''}
+              {' · '}Confidence {Number(change.confidence || 0).toFixed(0)}%
+            </span>
           </span>
         ) : (
           <span className="inline-flex items-center gap-1 mx-1 align-middle">
@@ -504,13 +569,48 @@ function ResumeReviewView({
     const items = Array.isArray(data) ? data : [data];
     return (
       <div className="space-y-2" data-review-section={sectionKey}>
-        <div className="border-b border-zinc-150 dark:border-zinc-850 pb-1">
+        <div className="flex justify-between items-center border-b border-zinc-150 dark:border-zinc-850 pb-1">
           <h2 className="text-[10px] font-black text-zinc-950 dark:text-zinc-50 uppercase tracking-widest font-sans">
             {title}
           </h2>
+          {['education', 'achievements'].includes(sectionKey) && (
+            <button
+              onClick={() => {
+                setActiveEditSection(activeEditSection === sectionKey ? null : sectionKey);
+                setCustomPrompt('');
+              }}
+              className="flex items-center gap-1 text-[8px] bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 text-[#00bda5] px-2 py-0.5 rounded font-extrabold uppercase tracking-wider transition cursor-pointer border-none"
+            >
+              <Sparkles size={8} /> Edit with AI
+            </button>
+          )}
         </div>
+        {activeEditSection === sectionKey && renderRefinePanel(sectionKey)}
         <div className="space-y-2 text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-350">
           {items.map((item, index) => {
+            const recordSuggestion = suggestions.find(suggestion =>
+              suggestion.sectionType === sectionKey && suggestion.itemIndex === index
+            );
+            if (recordSuggestion) {
+              const shown = recordSuggestion.status === 'accepted'
+                ? recordSuggestion.suggested
+                : recordSuggestion.original;
+              let displayRecord = shown;
+              if (sectionKey === 'education' && typeof shown === 'string') {
+                try { displayRecord = JSON.parse(shown); } catch { displayRecord = shown; }
+              }
+              return (
+                <div key={index} className="space-y-1">
+                  <div>{displayValue(displayRecord)}</div>
+                  {recordSuggestion.status === 'pending' && (
+                    <div className="flex gap-1">
+                      <button onClick={() => onUpdateSuggestionStatus(recordSuggestion.id, 'accepted')} className="px-2 py-0.5 bg-[#00bda5] text-white rounded text-[9px] font-bold">Accept</button>
+                      <button onClick={() => onUpdateSuggestionStatus(recordSuggestion.id, 'rejected')} className="px-2 py-0.5 bg-zinc-200 rounded text-[9px] font-bold">Reject</button>
+                    </div>
+                  )}
+                </div>
+              );
+            }
             if (typeof item !== 'object' || item === null) {
               return <div key={index}>• {displayValue(item)}</div>;
             }
@@ -615,6 +715,14 @@ function ResumeReviewView({
               <span className="text-[9px] bg-zinc-100 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-450 px-2 py-0.5 rounded-full font-bold">
                 {stats.reviewed}/{stats.total} Edits
               </span>
+              {jdFingerprint && (
+                <span
+                  className="text-[8px] bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-full font-bold"
+                  title={`Canonical extracted JD: ${jdFingerprint}`}
+                >
+                  JD Locked · {jdFingerprint.slice(-8)}
+                </span>
+              )}
             </div>
             {/* Visual Progress Bar */}
             <div className="flex items-center gap-2">
@@ -647,6 +755,16 @@ function ResumeReviewView({
             </div>
           )}
 
+        {stats.total === 0 ? (
+          <div className="max-w-md rounded-lg bg-amber-50 px-3 py-2 text-[9px] font-bold text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
+            <div>No safe AI edits passed validation. Your original resume is preserved.</div>
+            {(comparison?.tailoring_audit?.rejected_edits || []).slice(0, 2).map((edit, index) => (
+              <div key={`${edit.path || 'rejected'}-${index}`} className="mt-1 font-medium opacity-80">
+                {edit.path}: {edit.reason}
+              </div>
+            ))}
+          </div>
+        ) : (
         <div className="flex gap-1.5">
           <button
             onClick={onAcceptAll}
@@ -672,6 +790,7 @@ function ResumeReviewView({
             <RotateCcw size={12} />
           </button>
         </div>
+        )}
       </div>
 
       {/* Main Spacing & LaTeX-Style Resume Paper Container */}
@@ -902,6 +1021,16 @@ function ResumeReviewView({
           )}
 
           {/* Unchanged source sections are still part of the reviewed document. */}
+          {(liveATS?.quality_issues_current || []).length > 0 && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 font-sans text-[10px] text-rose-700">
+              <div className="font-black uppercase tracking-wider">
+                ATS repetition penalty: -{liveATS?.quality_penalty_current || 0} points
+              </div>
+              {(liveATS.quality_issues_current || []).map((issue, index) => (
+                <div key={`${issue.code}-${index}`} className="mt-1">• {issue.message}</div>
+              ))}
+            </div>
+          )}
           {sectionRegistry.map(([title, key]) => (
             <React.Fragment key={key}>{renderReadOnlySection(title, parsedResume[key], key)}</React.Fragment>
           ))}
@@ -932,7 +1061,7 @@ function ResumeReviewView({
           className="flex-2 py-3 bg-[#00bda5] hover:bg-[#00a894] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer active:scale-95"
         >
           <Sparkles size={13} />
-          Generate Resume
+          {stats.total === 0 ? 'Continue With Original Resume' : 'Generate Resume'}
         </button>
       </div>
     </div>

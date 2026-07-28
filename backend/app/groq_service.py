@@ -36,7 +36,11 @@ def parse_resume(raw_text: str, api_key: Optional[str] = None) -> ResumeStructur
     structured_llm = llm.with_structured_output(ResumeStructure)
     
     prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an expert ATS-parsing assistant. Analyze the unstructured resume text and extract it into the structured JSON schema format. Capture all experiences, education, skills, projects, and certifications. If a section is missing, fill with default empty values. IMPORTANT: In `experience` and `projects`, `description` MUST be a JSON array of strings (bullet point strings), e.g. [\"bullet point 1\", \"bullet point 2\"]. In `skills_categories`, group all extracted technical skills into distinct logical categories (e.g., 'Languages', 'Frameworks/Libraries', 'Databases', 'Cloud/DevOps', 'CS Fundamentals', 'Data Engineering', etc.) where keys are the category names and values are lists of skills belonging to that category."),
+        ("system", """You are a lossless ATS resume extraction engine. Extract only content explicitly present in the supplied resume.
+Preserve every source record exactly once and preserve its boundaries: never split one record's title, description, metric, link, or annotation into separate list items; never merge neighboring records; never repeat a section; never infer missing content.
+Keep employers, roles, projects, education, dates, metrics, skills, links, certifications, achievements, leadership, volunteering, publications, and custom sections source-faithful. A phrase belonging to a record's description must remain attached to that record.
+For a combined heading such as "Achievements & Certifications", create one structured record per source line and do not promote description fragments into new achievements.
+If a section is absent, use its empty default. In experience and projects, description must be an array containing exactly the source bullet strings. Group only explicitly listed skills into skills_categories."""),
         ("human", "{text}")
     ])
     
@@ -336,7 +340,12 @@ def calculate_resume_job_match_score(resume: ResumeStructure, job: JobAnalysis) 
 
     return max(0, min(100, round((skill_score * 70) + (experience_score * 20) + (structure_score * 10))))
 
-def generate_tailoring_patch(resume: ResumeStructure, job: JobAnalysis, api_key: Optional[str] = None) -> TailoringReport:
+def generate_tailoring_patch(
+    resume: ResumeStructure,
+    job: JobAnalysis,
+    api_key: Optional[str] = None,
+    selected_sections: set[str] | None = None,
+) -> TailoringReport:
     llm = get_llm(api_key, temperature=0.1)
     structured_llm = llm.with_structured_output(ResumePatch)
 
@@ -345,23 +354,69 @@ def generate_tailoring_patch(resume: ResumeStructure, job: JobAnalysis, api_key:
 Analyze the provided user resume and target job description in one single pass and produce an optimal ResumePatch JSON.
 
 Rules:
-1. summary: Naturally weave missing target keywords into the summary. Keep original tone and profession. Do not invent experience.
-2. skills_append: List missing technical skills and keywords from the JD that should be appended to the user's skill list. Never remove existing skills.
+1. summary: When Summary is selected, preserve or minimally improve it. If selected and missing, generate a concise evidence-only summary. Do not invent experience.
+2. skills_append: Always return an empty list. Missing JD keywords are analysis only and must never be added to candidate evidence.
 3. experience: A dict mapping experience item index (as a string "0", "1", ...) to a dict mapping bullet index (as a string "0", "1", ...) to the updated bullet text. Only include bullets that were improved or naturally incorporated keywords.
 4. projects: A dict mapping project item index (as a string "0", "1", ...) to a dict mapping bullet index (as a string "0", "1", ...) to the updated bullet text.
 5. NEVER invent metrics, companies, titles, or dates that do not exist in the resume."""),
-        ("human", "RESUME:\n{resume}\n\nJOB DESCRIPTION:\n{job}")
+        ("human", "SELECTED SECTIONS:\n{selected_sections}\n\nRESUME:\n{resume}\n\nJOB DESCRIPTION:\n{job}")
     ])
 
     try:
         chain = prompt | structured_llm
         patch = chain.invoke({
             "resume": resume.model_dump_json(include={"summary", "skills", "experience", "projects"}),
-            "job": job.model_dump_json(include={"title", "company", "required_skills", "preferred_skills", "qualifications", "responsibilities", "keywords", "ats_keywords"})
+            "job": job.model_dump_json(include={"title", "company", "required_skills", "preferred_skills", "qualifications", "responsibilities", "keywords", "ats_keywords"}),
+            "selected_sections": sorted(selected_sections or []),
         })
     except Exception as err:
         print(f"[GroqService] Single-pass tailoring patch failed: {err}")
         patch = ResumePatch()
+
+    from services.resume.tailoring_engine import StrictTailoringEngine
+    pipeline = StrictTailoringEngine().validate_patch(
+        resume, job, patch, requested_sections=selected_sections
+    )
+    # A selected project section must not silently degrade into an empty
+    # generic response. Retry once with a project-only, one-to-one editing
+    # contract; the same deterministic guardians still own final authority.
+    if (
+        selected_sections is not None
+        and "projects" in selected_sections
+        and resume.projects
+        and not pipeline.patch.projects
+    ):
+        retry_prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are a conservative project-bullet editor.
+Return ResumePatch JSON and edit PROJECTS ONLY.
+
+Requirements:
+- Improve at least one existing project bullet when a truthful wording improvement is possible.
+- Keep every project and bullet at the same index.
+- Make a minimal one-to-one wording edit, not a rewrite.
+- Preserve every technology, named tool, metric, URL, and factual claim exactly.
+- Do not introduce any technology or responsibility absent from the source.
+- summary must be null, skills_append empty, and experience empty.
+- projects must use string item and bullet indexes."""),
+            ("human", "PROJECTS:\n{projects}\n\nTARGET JOB:\n{job}\n\nPREVIOUS VALIDATION:\n{rejections}")
+        ])
+        try:
+            retry_patch = (retry_prompt | structured_llm).invoke({
+                "projects": resume.model_dump_json(include={"projects"}),
+                "job": job.model_dump_json(include={
+                    "title", "required_skills", "preferred_skills",
+                    "responsibilities", "keywords", "ats_keywords",
+                }),
+                "rejections": pipeline.audit_payload().get("rejected_edits", []),
+            })
+            retry_pipeline = StrictTailoringEngine().validate_patch(
+                resume, job, retry_patch, requested_sections={"projects"}
+            )
+            if retry_pipeline.patch.projects or retry_pipeline.rejected_edits:
+                pipeline = retry_pipeline
+        except Exception as err:
+            print(f"[GroqService] Project-only tailoring retry failed: {err}")
+    patch = pipeline.patch
 
     changes_made = []
     if patch.summary and patch.summary != resume.summary:
@@ -388,58 +443,23 @@ Rules:
             pass
 
     ats_score_before = calculate_resume_job_match_score(resume, job)
-    tailored_for_scoring = apply_tailoring_patch(resume, patch)
+    tailored_for_scoring = StrictTailoringEngine().apply_patch(resume, patch)
     ats_score_after = calculate_resume_job_match_score(tailored_for_scoring, job)
 
     return TailoringReport(
         changes_made=changes_made,
         ats_score_before=ats_score_before,
         ats_score_after=ats_score_after,
-        patch=patch
+        patch=patch,
+        tailoring_audit=pipeline.audit_payload(),
     )
 
 
 def apply_tailoring_patch(resume: ResumeStructure, patch: ResumePatch) -> ResumeStructure:
-    # Clone the resume to avoid modifying in-place (backend owns the source of truth)
-    tailored = resume.model_copy(deep=True)
-    
-    # Apply summary
-    if patch.summary:
-        tailored.summary = patch.summary
-        
-    # Apply skills
-    for skill in patch.skills_append:
-        if skill not in tailored.skills:
-            tailored.skills.append(skill)
-            
-    # Apply experience patch
-    for item_idx_str, bullets_patch in patch.experience.items():
-        try:
-            item_idx = int(item_idx_str)
-            if 0 <= item_idx < len(tailored.experience):
-                exp = tailored.experience[item_idx]
-                for bullet_idx_str, new_bullet in bullets_patch.items():
-                    bullet_idx = int(bullet_idx_str)
-                    if 0 <= bullet_idx < len(exp.description):
-                        exp.description[bullet_idx] = new_bullet
-        except ValueError:
-            pass # Ignore invalid keys
-            
-    # Apply projects patch
-    for item_idx_str, bullets_patch in patch.projects.items():
-        try:
-            item_idx = int(item_idx_str)
-            if 0 <= item_idx < len(tailored.projects):
-                proj = tailored.projects[item_idx]
-                for bullet_idx_str, new_bullet in bullets_patch.items():
-                    bullet_idx = int(bullet_idx_str)
-                    if 0 <= bullet_idx < len(proj.description):
-                        proj.description[bullet_idx] = new_bullet
-        except ValueError:
-            pass
-            
-    # Protected fields (Name, Company, Role, Dates, etc) remain entirely untouched
-    return tailored
+    from services.resume.tailoring_engine import StrictTailoringEngine
+    engine = StrictTailoringEngine()
+    validated = engine.validate_patch(resume, JobAnalysis(), patch)
+    return engine.apply_patch(resume, validated.patch)
 
 def generate_cover_letter(resume: ResumeStructure, job: JobAnalysis, api_key: Optional[str] = None) -> CoverLetterResult:
     """Draft a structured cover letter comparing candidate resume to parsed job parameters using Groq."""
@@ -589,7 +609,7 @@ def refine_section_with_ai(
         res = structured_llm.invoke(messages)
         return res.skills
 
-    elif section_type in ("experience", "projects"):
+    elif section_type in ("experience", "projects", "achievements", "education"):
         structured_llm = llm.with_structured_output(RefinedBullets)
         sys_prompt = (
             "You are an expert resume writer. Refine the following list of bullet points for a "
@@ -598,6 +618,8 @@ def refine_section_with_ai(
             "IMPORTANT Rules:\n"
             "1. You must return exactly the same number of bullet points as the input.\n"
             "2. Apply the user's refinement instruction to the bullet points where applicable.\n"
+            "3. Never split, merge, add, or remove records. Preserve every metric and date exactly.\n"
+            "4. For education JSON records, return each record as compact valid JSON with the exact same keys; change wording only when requested.\n"
             "\n"
             f"CONTEXT:\n{context_str}\n"
             f"User Instruction: {prompt}"
@@ -608,6 +630,46 @@ def refine_section_with_ai(
             ("human", f"Bullets to refine:\n{bullets_input}")
         ]
         res = structured_llm.invoke(messages)
+        if section_type == "achievements":
+            refined = list(res.bullets)
+            originals = [str(value) for value in section_data]
+            if len(refined) != len(originals):
+                raise ValueError(
+                    "Achievement editing changed item boundaries; the edit was rejected."
+                )
+            from services.resume.recovery_engine import (
+                ACHIEVEMENT_TITLE_PATTERNS,
+                METRIC_RE,
+            )
+            titles: list[str] = []
+            for original in originals:
+                title = next(
+                    (
+                        match.group(0)
+                        for pattern in ACHIEVEMENT_TITLE_PATTERNS
+                        if (match := pattern.search(original))
+                    ),
+                    re.split(r"\s+(?:—|–|-|:)\s+", original, maxsplit=1)[0].strip(),
+                )
+                titles.append(title)
+            for index, (original, updated) in enumerate(zip(originals, refined)):
+                if titles[index] and titles[index].casefold() not in updated.casefold():
+                    raise ValueError(
+                        "Achievement editing removed a title; the edit was rejected."
+                    )
+                if METRIC_RE.findall(original) != METRIC_RE.findall(updated):
+                    raise ValueError(
+                        "Achievement editing changed a metric; the edit was rejected."
+                    )
+                if any(
+                    other.casefold() in updated.casefold()
+                    for other_index, other in enumerate(titles)
+                    if other_index != index and other
+                ):
+                    raise ValueError(
+                        "Achievement editing merged multiple items; the edit was rejected."
+                    )
+            return refined
         return res.bullets
 
 

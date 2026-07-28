@@ -3,7 +3,7 @@ import { getInitials, resolveCompanyDomain } from './companyLogoUtils';
 
 const loadedFavicons = new Set();
 const failedFavicons = new Set();
-const FAILED_CACHE_KEY = 'tailorflow.failed-company-favicons';
+const FAILED_CACHE_KEY = 'tailr4u.failed-company-favicons';
 
 function readFailedFavicons() {
   if (typeof window === 'undefined') return;

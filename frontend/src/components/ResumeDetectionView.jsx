@@ -133,12 +133,58 @@ export default function ResumeDetectionView({
 
   // Modals & Action States
   const [previewResume, setPreviewResume] = useState(null);
+  const [storedPreviewUrls, setStoredPreviewUrls] = useState({});
+  const [storedPreviewErrors, setStoredPreviewErrors] = useState({});
   const [renamingResume, setRenamingResume] = useState(null);
   const [renameValue, setRenameValue] = useState('');
   const [renamingVersion, setRenamingVersion] = useState(null);
   const [versionRenameValue, setVersionRenameValue] = useState('');
 
   const fileInputRef = useRef(null);
+  const storedPreviewUrlsRef = useRef({});
+  const storedPreviewRequestsRef = useRef(new Map());
+
+  const cacheStoredResumeFile = React.useCallback(async (resume) => {
+    if (!resume?.id || storedPreviewUrlsRef.current[resume.id]) {
+      return storedPreviewUrlsRef.current[resume?.id] || '';
+    }
+    if (storedPreviewRequestsRef.current.has(resume.id)) {
+      return storedPreviewRequestsRef.current.get(resume.id);
+    }
+    const request = (async () => {
+      const token = session?.access_token || localStorage.getItem('access_token');
+      if (!token) throw new Error('Sign in to preview this resume.');
+      const response = await fetch(`${apiUrl}/api/v1/resumes/${resume.id}/file`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) throw new Error('The stored resume could not be loaded.');
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      storedPreviewUrlsRef.current = { ...storedPreviewUrlsRef.current, [resume.id]: url };
+      setStoredPreviewUrls(current => ({ ...current, [resume.id]: url }));
+      return url;
+    })().catch(error => {
+      setStoredPreviewErrors(current => ({ ...current, [resume.id]: error.message }));
+      return '';
+    }).finally(() => {
+      storedPreviewRequestsRef.current.delete(resume.id);
+    });
+    storedPreviewRequestsRef.current.set(resume.id, request);
+    return request;
+  }, [apiUrl, session?.access_token]);
+
+  // Fetch the immutable uploaded files while the user is viewing the table.
+  // Clicking Preview then only reveals an already-created local blob URL.
+  useEffect(() => {
+    (resumesList || []).forEach(resume => {
+      if ((resume.file_type || '').toLowerCase() === 'pdf') cacheStoredResumeFile(resume);
+    });
+  }, [resumesList, cacheStoredResumeFile]);
+
+  useEffect(() => () => {
+    Object.values(storedPreviewUrlsRef.current).forEach(url => URL.revokeObjectURL(url));
+    storedPreviewUrlsRef.current = {};
+  }, []);
 
   // Open Right-Side Version Drawer for a specific resume
   const handleOpenVersionsDrawer = async (resume, initialTab = 'versions') => {
@@ -263,12 +309,11 @@ export default function ResumeDetectionView({
 
   // Handle File Upload
   const handleFileChange = (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setResumeFile(file);
-      if (onUploadResume) {
-        onUploadResume(file);
-      }
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) {
+      if (setResumeFile && files[0]) setResumeFile(files[0]);
+      handleDropFiles(files);
+      if (e.target) e.target.value = '';
     }
   };
 
@@ -342,12 +387,46 @@ export default function ResumeDetectionView({
   };
 
   const [uploadQueue, setUploadQueue] = useState([]);
+  const uploadControllersRef = useRef({});
+  const uploadIntervalsRef = useRef({});
+
+  useEffect(() => {
+    return () => {
+      Object.values(uploadControllersRef.current).forEach(c => c?.abort());
+      Object.values(uploadIntervalsRef.current).forEach(i => clearInterval(i));
+    };
+  }, []);
+
+  const handleCancelUpload = (itemId) => {
+    if (uploadControllersRef.current[itemId]) {
+      uploadControllersRef.current[itemId].abort();
+      delete uploadControllersRef.current[itemId];
+    }
+    if (uploadIntervalsRef.current[itemId]) {
+      clearInterval(uploadIntervalsRef.current[itemId]);
+      delete uploadIntervalsRef.current[itemId];
+    }
+    setUploadQueue(prev => prev.filter(item => item.id !== itemId));
+  };
+
+  const handleCancelAllUploads = () => {
+    Object.keys(uploadControllersRef.current).forEach(id => {
+      uploadControllersRef.current[id]?.abort();
+      delete uploadControllersRef.current[id];
+    });
+    Object.keys(uploadIntervalsRef.current).forEach(id => {
+      clearInterval(uploadIntervalsRef.current[id]);
+      delete uploadIntervalsRef.current[id];
+    });
+    setUploadQueue([]);
+  };
 
   const handleDropFiles = async (files) => {
     if (!files || files.length === 0) return;
     
     const newItems = files.map((file, idx) => ({
-      id: `${file.name}-${Date.now()}-${idx}`,
+      id: `upload-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`,
+      file,
       name: file.name,
       size: file.size,
       progress: 10,
@@ -357,25 +436,59 @@ export default function ResumeDetectionView({
 
     setUploadQueue(prev => [...newItems, ...prev]);
 
-    for (let i = 0; i < files.length; i += 3) {
-      const chunk = files.slice(i, i + 3);
+    for (let i = 0; i < newItems.length; i += 3) {
+      const chunk = newItems.slice(i, i + 3);
       await Promise.all(
-        chunk.map(async (file) => {
-          const queueId = newItems.find(item => item.name === file.name)?.id;
+        chunk.map(async (item) => {
+          const controller = new AbortController();
+          uploadControllersRef.current[item.id] = controller;
+
+          const interval = setInterval(() => {
+            setUploadQueue(prev =>
+              prev.map(q => {
+                if (q.id === item.id && q.status === 'uploading' && q.progress < 90) {
+                  return { ...q, progress: Math.min(q.progress + 15, 90) };
+                }
+                return q;
+              })
+            );
+          }, 300);
+          uploadIntervalsRef.current[item.id] = interval;
+
           try {
             if (onUploadResume) {
-              await onUploadResume(file);
+              const res = await onUploadResume(item.file, { signal: controller.signal });
+              if (res?.cancelled) {
+                clearInterval(interval);
+                delete uploadIntervalsRef.current[item.id];
+                delete uploadControllersRef.current[item.id];
+                setUploadQueue(prev => prev.filter(q => q.id !== item.id));
+                return;
+              }
             }
+
+            clearInterval(interval);
+            delete uploadIntervalsRef.current[item.id];
+            delete uploadControllersRef.current[item.id];
+
             setUploadQueue(prev =>
-              prev.map(item => item.id === queueId ? { ...item, progress: 100, status: 'success' } : item)
+              prev.map(q => q.id === item.id ? { ...q, progress: 100, status: 'success' } : q)
             );
             setTimeout(() => {
-              setUploadQueue(prev => prev.filter(item => item.id !== queueId));
+              setUploadQueue(prev => prev.filter(q => q.id !== item.id));
             }, 1000);
           } catch (err) {
-            setUploadQueue(prev =>
-              prev.map(item => item.id === queueId ? { ...item, status: 'error', error: err.message || 'Upload failed' } : item)
-            );
+            clearInterval(interval);
+            delete uploadIntervalsRef.current[item.id];
+            delete uploadControllersRef.current[item.id];
+
+            if (err.name === 'AbortError' || err.message === 'Canceled') {
+              setUploadQueue(prev => prev.filter(q => q.id !== item.id));
+            } else {
+              setUploadQueue(prev =>
+                prev.map(q => q.id === item.id ? { ...q, status: 'error', error: err.message || 'Upload failed' } : q)
+              );
+            }
           }
         })
       );
@@ -411,6 +524,7 @@ export default function ResumeDetectionView({
               ref={fileInputRef}
               onChange={handleFileChange}
               accept=".pdf,.docx,.doc,.txt"
+              multiple
               className="hidden"
             />
             <div
@@ -437,13 +551,36 @@ export default function ResumeDetectionView({
         {/* UPLOADING STATE QUEUE BARS */}
         {activeUploads.length > 0 && (
           <div className="space-y-2">
+            <div className="flex items-center justify-between px-1">
+              <span className="text-xs font-semibold text-tf-text-secondary flex items-center gap-1.5">
+                <RefreshCw size={13} className="animate-spin text-tf-accent" />
+                Uploading {activeUploads.length} {activeUploads.length === 1 ? 'file' : 'files'}...
+              </span>
+              {activeUploads.length > 1 && (
+                <button
+                  type="button"
+                  onClick={handleCancelAllUploads}
+                  className="text-xs text-tf-danger hover:text-tf-danger/80 font-medium transition-colors flex items-center gap-1 cursor-pointer border-none bg-transparent"
+                >
+                  <X size={13} />
+                  Cancel All
+                </button>
+              )}
+            </div>
+
             {activeUploads.map(item => (
               <div key={item.id} className="bg-tf-surface border border-tf-accent/30 p-3 rounded-lg flex items-center gap-4 shadow-sm">
                 <RefreshCw size={16} className={`animate-spin ${item.status === 'error' ? 'text-tf-danger' : 'text-tf-accent'}`} />
-                <div className="flex-1 space-y-1">
-                  <div className="flex justify-between text-xs font-medium">
-                    <span className="text-tf-text truncate">{item.name}</span>
-                    <span className="text-tf-text-tertiary">{item.status === 'error' ? item.error : `${item.progress}%`}</span>
+                <div className="flex-1 space-y-1 min-w-0">
+                  <div className="flex justify-between text-xs font-medium gap-2">
+                    <span className="text-tf-text truncate font-medium">{item.name}</span>
+                    <span className="text-tf-text-tertiary shrink-0 font-semibold">
+                      {item.status === 'error' ? (
+                        <span className="text-tf-danger font-medium">{item.error}</span>
+                      ) : (
+                        `${item.progress}%`
+                      )}
+                    </span>
                   </div>
                   <div className="w-full h-1.5 bg-tf-surface-2 rounded-full overflow-hidden">
                     <div
@@ -452,6 +589,16 @@ export default function ResumeDetectionView({
                     />
                   </div>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleCancelUpload(item.id)}
+                  className="px-2.5 py-1 text-xs font-medium text-tf-text-secondary hover:text-tf-danger hover:bg-tf-danger/10 border border-tf-border hover:border-tf-danger/30 rounded-lg transition-all flex items-center gap-1 shrink-0 cursor-pointer"
+                  title={item.status === 'error' ? "Dismiss error" : "Cancel upload"}
+                >
+                  <X size={14} />
+                  <span>{item.status === 'error' ? 'Dismiss' : 'Cancel'}</span>
+                </button>
               </div>
             ))}
           </div>
@@ -684,7 +831,10 @@ export default function ResumeDetectionView({
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => setPreviewResume(resume)}
+                              onClick={() => {
+                                setPreviewResume({ ...resume, _storedFilePreview: true });
+                                if (!storedPreviewUrlsRef.current[resume.id]) cacheStoredResumeFile(resume);
+                              }}
                               title="Preview Resume"
                             >
                               <Eye size={13} />
@@ -1162,7 +1312,9 @@ export default function ResumeDetectionView({
               <FileText size={18} className="text-[#00bda5]" />
               <div>
                 <h3 className="text-xs font-black uppercase tracking-wider">{previewResume.file_name}</h3>
-                <span className="text-[10px] text-zinc-500 font-semibold">Resume Composition Preview</span>
+                <span className="text-[10px] text-zinc-500 font-semibold">
+                  {previewResume._storedFilePreview ? 'Original stored resume' : 'Saved version preview'}
+                </span>
               </div>
             </div>
             <button
@@ -1172,13 +1324,33 @@ export default function ResumeDetectionView({
               <X size={18} />
             </button>
           </div>
-          <div className="flex-1 bg-zinc-100 border-x border-b border-zinc-200 rounded-b-2xl overflow-y-auto p-6 flex justify-center items-start">
-            <div className="w-[816px] min-h-[1056px] bg-white shadow-2xl rounded-sm p-8 text-zinc-900">
-              <TailorRender
-                resume={previewResume.parsed_content || previewResume}
-                templateName="ExecutiveATS"
-              />
-            </div>
+          <div className="flex-1 bg-zinc-100 border-x border-b border-zinc-200 rounded-b-2xl overflow-hidden flex justify-center items-stretch">
+            {previewResume._storedFilePreview ? (
+              storedPreviewUrls[previewResume.id] ? (
+                <iframe
+                  src={`${storedPreviewUrls[previewResume.id]}#toolbar=1&navpanes=0&view=FitH`}
+                  title={`Stored resume: ${previewResume.file_name || 'Resume'}`}
+                  className="w-full h-full border-0 bg-white"
+                />
+              ) : storedPreviewErrors[previewResume.id] ? (
+                <div className="m-auto text-sm font-semibold text-rose-600">
+                  {storedPreviewErrors[previewResume.id]}
+                </div>
+              ) : (
+                <div className="m-auto flex items-center gap-2 text-sm font-semibold text-zinc-500">
+                  <RefreshCw size={16} className="animate-spin" /> Opening stored resume…
+                </div>
+              )
+            ) : (
+              <div className="overflow-y-auto p-6 w-full flex justify-center items-start">
+                <div className="w-[816px] min-h-[1056px] bg-white shadow-2xl rounded-sm p-8 text-zinc-900">
+                  <TailorRender
+                    resume={previewResume.parsed_content || previewResume}
+                    templateName="ExecutiveATS"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

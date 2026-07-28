@@ -8,6 +8,7 @@ from repositories.audit_repository import AuditRepository
 from services.ai.llm_service import LLMService
 from core.exceptions import CreditsExhaustedError, RecordNotFoundError
 from schemas.resume import ResumeStructure
+from schemas.jobs import JobAnalysis
 
 class TailoringService:
     def __init__(
@@ -50,12 +51,33 @@ class TailoringService:
         # AI Tailoring Process
         start_time = time.time()
         
-        from app.services.agents import orchestrate_multi_agent_flow
-        agent_res = orchestrate_multi_agent_flow(
-            original_resume=resume_obj,
-            jd_text=job["raw_text"]
+        job_payload = job.get("normalized_content") or job.get("parsed_content")
+        if not isinstance(job_payload, dict):
+            raise ValueError(
+                "The extracted JD JSON is unavailable; tailoring cannot run "
+                "without changing the JD extraction pipeline."
+            )
+        job_obj = JobAnalysis(**job_payload)
+        tailoring_report = self.ai_service.generate_tailoring_patch(resume_obj, job_obj)
+        from services.resume.merge_engine import FinalResumeMergeEngine
+        user_options = patch if isinstance(patch, dict) else {}
+        selected_sections = set(user_options.get("selected_sections") or [])
+        if user_options.get("include_summary"):
+            selected_sections.add("summary")
+        merged_payload, merge_report = FinalResumeMergeEngine().merge(
+            resume_obj,
+            validated_patch=tailoring_report.patch,
+            selected_sections=selected_sections,
+            hidden_sections=set(user_options.get("hidden_sections") or []),
+            generated_summary=user_options.get("generated_summary"),
+            explicit_user_edits=user_options.get("explicit_user_edits") or {},
         )
-        tailored_resume_obj = ResumeStructure(**agent_res["tailored_content"])
+        if not merge_report.valid:
+            raise ValueError(
+                "Resume merge preservation failed; tailoring stopped: "
+                + " ".join(merge_report.violations)
+            )
+        tailored_resume_obj = ResumeStructure(**merged_payload)
         from services.resume.preservation import preserve_resume
         parsed_source = resume.get("parsed_content") or {}
         preservation = preserve_resume(
@@ -78,13 +100,12 @@ class TailoringService:
         tailored_resume_obj = ResumeStructure(**preservation.lossless_resume)
         latency = int((time.time() - start_time) * 1000)
 
-        # Retrieve ATS score from agent feedback evaluations
-        ats_score = float(agent_res["ats_score"])
+        ats_score = float(tailoring_report.ats_score_after)
 
         # Log AI Generation stats
         self.audit_repo.log_ai_generation(
             user_id=user_id,
-            prompt_version="2.0.0",
+            prompt_version="3.0.0-minimal-diff",
             model="llama-3.3-70b-versatile",
             latency_ms=latency,
             input_tokens=1200,
@@ -127,5 +148,17 @@ class TailoringService:
                 }
                 for action in preservation.repair_actions
             ],
+        }
+        tailored_record["tailoring_audit"] = getattr(
+            tailoring_report, "tailoring_audit", {}
+        )
+        tailored_record["merge_preservation_report"] = {
+            "status": merge_report.status,
+            "preservation_score": merge_report.preservation_score,
+            "violations": merge_report.violations,
+            "missing_items": merge_report.missing_items,
+            "merged_items": merge_report.merged_items,
+            "changed_locked_fields": merge_report.changed_locked_fields,
+            "missing_selected_sections": merge_report.missing_selected_sections,
         }
         return tailored_record

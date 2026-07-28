@@ -290,27 +290,7 @@ export default function ResumePreview({
         return;
       }
 
-      // Fallback
-      const res = await fetch(`${apiUrl}/api/download-pdf?company_name=${encodeURIComponent(companyName || 'Company')}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          resume: toRenderableResume(resumeData),
-          original_resume: toRenderableResume(resumeData),
-          template_name: selectedTemplate || 'ExecutiveATS'
-        })
-      });
-
-      if (!res.ok) throw new Error('Failed to generate PDF');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = artifactFilename || `${(resumeData?.personal_info?.name || 'User').replace(/\s+/g, '_')}_${String(companyName || 'Company').replace(/\s+/g, '_')}_Resume.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      throw new Error('The validated preview artifact is not ready yet.');
     } catch (err) {
       console.error(err);
       alert('Failed to download PDF.');
@@ -490,7 +470,7 @@ export default function ResumePreview({
           <button
             className={`${btnClass} text-white bg-[#00bda5] hover:bg-[#00a894] px-4 py-2 font-black shadow-sm disabled:opacity-50`}
             onClick={handleDownload}
-            disabled={isDownloading || loadingPdf}
+            disabled={isDownloading || loadingPdf || !pdfBlob || !renderHash}
           >
             <Download size={15} />
             <span>{isDownloading ? 'Downloading...' : loadingPdf ? 'Optimizing...' : 'Download PDF'}</span>

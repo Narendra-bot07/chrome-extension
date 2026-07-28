@@ -1,6 +1,6 @@
 (() => {
-  if (globalThis.__TAILORFLOW_SNAPSHOT_ENGINE__) return;
-  globalThis.__TAILORFLOW_SNAPSHOT_ENGINE__ = true;
+  if (globalThis.__TAILR4U_SNAPSHOT_ENGINE__) return;
+  globalThis.__TAILR4U_SNAPSHOT_ENGINE__ = true;
 
   const cleanText = (value, limit) => String(value || '')
     .replace(/\u00a0/g, ' ')

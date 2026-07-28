@@ -4,7 +4,7 @@ import { Sparkles, Bot } from 'lucide-react';
 import { LoadingStage } from './LoadingStage';
 
 export function InlineAIThinking({
-  statusText = 'TailorFlow AI is thinking...',
+  statusText = 'tailr4u is thinking...',
   stages = null,
   isStreaming = false,
   streamText = '',

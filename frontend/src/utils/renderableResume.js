@@ -30,7 +30,7 @@ const unique = values => {
 
 const uniqueAchievementEvidence = values => {
   const kept = [];
-  for (const value of [...values].sort((left, right) => right.length - left.length)) {
+  for (const value of values) {
     const key = fingerprint(value);
     if (!kept.some(existing => {
       const existingKey = fingerprint(existing);
@@ -73,10 +73,56 @@ const certificationTitle = item => {
 
 const splitDetailedText = value => {
   const text = cleanText(value);
-  const parts = text.split(/\s+(?:—|–|â€”|â€“|-)\s+/, 2);
+  const parts = text.split(/\s+(?:\u2014|\u2013|â€”|â€“|-)\s+/, 2);
   return parts.length === 2
     ? { title: parts[0], description: parts[1] }
     : { title: text, description: '' };
+};
+
+const sanitizeAchievementEvidence = values => {
+  const texts = values.map(achievementText).filter(Boolean);
+  const split = texts.map(splitDetailedText);
+  const anchors = unique(split.map(part => part.title).filter(title => title.length >= 4));
+  return texts.map((text, index) => {
+    const part = split[index];
+    let hasLeadingSeparator = false;
+    if (text.length > 180) {
+      const separatorPositions = [
+        text.indexOf('\u2014'),
+        text.indexOf('\u2013'),
+        text.indexOf('â€”'),
+        text.indexOf('â€“'),
+        text.indexOf(' - ')
+      ].filter(position => position > 2 && position < 90);
+      if (separatorPositions.length) {
+        hasLeadingSeparator = true;
+        return cleanText(text.slice(0, Math.min(...separatorPositions)));
+      }
+    }
+    const otherAnchors = anchors.filter(anchor => fingerprint(anchor) !== fingerprint(part.title));
+    const searchFrom = hasLeadingSeparator ? Math.min(text.length, part.title.length + 3) : 20;
+    const foreignPositions = otherAnchors
+      .map(anchor => {
+        const match = text.toLowerCase().indexOf(anchor.toLowerCase(), searchFrom);
+        return match;
+      })
+      .filter(position => position > 0);
+    const firstForeign = foreignPositions.length ? Math.min(...foreignPositions) : -1;
+
+    // The bad parser output repeats the complete achievements section after
+    // each title. Keep only the selected item's title instead of displaying
+    // unsupported neighboring evidence.
+    if (part.description && part.description.length > 160) {
+      return part.title;
+    }
+    // A section-wide blob without a separator is usually the first genuine
+    // achievement followed by every subsequent one. Preserve its own leading
+    // evidence and cut at the next independently detected achievement.
+    if (!hasLeadingSeparator && text.length > 180 && firstForeign > 20) {
+      return cleanText(text.slice(0, firstForeign)).replace(/[.;,\s]+$/, '');
+    }
+    return text;
+  });
 };
 
 export function toRenderableResume(record) {
@@ -104,6 +150,30 @@ export function toRenderableResume(record) {
   output.objective = structuredClone(
     source.objective || source.career_objective || ''
   );
+  output.experience = structuredClone(source.experience || source.work_experience || []).map(item => {
+    const normalized = { ...item };
+    const descriptions = normalized.description
+      ?? normalized.responsibilities
+      ?? normalized.bullet_points
+      ?? normalized.bullets
+      ?? [];
+    normalized.description = Array.isArray(descriptions)
+      ? descriptions.map(cleanText).filter(Boolean)
+      : String(descriptions || '').split(/\r?\n/).map(cleanText).filter(Boolean);
+    return normalized;
+  });
+  output.projects = structuredClone(source.projects || source.project_experience || []).map(item => {
+    const normalized = { ...item };
+    const descriptions = normalized.description
+      ?? normalized.responsibilities
+      ?? normalized.bullet_points
+      ?? normalized.bullets
+      ?? [];
+    normalized.description = Array.isArray(descriptions)
+      ? descriptions.map(cleanText).filter(Boolean)
+      : String(descriptions || '').split(/\r?\n/).map(cleanText).filter(Boolean);
+    return normalized;
+  });
 
   const personal = {
     ...(record?.personal_info || {}),
@@ -170,7 +240,9 @@ export function toRenderableResume(record) {
     if (evidence) reclassifiedAchievements.push(evidence);
     return false;
   });
-  output.achievements = uniqueAchievementEvidence([...explicitAchievements, ...reclassifiedAchievements]);
+  output.achievements = uniqueAchievementEvidence(
+    sanitizeAchievementEvidence([...explicitAchievements, ...reclassifiedAchievements])
+  );
 
   const achievementTitles = new Set([
     ...output.achievements.map(value => fingerprint(value.split('—')[0])),
@@ -191,6 +263,20 @@ export function toRenderableResume(record) {
     const normalized = structuredClone(item);
     if (!normalized.name && normalized.title) normalized.name = normalized.title;
     return normalized;
+  });
+
+  // Final source-authoritative override. Earlier compatibility classification
+  // supports legacy imports, but must never alter the two lossless static
+  // sections in the final renderer payload.
+  output.achievements = (source.achievements || [])
+    .map(item => typeof item === 'string' ? item : achievementText(item))
+    .filter(value => cleanText(value));
+  output.certifications = (source.certifications || []).map(item => {
+    if (typeof item !== 'string') return structuredClone(item);
+    const split = splitDetailedText(item);
+    return split.description
+      ? { name: split.title, issuing_organization: split.description }
+      : { name: split.title };
   });
 
   return repairResumeLinks(output);

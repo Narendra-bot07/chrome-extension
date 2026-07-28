@@ -1,6 +1,20 @@
 import { toRenderableResume } from './renderableResume.js';
 
 const clone = value => structuredClone(value);
+const canonical = value => {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .filter(key => value[key] !== undefined && value[key] !== null && value[key] !== '')
+        .sort()
+        .map(key => [key, canonical(value[key])])
+    );
+  }
+  return value;
+};
+const stable = value => JSON.stringify(canonical(value));
+const metricTokens = value => String(value || '').match(/(?:\$\s*)?\d[\d,.]*(?:%|\+|x|k|m|b)?/gi) || [];
 
 export function suggestionToOperation(suggestion) {
   const section = suggestion.sectionType;
@@ -49,10 +63,9 @@ export function mergeReviewResume(originalInput, suggestions = []) {
       continue;
     }
     if (section === 'skills') {
-      const skill = operation.skillName || operation.proposed_text?.replace(/^Add skill:\s*/i, '');
-      if (skill && !working.skills.some(existing => existing.toLowerCase() === skill.toLowerCase())) {
-        working.skills.push(skill);
-      }
+      // Skills are source evidence, not prose. Never add a JD keyword to the
+      // candidate's resume through the tailoring workflow.
+      invalidOperations.push({ change_id: operation.change_id, reason: 'Skills are source-owned and cannot be added by tailoring.' });
       continue;
     }
     if (section === 'experience' || section === 'projects') {
@@ -63,6 +76,28 @@ export function mergeReviewResume(originalInput, suggestions = []) {
         continue;
       }
       bullets[operation.bulletIndex] = operation.proposed_text;
+      continue;
+    }
+    if (section === 'achievements') {
+      if (operation.itemIndex < 0 || operation.itemIndex >= (working.achievements || []).length) {
+        invalidOperations.push({ change_id: operation.change_id, reason: 'Achievement record does not exist.' });
+      } else {
+        working.achievements[operation.itemIndex] = operation.proposed_text;
+      }
+      continue;
+    }
+    if (section === 'education') {
+      if (operation.itemIndex < 0 || operation.itemIndex >= (working.education || []).length) {
+        invalidOperations.push({ change_id: operation.change_id, reason: 'Education record does not exist.' });
+      } else {
+        try {
+          working.education[operation.itemIndex] = typeof operation.proposed_text === 'string'
+            ? JSON.parse(operation.proposed_text)
+            : clone(operation.proposed_text);
+        } catch {
+          invalidOperations.push({ change_id: operation.change_id, reason: 'Education edit returned invalid structured data.' });
+        }
+      }
       continue;
     }
     invalidOperations.push({ change_id: operation.change_id, reason: `Unsupported operation section: ${section}` });
@@ -86,13 +121,46 @@ export function validateWorkingResume(originalInput, workingInput, operations = 
   const originalCounts = sectionCounts(original);
   const workingCounts = sectionCounts(working);
   for (const [section, count] of Object.entries(originalCounts)) {
-    if (workingCounts[section] < count) issues.push(`${section} lost ${count - workingCounts[section]} item(s).`);
+    if (workingCounts[section] !== count) {
+      issues.push(`${section} record count changed from ${count} to ${workingCounts[section]}.`);
+    }
+  }
+  const immutableSections = [
+    'personal_info', 'skills', 'skills_categories',
+    'certifications', 'awards', 'leadership',
+    'volunteer_experience', 'publications', 'languages', 'links',
+    'candidate_links', 'profile_links', 'extracurricular_activities',
+    'custom_sections', 'open_source', 'interests'
+  ];
+  immutableSections.forEach(section => {
+    if (stable(original[section] ?? null) !== stable(working[section] ?? null)) {
+      issues.push(`${section} contains changes outside the allowed prose fields.`);
+    }
+  });
+  for (const section of ['achievements', 'education']) {
+    (original[section] || []).forEach((item, index) => {
+      const next = working[section]?.[index];
+      if (stable(metricTokens(JSON.stringify(item))) !== stable(metricTokens(JSON.stringify(next)))) {
+        issues.push(`${section}.${index} changed factual metrics or dates.`);
+      }
+    });
   }
   for (const section of ['experience', 'projects', 'internships']) {
     (original[section] || []).forEach((item, index) => {
       const before = item.description?.length || 0;
       const after = working[section]?.[index]?.description?.length || 0;
-      if (after < before) issues.push(`${section}.${index} lost ${before - after} bullet(s).`);
+      if (after !== before) issues.push(`${section}.${index} bullet count changed from ${before} to ${after}.`);
+      const sourceIdentity = { ...item, description: undefined };
+      const workingIdentity = { ...(working[section]?.[index] || {}), description: undefined };
+      if (stable(sourceIdentity) !== stable(workingIdentity)) {
+        issues.push(`${section}.${index} identity, dates, links, or metadata changed.`);
+      }
+      (item.description || []).forEach((sourceBullet, bulletIndex) => {
+        const nextBullet = working[section]?.[index]?.description?.[bulletIndex] || '';
+        if (stable(metricTokens(sourceBullet)) !== stable(metricTokens(nextBullet))) {
+          issues.push(`${section}.${index}.description.${bulletIndex} changed factual metrics.`);
+        }
+      });
     });
   }
   if (operations.some(operation => operation.status === 'accepted' && !operation.change_id)) {

@@ -364,7 +364,7 @@ export default function JobPreferencesPage() {
             </div>
             <div>
               <h1 className="text-base font-bold text-tf-text">Live Targeting Summary</h1>
-              <p className="text-xs text-tf-text-secondary">Criteria shaping your TailorFlow recommendations and application materials.</p>
+              <p className="text-xs text-tf-text-secondary">Criteria shaping your tailr4u recommendations and application materials.</p>
             </div>
           </div>
 

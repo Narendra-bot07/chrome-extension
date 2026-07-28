@@ -69,7 +69,7 @@ function Layout() {
   const [profileDropupOpen, setProfileDropupOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [profilePromptDismissed, setProfilePromptDismissed] = useState(
-    () => sessionStorage.getItem('tailorflow.profile-prompt-dismissed') === '1'
+    () => sessionStorage.getItem('tailr4u.profile-prompt-dismissed') === '1'
   );
   const profileMenuRef = useRef(null);
 
@@ -250,7 +250,7 @@ function Layout() {
       case '/support/contact': return 'Contact Support';
       case '/no-job-detected': return 'No Job Detected';
       case '/manual-job-entry': return 'Manual Job Entry';
-      default: return 'TailorFlow';
+      default: return 'tailr4u';
     }
   };
 
@@ -294,7 +294,7 @@ function Layout() {
               <ApplicationLogo size={36} />
               {sidebarOpen && (
                 <span className="text-sm font-semibold tracking-tight text-tf-text truncate">
-                  TailorFlow
+                  tailr4u
                 </span>
               )}
             </Link>
@@ -384,14 +384,14 @@ function Layout() {
               <Menu size={18} />
             </button>
 
-            {/* TailorFlow Brand Logo */}
+            {/* tailr4u Brand Logo */}
             <Link to="/dashboard" className="flex items-center gap-2.5 shrink-0 group">
               <ApplicationLogo
                 size={40}
                 className="transition-transform group-hover:scale-105"
               />
               <span className="text-base font-bold tracking-tight text-tf-text hidden xs:inline">
-                TailorFlow
+                tailr4u
               </span>
             </Link>
           </div>
@@ -622,7 +622,7 @@ function Layout() {
                       Complete Profile
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => {
-                      sessionStorage.setItem('tailorflow.profile-prompt-dismissed', '1');
+                      sessionStorage.setItem('tailr4u.profile-prompt-dismissed', '1');
                       setProfilePromptDismissed(true);
                     }}>
                       Later

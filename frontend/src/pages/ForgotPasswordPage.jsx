@@ -27,7 +27,7 @@ export default function ForgotPasswordPage() {
     }
   };
 
-  return <AuthCard title="Reset your password" subtitle="Enter the email used for your TailorFlow account.">
+  return <AuthCard title="Reset your password" subtitle="Enter the email used for your tailr4u account.">
     <form onSubmit={submit} className="space-y-5">
       <label className="block text-sm font-semibold">Email address
         <input autoFocus required type="email" value={email} onChange={(e) => setEmail(e.target.value)}

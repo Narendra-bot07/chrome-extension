@@ -3,6 +3,7 @@ from fastapi.responses import Response
 from typing import Dict, Any, List
 from datetime import datetime, timezone
 from pathlib import Path
+import copy
 import re
 import hashlib
 from core.security import verify_supabase_jwt
@@ -11,7 +12,11 @@ from api.dependencies import get_resume_repository, get_storage_service
 from repositories.resume_repository import ResumeRepository
 from services.storage.file_service import FileService
 from services.resume.parser import ResumeParser
-from services.resume.source_preservation import restore_source_evidence
+from services.resume.source_preservation import (
+    achievement_certificate_lines,
+    restore_source_evidence,
+)
+from services.resume.recovery_engine import ResumeRecoveryAgent
 from services.ai.groq_service import GroqService
 from app.analytics.events.tracking.analytics_service import AnalyticsService
 from core.database import get_db_connection
@@ -514,11 +519,12 @@ async def parse_existing_resume(
 @router.post("/{resume_id}/recover-source")
 async def recover_resume_source_details(
     resume_id: str,
+    x_groq_key: str = Header(None),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository),
     storage: FileService = Depends(get_storage_service),
 ):
-    """Backfill lossless descriptions and PDF annotation URLs without an LLM."""
+    """Recover a lossless canonical structure from stored source evidence."""
     record = repo.get_by_id(resume_id, user["id"])
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
@@ -533,8 +539,20 @@ async def recover_resume_source_details(
     if record.get("file_path") and str(record.get("file_type") or "").lower() == "pdf":
         source_bytes = storage.download_file("original-resumes", record["file_path"])
         source_links.update(ResumeParser.extract_links_from_pdf(source_bytes))
-    recovered = restore_source_evidence(parsed_content, raw_text, source_links)
-    recovered["source_preservation_version"] = "7.3"
+    recovery = ResumeRecoveryAgent().recover(
+        parsed_content,
+        raw_text,
+        source_metadata={
+            "resume_id": resume_id,
+            "parser_status": record.get("parsing_status"),
+            "file_type": record.get("file_type"),
+        },
+    )
+    # Renderer-compatible fields remain byte-for-byte equivalent to parser
+    # output. Recovered boundaries live in canonical_resume until explicitly
+    # confirmed; low-confidence blocks are never silently substituted.
+    recovered = recovery.recovered_resume
+    recovered["links"] = {**(recovered.get("links") or {}), **source_links}
     if not repo.update_parsed_content(resume_id, user["id"], recovered):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -543,12 +561,13 @@ async def recover_resume_source_details(
     record["parsed_content"] = recovered
     record["parsing_status"] = record.get("parsing_status") or recovered.get("parse_status")
     logger.info(
-        "[RESUME-PRESERVATION] Source recovery completed resume_id=%s links=%s "
-        "achievements=%s certifications=%s",
+        "[RESUME-RECOVERY] completed resume_id=%s links=%s sections=%s "
+        "warnings=%s confidence=%.2f",
         resume_id,
         len(source_links),
-        len(recovered.get("achievements") or []),
-        len(recovered.get("certifications") or []),
+        len(recovery.canonical_resume.get("sections") or []),
+        len(recovery.recovery_warnings),
+        recovery.confidence,
     )
     return record
 

@@ -1,11 +1,12 @@
 import re
 import json
+from difflib import SequenceMatcher
 from typing import Dict, Any, List, Set, Optional
 from schemas.resume import ResumeStructure
 from schemas.jobs import JobAnalysis
 
 class ATSScoringEngine:
-    ENGINE_VERSION = "v1.0.0"
+    ENGINE_VERSION = "v1.1.0"
 
     @classmethod
     def calculate_score(cls, resume: ResumeStructure, job: JobAnalysis) -> Dict[str, Any]:
@@ -217,6 +218,12 @@ class ATSScoringEngine:
             (impact_score * 0.10) +
             (overall_opt_score * 0.10)
         )
+        duplicate_issues = cls._duplicate_content_issues(resume)
+        duplicate_penalty = min(
+            35,
+            sum(10 if issue["kind"] == "exact" else 6 for issue in duplicate_issues),
+        )
+        ats_score -= duplicate_penalty
         ats_score = max(0, min(100, ats_score))
 
         return {
@@ -241,9 +248,56 @@ class ATSScoringEngine:
                     "Readability": round(readability_score),
                     "Measurable Impact": round(impact_score),
                     "Overall Optimization": round(overall_opt_score)
+                    ,"Content Originality": max(0, 100 - duplicate_penalty * 2)
                 }
-            }
+            },
+            "quality_issues": duplicate_issues,
+            "quality_penalty": duplicate_penalty,
         }
+
+    @classmethod
+    def _duplicate_content_issues(cls, resume: ResumeStructure) -> List[Dict[str, Any]]:
+        records: List[tuple[str, str]] = []
+        if resume.summary:
+            records.append(("summary", resume.summary))
+        for section in ("experience", "projects"):
+            for item_index, item in enumerate(getattr(resume, section, []) or []):
+                for bullet_index, bullet in enumerate(item.description or []):
+                    records.append((f"{section}.{item_index}.description.{bullet_index}", bullet))
+        for section in ("achievements", "certifications"):
+            for index, item in enumerate(getattr(resume, section, []) or []):
+                text = item if isinstance(item, str) else " ".join(
+                    str(value) for value in item.model_dump().values() if value
+                )
+                records.append((f"{section}.{index}", text))
+
+        normalized = [
+            (path, re.sub(r"[^a-z0-9]+", " ", str(text).lower()).strip(), str(text).strip())
+            for path, text in records
+            if len(str(text).strip()) >= 24
+        ]
+        issues: List[Dict[str, Any]] = []
+        for left_index, (left_path, left, left_text) in enumerate(normalized):
+            for right_path, right, right_text in normalized[left_index + 1:]:
+                if not left or not right:
+                    continue
+                exact = left == right
+                similarity = SequenceMatcher(None, left, right).ratio()
+                containment = min(len(left), len(right)) >= 35 and (
+                    left in right or right in left
+                )
+                if exact or containment or similarity >= 0.88:
+                    issues.append({
+                        "code": "REPEATED_CONTENT",
+                        "kind": "exact" if exact or containment else "near",
+                        "paths": [left_path, right_path],
+                        "similarity": round(similarity, 2),
+                        "message": (
+                            f"Repeated content detected between {left_path} and {right_path}: "
+                            f"“{left_text[:90]}”"
+                        ),
+                    })
+        return issues[:8]
 
     @classmethod
     def apply_suggestions(cls, resume: ResumeStructure, suggestions: List[Dict[str, Any]], target_statuses: Set[str]) -> ResumeStructure:

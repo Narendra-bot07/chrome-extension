@@ -6,7 +6,7 @@ import { LoadingStage } from './LoadingStage';
 export function PageLoadingState({ 
   type = 'dashboard', 
   stages = null, 
-  statusText = 'Loading TailorFlow AI...',
+  statusText = 'Loading tailr4u...',
   className = '' 
 }) {
   const renderDashboardSkeleton = () => (
