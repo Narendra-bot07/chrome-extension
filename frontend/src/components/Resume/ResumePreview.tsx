@@ -1,10 +1,11 @@
-import React, { useRef, useEffect, useState, useLayoutEffect } from 'react';
+import React, { useRef, useEffect, useState, useLayoutEffect, useMemo } from 'react';
 import {
   Eye, ZoomIn, ZoomOut, Expand, Shrink, Printer, Download,
   Sparkles, RotateCcw, ChevronUp, ChevronDown, FileText, AlertTriangle, RefreshCw
 } from 'lucide-react';
 import { toRenderableResume } from '../../utils/renderableResume';
 import { getTemplateComponent } from '../../templates';
+import { createCompositionPlan } from '../../utils/resumeComposition';
 
 type ZoomMode = 'fit_width' | 'fit_page' | 'actual_size';
 type PagePreference = 'auto' | 'prefer_one_page' | 'prefer_two_pages';
@@ -18,6 +19,13 @@ interface ResumePreviewProps {
   companyName?: string;
   onCompositionChange?: (plan: any) => void;
   interactiveLayoutMode?: boolean;
+  onDownloadArtifact?: (artifact: {
+    blob: Blob;
+    url: string;
+    filename: string;
+    renderHash: string;
+    compositionPlan: any;
+  }) => Promise<unknown>;
 }
 
 export default function ResumePreview({
@@ -28,7 +36,8 @@ export default function ResumePreview({
   resumeVersionId,
   companyName = 'Company',
   onCompositionChange,
-  interactiveLayoutMode = false
+  interactiveLayoutMode = false,
+  onDownloadArtifact
 }: ResumePreviewProps) {
   // 1. Zoom and Viewport States
   const [zoomMode, setZoomMode] = useState<ZoomMode>(() => {
@@ -64,6 +73,10 @@ export default function ResumePreview({
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollWrapperRef = useRef<HTMLDivElement>(null);
   const renderRequestIdRef = useRef(0);
+  const adaptiveComposition = useMemo(
+    () => createCompositionPlan(resumeData, selectedTemplate || 'ExecutiveATS'),
+    [resumeData, selectedTemplate]
+  );
 
   // Touch Pinch-to-Zoom Gesture Handlers
   const touchStartDistRef = useRef<number | null>(null);
@@ -280,6 +293,17 @@ export default function ResumePreview({
         const cleanUser = rawName.replace(/\s+/g, '_');
         const cleanCompany = String(companyName || 'Company').replace(/\s+/g, '_');
         const filename = artifactFilename || `${cleanUser}_${cleanCompany}_Resume.pdf`;
+
+        if (onDownloadArtifact) {
+          await onDownloadArtifact({
+            blob: pdfBlob,
+            url: pdfBlobUrl,
+            filename,
+            renderHash,
+            compositionPlan
+          });
+          return;
+        }
 
         const a = document.createElement('a');
         a.href = pdfBlobUrl;
@@ -530,21 +554,21 @@ export default function ResumePreview({
             className="resume-document-light shadow-2xl bg-white ring-1 ring-zinc-200/70 rounded-sm overflow-hidden text-zinc-900"
             style={{ width: '8.5in', minHeight: pageCount === 2 ? '22.5in' : '11in' }}
           >
-            {interactiveLayoutMode ? (
-              <div className="resume-document-light w-full bg-white">
-                <LiveTemplateComponent
-                  resume={resumeData}
-                  sectionOrder={sectionOrder}
-                  layoutLevel={Number(resumeData?.layout_level ?? 4)}
-                />
-              </div>
-            ) : pdfBlobUrl ? (
+            {pdfBlobUrl ? (
               <iframe
                 src={`${pdfBlobUrl}#toolbar=0&navpanes=0&view=FitH`}
                 title="Final resume PDF preview"
                 className="w-full border-0 bg-white"
                 style={{ height: pageCount === 2 ? '23.38in' : '11.69in' }}
               />
+            ) : interactiveLayoutMode ? (
+              <div className="resume-document-light w-full bg-white">
+                <LiveTemplateComponent
+                  resume={resumeData}
+                  sectionOrder={sectionOrder || adaptiveComposition?.sectionOrder}
+                  layoutLevel={Number(adaptiveComposition?.layoutLevel ?? 6)}
+                />
+              </div>
             ) : null}
           </div>
         </div>

@@ -535,7 +535,7 @@ function ResumeReviewView({
                   e.stopPropagation();
                   onUpdateSuggestionStatus(change.id, 'accepted');
                 }}
-                className="px-2 py-0.5 bg-[#00bda5] hover:bg-[#00a894] disabled:bg-zinc-200 disabled:dark:bg-zinc-800 disabled:text-zinc-400 disabled:dark:text-zinc-600 disabled:cursor-not-allowed text-white rounded font-extrabold text-[9px] transition cursor-pointer border-none"
+                className="resume-review-accept px-2 py-0.5 bg-[#00bda5] hover:bg-[#00a894] disabled:bg-zinc-200 disabled:dark:bg-zinc-800 disabled:text-zinc-400 disabled:dark:text-zinc-600 disabled:cursor-not-allowed text-white rounded font-extrabold text-[9px] transition cursor-pointer border-none"
               >
                 Accept
               </button>
@@ -545,7 +545,7 @@ function ResumeReviewView({
                   e.stopPropagation();
                   onUpdateSuggestionStatus(change.id, 'rejected');
                 }}
-                className="px-2 py-0.5 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 disabled:bg-zinc-100 disabled:dark:bg-zinc-900 disabled:text-zinc-400 disabled:dark:text-zinc-650 disabled:cursor-not-allowed text-zinc-700 dark:text-zinc-300 rounded font-extrabold text-[9px] transition cursor-pointer border-none"
+                className="resume-review-reject px-2 py-0.5 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 disabled:bg-zinc-100 disabled:dark:bg-zinc-900 disabled:text-zinc-400 disabled:dark:text-zinc-650 disabled:cursor-not-allowed text-zinc-700 dark:text-zinc-300 rounded font-extrabold text-[9px] transition cursor-pointer border-none"
               >
                 Reject
               </button>
@@ -616,8 +616,8 @@ function ResumeReviewView({
                   <div>{displayValue(displayRecord)}</div>
                   {recordSuggestion.status === 'pending' && (
                     <div className="flex gap-1">
-                      <button onClick={() => onUpdateSuggestionStatus(recordSuggestion.id, 'accepted')} className="px-2 py-0.5 bg-[#00bda5] text-white rounded text-[9px] font-bold">Accept</button>
-                      <button onClick={() => onUpdateSuggestionStatus(recordSuggestion.id, 'rejected')} className="px-2 py-0.5 bg-zinc-200 rounded text-[9px] font-bold">Reject</button>
+                      <button onClick={() => onUpdateSuggestionStatus(recordSuggestion.id, 'accepted')} className="resume-review-accept px-2 py-0.5 bg-[#00bda5] text-white rounded text-[9px] font-bold">Accept</button>
+                      <button onClick={() => onUpdateSuggestionStatus(recordSuggestion.id, 'rejected')} className="resume-review-reject px-2 py-0.5 bg-zinc-200 rounded text-[9px] font-bold">Reject</button>
                     </div>
                   )}
                 </div>
@@ -863,7 +863,7 @@ function ResumeReviewView({
 
       {/* Main Spacing & LaTeX-Style Resume Paper Container */}
       <div className="flex-1 overflow-y-auto p-4 scrollbar-thin max-h-[500px]">
-        <div className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-zinc-200/80 dark:border-zinc-850 space-y-5 text-zinc-850 dark:text-zinc-200 font-serif leading-relaxed max-w-full relative shadow-xs">
+        <div className="resume-document-light bg-white p-6 rounded-2xl border border-zinc-200/80 space-y-5 text-zinc-850 font-serif leading-relaxed max-w-full relative shadow-xs">
           
           {/* Header Info */}
           <div className="text-center space-y-1.5 pb-4 border-b border-zinc-100 dark:border-zinc-850 font-sans select-none">

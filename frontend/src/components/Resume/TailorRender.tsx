@@ -81,19 +81,24 @@ export interface LayoutParams {
 }
 
 export function getParamsForLevel(level: number): LayoutParams {
-  const t = Math.max(0, Math.min(10, level)) / 10;
+  // Levels 0-10 cover normal compact-to-comfortable resumes. Levels 11-20
+  // are reserved for measured sparse-page expansion in the print renderer.
+  // This changes presentation only; content and page width remain immutable.
+  const safeLevel = Math.max(0, Math.min(20, level));
+  const t = Math.min(1, safeLevel / 10);
+  const sparseT = Math.max(0, safeLevel - 10) / 10;
   return {
-    paddingX: Math.round(32 + (56 - 32) * t),
-    paddingY: Math.round(20 + (50 - 20) * t),
-    // Keep exactly one compact visual line between major sections. Fields and
-    // records inside each section remain tightly packed.
-    sectionGap: Math.round(8 + (10 - 8) * t),
-    itemGap: Math.round(0 + (2 - 0) * t),
-    bulletGap: 0,
-    lineHeight: 1.15 + (1.32 - 1.15) * t,
-    fontSize: 9.0 + (11.5 - 9.0) * t,
-    nameSize: Math.round(20 + (32 - 20) * t),
-    sectionTitleSize: Math.round(11 + (15 - 11) * t)
+    paddingX: Math.round(32 + (60 - 32) * t + 12 * sparseT),
+    paddingY: Math.round(20 + (58 - 20) * t + 20 * sparseT),
+    // Density level expands sparse documents and compacts dense documents.
+    // These bounds remain ATS-safe and never alter or remove resume content.
+    sectionGap: Math.round(7 + (18 - 7) * t + 14 * sparseT),
+    itemGap: Math.round(0 + (5 - 0) * t + 4 * sparseT),
+    bulletGap: Math.round(0 + (3 - 0) * t + 2 * sparseT),
+    lineHeight: 1.12 + (1.42 - 1.12) * t + 0.13 * sparseT,
+    fontSize: 9.0 + (12.5 - 9.0) * t + 0.7 * sparseT,
+    nameSize: Math.round(20 + (34 - 20) * t + 6 * sparseT),
+    sectionTitleSize: Math.round(11 + (16 - 11) * t + 2 * sparseT)
   };
 }
 
@@ -469,6 +474,11 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
             {certificationRecords.map((cert: any) => (
               <div key={cert.id} className="break-inside-avoid" style={{ breakInside: 'avoid-page', fontSize: `${params.fontSize}px`, lineHeight: 1.05, margin: 0, padding: '1px 0' }}>
                 {cert.title && <div className="font-bold text-zinc-950">{cert.title}</div>}
+                {(cert.organization || cert.date) && (
+                  <div className="font-medium text-zinc-700">
+                    {[cert.organization, cert.date].filter(Boolean).join(', ')}
+                  </div>
+                )}
               </div>
             ))}
           </div>

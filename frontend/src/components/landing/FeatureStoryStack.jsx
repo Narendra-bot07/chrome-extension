@@ -192,12 +192,14 @@ export default function FeatureStoryStack() {
   const reduced = useReducedMotion();
   const { scrollYProgress } = useScroll({ target: rootRef, offset: ['start start', 'end end'] });
   const smoothProgress = useSpring(scrollYProgress, { stiffness: 260, damping: 30, mass: .9 });
-  // Hold each completed card briefly before beginning the next lift. This
-  // creates a readable pause without relying on wheel-event interception.
+  // Each chapter owns one third of the scroll runway. Keep its card fixed for
+  // the first 60% of that runway, then use the remaining 40% for the physical
+  // card transition. This makes trackpad scrolling deliberate without
+  // intercepting native wheel/touch events or trapping the page.
   const pacedProgress = useTransform(
     smoothProgress,
-    [0, .18, .26, .42, .50, .66, .74, .90, 1],
-    [0, 0, 1 / 3, 1 / 3, 2 / 3, 2 / 3, 1, 1, 1]
+    [0, .20, 1 / 3, .533333, 2 / 3, .866667, 1],
+    [0, 0, 1 / 3, 1 / 3, 2 / 3, 2 / 3, 1]
   );
 
   useMotionValueEvent(pacedProgress, 'change', value => {

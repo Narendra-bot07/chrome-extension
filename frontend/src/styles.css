@@ -1035,9 +1035,137 @@ html.dark #root .dashboard-kpi-card:hover {
 html.dark #root .resume-document-light,
 html.dark #root .resume-document-light.bg-white,
 html.dark #root .resume-document-light .bg-white {
+  --tf-bg: #ffffff;
+  --tf-surface: #ffffff;
+  --tf-surface-2: #f4f4f5;
+  --tf-border: #e4e4e7;
+  --tf-border-strong: #d4d4d8;
+  --tf-text: #18181b;
+  --tf-text-secondary: #52525b;
+  --tf-text-tertiary: #71717a;
+  --tf-text-disabled: #a1a1aa;
+  --tf-accent: #00bda5;
+  --tf-accent-hover: #00a894;
+  --tf-accent-fg: #ffffff;
   color-scheme: light;
   background-color: #ffffff !important;
   background-image: none !important;
   color: #18181b;
   backdrop-filter: none !important;
+}
+
+/* Neutralize Tailwind dark utilities that belong to the application shell.
+   Review controls retain semantic red/green diff colors, while document copy
+   always uses printable light-theme ink. */
+html.dark #root .resume-document-light [class*="dark:text-white"],
+html.dark #root .resume-document-light [class*="dark:text-zinc-50"] {
+  color: #18181b !important;
+}
+
+html.dark #root .resume-document-light [class*="dark:text-zinc-200"],
+html.dark #root .resume-document-light [class*="dark:text-zinc-300"],
+html.dark #root .resume-document-light [class*="dark:text-zinc-350"] {
+  color: #3f3f46 !important;
+}
+
+html.dark #root .resume-document-light [class*="dark:text-zinc-400"],
+html.dark #root .resume-document-light [class*="dark:text-zinc-450"],
+html.dark #root .resume-document-light [class*="dark:text-zinc-500"] {
+  color: #71717a !important;
+}
+
+html.dark #root .resume-document-light [class*="dark:bg-rose-950"] {
+  background-color: #fff1f2 !important;
+}
+
+html.dark #root .resume-document-light [class*="dark:bg-emerald-950"],
+html.dark #root .resume-document-light [class*="dark:bg-emerald-900"] {
+  background-color: #ecfdf5 !important;
+}
+
+html.dark #root .resume-document-light [class*="dark:text-rose-"] {
+  color: #e11d48 !important;
+}
+
+html.dark #root .resume-document-light [class*="dark:text-emerald-"] {
+  color: #059669 !important;
+}
+
+html.dark #root .resume-document-light button.bg-\[\#00bda5\] {
+  background-color: #00bda5 !important;
+  color: #ffffff !important;
+}
+
+html.dark #root .resume-document-light button.bg-zinc-200,
+html.dark #root .resume-document-light button[class*="dark:bg-zinc-800"] {
+  background-color: #e4e4e7 !important;
+  color: #3f3f46 !important;
+}
+
+/* Review decisions are controls printed over white resume paper. They remain
+   light-theme controls regardless of the surrounding application theme. */
+html.dark #root .resume-document-light .resume-review-accept:not(:disabled) {
+  background: #00bda5 !important;
+  color: #ffffff !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+html.dark #root .resume-document-light .resume-review-accept:not(:disabled):hover {
+  background: #00a894 !important;
+}
+
+html.dark #root .resume-document-light .resume-review-reject:not(:disabled) {
+  background: #e4e4e7 !important;
+  color: #3f3f46 !important;
+  border-color: #d4d4d8 !important;
+  box-shadow: none !important;
+}
+
+html.dark #root .resume-document-light .resume-review-reject:not(:disabled):hover {
+  background: #d4d4d8 !important;
+  color: #18181b !important;
+}
+
+html.dark #root .resume-document-light .resume-review-accept:disabled,
+html.dark #root .resume-document-light .resume-review-reject:disabled {
+  background: #f4f4f5 !important;
+  color: #a1a1aa !important;
+  box-shadow: none !important;
+}
+
+@keyframes tf-loader-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Extraction progress must remain visibly active. This is deliberately scoped
+   so the global reduced-motion and legacy animate-spin rules cannot turn the
+   loader into a static/pulsing ring. */
+.tf-loader-spinner {
+  display: block;
+  transform-origin: 50% 50%;
+  animation: tf-loader-spin 850ms linear infinite !important;
+}
+/* Preserve readable labels in the final resume layout editor when global dark
+   surfaces replace its white utility backgrounds. */
+html.dark #root .resume-editor-contrast {
+  color: #e4e4e7 !important;
+}
+
+html.dark #root .resume-editor-contrast .text-slate-800 {
+  color: #f8fafc !important;
+}
+
+html.dark #root .resume-editor-contrast .text-slate-700 {
+  color: #e2e8f0 !important;
+}
+
+html.dark #root .resume-editor-contrast .text-slate-500 {
+  color: #cbd5e1 !important;
+}
+
+html.dark #root .resume-editor-contrast .text-slate-400,
+html.dark #root .resume-editor-contrast .text-slate-350 {
+  color: #94a3b8 !important;
 }

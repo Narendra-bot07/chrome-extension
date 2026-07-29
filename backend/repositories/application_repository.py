@@ -6,32 +6,40 @@ class ApplicationRepository:
     def __init__(self, conn):
         self.conn = conn
 
-    def create(self, user_id: str, company_name: str, company_domain: Optional[str], job_title: str, location: Optional[str], job_url: Optional[str], resume_version: Optional[str], cover_letter_version: Optional[str], ats_score: Optional[float], resume_match_score: Optional[float], current_stage: str = 'Ready To Apply', timeline: List[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def create(self, user_id: str, company_name: str, company_domain: Optional[str], job_title: str, location: Optional[str], job_url: Optional[str], resume_version: Optional[str], cover_letter_version: Optional[str], ats_score: Optional[float], resume_match_score: Optional[float], job_description: Optional[str] = None, organized_jd: Optional[Dict[str, Any]] = None, current_stage: str = 'Ready To Apply', timeline: List[Dict[str, Any]] = None, notes: Optional[str] = None) -> Dict[str, Any]:
         if timeline is None:
             timeline = []
         
         query = """
-            INSERT INTO public.applications (user_id, company_name, company_domain, job_title, location, job_url, resume_version, cover_letter_version, ats_score, resume_match_score, current_stage, timeline)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO public.applications (user_id, company_name, company_domain, job_title, location, job_url, resume_version, cover_letter_version, ats_score, resume_match_score, job_description, organized_jd, current_stage, timeline, notes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
         """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(query, (
-                user_id,
-                company_name,
-                company_domain,
-                job_title,
-                location,
-                job_url,
-                resume_version,
-                cover_letter_version,
-                ats_score,
-                resume_match_score,
-                current_stage,
-                json.dumps(timeline)
-            ))
-            self.conn.commit()
-            return cur.fetchone() or {}
+            try:
+                cur.execute(query, (
+                    user_id,
+                    company_name,
+                    company_domain,
+                    job_title,
+                    location,
+                    job_url,
+                    resume_version,
+                    cover_letter_version,
+                    ats_score,
+                    resume_match_score,
+                    job_description,
+                    json.dumps(organized_jd or {}),
+                    current_stage,
+                    json.dumps(timeline),
+                    notes
+                ))
+                record = cur.fetchone() or {}
+                self.conn.commit()
+                return record
+            except Exception:
+                self.conn.rollback()
+                raise
 
     def get_by_id(self, app_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         query = "SELECT * FROM public.applications WHERE id = %s AND user_id = %s"

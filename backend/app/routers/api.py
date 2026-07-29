@@ -683,6 +683,14 @@ async def api_render_unified_pdf(request: UnifiedRenderRequest):
         page_mode=request.page_preference,
     )
     renderer_resume = dict(resume_dict)
+    # The composition agent owns presentation density. Legacy persisted
+    # layout levels are ignored unless a user explicitly locks the layout.
+    if not renderer_resume.get("layout_locked"):
+        renderer_resume["layout_level"] = {
+            "Comfortable": 14,
+            "Compact": 6,
+            "Dense": 2,
+        }.get(composition_plan.density.value, 6)
     renderer_resume["_page_preference"] = {
         "prefer_one_page": "one", "one_page": "one", "one": "one",
         "prefer_two_pages": "two", "two_page": "two", "two": "two",

@@ -54,6 +54,7 @@ export default function ResumeEditorView({
   onUploadDifferent,
   loading,
   reorderOnly = false,
+  hidePrimaryAction = false,
   onPreview,
   onUndo,
   onRedo,
@@ -765,7 +766,7 @@ export default function ResumeEditorView({
     );
 
     return (
-      <div className="flex h-full flex-col bg-white text-slate-800">
+      <div className="resume-editor-contrast flex h-full flex-col bg-white text-slate-800">
         <div className="flex-1 overflow-y-auto px-4 pb-24 pt-4 custom-scrollbar">
           <div className="sticky top-0 z-20 mb-4 flex items-center justify-between rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
             <div>
@@ -823,7 +824,7 @@ export default function ResumeEditorView({
           </section>}
         </div>
 
-        <div className="shrink-0 border-t border-slate-200 bg-white p-4 shadow-[0_-4px_10px_rgba(0,0,0,0.02)]">
+        {!hidePrimaryAction && <div className="shrink-0 border-t border-slate-200 bg-white p-4 shadow-[0_-4px_10px_rgba(0,0,0,0.02)]">
           <button
             type="button"
             onClick={onLooksGood}
@@ -833,7 +834,7 @@ export default function ResumeEditorView({
             {loading ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}
             {loading ? 'Composing PDF…' : 'Download Tailored Resume'}
           </button>
-        </div>
+        </div>}
       </div>
     );
   }

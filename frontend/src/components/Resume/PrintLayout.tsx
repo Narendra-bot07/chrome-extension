@@ -13,11 +13,13 @@ export default function PrintLayout() {
   const [originalResumeData, setOriginalResumeData] = useState(null);
   const [activeResumeData, setActiveResumeData] = useState(null);
   const [compressionLevel, setCompressionLevel] = useState(0);
+  const [fitLayoutLevel, setFitLayoutLevel] = useState(6);
   const [fittingComplete, setFittingComplete] = useState(false);
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
   const templateName = searchParams.get('template') || 'ProfessionalATS';
   const containerRef = useRef(null);
+  const blockedExpansionLevelRef = useRef<number | null>(null);
 
   // 1. Ingestion
   useEffect(() => {
@@ -26,6 +28,11 @@ export default function PrintLayout() {
         setOriginalResumeData(window.__INJECTED_RESUME_DATA__);
         setActiveResumeData(window.__INJECTED_RESUME_DATA__);
         setCompressionLevel(0);
+        setFitLayoutLevel(Math.max(
+          0,
+          Math.min(20, Number(window.__INJECTED_RESUME_DATA__?.layout_level ?? 6))
+        ));
+        blockedExpansionLevelRef.current = null;
         setFittingComplete(false);
       }
     };
@@ -70,6 +77,7 @@ export default function PrintLayout() {
       
       const targetWidth = isA4 ? '8.27in' : '8.5in';
       const MAX_HEIGHT = isA4 ? 1115 : 1045; // A4 has 1122px max, Letter has 1056px max at 96 DPI
+      const TARGET_MIN_HEIGHT = MAX_HEIGHT * 0.88;
       
       // Force matching size constraints onto the template container
       el.style.width = targetWidth;
@@ -87,12 +95,21 @@ export default function PrintLayout() {
       const maxCompression = originalResumeData?._page_preference === 'two'
         ? Math.min(1, configuredCompression)
         : configuredCompression;
-      const measuredLayoutLevel = Math.max(
-        0,
-        Number(originalResumeData?.layout_level ?? 6) - compressionLevel * 2
-      );
+      const measuredLayoutLevel = fitLayoutLevel;
 
       if (currentHeight <= MAX_HEIGHT) {
+        // Expand a genuinely under-filled page using presentation-only density
+        // changes. Stop at the last safe level if the next expansion overflows.
+        const nextLevel = fitLayoutLevel + 1;
+        const blockedLevel = blockedExpansionLevelRef.current;
+        if (
+          currentHeight < TARGET_MIN_HEIGHT
+          && fitLayoutLevel < 20
+          && (blockedLevel === null || nextLevel < blockedLevel)
+        ) {
+          setFitLayoutLevel(nextLevel);
+          return;
+        }
         // Fits perfectly!
         const measurement = measureResumeElement(el);
         const finalPlan = buildMeasuredCompositionPlan({
@@ -122,6 +139,11 @@ export default function PrintLayout() {
         }
         setFittingComplete(true);
       } else {
+        if (fitLayoutLevel > 0) {
+          blockedExpansionLevelRef.current = fitLayoutLevel;
+          setFitLayoutLevel(level => Math.max(0, level - 1));
+          return;
+        }
         // Overflowing! Check if we should compress further
         if (compressionLevel < maxCompression) {
           // Try next compression level
@@ -159,7 +181,7 @@ export default function PrintLayout() {
     }, 150); // Small delay to let fonts and DOM settle
 
     return () => clearTimeout(timer);
-  }, [activeResumeData, compressionLevel, fittingComplete, originalResumeData]);
+  }, [activeResumeData, compressionLevel, fitLayoutLevel, fittingComplete, originalResumeData]);
 
   if (!activeResumeData) {
     return <div style={{ padding: '20px' }}>Waiting for data injection...</div>;
@@ -176,10 +198,7 @@ export default function PrintLayout() {
     >
       <TemplateComponent 
         resume={activeResumeData} 
-        layoutLevel={Math.max(
-          0,
-          Number(originalResumeData?.layout_level ?? 6) - compressionLevel * 2
-        )}
+        layoutLevel={fitLayoutLevel}
       />
       {/* Invisible div to signal Playwright that Auto-Fit is done */}
       {fittingComplete && <div

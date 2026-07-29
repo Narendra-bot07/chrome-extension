@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 from datetime import datetime, time, timedelta, timezone
+import logging
 
 from core.security import verify_supabase_jwt
 from api.dependencies import get_application_repository
@@ -37,6 +38,7 @@ def calculate_early_morning_reminder_time(event_date_val: str) -> datetime:
         return now + timedelta(minutes=5)
 
 router = APIRouter(prefix="/applications", tags=["applications"])
+logger = logging.getLogger(__name__)
 
 class ApplicationCreateRequest(BaseModel):
     company_name: str
@@ -48,8 +50,11 @@ class ApplicationCreateRequest(BaseModel):
     cover_letter_version: Optional[str] = None
     ats_score: Optional[float] = None
     resume_match_score: Optional[float] = None
+    job_description: Optional[str] = None
+    organized_jd: Optional[Dict[str, Any]] = None
     current_stage: Optional[str] = "Ready To Apply"
     timeline: Optional[List[Dict[str, Any]]] = None
+    notes: Optional[str] = None
 
 class ApplicationUpdateRequest(BaseModel):
     company_name: Optional[str] = None
@@ -61,6 +66,8 @@ class ApplicationUpdateRequest(BaseModel):
     cover_letter_version: Optional[str] = None
     ats_score: Optional[float] = None
     resume_match_score: Optional[float] = None
+    job_description: Optional[str] = None
+    organized_jd: Optional[Dict[str, Any]] = None
     current_stage: Optional[str] = None
     timeline: Optional[List[Dict[str, Any]]] = None
     notes: Optional[str] = None
@@ -127,26 +134,39 @@ async def create_application(
             cover_letter_version=request.cover_letter_version,
             ats_score=request.ats_score,
             resume_match_score=request.resume_match_score,
+            job_description=request.job_description,
+            organized_jd=request.organized_jd,
             current_stage=request.current_stage or "Ready To Apply",
-            timeline=timeline
+            timeline=timeline,
+            notes=request.notes
         )
         
-        AnalyticsService(conn).emit_event(
-            user_id=user["id"],
-            event_type="APPLICATION_CREATED",
-            resource_type="application",
-            resource_id=record["id"],
-            metadata={
-                "company_name": request.company_name,
-                "job_title": request.job_title,
-                "current_stage": request.current_stage or "Ready To Apply"
-            }
-        )
-        NotificationService(conn).emit(
-            user["id"], "application.created",
-            {"company": request.company_name, "application_id": str(record["id"])},
-            "application", str(record["id"]), f"application_created:{record['id']}"
-        )
+        # Tracker persistence is authoritative. Observability and notification
+        # failures must never turn a committed application into an HTTP 500.
+        try:
+            AnalyticsService(conn).emit_event(
+                user_id=user["id"],
+                event_type="APPLICATION_CREATED",
+                resource_type="application",
+                resource_id=record["id"],
+                metadata={
+                    "company_name": request.company_name,
+                    "job_title": request.job_title,
+                    "current_stage": request.current_stage or "Ready To Apply"
+                }
+            )
+        except Exception:
+            conn.rollback()
+            logger.exception("Application %s saved, but analytics emission failed", record.get("id"))
+        try:
+            NotificationService(conn).emit(
+                user["id"], "application.created",
+                {"company": request.company_name, "application_id": str(record["id"])},
+                "application", str(record["id"]), f"application_created:{record['id']}"
+            )
+        except Exception:
+            conn.rollback()
+            logger.exception("Application %s saved, but notification emission failed", record.get("id"))
         
         return record
     except Exception as e:

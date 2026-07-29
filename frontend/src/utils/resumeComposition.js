@@ -94,15 +94,18 @@ export function createCompositionPlan(input, templateName = 'ExecutiveATS') {
   const sectionOrder = [...new Set([...requested, ...populated])];
   const recommendedLayoutLevel =
     quality.metrics.estimatedPages > 1 ? 3 :
-    quality.metrics.density === 'spacious' ? 8 :
+    quality.metrics.density === 'spacious' ? 10 :
     quality.metrics.density === 'dense' ? 2 : 6;
+  const layoutLevel = resume.layout_locked === true && Number.isFinite(Number(resume.layout_level))
+    ? Math.max(0, Math.min(10, Number(resume.layout_level)))
+    : recommendedLayoutLevel;
   return {
     version: 1,
     templateName,
     sectionOrder,
-    layoutLevel: resume.layout_level ?? recommendedLayoutLevel,
+    layoutLevel,
     estimatedPages: quality.metrics.estimatedPages,
     quality,
-    resume: { ...resume, section_order: sectionOrder, layout_level: resume.layout_level ?? recommendedLayoutLevel }
+    resume: { ...resume, section_order: sectionOrder, layout_level: layoutLevel }
   };
 }

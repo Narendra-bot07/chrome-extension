@@ -10,25 +10,43 @@ from playwright.sync_api import sync_playwright
 
 PDF_RENDERER_URL = (
     os.environ.get("PDF_RENDERER_URL")
-    or os.environ.get("FRONTEND_URL")
     or "http://127.0.0.1:8000/__pdf_renderer/index.html"
 ).rstrip("/")
+
+
+def _renderer_candidates() -> list[str]:
+    """PDF rendering is independent from the public/dev frontend origin."""
+    configured = PDF_RENDERER_URL
+    backend_static = "http://127.0.0.1:8000/__pdf_renderer/index.html"
+    candidates = [configured, backend_static]
+    # Keep the public frontend as a last-resort compatibility path only. A
+    # stopped Vite server must not block the backend-served production build.
+    frontend_url = str(os.environ.get("FRONTEND_URL") or "").rstrip("/")
+    if frontend_url:
+        candidates.append(frontend_url)
+    return list(dict.fromkeys(candidate for candidate in candidates if candidate))
+
+
 def _open_renderer(page, route: str, query: Optional[dict] = None):
     fragment = f"#/{route.lstrip('/')}"
     if query:
         fragment += f"?{urlencode(query)}"
-    separator = "" if PDF_RENDERER_URL.lower().endswith(".html") else "/"
-    url = f"{PDF_RENDERER_URL}{separator}{fragment}"
-    try:
-        response = page.goto(url, wait_until="domcontentloaded", timeout=15000)
-    except Exception as exc:
-        raise RuntimeError(
-            f"PDF renderer is unavailable at {PDF_RENDERER_URL}. "
-            "Restart the backend after building frontend/dist, or set PDF_RENDERER_URL to a reachable frontend origin."
-        ) from exc
-    if response and response.status >= 400:
-        raise RuntimeError(f"PDF renderer returned HTTP {response.status} at {url}")
-    return response
+    failures = []
+    for candidate in _renderer_candidates():
+        separator = "" if candidate.lower().endswith(".html") else "/"
+        url = f"{candidate}{separator}{fragment}"
+        try:
+            response = page.goto(url, wait_until="domcontentloaded", timeout=8000)
+            if response and response.status >= 400:
+                failures.append(f"{url} returned HTTP {response.status}")
+                continue
+            return response
+        except Exception as exc:
+            failures.append(f"{url}: {exc}")
+    raise RuntimeError(
+        "PDF renderer is unavailable. Tried the backend production build and "
+        f"configured frontend origins. {' | '.join(failures)}"
+    )
 
 def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Optional[bytes]:
     """

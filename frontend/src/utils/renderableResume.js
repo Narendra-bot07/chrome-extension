@@ -94,6 +94,32 @@ const cleanCertification = item => {
   );
   if (!cleaned.name && cleaned.title) cleaned.name = cleaned.title;
   delete cleaned.title;
+  // Canonicalize provider/date aliases before the workflow snapshot is saved.
+  // Different parsers use different field names; downstream templates consume
+  // these two stable keys.
+  if (!cleaned.issuing_organization) {
+    cleaned.issuing_organization =
+      cleaned.organization ||
+      cleaned.issuer ||
+      cleaned.provider ||
+      cleaned.authority ||
+      cleaned.institution ||
+      cleaned.metadata?.organization ||
+      cleaned.metadata?.issuer ||
+      '';
+  }
+  if (!cleaned.issue_date) {
+    cleaned.issue_date =
+      cleaned.date ||
+      cleaned.issued_date ||
+      cleaned.date_issued ||
+      cleaned.completion_date ||
+      cleaned.awarded_date ||
+      cleaned.year ||
+      cleaned.metadata?.issue_date ||
+      cleaned.metadata?.date ||
+      '';
+  }
   if (isPlaceholderText(cleaned.name)) cleaned.name = '';
   return cleaned;
 };

@@ -1884,6 +1884,27 @@ export function AppProvider({ children }) {
       const numeric = Number(value);
       return Number.isFinite(numeric) && numeric >= 0 && numeric <= 100 ? numeric : null;
     };
+    const organizedJob = getCanonicalJobAnalysis();
+    const persistedJobDescription = String(
+      jobText
+      || organizedJob?.job_description
+      || organizedJob?.description
+      || organizedJob?.raw_description
+      || ''
+    ).trim() || null;
+    const trackerSnapshot = {
+      company_name: companyName || organizedJob?.company_name || "",
+      company_domain: organizedJob?.company_domain || organizedJob?.analysis?.company_domain || null,
+      job_title: jobTitle || organizedJob?.job_title || organizedJob?.title || "",
+      location: organizedJob?.location || "Remote",
+      job_url: lastAnalyzedUrl || organizedJob?.job_url || "",
+      resume_version: tailoredResume ? "v1 (Tailored)" : null,
+      cover_letter_version: coverLetter ? "v1" : null,
+      ats_score: strictScore(comparison?.ats_score_after ?? comparison?.ats_score_before),
+      resume_match_score: strictScore(comparison?.resume_match_after ?? comparison?.resume_match_before),
+      job_description: persistedJobDescription,
+      organized_jd: organizedJob || {}
+    };
     const freshResponse = await fetch(`${apiUrl}/api/v1/applications/`, {
       headers: { "Authorization": `Bearer ${token}` }
     });
@@ -1911,6 +1932,7 @@ export function AppProvider({ children }) {
           "Authorization": `Bearer ${token}`
         },
         body: JSON.stringify({
+          ...trackerSnapshot,
           current_stage: currentStage,
           notes: notes.trim() || existing.notes || null,
           timeline: updatedTimeline
@@ -1920,18 +1942,11 @@ export function AppProvider({ children }) {
       const updated = await updateResponse.json();
       setActiveApplicationId(existing.id);
       await fetchApplications();
+      setApiError(null);
       return updated;
     }
     const appData = {
-      company_name: companyName || "",
-      company_domain: jobAnalysis?.company_domain || jobAnalysis?.analysis?.company_domain || null,
-      job_title: jobTitle || "",
-      location: jobAnalysis?.location || "Remote",
-      job_url: lastAnalyzedUrl || "",
-      resume_version: tailoredResume ? "v1 (Tailored)" : null,
-      cover_letter_version: coverLetter ? "v1" : null,
-      ats_score: strictScore(comparison?.ats_score_after ?? comparison?.ats_score_before),
-      resume_match_score: strictScore(comparison?.resume_match_after ?? comparison?.resume_match_before),
+      ...trackerSnapshot,
       current_stage: currentStage,
       notes: notes.trim() || null,
       timeline: [{
@@ -1954,6 +1969,7 @@ export function AppProvider({ children }) {
     const created = await response.json();
     setActiveApplicationId(created.id);
     await fetchApplications();
+    setApiError(null);
     return created;
   };
 
@@ -2718,7 +2734,20 @@ export function AppProvider({ children }) {
         link.click();
         document.body.removeChild(link);
       }
-      return true;
+      try {
+        setLoadingMessage("Syncing resume and job details...");
+        return await syncCurrentJobToTracker(
+          "Ready To Apply",
+          "",
+          "Resume Downloaded"
+        );
+      } catch (trackerError) {
+        console.error("Prepared resume downloaded but Job Tracker sync failed:", trackerError);
+        setApiError(
+          "The PDF downloaded, but the dashboard sync did not finish. Retry download to complete this job session."
+        );
+        return false;
+      }
     }
 
     let finalRes = { ...activeRes };
@@ -2857,18 +2886,22 @@ export function AppProvider({ children }) {
 
       try {
         setLoadingMessage("Adding downloaded resume to Job Tracker...");
-        await syncCurrentJobToTracker(
+        const syncedApplication = await syncCurrentJobToTracker(
           "Ready To Apply",
           "",
           "Resume Downloaded"
         );
+        if (!syncedApplication?.id) {
+          throw new Error("Job Tracker did not confirm the synced application.");
+        }
+        return syncedApplication;
       } catch (trackerError) {
         console.error("Resume downloaded but Job Tracker sync failed:", trackerError);
         setApiError(
-          "Your resume downloaded successfully, but it could not be added to Job Tracker. You can retry from the success screen."
+          "The PDF downloaded, but the dashboard sync did not finish. Retry download to complete this job session."
         );
+        return false;
       }
-      return true;
     } catch (e) {
       console.error(e);
       alert("Error generating PDF: " + e.message);

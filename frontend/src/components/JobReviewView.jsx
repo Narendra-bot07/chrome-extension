@@ -175,7 +175,7 @@ function JobReviewView({
     return 'D';
   };
 
-  const openWorkflowRoute = (path) => {
+  const openWorkflowRoute = (path, panelPath = null) => {
     if (isExtension && typeof chrome !== 'undefined' && chrome.storage?.local) {
       const canonicalJD = currentJobAnalysis || jobAnalysis;
       const jdFingerprint = canonicalJD ? fingerprintJD(canonicalJD) : '';
@@ -217,6 +217,9 @@ function JobReviewView({
           openTab();
         }
       });
+      if (panelPath) {
+        navigate(panelPath);
+      }
       return;
     }
 
@@ -224,19 +227,17 @@ function JobReviewView({
   };
 
   const handleResumeTailor = () => {
-    if (!parsedResume) {
-      openWorkflowRoute('/resume-detect');
-    } else {
-      openWorkflowRoute('/tailor-config');
-    }
+    openWorkflowRoute(
+      parsedResume ? '/tailor-config' : '/resume-detect',
+      '/resume-detect'
+    );
   };
 
   const handleCoverLetterGenerate = () => {
-    if (!parsedResume) {
-      openWorkflowRoute('/resume-detect');
-    } else {
-      openWorkflowRoute('/cover-letter');
-    }
+    openWorkflowRoute(
+      parsedResume ? '/cover-letter' : '/resume-detect',
+      '/resume-detect'
+    );
   };
 
   const details = jobAnalysis?.normalized_content || jobAnalysis || {};

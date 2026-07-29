@@ -140,6 +140,27 @@ def project_renderable_resume(record: dict[str, Any]) -> dict[str, Any]:
             normalized = {k: v for k, v in normalized.items() if k not in internal_cert_keys and v not in (None, "")}
             if "description" in normalized and str(normalized["description"]).strip() in ("0", "0.", "1", "1."):
                 del normalized["description"]
+            if not normalized.get("issuing_organization"):
+                normalized["issuing_organization"] = next(
+                    (
+                        normalized.get(key)
+                        for key in ("organization", "issuer", "provider", "authority", "institution")
+                        if normalized.get(key)
+                    ),
+                    "",
+                )
+            if not normalized.get("issue_date"):
+                normalized["issue_date"] = next(
+                    (
+                        normalized.get(key)
+                        for key in (
+                            "date", "issued_date", "date_issued",
+                            "completion_date", "awarded_date", "year",
+                        )
+                        if normalized.get(key)
+                    ),
+                    "",
+                )
         if not normalized.get("name") and normalized.get("title"):
             normalized["name"] = normalized["title"]
         if str(normalized.get("name") or "").strip().lower() in {

@@ -8,6 +8,7 @@ import { useApp } from '../context/AppContext';
 function SuccessView({
   tailoredResume,
   companyName,
+  syncedApplication,
   onDownloadPDF,
   onReset
 }) {
@@ -22,6 +23,7 @@ function SuccessView({
   const [appliedStatus, setAppliedStatus] = useState('Ready To Apply');
   const [quickNotes, setQuickNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [syncError, setSyncError] = useState('');
 
   useEffect(() => {
     const closeOnEscape = event => {
@@ -40,6 +42,7 @@ function SuccessView({
 
   const handleSaveAndConfirm = async () => {
     setSaving(true);
+    setSyncError('');
     try {
       const token = session?.access_token || localStorage.getItem('access_token');
       if (token) {
@@ -51,11 +54,12 @@ function SuccessView({
         // Refresh application state
         await fetchApplications();
       }
+      onReset();
     } catch (e) {
       console.error("Failed to update application tracker status:", e);
+      setSyncError(e.message || "The tracker update failed. Please retry.");
     } finally {
       setSaving(false);
-      onReset(); // Closes modal and navigates to /job-tracker
     }
   };
 
@@ -81,10 +85,15 @@ function SuccessView({
         </div>
         
         <div className="text-center space-y-1 px-4">
-          <h3 className="text-xs font-black uppercase tracking-widest text-zinc-950 dark:text-zinc-50">Export Successful</h3>
+          <h3 className="text-xs font-black uppercase tracking-widest text-zinc-950 dark:text-zinc-50">Dashboard & Job Tracker Synced</h3>
           <p className="text-[10px] text-zinc-550 dark:text-zinc-400 font-bold">
-            LaTeX-style vector PDF downloaded successfully.
+            Your PDF, tailored resume, and organized job description are saved to this application.
           </p>
+          {syncedApplication?.job_title && (
+            <p className="text-[9px] font-extrabold text-[#00a894]">
+              {syncedApplication.job_title} · {syncedApplication.company_name || companyName}
+            </p>
+          )}
         </div>
 
         {/* Premium Details Grid */}
@@ -155,13 +164,18 @@ function SuccessView({
 
       {/* Options CTA */}
       <div className="space-y-2 pt-5 shrink-0">
+        {syncError && (
+          <p role="alert" className="text-[10px] font-bold text-rose-600 text-center">
+            {syncError}
+          </p>
+        )}
         <button 
           type="button"
           onClick={handleSaveAndConfirm}
           disabled={saving}
           className="w-full py-3 bg-[#00bda5] hover:bg-[#00a894] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-1 cursor-pointer border-none shadow-md"
         >
-          {saving ? "Syncing..." : "Save & Sync Job Tracker"}
+          {saving ? "Updating..." : "Update & Open Job Tracker"}
           <ArrowRight size={13} className="ml-1" />
         </button>
         

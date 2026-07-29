@@ -75,6 +75,7 @@ function DownloadPage({ onClose }) {
   } = useApp();
 
   const [downloadSuccess, setDownloadSuccess] = useState(false);
+  const [syncedApplication, setSyncedApplication] = useState(null);
 
   const sourceResume = useMemo(() => {
     try {
@@ -269,8 +270,11 @@ function DownloadPage({ onClose }) {
       alert(`Export blocked until critical resume issues are resolved:\n\n${messages}`);
       return;
     }
-    const downloaded = await handleDownloadFinalPDF(layoutLevel);
-    if (downloaded) setDownloadSuccess(true);
+    const syncResult = await handleDownloadFinalPDF(layoutLevel);
+    if (syncResult?.id) {
+      setSyncedApplication(syncResult);
+      setDownloadSuccess(true);
+    }
   };
 
   if (downloadSuccess) {
@@ -278,10 +282,18 @@ function DownloadPage({ onClose }) {
       <SuccessView
         companyName={companyName}
         tailoredResume={activeResume}
+        syncedApplication={syncedApplication}
         onDownloadPDF={() => handleDownloadFinalPDF(layoutLevel)}
         onReset={() => {
           if (onClose) onClose();
-          navigate('/job-tracker');
+          navigate(
+            syncedApplication?.id
+              ? `/job-tracker?appId=${encodeURIComponent(syncedApplication.id)}`
+              : '/job-tracker',
+            syncedApplication?.id
+              ? { state: { selectedAppId: syncedApplication.id } }
+              : undefined
+          );
         }}
       />
     );
@@ -365,6 +377,7 @@ function DownloadPage({ onClose }) {
             onUploadDifferent={() => navigate('/templates')}
             loading={loading}
             reorderOnly={true}
+            hidePrimaryAction={true}
             onPreview={() => {
               setZoomLevel(1.0);
               setShowZoomModal(true);
@@ -382,6 +395,16 @@ function DownloadPage({ onClose }) {
           resumeVersionId={parsedResume?.id}
           companyName={companyName || 'Company'}
           interactiveLayoutMode={true}
+          onDownloadArtifact={async (artifact) => {
+            const syncResult = await handleDownloadFinalPDF(layoutLevel, {
+              usePrepared: true,
+              preparedArtifact: artifact
+            });
+            if (syncResult?.id) {
+              setSyncedApplication(syncResult);
+              setDownloadSuccess(true);
+            }
+          }}
         />
 
         {/* Compile Loading Glassmorphic Overlay */}

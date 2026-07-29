@@ -20,7 +20,30 @@ export function OverviewTab({ application, onNavigateTab }) {
     'Review next application steps'
   );
 
-  const keySkills = application.key_skills || ['Python', 'Cloud Architecture', 'System Design', 'DevOps', 'Data Analysis'];
+  const organizedJd = application.organized_jd || {};
+  const normalizeSkills = (value) => {
+    if (Array.isArray(value)) {
+      return value
+        .map(skill => typeof skill === 'string' ? skill : skill?.name || skill?.skill)
+        .filter(Boolean);
+    }
+    return typeof value === 'string'
+      ? value.split(/[,;\n]/).map(skill => skill.trim()).filter(Boolean)
+      : [];
+  };
+  const keySkills = [
+    ...normalizeSkills(application.key_skills),
+    ...normalizeSkills(organizedJd.required_skills),
+    ...normalizeSkills(organizedJd.skills),
+    ...normalizeSkills(organizedJd.explicit_skills)
+  ].filter((skill, index, all) => (
+    all.findIndex(candidate => candidate.toLowerCase() === skill.toLowerCase()) === index
+  ));
+  const jobDescription = application.job_description
+    || organizedJd.job_description
+    || organizedJd.description
+    || organizedJd.raw_description
+    || '';
 
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-5xl">
@@ -172,8 +195,19 @@ export function OverviewTab({ application, onNavigateTab }) {
           </div>
         </div>
 
+        {jobDescription && (
+          <div className="pt-2">
+            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block mb-2">
+              Organized Job Description
+            </span>
+            <p className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs leading-relaxed text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
+              {jobDescription}
+            </p>
+          </div>
+        )}
+
         {/* Required Skills */}
-        <div className="pt-2">
+        {keySkills.length > 0 && <div className="pt-2">
           <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block mb-2">
             Key Required Skills
           </span>
@@ -184,7 +218,7 @@ export function OverviewTab({ application, onNavigateTab }) {
               </span>
             ))}
           </div>
-        </div>
+        </div>}
       </section>
 
     </div>

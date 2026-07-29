@@ -16,3 +16,14 @@ test('certification metadata zero is not rendered as description text', () => {
   assert.equal(records[0].organization, '');
   assert.equal(records[0].date, '');
 });
+
+test('renders canonical certification provider and date metadata', () => {
+  const records = normalizeDetailedRecords([{
+    name: 'Oracle Certified Foundations Associate',
+    provider: 'Oracle',
+    completion_date: 'Aug 2025'
+  }], 'certification');
+
+  assert.equal(records[0].organization, 'Oracle');
+  assert.equal(records[0].date, 'Aug 2025');
+});

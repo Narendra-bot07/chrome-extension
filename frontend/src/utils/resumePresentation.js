@@ -48,9 +48,26 @@ export const normalizeDetailedRecords = (items = [], kind = 'achievement') => {
         item?.description || item?.details || item?.summary || item?.evidence
       ),
       organization: cleanOptionalDetail(
-        item?.organization || item?.issuer || item?.issuing_organization
+        item?.issuing_organization ||
+        item?.organization ||
+        item?.issuer ||
+        item?.provider ||
+        item?.authority ||
+        item?.institution ||
+        item?.metadata?.organization ||
+        item?.metadata?.issuer
       ),
-      date: cleanOptionalDetail(item?.date || item?.issue_date),
+      date: cleanOptionalDetail(
+        item?.issue_date ||
+        item?.date ||
+        item?.issued_date ||
+        item?.date_issued ||
+        item?.completion_date ||
+        item?.awarded_date ||
+        item?.year ||
+        item?.metadata?.issue_date ||
+        item?.metadata?.date
+      ),
       metric: cleanOptionalDetail(item?.metric),
       url: cleanOptionalDetail(item?.url || item?.link || item?.credential_url),
       links: Array.isArray(item?.links) ? item.links : []

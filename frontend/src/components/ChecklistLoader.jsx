@@ -10,12 +10,8 @@ function ChecklistLoader({ title, progress, message, checklistItems }) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center space-y-6 py-12 select-none font-sans max-w-sm mx-auto">
       <div className="w-9 h-9 rounded-md bg-tf-surface border border-tf-border shadow-sm flex items-center justify-center">
-        <motion.svg
-          className="h-4 w-4 text-tf-accent shrink-0"
-          animate={reducedMotion ? { opacity: [0.55, 1, 0.55] } : { rotate: 360 }}
-          transition={reducedMotion
-            ? { duration: 1.4, repeat: Infinity, ease: 'easeInOut' }
-            : { duration: 0.9, repeat: Infinity, ease: 'linear' }}
+        <svg
+          className="tf-loader-spinner h-4 w-4 text-tf-accent shrink-0"
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
           viewBox="0 0 24 24"
@@ -23,7 +19,7 @@ function ChecklistLoader({ title, progress, message, checklistItems }) {
         >
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"></circle>
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </motion.svg>
+        </svg>
       </div>
 
       <div className="text-center space-y-1">

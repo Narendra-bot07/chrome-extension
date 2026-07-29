@@ -67,3 +67,25 @@ test('removes standalone certification metadata placeholder records', () => {
     ['Databricks Certified Data Engineer Associate 2026']
   );
 });
+
+test('canonicalizes certification provider and date aliases for later workflow steps', () => {
+  const result = toRenderableResume({
+    personal_info: {},
+    certifications: [
+      { name: 'Oracle Certified Foundations Associate', provider: 'Oracle', completion_date: 'Aug 2025' },
+      { title: 'DevOps Beginners to Advanced with Projects', authority: 'Udemy', year: 'Jan 2025' }
+    ]
+  });
+
+  assert.deepEqual(
+    result.certifications.map(item => ({
+      name: item.name,
+      organization: item.issuing_organization,
+      date: item.issue_date
+    })),
+    [
+      { name: 'Oracle Certified Foundations Associate', organization: 'Oracle', date: 'Aug 2025' },
+      { name: 'DevOps Beginners to Advanced with Projects', organization: 'Udemy', date: 'Jan 2025' }
+    ]
+  );
+});
