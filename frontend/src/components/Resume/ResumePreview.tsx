@@ -19,6 +19,7 @@ interface ResumePreviewProps {
   companyName?: string;
   onCompositionChange?: (plan: any) => void;
   interactiveLayoutMode?: boolean;
+  layoutLevel?: number;
   onDownloadArtifact?: (artifact: {
     blob: Blob;
     url: string;
@@ -37,6 +38,7 @@ export default function ResumePreview({
   companyName = 'Company',
   onCompositionChange,
   interactiveLayoutMode = false,
+  layoutLevel,
   onDownloadArtifact
 }: ResumePreviewProps) {
   // 1. Zoom and Viewport States
@@ -77,6 +79,22 @@ export default function ResumePreview({
     () => createCompositionPlan(resumeData, selectedTemplate || 'ExecutiveATS'),
     [resumeData, selectedTemplate]
   );
+  const exactFinalResume = useMemo(() => {
+    const canonical = toRenderableResume(resumeData);
+    if (!canonical) return null;
+    const resolvedLevel = Number.isFinite(Number(layoutLevel))
+      ? Number(layoutLevel)
+      : Number(adaptiveComposition?.layoutLevel ?? canonical.layout_level ?? 6);
+    return {
+      ...canonical,
+      section_order: sectionOrder || canonical.section_order || adaptiveComposition?.sectionOrder,
+      layout_level: resolvedLevel,
+      // This is a starting density, not a command to freeze a guessed layout.
+      // The print renderer must measure the actual occupied content and may
+      // safely expand/compact presentation without changing resume data.
+      layout_locked: false
+    };
+  }, [resumeData, layoutLevel, sectionOrder, adaptiveComposition?.layoutLevel, adaptiveComposition?.sectionOrder]);
 
   // Touch Pinch-to-Zoom Gesture Handlers
   const touchStartDistRef = useRef<number | null>(null);
@@ -181,7 +199,7 @@ export default function ResumePreview({
     pref: PagePreference = pagePreference,
     signal?: AbortSignal
   ) => {
-    if (!resumeData) return;
+    if (!exactFinalResume) return;
     const requestId = ++renderRequestIdRef.current;
     try {
       setLoadingPdf(true);
@@ -192,8 +210,8 @@ export default function ResumePreview({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          resume: toRenderableResume(resumeData),
-          original_resume: toRenderableResume(resumeData),
+          resume: exactFinalResume,
+          original_resume: exactFinalResume,
           template_name: selectedTemplate || 'ExecutiveATS',
           page_preference: pref,
           company_name: companyName
@@ -263,7 +281,7 @@ export default function ResumePreview({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [resumeData, selectedTemplate, pagePreference, companyName]);
+  }, [exactFinalResume, selectedTemplate, pagePreference, companyName]);
 
   // Scroll Active Page Indicator
   const handleScroll = () => {
@@ -330,6 +348,15 @@ export default function ResumePreview({
   const pillClass = "bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 shadow-sm rounded-xl flex items-center p-1 text-sm text-zinc-700 dark:text-zinc-300 h-10";
   const btnClass = "hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg px-2.5 py-1.5 transition-colors flex items-center gap-1.5 font-medium disabled:opacity-50 text-xs cursor-pointer";
   const LiveTemplateComponent = getTemplateComponent(selectedTemplate);
+  const previewLayoutLevel = Number(
+    compositionPlan?.compactness_level
+      ?? compositionPlan?.layout_level
+      ?? exactFinalResume?.layout_level
+      ?? 6
+  );
+  const previewSectionOrder = compositionPlan?.section_order
+    || exactFinalResume?.section_order
+    || adaptiveComposition?.sectionOrder;
 
   return (
     <div className={containerClasses} ref={containerRef}>
@@ -554,21 +581,21 @@ export default function ResumePreview({
             className="resume-document-light shadow-2xl bg-white ring-1 ring-zinc-200/70 rounded-sm overflow-hidden text-zinc-900"
             style={{ width: '8.5in', minHeight: pageCount === 2 ? '22.5in' : '11in' }}
           >
-            {pdfBlobUrl ? (
+            {interactiveLayoutMode ? (
+              <div className="resume-document-light w-full bg-white">
+                <LiveTemplateComponent
+                  resume={exactFinalResume}
+                  sectionOrder={previewSectionOrder}
+                  layoutLevel={previewLayoutLevel}
+                />
+              </div>
+            ) : pdfBlobUrl ? (
               <iframe
                 src={`${pdfBlobUrl}#toolbar=0&navpanes=0&view=FitH`}
                 title="Final resume PDF preview"
                 className="w-full border-0 bg-white"
                 style={{ height: pageCount === 2 ? '23.38in' : '11.69in' }}
               />
-            ) : interactiveLayoutMode ? (
-              <div className="resume-document-light w-full bg-white">
-                <LiveTemplateComponent
-                  resume={resumeData}
-                  sectionOrder={sectionOrder || adaptiveComposition?.sectionOrder}
-                  layoutLevel={Number(adaptiveComposition?.layoutLevel ?? 6)}
-                />
-              </div>
             ) : null}
           </div>
         </div>

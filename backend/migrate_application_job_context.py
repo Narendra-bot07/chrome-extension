@@ -18,9 +18,15 @@ def main():
                 """
                 ALTER TABLE public.applications
                     ADD COLUMN IF NOT EXISTS company_domain TEXT,
-                    ADD COLUMN IF NOT EXISTS notes TEXT,
-                    ADD COLUMN IF NOT EXISTS job_description TEXT,
-                    ADD COLUMN IF NOT EXISTS organized_jd JSONB NOT NULL DEFAULT '{}'::jsonb
+                ADD COLUMN IF NOT EXISTS notes TEXT,
+                ADD COLUMN IF NOT EXISTS job_description TEXT,
+                ADD COLUMN IF NOT EXISTS organized_jd JSONB NOT NULL DEFAULT '{}'::jsonb,
+                ADD COLUMN IF NOT EXISTS resume_id UUID,
+                ADD COLUMN IF NOT EXISTS resume_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+                ADD COLUMN IF NOT EXISTS cover_letter_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+                ADD COLUMN IF NOT EXISTS resume_status TEXT,
+                ADD COLUMN IF NOT EXISTS cover_letter_status TEXT,
+                ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ
                 """
             )
         conn.commit()

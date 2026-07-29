@@ -52,6 +52,9 @@ class ApplicationCreateRequest(BaseModel):
     resume_match_score: Optional[float] = None
     job_description: Optional[str] = None
     organized_jd: Optional[Dict[str, Any]] = None
+    resume_id: Optional[str] = None
+    resume_snapshot: Optional[Dict[str, Any]] = None
+    cover_letter_snapshot: Optional[Dict[str, Any]] = None
     current_stage: Optional[str] = "Ready To Apply"
     timeline: Optional[List[Dict[str, Any]]] = None
     notes: Optional[str] = None
@@ -68,6 +71,9 @@ class ApplicationUpdateRequest(BaseModel):
     resume_match_score: Optional[float] = None
     job_description: Optional[str] = None
     organized_jd: Optional[Dict[str, Any]] = None
+    resume_id: Optional[str] = None
+    resume_snapshot: Optional[Dict[str, Any]] = None
+    cover_letter_snapshot: Optional[Dict[str, Any]] = None
     current_stage: Optional[str] = None
     timeline: Optional[List[Dict[str, Any]]] = None
     notes: Optional[str] = None
@@ -136,6 +142,9 @@ async def create_application(
             resume_match_score=request.resume_match_score,
             job_description=request.job_description,
             organized_jd=request.organized_jd,
+            resume_id=request.resume_id,
+            resume_snapshot=request.resume_snapshot,
+            cover_letter_snapshot=request.cover_letter_snapshot,
             current_stage=request.current_stage or "Ready To Apply",
             timeline=timeline,
             notes=request.notes

@@ -44,22 +44,18 @@ export default function PrintLayout() {
     return () => window.removeEventListener('resumeDataReady', handleDataReady);
   }, []);
 
-  // 3. Scale HTML root font size dynamically based on compressionLevel
+  // Typography has exactly one owner: TailorRender's layoutLevel. Applying a
+  // second root-font scale here made rem-based labels/dates shrink while
+  // pixel-based body text stayed unchanged, producing an uneven PDF that did
+  // not match the live preview.
   useEffect(() => {
-    // ATS-safe bounded typography. Never shrink the resume into unreadable
-    // 10-12px text merely to force a one-page result.
-    const fontSizes = [16, 15, 14, 13.5];
-    const size = fontSizes[compressionLevel] || 16;
-    
-    // Apply to html and body elements so rem/em units scale down correctly
-    document.documentElement.style.fontSize = `${size}px`;
-    document.body.style.fontSize = `${size}px`;
-    
+    document.documentElement.style.fontSize = '16px';
+    document.body.style.fontSize = '16px';
     return () => {
       document.documentElement.style.fontSize = '';
       document.body.style.fontSize = '';
     };
-  }, [compressionLevel]);
+  }, []);
 
   // 2. Intelligent Auto-Fit Engine
   useEffect(() => {
@@ -76,7 +72,10 @@ export default function PrintLayout() {
       const isA4 = format.toLowerCase() === 'a4';
       
       const targetWidth = isA4 ? '8.27in' : '8.5in';
-      const MAX_HEIGHT = isA4 ? 1115 : 1045; // A4 has 1122px max, Letter has 1056px max at 96 DPI
+      // Keep a small physical-print safety boundary. Chromium rounds fonts and
+      // line boxes differently during PDF pagination; fitting to the exact
+      // paper edge can clip the final education/certification row.
+      const MAX_HEIGHT = isA4 ? 1100 : 1035;
       const TARGET_MIN_HEIGHT = MAX_HEIGHT * 0.88;
       
       // Force matching size constraints onto the template container
@@ -84,7 +83,9 @@ export default function PrintLayout() {
       el.style.minHeight = 'auto';
       el.style.height = 'auto'; // Allow height to grow naturally!
 
-      const currentHeight = el.scrollHeight;
+      const currentMeasurement = measureResumeElement(el);
+      const currentHeight = currentMeasurement.contentHeight;
+      const occupiedHeight = currentMeasurement.occupiedContentHeight || currentHeight;
       const composition = originalResumeData?._composition || {};
       const configuredCompression = Math.min(
         3,
@@ -103,7 +104,7 @@ export default function PrintLayout() {
         const nextLevel = fitLayoutLevel + 1;
         const blockedLevel = blockedExpansionLevelRef.current;
         if (
-          currentHeight < TARGET_MIN_HEIGHT
+          occupiedHeight < TARGET_MIN_HEIGHT
           && fitLayoutLevel < 20
           && (blockedLevel === null || nextLevel < blockedLevel)
         ) {
@@ -111,7 +112,7 @@ export default function PrintLayout() {
           return;
         }
         // Fits perfectly!
-        const measurement = measureResumeElement(el);
+        const measurement = currentMeasurement;
         const finalPlan = buildMeasuredCompositionPlan({
           ...measurement,
           pageSize: isA4 ? A4_PAGE : {

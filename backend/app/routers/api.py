@@ -750,6 +750,8 @@ async def api_render_unified_pdf(request: UnifiedRenderRequest):
         "page_count": page_count,
         "density": plan_meta.get("density", composition_plan.density.value.lower()),
         "density_profile": plan_meta.get("density", composition_plan.density.value.lower()),
+        "layout_level": plan_meta.get("compactness_level", renderer_resume.get("layout_level", 6)),
+        "compactness_level": plan_meta.get("compactness_level", renderer_resume.get("layout_level", 6)),
         "page_size": plan_meta.get("page_size", "A4"),
         "margins": plan_meta.get("margins", composition_plan.spacing_profile),
         "typography": plan_meta.get("typography", {"fontFamily": "font-sans"}),

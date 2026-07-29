@@ -6,7 +6,7 @@ import TailorRender from '../components/Resume/TailorRender';
 import { useNavigate } from 'react-router-dom';
 import { 
   Download, X, Eye, ZoomIn, ZoomOut, Maximize, RotateCcw, 
-  Sparkles, Move, Printer, ChevronLeft, ChevronRight 
+  Move, Printer, ChevronLeft, ChevronRight 
 } from 'lucide-react';
 import { compressResumeData } from '../utils/resumeCompression';
 import { toRenderableResume } from '../utils/renderableResume';
@@ -76,7 +76,6 @@ function DownloadPage({ onClose }) {
 
   const [downloadSuccess, setDownloadSuccess] = useState(false);
   const [syncedApplication, setSyncedApplication] = useState(null);
-
   const sourceResume = useMemo(() => {
     try {
       const raw = workflowResume;
@@ -96,7 +95,9 @@ function DownloadPage({ onClose }) {
     }
   }, [sourceResume, selectedTemplate]);
 
-  const activeResume = composition?.resume || sourceResume || null;
+  // Content is immutable at this stage. Composition may suggest presentation
+  // metadata, but it must never replace the finalized workflow document.
+  const activeResume = sourceResume || null;
 
   // Initialize output file name on mount
   useEffect(() => {
@@ -141,9 +142,15 @@ function DownloadPage({ onClose }) {
     const timer = setTimeout(() => {
       const el = contentRef.current;
       if (!el) return;
-      const height = el.scrollHeight;
-      const MAX_HEIGHT = 1056; // Strict A4 single page height
-      const MIN_HEIGHT = 920;  // 90% space utilization target
+      const rootRect = el.getBoundingClientRect();
+      const descendantBottom = Array.from(el.querySelectorAll('*')).reduce((bottom, node) => {
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || style.visibility === 'hidden') return bottom;
+        return Math.max(bottom, node.getBoundingClientRect().bottom - rootRect.top);
+      }, 0);
+      const height = Math.max(el.scrollHeight, rootRect.height, descendantBottom);
+      const MAX_HEIGHT = 1035; // Letter preview with a safe PDF rounding boundary
+      const MIN_HEIGHT = 900;
 
       console.log(`[Typesetter Solver] level=${layoutLevel}, height=${height}px`);
 
@@ -336,7 +343,6 @@ function DownloadPage({ onClose }) {
   return (
     <div className="p-4 md:p-5 w-full h-[calc(100vh-80px)] flex-1 flex flex-col min-h-0 overflow-hidden select-none">
       <div className="flex-1 flex min-h-0 h-full w-full bg-zinc-950 overflow-hidden relative rounded-2xl border border-zinc-800 shadow-2xl">
-      
       {/* LEFT SIDE: Editor Panel */}
       <div className={`${editorIsSplit ? 'w-[48%] min-w-[500px]' : 'w-[42%] min-w-[380px]'} border-r border-zinc-200 dark:border-zinc-800 flex flex-col h-full bg-white shrink-0 z-10 shadow-lg`}>
         <div className="p-4 bg-white border-b border-zinc-200 shrink-0">
@@ -395,6 +401,7 @@ function DownloadPage({ onClose }) {
           resumeVersionId={parsedResume?.id}
           companyName={companyName || 'Company'}
           interactiveLayoutMode={true}
+          layoutLevel={layoutLevel}
           onDownloadArtifact={async (artifact) => {
             const syncResult = await handleDownloadFinalPDF(layoutLevel, {
               usePrepared: true,

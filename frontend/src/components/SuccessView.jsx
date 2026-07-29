@@ -4,6 +4,7 @@ import {
   PlusCircle, ArrowUpRight, ShieldCheck, ClipboardCheck, ArrowRight, X 
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { useNavigate } from 'react-router-dom';
 
 function SuccessView({
   tailoredResume,
@@ -12,18 +13,26 @@ function SuccessView({
   onDownloadPDF,
   onReset
 }) {
+  const navigate = useNavigate();
   const { 
     isExtension, 
     fetchApplications, 
     session,
     comparison,
-    syncCurrentJobToTracker
+    syncCurrentJobToTracker,
+    handleGenerateCoverLetter,
+    setApiError
   } = useApp();
 
   const [appliedStatus, setAppliedStatus] = useState('Ready To Apply');
   const [quickNotes, setQuickNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [syncError, setSyncError] = useState('');
+  const [startingCoverLetter, setStartingCoverLetter] = useState(false);
+
+  useEffect(() => {
+    setApiError(null);
+  }, [setApiError]);
 
   useEffect(() => {
     const closeOnEscape = event => {
@@ -60,6 +69,52 @@ function SuccessView({
       setSyncError(e.message || "The tracker update failed. Please retry.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleCreateCoverLetter = async () => {
+    if (startingCoverLetter) return;
+    setStartingCoverLetter(true);
+    setSyncError('');
+    try {
+      const application = syncedApplication || {};
+      const persistedResume = application.resume_snapshot && Object.keys(application.resume_snapshot).length
+        ? application.resume_snapshot
+        : {};
+      const resume = {
+        ...(tailoredResume || {}),
+        ...persistedResume,
+        personal_info: {
+          ...(tailoredResume?.personal_info || {}),
+          ...(persistedResume.personal_info || {})
+        }
+      };
+      const persistedJob = application.organized_jd && Object.keys(application.organized_jd).length
+        ? application.organized_jd
+        : application.resume_snapshot?._job_context?.organized_jd;
+      const job = persistedJob ? {
+        ...persistedJob,
+        job_title: persistedJob.job_title || persistedJob.title || application.job_title,
+        title: persistedJob.title || persistedJob.job_title || application.job_title,
+        company_name: persistedJob.company_name || persistedJob.company || application.company_name,
+        company: persistedJob.company || persistedJob.company_name || application.company_name,
+        location: persistedJob.location || application.location,
+        job_url: persistedJob.job_url || application.job_url
+      } : null;
+      if (!resume || !job) {
+        throw new Error('The saved resume and organized job description could not be restored.');
+      }
+      sessionStorage.setItem('tailr4u_auto_generate_cover_letter', '1');
+      const context = await handleGenerateCoverLetter({}, [], {
+        applicationId: application.id,
+        resume,
+        job
+      });
+      if (!context) throw new Error('Cover letter context could not be prepared.');
+    } catch (error) {
+      sessionStorage.removeItem('tailr4u_auto_generate_cover_letter');
+      setSyncError(error.message || 'Unable to start the cover letter.');
+      setStartingCoverLetter(false);
     }
   };
 
@@ -169,6 +224,16 @@ function SuccessView({
             {syncError}
           </p>
         )}
+        <button
+          type="button"
+          onClick={handleCreateCoverLetter}
+          disabled={saving || startingCoverLetter}
+          className="w-full py-3 bg-[#f97316] hover:bg-[#ea580c] disabled:opacity-60 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 cursor-pointer border-none shadow-md"
+        >
+          <PlusCircle size={14} />
+          {startingCoverLetter ? 'Preparing Cover Letter…' : 'Create Cover Letter'}
+        </button>
+
         <button 
           type="button"
           onClick={handleSaveAndConfirm}

@@ -269,6 +269,7 @@ export default function CoverLetterPage() {
     handleGenerateCoverLetter,
     handleBuildCoverLetterStrategy,
     handleGenerateFirstCoverLetterDraft,
+    cancelCoverLetterGeneration,
     handleEditCoverLetter,
     handleUndoCoverLetterEdit,
     handleRestoreCoverLetterEdit
@@ -302,6 +303,20 @@ export default function CoverLetterPage() {
   const [showReviewModal, setShowReviewModal] = useState(false);
 
   const previewWrapperRef = useRef(null);
+  const autoGenerationStartedRef = useRef(false);
+
+  useEffect(() => {
+    if (
+      !generatedCoverLetter
+      && coverLetterContext?.ready_for_generation
+      && sessionStorage.getItem('tailr4u_auto_generate_cover_letter') === '1'
+      && !autoGenerationStartedRef.current
+    ) {
+      autoGenerationStartedRef.current = true;
+      sessionStorage.removeItem('tailr4u_auto_generate_cover_letter');
+      handleGenerateFirstCoverLetterDraft?.();
+    }
+  }, [coverLetterContext, generatedCoverLetter, handleGenerateFirstCoverLetterDraft]);
 
   // Derived settings payload for backend Playwright rendering
   const currentSettings = useMemo(() => {
@@ -451,6 +466,12 @@ export default function CoverLetterPage() {
               <div className="h-full bg-[#00bda5] transition-all duration-300" style={{ width: `${loadingProgress || 35}%` }} />
             </div>
             <span className="text-[10px] text-zinc-400 font-bold block">{loadingProgress || 35}% complete</span>
+            <button
+              onClick={cancelCoverLetterGeneration}
+              className="mt-2 px-4 py-2 rounded-xl border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 text-[10px] font-black uppercase tracking-wider cursor-pointer"
+            >
+              Cancel Generation
+            </button>
           </div>
         ) : (
           <button
@@ -467,7 +488,7 @@ export default function CoverLetterPage() {
   const activeContent = generatedCoverLetter.content || coverLetter || {};
 
   return (
-    <div className="flex-1 flex min-h-[750px] h-[calc(100vh-140px)] w-full bg-zinc-900 overflow-hidden relative rounded-2xl border border-zinc-800 shadow-2xl">
+    <div className="flex-1 flex min-h-0 h-full w-full bg-zinc-900 overflow-hidden relative rounded-2xl border border-zinc-800 shadow-2xl">
       
       {/* LEFT PANEL (38% WIDTH): STRUCTURE, TEMPLATES, CONTROLS & AI CHAT */}
       <div className="w-[38%] min-w-[420px] max-w-[500px] border-r border-zinc-200 bg-white flex flex-col h-full shrink-0 z-10 shadow-lg">
@@ -482,12 +503,21 @@ export default function CoverLetterPage() {
             <p className="text-[10px] text-zinc-500 font-semibold mt-0.5">Customize template & edit with AI</p>
           </div>
 
-          <button
-            onClick={() => navigate('/templates')}
-            className="flex items-center gap-1 px-2.5 py-1.5 bg-white border border-zinc-300 text-zinc-700 font-extrabold text-[10px] uppercase tracking-wider rounded-lg hover:bg-zinc-100 transition cursor-pointer"
-          >
-            <ArrowLeft size={12} /> Back
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate('/tailor-config')}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#f97316] hover:bg-[#ea580c] text-white text-[9px] font-black uppercase tracking-wider shadow-sm cursor-pointer"
+            >
+              <Sparkles size={12} />
+              Generate Resume
+            </button>
+            <button
+              onClick={() => navigate('/templates')}
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-white border border-zinc-300 text-zinc-700 font-extrabold text-[10px] uppercase tracking-wider rounded-lg hover:bg-zinc-100 transition cursor-pointer"
+            >
+              <ArrowLeft size={12} /> Back
+            </button>
+          </div>
         </div>
 
         {/* Scrollable Controls & AI Editor Area */}
@@ -859,12 +889,16 @@ export default function CoverLetterPage() {
           
           {/* Exact PDF Canvas Document (LIVE PREVIEW = DOWNLOADED PDF) */}
           <div
-            className="origin-top transition-transform duration-200 ease-out shadow-2xl bg-white rounded-sm relative overflow-hidden"
+            className="relative shrink-0"
+            style={{ width: `${816 * zoom}px`, height: `${1056 * zoom}px` }}
+          >
+          <div
+            className="absolute left-0 top-0 origin-top-left transition-transform duration-200 ease-out shadow-2xl bg-white rounded-sm overflow-hidden"
             style={{
               width: '816px',
               height: '1056px',
               transform: `scale(${zoom})`,
-              transformOrigin: 'top center'
+              transformOrigin: 'top left'
             }}
           >
             {isRenderingPdf && (
@@ -881,6 +915,7 @@ export default function CoverLetterPage() {
               settings={currentSettings}
               className="shadow-none border-none"
             />
+          </div>
           </div>
 
         </div>

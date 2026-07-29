@@ -514,6 +514,7 @@ export function AppProvider({ children }) {
   const extractionInFlightRef = useRef(false);
   const activeRequestIdRef = useRef(null);
   const extractionAbortControllerRef = useRef(null);
+  const coverLetterAbortControllerRef = useRef(null);
   const lastSyncedResumeSignatureRef = useRef('');
   const logExtraction = (event, meta = {}) => {
     console.info(`[JD-EXTRACTION][FRONTEND] ${event}`, meta);
@@ -1892,6 +1893,13 @@ export function AppProvider({ children }) {
       || organizedJob?.raw_description
       || ''
     ).trim() || null;
+    const storedResumeSnapshot = toRenderableResume(tailoredResume || parsedResume) || {};
+    storedResumeSnapshot._job_context = {
+      job_description: persistedJobDescription,
+      organized_jd: organizedJob || {},
+      job_url: lastAnalyzedUrl || organizedJob?.job_url || "",
+      stored_at: new Date().toISOString()
+    };
     const trackerSnapshot = {
       company_name: companyName || organizedJob?.company_name || "",
       company_domain: organizedJob?.company_domain || organizedJob?.analysis?.company_domain || null,
@@ -1903,7 +1911,10 @@ export function AppProvider({ children }) {
       ats_score: strictScore(comparison?.ats_score_after ?? comparison?.ats_score_before),
       resume_match_score: strictScore(comparison?.resume_match_after ?? comparison?.resume_match_before),
       job_description: persistedJobDescription,
-      organized_jd: organizedJob || {}
+      organized_jd: organizedJob || {},
+      resume_id: parsedResume?.id || parsedResume?.resume_id || null,
+      resume_snapshot: storedResumeSnapshot,
+      cover_letter_snapshot: generatedCoverLetter || coverLetter || {}
     };
     const freshResponse = await fetch(`${apiUrl}/api/v1/applications/`, {
       headers: { "Authorization": `Bearer ${token}` }
@@ -3033,6 +3044,9 @@ export function AppProvider({ children }) {
   };
 
   const handleGenerateFirstCoverLetterDraft = async (answers = {}, skipped = []) => {
+    coverLetterAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    coverLetterAbortControllerRef.current = abortController;
     setLoading(true);
     setLoadingMessage("Preparing cover letter context & strategy...");
     setLoadingProgress(15);
@@ -3049,6 +3063,7 @@ export function AppProvider({ children }) {
         const ctxRes = await fetch(`${apiUrl}/api/cover-letter/context`, {
           method: "POST",
           headers,
+          signal: abortController.signal,
           body: JSON.stringify({
             resume: toRenderableResume(parsedResume),
             jd: getCanonicalJobAnalysis() || {},
@@ -3075,6 +3090,7 @@ export function AppProvider({ children }) {
         const stratRes = await fetch(`${apiUrl}/api/cover-letter/strategy`, {
           method: "POST",
           headers,
+          signal: abortController.signal,
           body: JSON.stringify({
             context: currentCtx,
             session_id: currentCtx.scope_fingerprint || 'session'
@@ -3097,6 +3113,7 @@ export function AppProvider({ children }) {
       const response = await fetch(`${apiUrl}/api/cover-letter/generate`, {
         method: "POST",
         headers,
+        signal: abortController.signal,
         body: JSON.stringify({
           context: currentCtx,
           strategy: currentStrat
@@ -3111,6 +3128,7 @@ export function AppProvider({ children }) {
         throw new Error(errDetail);
       }
       const generated = await response.json();
+      let finalGenerated = generated;
       setGeneratedCoverLetter(generated);
       setCoverLetterReview(null);
       setCoverLetterEditHistory([]);
@@ -3121,6 +3139,7 @@ export function AppProvider({ children }) {
       const reviewResponse = await fetch(`${apiUrl}/api/cover-letter/review`, {
         method: "POST",
         headers,
+        signal: abortController.signal,
         body: JSON.stringify({
           context: currentCtx,
           strategy: currentStrat,
@@ -3132,12 +3151,47 @@ export function AppProvider({ children }) {
       if (reviewResponse.ok) {
         const review = await reviewResponse.json();
         setCoverLetterReview(review);
-        setGeneratedCoverLetter(review.final_cover_letter || generated);
+        finalGenerated = review.final_cover_letter || generated;
+        setGeneratedCoverLetter(finalGenerated);
+      }
+
+      // The cover letter belongs to the same application snapshot as the
+      // resume and organized JD. Persist it immediately so leaving this page
+      // never breaks the end-to-end document story.
+      if (activeApplicationId) {
+        const token = session?.access_token || localStorage.getItem('access_token');
+        if (token) {
+          const persisted = await fetch(`${apiUrl}/api/v1/applications/${activeApplicationId}`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              cover_letter_version: "v1",
+              cover_letter_status: "ready",
+              cover_letter_snapshot: finalGenerated
+            }),
+            signal: abortController.signal
+          });
+          if (!persisted.ok) {
+            const failure = await persisted.json().catch(() => ({}));
+            throw new Error(
+              failure.detail
+              || "The cover letter was generated but could not be saved to the tracked application."
+            );
+          }
+          await fetchApplications();
+        }
       }
 
       setLoadingProgress(100);
       return true;
     } catch (error) {
+      if (error?.name === 'AbortError') {
+        setLoadingMessage("Cover letter generation cancelled.");
+        return false;
+      }
       console.error("Cover letter generation pipeline error:", error);
       const detailMsg = typeof error?.message === 'string'
         ? error.message
@@ -3145,8 +3199,19 @@ export function AppProvider({ children }) {
       alert(detailMsg);
       return false;
     } finally {
+      if (coverLetterAbortControllerRef.current === abortController) {
+        coverLetterAbortControllerRef.current = null;
+      }
       setLoading(false);
     }
+  };
+
+  const cancelCoverLetterGeneration = () => {
+    coverLetterAbortControllerRef.current?.abort();
+    coverLetterAbortControllerRef.current = null;
+    setLoading(false);
+    setLoadingProgress(0);
+    setLoadingMessage("Cover letter generation cancelled.");
   };
 
   const handleEditCoverLetter = async (userPrompt) => {
@@ -3240,7 +3305,7 @@ export function AppProvider({ children }) {
     }
   };
 
-  const handleGenerateCoverLetter = async (contextAnswers = {}, skippedQuestions = []) => {
+  const handleGenerateCoverLetter = async (contextAnswers = {}, skippedQuestions = [], workflowSource = null) => {
     // React passes the SyntheticEvent when this handler is used directly as
     // onClick. Never treat that DOM-backed event as serializable user answers.
     if (
@@ -3253,16 +3318,21 @@ export function AppProvider({ children }) {
       contextAnswers = {};
     }
     if (!Array.isArray(skippedQuestions)) skippedQuestions = [];
-    if (!parsedResume) {
+    const sourceResume = workflowSource?.resume || parsedResume;
+    const sourceJob = workflowSource?.job || getCanonicalJobAnalysis();
+    if (!sourceResume) {
       alert("Please select or upload a resume before drafting a cover letter.");
       return;
     }
-    if (!jobAnalysis) {
+    if (!sourceJob) {
       alert("Please analyze a job description first.");
       return;
     }
 
     setLoading(true);
+    coverLetterAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    coverLetterAbortControllerRef.current = abortController;
     setLoadingProgress(10);
     setLoadingMessage("Building cover letter context...");
 
@@ -3270,11 +3340,11 @@ export function AppProvider({ children }) {
       setLoadingProgress((prev) => (prev >= 90 ? 90 : prev + 15));
     }, 200);
 
-    let activeParsed = parsedResume;
+    let activeParsed = sourceResume;
 
     try {
       // Lazy parse if resume experience is empty and raw_text is present
-      if (parsedResume.id && (!parsedResume.experience || parsedResume.experience.length === 0) && parsedResume.raw_text) {
+      if (activeParsed.id && (!activeParsed.experience || activeParsed.experience.length === 0) && activeParsed.raw_text) {
         setLoadingMessage("Parsing Resume with AI for Cover Letter...");
         setLoadingProgress(15);
 
@@ -3283,7 +3353,7 @@ export function AppProvider({ children }) {
         if (token) parseHeaders["Authorization"] = `Bearer ${token}`;
         if (apiKey) parseHeaders["x-groq-key"] = apiKey;
 
-        const parseRes = await fetch(`${apiUrl}/api/v1/resumes/${parsedResume.id}/parse`, {
+        const parseRes = await fetch(`${apiUrl}/api/v1/resumes/${activeParsed.id}/parse`, {
           method: "POST",
           headers: parseHeaders
         });
@@ -3317,6 +3387,7 @@ export function AppProvider({ children }) {
 
       const response = await fetch(`${apiUrl}/api/cover-letter/context`, {
         method: "POST",
+        signal: abortController.signal,
         headers: {
           "Content-Type": "application/json",
           ...headers
@@ -3324,10 +3395,10 @@ export function AppProvider({ children }) {
         body: JSON.stringify({
           resume: toRenderableResume(activeParsed),
           resume_intelligence: activeParsed.resume_intelligence || null,
-          jd: getCanonicalJobAnalysis(),
-          jd_intelligence: getCanonicalJobAnalysis()?.jd_intelligence || null,
+          jd: sourceJob,
+          jd_intelligence: sourceJob?.jd_intelligence || null,
           resume_id: activeParsed.id || null,
-          jd_id: jobAnalysis.id || jobAnalysis.jd_id || null,
+          jd_id: sourceJob.id || sourceJob.jd_id || null,
           user_answers: contextAnswers,
           skipped_questions: skippedQuestions
         })
@@ -3338,6 +3409,15 @@ export function AppProvider({ children }) {
       }
 
       const contextResult = await response.json();
+      coverLetterScopeRef.current = [
+        activeParsed?.resume_version_id || activeParsed?.version_id || activeParsed?.id || '',
+        sourceJob?.id || sourceJob?.jd_id || '',
+        sourceJob?.title || sourceJob?.job_title || '',
+        sourceJob?.company || sourceJob?.company_name || ''
+      ].join('|');
+      setParsedResume(activeParsed);
+      setJobAnalysis(sourceJob);
+      if (workflowSource?.applicationId) setActiveApplicationId(workflowSource.applicationId);
       setCoverLetter(null);
       setCoverLetterContext(contextResult);
       setCoverLetterStrategy(null);
@@ -3394,8 +3474,13 @@ export function AppProvider({ children }) {
     } catch (error) {
       clearInterval(clInterval);
       setLoading(false);
+      if (error?.name === 'AbortError') return null;
       console.error(error);
       alert("Error: " + error.message);
+    } finally {
+      if (coverLetterAbortControllerRef.current === abortController) {
+        coverLetterAbortControllerRef.current = null;
+      }
     }
   };
 
@@ -3511,6 +3596,7 @@ export function AppProvider({ children }) {
       handleGenerateCoverLetter,
       handleBuildCoverLetterStrategy,
       handleGenerateFirstCoverLetterDraft,
+      cancelCoverLetterGeneration,
       handleEditCoverLetter,
       handleUndoCoverLetterEdit,
       handleRestoreCoverLetterEdit,

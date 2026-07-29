@@ -10,21 +10,49 @@ import { CoverLetterRender } from '../CoverLetterRender';
 
 export function DocumentsTab({ application, onUpdateDocumentStatus }) {
   const navigate = useNavigate();
-  const { tailoredResume, coverLetter, parsedResume } = useApp();
+  const {
+    tailoredResume,
+    coverLetter,
+    parsedResume,
+    handleGenerateCoverLetter
+  } = useApp();
 
   const [previewModalType, setPreviewModalType] = useState(null); // null | 'resume' | 'coverletter'
 
   if (!application) return null;
 
   const resumeReady = application.resume_status === 'ready' || Boolean(application.resume_version) || Boolean(tailoredResume);
-  const coverLetterReady = application.cover_letter_status === 'ready' || Boolean(application.cover_letter_version) || Boolean(coverLetter);
+  const coverLetterReady = application.cover_letter_status === 'ready'
+    || Boolean(application.cover_letter_version)
+    || Boolean(application.cover_letter_snapshot && Object.keys(application.cover_letter_snapshot).length)
+    || Boolean(coverLetter);
   const isStale = application.resume_status === 'stale' || application.cover_letter_status === 'stale';
 
-  const handleOpenStudio = (docType) => {
+  const handleOpenStudio = async (docType) => {
     if (docType === 'resume') {
       navigate('/resume-review');
     } else {
-      navigate('/cover-letter');
+      const storedJob = application.organized_jd && Object.keys(application.organized_jd).length
+        ? application.organized_jd
+        : application.job_description
+          ? {
+              job_description: application.job_description,
+              description: application.job_description,
+              job_title: application.job_title,
+              company_name: application.company_name,
+              location: application.location,
+              job_url: application.job_url
+            }
+          : null;
+      const storedResume = application.resume_snapshot && Object.keys(application.resume_snapshot).length
+        ? application.resume_snapshot
+        : tailoredResume || parsedResume;
+
+      await handleGenerateCoverLetter({}, [], {
+        applicationId: application.id,
+        resume: storedResume,
+        job: storedJob
+      });
     }
   };
 
@@ -52,7 +80,7 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
     recipient: { name: 'Hiring Manager' }
   };
 
-  const activeCoverLetterText = coverLetter || application.cover_letter_content || (
+  const activeCoverLetterText = coverLetter || application.cover_letter_snapshot || application.cover_letter_content || (
     `Dear Hiring Manager,\n\nI am writing to express my strong interest in the ${application.job_title || 'Target Role'} position at ${application.company_name || 'Company'}. With my background in technology and proven track record, I am confident I can make an immediate contribution to your team.\n\nThank you for considering my application.\n\nSincerely,\nCandidate Name`
   );
 
@@ -131,14 +159,6 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
             >
               <Eye size={14} />
               Preview Document
-            </button>
-            <button
-              onClick={() => handleOpenStudio('resume')}
-              className="px-3 py-2 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 font-bold text-xs rounded-xl flex items-center gap-1 transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700 shadow-xs"
-              title="Open Resume Studio"
-            >
-              <Edit3 size={14} />
-              Studio
             </button>
             <button
               onClick={() => navigate('/download')}

@@ -100,6 +100,15 @@ export async function waitForRenderableFonts(doc = globalThis.document) {
 export function measureResumeElement(element) {
   if (!element) throw new Error('A rendered resume element is required.');
   const rootRect = element.getBoundingClientRect();
+  // scrollHeight can under-report descendants that participate in fragmented
+  // print layout (and positioned/flex children). Measure the lowest visible
+  // descendant as well so the final section can never be clipped at page end.
+  const visualBottom = Array.from(element.querySelectorAll('*')).reduce((bottom, node) => {
+    const style = getComputedStyle(node);
+    if (style.display === 'none' || style.visibility === 'hidden') return bottom;
+    const rect = node.getBoundingClientRect();
+    return Math.max(bottom, rect.bottom - rootRect.top);
+  }, 0);
   const sectionMeasurements = Array.from(element.querySelectorAll('[data-section]')).map(section => {
     const rect = section.getBoundingClientRect();
     return {
@@ -109,18 +118,36 @@ export function measureResumeElement(element) {
       bottom: rect.bottom - rootRect.top
     };
   });
+  const meaningfulNodes = Array.from(element.querySelectorAll('*')).filter(node => {
+    const style = getComputedStyle(node);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    return node.hasAttribute('data-section')
+      || node.hasAttribute('data-contact-links')
+      || node.children.length === 0;
+  });
+  const occupiedContentHeight = meaningfulNodes.reduce((bottom, node) => {
+    const rect = node.getBoundingClientRect();
+    return Math.max(bottom, rect.bottom - rootRect.top);
+  }, 0);
   return {
-    contentHeight: Math.max(element.scrollHeight, rootRect.height),
+    contentHeight: Math.max(element.scrollHeight, rootRect.height, visualBottom),
+    // Unlike contentHeight, this excludes full-page background/min-height
+    // wrappers. It represents the actual lowest text/content boundary and is
+    // the correct signal for deciding whether a sparse page should expand.
+    occupiedContentHeight,
     contentWidth: Math.max(element.scrollWidth, rootRect.width),
     sectionMeasurements,
     hasHorizontalOverflow: element.scrollWidth > element.clientWidth + 1,
-    hasClipping: element.scrollHeight > element.clientHeight + 1
-      && getComputedStyle(element).overflowY === 'hidden'
+    hasClipping: (
+      element.scrollHeight > element.clientHeight + 1
+      || visualBottom > element.clientHeight + 1
+    ) && getComputedStyle(element).overflowY === 'hidden'
   };
 }
 
 export function buildMeasuredCompositionPlan({
   contentHeight,
+  occupiedContentHeight,
   contentWidth = A4_PAGE.widthPx,
   sectionMeasurements = [],
   layoutLevel = 6,
@@ -131,7 +158,10 @@ export function buildMeasuredCompositionPlan({
   optimizationActions = []
 }) {
   const safeHeight = Math.max(1, finite(pageSize.heightPx));
-  const measuredHeight = Math.max(0, finite(contentHeight));
+  const measuredHeight = Math.max(
+    0,
+    finite(occupiedContentHeight) || finite(contentHeight)
+  );
   const sections = sectionMeasurements
     .map(section => ({
       id: String(section.id || ''),
