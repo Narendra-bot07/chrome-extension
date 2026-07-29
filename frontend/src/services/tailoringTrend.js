@@ -1,5 +1,5 @@
 export const formatTailoringCount = count => (
-  `${count} ${count === 1 ? 'resume' : 'resumes'} tailored`
+  `${count} ${count === 1 ? 'JD' : 'JDs'} extracted`
 );
 
 export const mapTailoringSeries = series => (

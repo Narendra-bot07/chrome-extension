@@ -26,6 +26,7 @@ import NoJobDetectedPage from './pages/NoJobDetectedPage';
 import ManualJobEntryPage from './pages/ManualJobEntryPage';
 import SubscriptionPage from './pages/SubscriptionPage';
 import JobPreferencesPage from './pages/JobPreferencesPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import EmailSentPage from './pages/EmailSentPage';
@@ -138,9 +139,9 @@ function AppRoutes() {
         <Route path="/" element={null} />
         <Route path="/login" element={null} />
         <Route path="/register" element={null} />
-        <Route path="/forgot-password" element={null} />
         <Route path="/email-sent" element={null} />
       </Route>
+      <Route path="/forgot-password" element={<MotionPage><ForgotPasswordPage /></MotionPage>} />
       <Route path="/reset-password" element={<MotionPage><ResetPasswordPage /></MotionPage>} />
       <Route path="/verify-email" element={<MotionPage><VerifyEmailPage /></MotionPage>} />
       <Route path="/extension-setup" element={<MotionPage><ExtensionSetupPage /></MotionPage>} />

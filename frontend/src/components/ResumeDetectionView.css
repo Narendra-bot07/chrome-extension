@@ -69,6 +69,28 @@
 .dark .resume-manager-table tbody tr,.dark .resume-version-card{background:#142238!important}
 .dark .resume-manager-table tbody tr:hover,.dark .resume-manager-table tbody tr[class*="border-l-tf-accent"]{background:#192f4e!important}
 .dark .resume-manager-table thead tr{background:#192a42!important}
+.dark .resume-manager-table thead tr,.dark .resume-manager-table thead th{color:#9fb0c7!important}
+.dark .resume-manager-table tbody td{color:#b7c4d6}
+.dark .resume-manager-table tbody [class*="text-tf-text"]{color:#eef4ff!important}
+.dark .resume-manager-table tbody [class*="text-tf-text-secondary"]{color:#b5c3d6!important}
+.dark .resume-manager-table tbody [class*="text-tf-text-tertiary"]{color:#91a2ba!important}
+.dark .resume-manager-table span[class*="bg-tf-surface-2"]{
+  background:#101d2f!important;
+  border-color:#31445e!important;
+  color:#c7d3e3!important
+}
+.dark .resume-manager-table button[class*="bg-tf-accent-secondary"]{
+  background:rgba(249,115,22,.12)!important;
+  border-color:rgba(249,115,22,.38)!important;
+  color:#fb923c!important
+}
+.dark .resume-manager-table button[class*="bg-tf-accent-secondary"]:hover{background:rgba(249,115,22,.2)!important}
+.dark .resume-manager-table button[title]{color:#9fb1c8!important}
+.dark .resume-manager-table button[title]:hover{color:#fff!important;background:#203550!important}
+.dark .resume-manager-toolbar input{color:#eef4ff!important}
+.dark .resume-manager-toolbar input::placeholder{color:#71839c!important}
+.dark .resume-manager-toolbar button{color:#b8c6d8}
+.dark .resume-manager-toolbar button[class*="bg-tf-surface-2"]{background:#20334d!important;color:#fff!important}
 .dark .resume-version-drawer,.dark .resume-version-drawer__body{background:#0d1726!important}
 .dark .resume-version-drawer__header{background:linear-gradient(120deg,#142238,#172b47 68%,#3b281f)!important}
 .dark .resume-version-drawer__tabs{background:#142238!important}

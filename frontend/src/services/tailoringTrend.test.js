@@ -25,8 +25,8 @@ test('range total is the sum of daily buckets', () => {
 });
 
 test('tooltip count uses correct singular and plural wording', () => {
-  assert.equal(formatTailoringCount(1), '1 resume tailored');
-  assert.equal(formatTailoringCount(2), '2 resumes tailored');
+  assert.equal(formatTailoringCount(1), '1 JD extracted');
+  assert.equal(formatTailoringCount(2), '2 JDs extracted');
 });
 
 test('preserves zero-filled 7-day and 30-day backend series lengths', () => {

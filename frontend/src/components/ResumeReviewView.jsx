@@ -704,33 +704,22 @@ function ResumeReviewView({
     ['Links', 'links']
   ];
 
-  // Real-time score semantics:
-  // original = baseline score before tailoring
-  // current = dynamically scales in parallel as suggestions are accepted
-  // estimated/potential = target score calculated for the full tailored patch
-  const totalEdits = suggestions.length;
+  // These are three independently evaluated snapshots. Never interpolate or
+  // force an increase: doing so invents a score the backend did not calculate.
   const acceptedCount = suggestions.filter(s => s.status === 'accepted').length;
-  const acceptedRatio = totalEdits > 0 ? acceptedCount / totalEdits : 0;
+  const acceptedRatio = suggestions.length > 0 ? acceptedCount / suggestions.length : 0;
 
   const originalResumeMatch = liveATS?.original_resume_match ?? comparison?.resume_match_before ?? 0;
-  const estimatedResumeMatch = liveATS?.estimated_resume_match ?? comparison?.resume_match_after ?? originalResumeMatch;
+  const estimatedResumeMatch = liveATS?.estimated_resume_match ?? originalResumeMatch;
   const scoredCurrentResumeMatch = liveATS?.current_resume_match ?? originalResumeMatch;
-  const progressiveResumeMatch = Math.round(
-    originalResumeMatch + (estimatedResumeMatch - originalResumeMatch) * acceptedRatio
-  );
   const currentResumeMatch = acceptedCount > 0
-    ? Math.max(originalResumeMatch, scoredCurrentResumeMatch, progressiveResumeMatch)
+    ? scoredCurrentResumeMatch
     : originalResumeMatch;
 
   const originalATS = liveATS?.original_ats ?? comparison?.ats_score_before ?? 0;
-  const estimatedATS = liveATS?.estimated_ats ?? comparison?.ats_score_after ?? originalATS;
+  const estimatedATS = liveATS?.estimated_ats ?? originalATS;
   const scoredCurrentATS = liveATS?.current_ats ?? originalATS;
-  const progressiveATS = Math.round(
-    originalATS + (estimatedATS - originalATS) * acceptedRatio
-  );
-  const currentATS = acceptedCount > 0
-    ? Math.max(originalATS, scoredCurrentATS, progressiveATS)
-    : originalATS;
+  const currentATS = acceptedCount > 0 ? scoredCurrentATS : originalATS;
 
   const breakdownBefore = liveATS?.breakdown_before ?? comparison?.breakdown_before ?? {
     resume_match: {
@@ -1132,7 +1121,9 @@ function ResumeReviewView({
             <h2 className="text-xs font-black uppercase tracking-wider">ATS Intelligence</h2>
           </div>
           <p className="text-[10px] text-zinc-400 dark:text-zinc-500 font-bold">
-            Real-time deterministic analysis calculated by backend
+            {liveATS?.scoring_source === 'llm'
+              ? 'Live LLM analysis grounded in resume evidence'
+              : 'Waiting for live LLM analysis…'}
           </p>
         </div>
 

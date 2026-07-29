@@ -502,17 +502,20 @@ class LiveScoreRequest(BaseModel):
     suggestions: List[Dict[str, Any]]
 
 @router.post("/ats/live-score")
-async def api_ats_live_score(request: LiveScoreRequest, user: Dict[str, Any] = Depends(verify_supabase_jwt)):
+async def api_ats_live_score(
+    request: LiveScoreRequest,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    x_groq_key: Optional[str] = Header(None),
+):
+    from fastapi.concurrency import run_in_threadpool
+    from services.resume.llm_scoring import calculate_llm_live_scores
+    from services.resume.scoring import ATSScoringEngine
+    import logging
+
     try:
-        from services.resume.scoring import ATSScoringEngine
         resume = ResumeStructure(**normalize_resume_payload(request.resume))
         job = JobAnalysis(**normalize_job_payload(request.job))
 
-        # Original score (base score)
-        res_before = ATSScoringEngine.calculate_score(resume, job)
-
-        # Prefer the exact canonical working resumes constructed by the review
-        # merge engine. Falling back keeps older extension builds compatible.
         current_resume = (
             ResumeStructure(**normalize_resume_payload(request.current_resume))
             if request.current_resume
@@ -520,10 +523,6 @@ async def api_ats_live_score(request: LiveScoreRequest, user: Dict[str, Any] = D
                 resume, request.suggestions, {"accepted"}
             )
         )
-        res_current = ATSScoringEngine.calculate_score(current_resume, job)
-
-        # Potential means every non-rejected suggestion applied, independently
-        # from the user's current individual acceptance decisions.
         estimated_resume = (
             ResumeStructure(**normalize_resume_payload(request.estimated_resume))
             if request.estimated_resume
@@ -531,29 +530,83 @@ async def api_ats_live_score(request: LiveScoreRequest, user: Dict[str, Any] = D
                 resume, request.suggestions, {"accepted", "pending"}
             )
         )
-        res_estimated = ATSScoringEngine.calculate_score(estimated_resume, job)
+    except Exception as e:
+        logging.error(f"Error normalizing live score payload: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid payload: {e}")
+
+    try:
+        scores = await run_in_threadpool(
+            calculate_llm_live_scores,
+            resume.model_dump(mode="json"),
+            current_resume.model_dump(mode="json"),
+            estimated_resume.model_dump(mode="json"),
+            job.model_dump(mode="json"),
+            x_groq_key,
+        )
+        original = scores.original
+        current = scores.current
+        estimated = scores.potential
+
+        def breakdown(score):
+            return {
+                "resume_match": {
+                    "score": score.resume_match_score,
+                    "role_alignment": score.role_alignment,
+                    "required_skills_coverage": score.required_skills_coverage,
+                    "experience_relevance": score.experience_relevance,
+                },
+                "ats_optimization": {
+                    "score": score.ats_score,
+                    "evidence_quality": score.evidence_quality,
+                },
+            }
 
         return {
-            "original_resume_match": res_before["resume_match_score"],
-            "current_resume_match": res_current["resume_match_score"],
-            "estimated_resume_match": res_estimated["resume_match_score"],
-            
-            "original_ats": res_before["ats_score"],
-            "current_ats": res_current["ats_score"],
-            "estimated_ats": res_estimated["ats_score"],
-            
-            "breakdown_before": res_before["breakdown"],
-            "breakdown_current": res_current["breakdown"],
-            "breakdown_estimated": res_estimated["breakdown"]
-            ,"quality_issues_before": res_before.get("quality_issues", [])
-            ,"quality_issues_current": res_current.get("quality_issues", [])
-            ,"quality_issues_estimated": res_estimated.get("quality_issues", [])
-            ,"quality_penalty_current": res_current.get("quality_penalty", 0)
+            "scoring_source": "llm",
+            "original_resume_match": original.resume_match_score,
+            "current_resume_match": current.resume_match_score,
+            "estimated_resume_match": estimated.resume_match_score,
+            "original_ats": original.ats_score,
+            "current_ats": current.ats_score,
+            "estimated_ats": estimated.ats_score,
+            "breakdown_before": breakdown(original),
+            "breakdown_current": breakdown(current),
+            "breakdown_estimated": breakdown(estimated),
+            "quality_issues_before": original.missing_required_skills + original.unsupported_claims,
+            "quality_issues_current": current.missing_required_skills + current.unsupported_claims,
+            "quality_issues_estimated": estimated.missing_required_skills + estimated.unsupported_claims,
+            "explanations": {
+                "original": original.explanation,
+                "current": current.explanation,
+                "potential": estimated.explanation,
+            },
         }
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to calculate live scores: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to calculate live scores: {str(e)}")
+        logging.warning(f"LLM live scoring failed (e.g. rate limit 429), falling back to deterministic scoring: {e}")
+        orig_res = ATSScoringEngine.calculate_score(resume, job)
+        curr_res = ATSScoringEngine.calculate_score(current_resume, job)
+        est_res = ATSScoringEngine.calculate_score(estimated_resume, job)
+
+        return {
+            "scoring_source": "deterministic",
+            "original_resume_match": orig_res["resume_match_score"],
+            "current_resume_match": curr_res["resume_match_score"],
+            "estimated_resume_match": est_res["resume_match_score"],
+            "original_ats": orig_res["ats_score"],
+            "current_ats": curr_res["ats_score"],
+            "estimated_ats": est_res["ats_score"],
+            "breakdown_before": orig_res["breakdown"],
+            "breakdown_current": curr_res["breakdown"],
+            "breakdown_estimated": est_res["breakdown"],
+            "quality_issues_before": orig_res.get("quality_issues", []),
+            "quality_issues_current": curr_res.get("quality_issues", []),
+            "quality_issues_estimated": est_res.get("quality_issues", []),
+            "explanations": {
+                "original": "Deterministic rule-based match score.",
+                "current": "Deterministic rule-based match score with accepted edits.",
+                "potential": "Deterministic rule-based match score with all proposed edits.",
+            },
+        }
 
 @router.post("/tailor", response_model=ResumeStructure)
 async def api_tailor(request: TailorRequest):

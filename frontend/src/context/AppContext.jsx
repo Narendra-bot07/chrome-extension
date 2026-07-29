@@ -370,7 +370,8 @@ export function AppProvider({ children }) {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(token ? { "Authorization": `Bearer ${token}` } : {})
+            ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+            ...(apiKey ? { "x-groq-key": apiKey } : {})
           },
           body: requestKey,
           signal: controller.signal
@@ -1487,6 +1488,47 @@ export function AppProvider({ children }) {
     return true;
   };
 
+  const scoreJobBeforeReveal = async (job) => {
+    if (!parsedResume || !job) return null;
+    setLoadingMessage("Calculating resume match with AI...");
+    setLoadingProgress(previous => Math.max(previous, 92));
+    const token = session?.access_token || localStorage.getItem('access_token');
+    const headers = {
+      "Content-Type": "application/json",
+      ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+      ...(apiKey ? { "x-groq-key": apiKey } : {})
+    };
+    const resume = toRenderableResume(parsedResume);
+    const response = await fetch(`${apiUrl}/api/ats/live-score`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        resume,
+        current_resume: resume,
+        estimated_resume: resume,
+        job,
+        suggestions: []
+      })
+    });
+    if (!response.ok) {
+      const failure = await response.json().catch(() => ({}));
+      throw new Error(failure?.detail || "AI resume-match scoring failed.");
+    }
+    const score = await response.json();
+    setLiveATS(score);
+    setComparison(previous => ({
+      ...(previous || {}),
+      resume_match_before: score.original_resume_match,
+      resume_match_after: score.original_resume_match,
+      ats_score_before: score.original_ats,
+      ats_score_after: score.original_ats,
+      breakdown_before: score.breakdown_before,
+      breakdown_after: score.breakdown_before,
+      scoring_source: score.scoring_source
+    }));
+    return score;
+  };
+
   // Scan Active Page content
   const handleScanPage = async (forceRescan = false) => {
     if (!ensureExtractionProfileReady()) return;
@@ -1804,6 +1846,9 @@ export function AppProvider({ children }) {
       } else if (pageType === "job_detail" && data.extracted_job) {
         const job = data.job || data.extracted_job;
         const { title, company, description } = job;
+        // Publish the JD and its score as one completed result. This prevents
+        // the details screen from flashing before the authoritative match.
+        await scoreJobBeforeReveal(job);
         setJobText(description || '');
         setJobTitle(title || '');
         setCompanyName(company || '');
@@ -2144,6 +2189,7 @@ export function AppProvider({ children }) {
         return;
       }
 
+      await scoreJobBeforeReveal(analyzedJob);
       setJobAnalysis(analyzedJob);
       if (isValidText(finalCompany)) setCompanyName(finalCompany);
       if (isValidText(finalTitle)) setJobTitle(finalTitle);
@@ -2676,6 +2722,33 @@ export function AppProvider({ children }) {
       const tailoredResult = selectRenderableResume(finalizedWorkflow);
       if (!tailoredResult) throw new Error('FINAL_RESUME_VALIDATION_FAILED: Final resume is unavailable.');
       await persistTailoredWorkflowResume(tailoredResult);
+
+      // A completed generation must have a durable database event. Previously
+      // this workflow only updated React/storage state, leaving Analytics with
+      // nothing to group by date.
+      const sourceResumeId = parsedResume?.id || parsedResume?.resume_id || null;
+      if (sourceResumeId) {
+        const createdVersion = await createResumeVersion(sourceResumeId, {
+          version_name: `${companyName || jobTitle || 'Job'} Tailored`,
+          version_type: 'tailored',
+          content: tailoredResult,
+          parent_version_id: parsedResume?.resume_version_id || parsedResume?.version_id || null,
+          jd_id: null,
+          job_id: activeApplicationId || null,
+          change_summary_json: {
+            event: 'resume_generated',
+            jd_fingerprint: jdFingerprintRef.current || null,
+            company_name: companyName || null,
+            job_title: jobTitle || null
+          },
+          changes_summary: `Tailored for ${jobTitle || 'target role'} at ${companyName || 'target company'}`,
+          is_current: true,
+          is_final: true
+        });
+        if (!createdVersion?.id) {
+          throw new Error('The resume was finalized but its generation record could not be saved.');
+        }
+      }
       setLoading(false);
       navigate('/templates');
 

@@ -7,13 +7,115 @@ from core.security import verify_supabase_jwt
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 
+@router.get("/performance-signature")
+async def get_performance_signature(
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    conn=Depends(get_db_connection),
+):
+    """Return the six dashboard radar metrics calculated directly in PostgreSQL."""
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            WITH app_stats AS (
+              SELECT
+                COUNT(*)::int AS total,
+                COALESCE(AVG(COALESCE(ats_score, resume_match_score)), 0)::numeric AS ats_match,
+                COUNT(*) FILTER (
+                  WHERE resume_status = 'ready' OR resume_version IS NOT NULL
+                )::int AS resume_ready,
+                COUNT(*) FILTER (
+                  WHERE current_stage <> 'Ready To Apply'
+                )::int AS submitted,
+                COUNT(*) FILTER (
+                  WHERE current_stage IN ('Interview', 'Final Round', 'Offer', 'Accepted')
+                )::int AS interviews,
+                COUNT(*) FILTER (
+                  WHERE current_stage IN ('Offer', 'Accepted')
+                )::int AS offers,
+                COUNT(*) FILTER (
+                  WHERE cover_letter_status = 'ready'
+                     OR LOWER(COALESCE(cover_letter_version, '')) ~ '^v?[0-9]+'
+                     OR (
+                       cover_letter_snapshot IS NOT NULL
+                       AND cover_letter_snapshot <> '{}'::jsonb
+                       AND LENGTH(TRIM(COALESCE(
+                         cover_letter_snapshot->>'content',
+                         cover_letter_snapshot->>'body',
+                         cover_letter_snapshot->>'letter',
+                         ''
+                       ))) > 0
+                     )
+                )::int AS cover_letters,
+                COALESCE(AVG(
+                  CASE current_stage
+                    WHEN 'Ready To Apply' THEN 10
+                    WHEN 'Resume Ready' THEN 15
+                    WHEN 'Draft' THEN 15
+                    WHEN 'Applied' THEN 30
+                    WHEN 'Screening' THEN 45
+                    WHEN 'Assessment' THEN 50
+                    WHEN 'Recruiter' THEN 55
+                    WHEN 'Recruiter Contact' THEN 55
+                    WHEN 'Interview' THEN 70
+                    WHEN 'Final Round' THEN 82
+                    WHEN 'Offer' THEN 92
+                    WHEN 'Accepted' THEN 100
+                    WHEN 'Rejected' THEN 20
+                    ELSE 10
+                  END
+                ), 0)::numeric AS application_progress
+              FROM public.applications
+              WHERE user_id = %s
+            )
+            SELECT
+              ROUND(LEAST(100, GREATEST(0, a.ats_match)))::int AS ats_match,
+              CASE WHEN a.total = 0 THEN 0
+                   ELSE ROUND(100.0 * a.resume_ready / a.total)::int END AS resume_ready,
+              ROUND(LEAST(100, GREATEST(0, a.application_progress)))::int AS application_progress,
+              CASE WHEN a.submitted = 0 THEN 0
+                   ELSE ROUND(100.0 * a.interviews / a.submitted)::int END AS interviews,
+              CASE WHEN a.total = 0 THEN 0
+                   ELSE ROUND(100.0 * a.cover_letters / a.total)::int END AS cover_letter_ready,
+              CASE WHEN a.submitted = 0 THEN 0
+                   ELSE ROUND(100.0 * a.offers / a.submitted)::int END AS offer_success,
+              a.total,
+              a.submitted,
+              a.resume_ready AS resume_ready_count,
+              a.cover_letters AS cover_letter_count,
+              a.interviews AS interview_count,
+              a.offers AS offer_count
+            FROM app_stats a
+            """,
+            (user["id"],),
+        )
+        row = cur.fetchone() or {}
+        return {
+            "metrics": {
+                "ats_match": int(row.get("ats_match") or 0),
+                "resume_ready": int(row.get("resume_ready") or 0),
+                "application_progress": int(row.get("application_progress") or 0),
+                "interviews": int(row.get("interviews") or 0),
+                "cover_letter_ready": int(row.get("cover_letter_ready") or 0),
+                "offer_success": int(row.get("offer_success") or 0),
+            },
+            "counts": {
+                "applications": int(row.get("total") or 0),
+                "submitted": int(row.get("submitted") or 0),
+                "resume_ready": int(row.get("resume_ready_count") or 0),
+                "cover_letters": int(row.get("cover_letter_count") or 0),
+                "interviews": int(row.get("interview_count") or 0),
+                "offers": int(row.get("offer_count") or 0),
+            },
+        }
+
+
 @router.get("/trend")
 async def get_activity_trend(
     days: int = Query(30, enum=[7, 30, 90]),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn=Depends(get_db_connection),
 ):
-    """Return tailored resume-version counts by their creation date."""
+    """Return successful JD extractions grouped by the user's local date."""
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
             """
@@ -49,18 +151,17 @@ async def get_activity_trend(
                 interval '1 day'
               )::date AS tailored_date
             ),
-            activity AS (
+            usage_activity AS (
               SELECT (
-                       rv.created_at AT TIME ZONE
+                       ue.created_at AT TIME ZONE
                        (SELECT timezone FROM date_range)
                      )::date AS tailored_date,
-                     COUNT(DISTINCT rv.id)::int AS count
-              FROM public.resume_versions rv
-              WHERE rv.created_by=%s
-                AND rv.version_type = 'tailored'
-                AND rv.deleted_at IS NULL
+                     SUM(ue.quantity)::int AS count
+              FROM public.usage_events ue
+              WHERE ue.user_id=%s
+                AND ue.feature_key = 'jd_extraction'
                 AND (
-                      rv.created_at AT TIME ZONE
+                      ue.created_at AT TIME ZONE
                       (SELECT timezone FROM date_range)
                     )::date BETWEEN
                       (SELECT start_date FROM date_range)
@@ -69,9 +170,9 @@ async def get_activity_trend(
             ),
             daily_series AS (
               SELECT d.tailored_date AS date,
-                     COALESCE(a.count, 0)::int AS count
+                     COALESCE(u.count, 0)::int AS count
               FROM dates d
-              LEFT JOIN activity a USING(tailored_date)
+              LEFT JOIN usage_activity u USING(tailored_date)
             )
             SELECT date,
                    count,

@@ -154,6 +154,109 @@ const getStageBadgeStyle = (stage) => {
   }
 };
 
+function CareerPerformanceRadar({ metrics, updatedAt }) {
+  const width = 390;
+  const height = 250;
+  const centerX = 195;
+  const centerY = 125;
+  const radius = 82;
+  const angleFor = index => -Math.PI / 2 + (index * Math.PI * 2) / metrics.length;
+  const pointAt = (index, scale = 1) => {
+    const angle = angleFor(index);
+    return {
+      x: centerX + Math.cos(angle) * radius * scale,
+      y: centerY + Math.sin(angle) * radius * scale,
+    };
+  };
+  const polygon = scale => metrics
+    .map((_, index) => {
+      const point = pointAt(index, scale);
+      return `${point.x},${point.y}`;
+    })
+    .join(' ');
+  const scorePolygon = metrics
+    .map((metric, index) => {
+      const point = pointAt(index, Math.max(0.06, Math.min(100, metric.value)) / 100);
+      return `${point.x},${point.y}`;
+    })
+    .join(' ');
+
+  return (
+    <div className="dashboard-panel dashboard-interactive-surface rounded-2xl border border-tf-border bg-white/80 p-5 shadow-xs dark:bg-zinc-900/80">
+      <div>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[9px] font-bold tracking-[0.18em] text-orange-500">CAREER INTELLIGENCE</p>
+          <span className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-emerald-500" title={updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : 'Loading live metrics'}>
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+            Live
+          </span>
+        </div>
+        <h3 className="mt-1 text-xs font-bold text-tf-text">Performance Signature</h3>
+        <p className="mt-0.5 text-[11px] text-tf-text-tertiary">Your current job-search health across six metrics</p>
+      </div>
+      <svg className="mt-2 h-[250px] w-full overflow-visible" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Career performance radar chart">
+        {[0.25, 0.5, 0.75, 1].map(scale => (
+          <polygon
+            key={scale}
+            points={polygon(scale)}
+            fill="none"
+            stroke="currentColor"
+            strokeOpacity={scale === 1 ? 0.2 : 0.1}
+            strokeWidth="1"
+          />
+        ))}
+        {metrics.map((metric, index) => {
+          const endpoint = pointAt(index);
+          return (
+            <line
+              key={metric.label}
+              x1={centerX}
+              y1={centerY}
+              x2={endpoint.x}
+              y2={endpoint.y}
+              stroke="currentColor"
+              strokeOpacity="0.12"
+            />
+          );
+        })}
+        <motion.polygon
+          points={scorePolygon}
+          fill="rgba(249, 115, 22, 0.22)"
+          stroke="#F97316"
+          strokeWidth="2.5"
+          strokeLinejoin="round"
+          initial={{ opacity: 0, scale: 0.7, transformOrigin: `${centerX}px ${centerY}px` }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: .55, ease: 'easeOut' }}
+        />
+        {metrics.map((metric, index) => {
+          const scorePoint = pointAt(index, Math.max(0.06, Math.min(100, metric.value)) / 100);
+          const labelPoint = pointAt(index, 1.27);
+          const anchor = Math.abs(labelPoint.x - centerX) < 8 ? 'middle' : labelPoint.x > centerX ? 'start' : 'end';
+          return (
+            <g key={metric.label} className="group/radar">
+              <circle cx={scorePoint.x} cy={scorePoint.y} r="12" fill="transparent" />
+              <circle cx={scorePoint.x} cy={scorePoint.y} r="4" fill="#F97316" stroke="white" strokeWidth="1.5" />
+              <text x={labelPoint.x} y={labelPoint.y} textAnchor={anchor} dominantBaseline="middle" fill="currentColor" opacity="0.72" fontSize="9" fontWeight="700">
+                {metric.label}
+              </text>
+              <g className="pointer-events-none hidden group-hover/radar:block">
+                <rect x={Math.min(width - 148, Math.max(4, scorePoint.x - 70))} y={Math.max(4, scorePoint.y - 54)} width="140" height="39" rx="8" fill="#09090b" />
+                <text x={Math.min(width - 78, Math.max(74, scorePoint.x))} y={Math.max(19, scorePoint.y - 37)} textAnchor="middle" fill="white" fontSize="10" fontWeight="700">
+                  {metric.label}: {metric.value}%
+                </text>
+                <text x={Math.min(width - 78, Math.max(74, scorePoint.x))} y={Math.max(31, scorePoint.y - 25)} textAnchor="middle" fill="#a1a1aa" fontSize="8">
+                  {metric.detail}
+                </text>
+              </g>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 function DashboardContent() {
   const { session, applications: rawApps, fetchApplications, apiUrl, profile, user, parsedResume } = useApp();
   const applications = rawApps || [];
@@ -168,6 +271,9 @@ function DashboardContent() {
   const [pipelineFilter, setPipelineFilter] = useState('All Jobs');
   const [pipelineDropdownOpen, setPipelineDropdownOpen] = useState(false);
   const [activeDonutStage, setActiveDonutStage] = useState(null);
+  const [liveDataUpdatedAt, setLiveDataUpdatedAt] = useState(null);
+  const [performanceSignature, setPerformanceSignature] = useState(null);
+  const liveRefreshInFlightRef = React.useRef(false);
 
   // Session-level completion banner dismissal state
   const [dismissedBanner, setDismissedBanner] = useState(() => {
@@ -213,6 +319,55 @@ function DashboardContent() {
     }
 
     return () => { active = false; };
+  }, [session?.access_token, apiUrl]);
+
+  useEffect(() => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token) return undefined;
+    let active = true;
+
+    const refreshLiveDashboardData = async () => {
+      if (liveRefreshInFlightRef.current) return;
+      liveRefreshInFlightRef.current = true;
+      try {
+        const [, reminders, signature] = await Promise.all([
+          fetchApplications(),
+          notificationApi.reminders(token),
+          fetch(`${apiUrl}/api/v1/analytics/performance-signature`, {
+            headers: { Authorization: `Bearer ${token}` },
+          }).then(async response => {
+            if (!response.ok) throw new Error('Performance signature request failed');
+            return response.json();
+          }),
+        ]);
+        if (!active) return;
+        setPersistedReminders(
+          (Array.isArray(reminders) ? reminders : [])
+            .filter(item => !['completed', 'cancelled'].includes(item.status))
+        );
+        setPerformanceSignature(signature || null);
+        setLiveDataUpdatedAt(new Date());
+      } catch (error) {
+        console.warn('Live dashboard refresh unavailable:', error);
+      } finally {
+        liveRefreshInFlightRef.current = false;
+      }
+    };
+
+    const handleVisibilityRefresh = () => {
+      if (document.visibilityState === 'visible') refreshLiveDashboardData();
+    };
+    const intervalId = window.setInterval(refreshLiveDashboardData, 12000);
+    window.addEventListener('focus', refreshLiveDashboardData);
+    document.addEventListener('visibilitychange', handleVisibilityRefresh);
+    refreshLiveDashboardData();
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', refreshLiveDashboardData);
+      document.removeEventListener('visibilitychange', handleVisibilityRefresh);
+    };
   }, [session?.access_token, apiUrl]);
 
   useEffect(() => {
@@ -320,6 +475,120 @@ function DashboardContent() {
   const interviewApps = filteredApplications.filter(a => ['Interview', 'Final Round'].includes(a.current_stage));
   const offerApps = filteredApplications.filter(a => ['Offer', 'Accepted'].includes(a.current_stage));
   const rejectedApps = filteredApplications.filter(a => a.current_stage === 'Rejected');
+
+  const appliedGraphBars = useMemo(() => {
+    const applied = filteredApplications.filter(a => (
+      ['Applied', 'Ready To Apply', 'Resume Ready', 'Draft'].includes(a.current_stage)
+    ));
+    const bucketCount = 8;
+    const dayMs = 86400000;
+    const timestamps = applied
+      .map((item) => {
+        const date = new Date(item.created_at || item.updated_at || 0);
+        date.setHours(0, 0, 0, 0);
+        return date.getTime();
+      })
+      .filter(Number.isFinite);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const earliest = timestamps.length ? Math.min(...timestamps) : today.getTime();
+    const latest = timestamps.length ? Math.max(...timestamps) : today.getTime();
+    const spanDays = Math.max(1, Math.floor((latest - earliest) / dayMs) + 1);
+    const daysPerBucket = Math.max(1, Math.ceil(spanDays / bucketCount));
+    const chartStart = latest - ((bucketCount * daysPerBucket) - 1) * dayMs;
+
+    return Array.from({ length: bucketCount }, (_, index) => {
+      const start = chartStart + index * daysPerBucket * dayMs;
+      const end = start + daysPerBucket * dayMs;
+      const count = timestamps.filter(timestamp => timestamp >= start && timestamp < end).length;
+      const startDate = new Date(start);
+      const endDate = new Date(end - dayMs);
+      const dateLabel = daysPerBucket === 1
+        ? startDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+        : `${startDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}–${endDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+      return { count, dateLabel };
+    });
+  }, [filteredApplications]);
+
+  const topDashboardGraphs = useMemo(() => {
+    const weekMs = 7 * 86400000;
+    const currentWeekStart = new Date();
+    currentWeekStart.setHours(0, 0, 0, 0);
+    currentWeekStart.setDate(currentWeekStart.getDate() - currentWeekStart.getDay());
+    const firstWeekStart = currentWeekStart.getTime() - 7 * weekMs;
+
+    const downloaded = applications.filter((app) => (
+      app?.resume_status === 'ready'
+      || Boolean(app?.resume_version)
+      || app?.timeline?.some(event => /resume downloaded/i.test(String(event?.event || '')))
+    ));
+    const hasGeneratedCoverLetter = (app) => {
+      const status = String(app?.cover_letter_status || '').trim().toLowerCase();
+      const version = String(app?.cover_letter_version || '').trim().toLowerCase();
+      const snapshot = app?.cover_letter_snapshot;
+      const snapshotHasContent = typeof snapshot === 'string'
+        ? snapshot.trim().length > 0
+        : Boolean(
+            snapshot
+            && typeof snapshot === 'object'
+            && Object.keys(snapshot).length > 0
+            && String(snapshot.content || snapshot.body || snapshot.letter || '').trim().length > 0
+          );
+      const hasRealVersion = Boolean(version)
+        && !['pending', 'not created', 'none', 'null', 'draft'].includes(version)
+        && /^v?\d/.test(version);
+      const hasGenerationEvent = app?.timeline?.some(event => (
+        /cover letter (generated|downloaded|created)/i.test(String(event?.event || ''))
+      ));
+
+      return status === 'ready' || snapshotHasContent || hasRealVersion || hasGenerationEvent;
+    };
+    const coverLetters = applications.filter(hasGeneratedCoverLetter);
+    const successful = applications.filter(app => ['Offer', 'Accepted'].includes(app?.current_stage));
+    const rejected = applications.filter(app => app?.current_stage === 'Rejected');
+
+    const eventTime = (app, type) => {
+      if (type === 'downloaded') {
+        const downloadEvent = [...(app.timeline || [])]
+          .reverse()
+          .find(event => /resume downloaded/i.test(String(event?.event || '')));
+        if (downloadEvent?.timestamp) return new Date(downloadEvent.timestamp).getTime();
+      }
+      if (type === 'cover-letter') {
+        const coverLetterEvent = [...(app.timeline || [])]
+          .reverse()
+          .find(event => /cover letter (generated|downloaded)/i.test(String(event?.event || '')));
+        if (coverLetterEvent?.timestamp) return new Date(coverLetterEvent.timestamp).getTime();
+      }
+      // Offer/rejection stages can change long after an application was
+      // created. Plot outcomes on their persisted activity timestamp.
+      return new Date(app.last_activity_at || app.last_activity || app.updated_at || app.created_at || 0).getTime();
+    };
+
+    const makeSeries = (records, type) => Array.from({ length: 8 }, (_, index) => {
+      const start = firstWeekStart + index * weekMs;
+      const end = start + weekMs;
+      return {
+        label: `W${index + 1}`,
+        dateLabel: `${new Date(start).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}–${new Date(end - 1).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`,
+        count: records.filter((record) => {
+          const timestamp = eventTime(record, type);
+          return Number.isFinite(timestamp) && timestamp >= start && timestamp < end;
+        }).length,
+      };
+    });
+
+    return {
+      downloadedTotal: downloaded.length,
+      coverLetterTotal: coverLetters.length,
+      successfulTotal: successful.length,
+      rejectedTotal: rejected.length,
+      downloadedSeries: makeSeries(downloaded, 'downloaded'),
+      coverLetterSeries: makeSeries(coverLetters, 'cover-letter'),
+      successfulSeries: makeSeries(successful, 'successful'),
+      rejectedSeries: makeSeries(rejected, 'rejected'),
+    };
+  }, [applications]);
 
   const activeAppsCount = applications.filter(a => a && !['Accepted', 'Rejected', 'Archived'].includes(a.current_stage)).length;
   const appsSubmitted = applications.filter(a => a && a.current_stage !== 'Ready To Apply').length;
@@ -544,6 +813,21 @@ function DashboardContent() {
 
   const upcomingEvents = allReminders.slice(0, 3);
 
+  const careerRadarMetrics = useMemo(() => {
+    const db = performanceSignature?.metrics || {};
+    const counts = performanceSignature?.counts || {};
+    const applicationsCount = Number(counts.applications) || 0;
+    const submittedCount = Number(counts.submitted) || 0;
+    return [
+      { label: 'ATS Score', value: Number(db.ats_match) || 0, detail: 'Average saved ATS score' },
+      { label: 'Resume Ready', value: Number(db.resume_ready) || 0, detail: `${Number(counts.resume_ready) || 0} of ${applicationsCount} jobs` },
+      { label: 'App Progress', value: Number(db.application_progress) || 0, detail: 'Weighted by current stages' },
+      { label: 'Interview Rate', value: Number(db.interviews) || 0, detail: `${Number(counts.interviews) || 0} of ${submittedCount} submitted` },
+      { label: 'Cover Letters', value: Number(db.cover_letter_ready) || 0, detail: `${Number(counts.cover_letters) || 0} of ${applicationsCount} jobs` },
+      { label: 'Offer Rate', value: Number(db.offer_success) || 0, detail: `${Number(counts.offers) || 0} of ${submittedCount} submitted` },
+    ];
+  }, [performanceSignature]);
+
   const isProfileIncomplete = !profile?.phone_number || !parsedResume;
 
   return (
@@ -609,7 +893,129 @@ function DashboardContent() {
             </div>
           )}
 
-          {/* 3. REFINED KPI CARDS WITH DISTINCT HIERARCHY */}
+          {/* 3. PRIMARY ANALYTICS — LARGE GRAPHS FIRST */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+            {[
+              {
+                key: 'downloads',
+                eyebrow: 'DOCUMENT OUTPUT',
+                title: 'Generated Documents',
+                description: 'Completed resume and cover-letter outputs over the last eight weeks',
+                lines: [
+                  { label: 'Resumes', total: topDashboardGraphs.downloadedTotal, series: topDashboardGraphs.downloadedSeries, stroke: '#3B82F6', unit: 'resumes' },
+                  { label: 'Cover letters', total: topDashboardGraphs.coverLetterTotal, series: topDashboardGraphs.coverLetterSeries, stroke: '#F97316', unit: 'cover letters' },
+                ],
+              },
+              {
+                key: 'success',
+                eyebrow: 'APPLICATION OUTCOMES',
+                title: 'Offer Outcomes',
+                description: 'Secured and rejected offers over the last eight weeks',
+                lines: [
+                  { label: 'Secured', total: topDashboardGraphs.successfulTotal, series: topDashboardGraphs.successfulSeries, stroke: '#10B981', unit: 'offers' },
+                  { label: 'Rejected', total: topDashboardGraphs.rejectedTotal, series: topDashboardGraphs.rejectedSeries, stroke: '#F97316', unit: 'rejections' },
+                ],
+              },
+            ].map((graph, graphIndex) => {
+              const width = 620;
+              const height = 190;
+              const left = 34;
+              const right = 18;
+              const top = 18;
+              const bottom = 32;
+              const graphMax = Math.max(...graph.lines.flatMap(line => line.series.map(item => item.count)), 1);
+              const renderedLines = graph.lines.map(line => {
+                const points = line.series.map((item, index) => ({
+                  ...item,
+                  x: left + (index / Math.max(line.series.length - 1, 1)) * (width - left - right),
+                  y: top + (1 - item.count / graphMax) * (height - top - bottom),
+                }));
+                return {
+                  ...line,
+                  points,
+                  path: points.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.y}`).join(' '),
+                };
+              });
+
+              return (
+                <motion.section
+                  key={graph.key}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: .04 + graphIndex * .06 }}
+                  className="dashboard-panel dashboard-interactive-surface overflow-hidden rounded-2xl border border-tf-border bg-white/85 p-6 shadow-xs dark:bg-zinc-900/85"
+                >
+                  <div className="flex items-start justify-between gap-5">
+                    <div>
+                      <p className="text-[10px] font-bold tracking-[0.18em] text-tf-text-tertiary">{graph.eyebrow}</p>
+                      <h2 className="mt-2 text-base font-extrabold text-tf-text">{graph.title}</h2>
+                      <p className="mt-1 text-[11px] text-tf-text-secondary">{graph.description}</p>
+                    </div>
+                    <div className="flex shrink-0 gap-4 text-right">
+                      {graph.lines.map(line => (
+                        <div key={line.label}>
+                          <div className="text-3xl font-black tracking-tight" style={{ color: line.stroke }}>{line.total}</div>
+                          <div className="text-[9px] font-bold uppercase tracking-wider text-tf-text-tertiary">{line.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center gap-4">
+                    {graph.lines.map(line => (
+                      <div key={line.label} className="flex items-center gap-2 text-[10px] font-bold text-tf-text-secondary">
+                        <span className="h-0.5 w-6 rounded-full" style={{ backgroundColor: line.stroke }} />
+                        <span>{line.label}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-5">
+                    <svg className="h-[190px] w-full overflow-visible" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={graph.title}>
+                      {[top, top + (height - top - bottom) / 2, height - bottom].map((y) => (
+                        <line key={y} x1={left} x2={width - right} y1={y} y2={y} stroke="currentColor" strokeOpacity="0.1" strokeDasharray="4 5" />
+                      ))}
+                      {renderedLines.map((line, lineIndex) => (
+                        <g key={line.label}>
+                          <motion.path
+                            d={line.path}
+                            fill="none"
+                            stroke={line.stroke}
+                            strokeWidth="3"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            initial={{ pathLength: 0 }}
+                            animate={{ pathLength: 1 }}
+                            transition={{ duration: .7, delay: lineIndex * .08, ease: 'easeOut' }}
+                          />
+                          {line.points.map((point) => (
+                            <g key={`${line.label}-${point.label}`} className="group/point">
+                              <circle cx={point.x} cy={point.y} r="11" fill="transparent" />
+                              <circle cx={point.x} cy={point.y} r="4.5" fill={line.stroke} stroke="white" strokeWidth="2" />
+                              <g className="pointer-events-none hidden group-hover/point:block">
+                                <rect x={Math.min(width - 150, Math.max(4, point.x - 67))} y={Math.max(2, point.y - 48 - lineIndex * 38)} width="134" height="34" rx="8" fill="#09090b" />
+                                <text x={Math.min(width - 83, Math.max(71, point.x))} y={Math.max(16, point.y - 34 - lineIndex * 38)} fill="white" fontSize="9" fontWeight="700" textAnchor="middle">
+                                  {point.dateLabel}
+                                </text>
+                                <text x={Math.min(width - 83, Math.max(71, point.x))} y={Math.max(27, point.y - 23 - lineIndex * 38)} fill="white" fontSize="9" textAnchor="middle">
+                                  {line.label}: {point.count}
+                                </text>
+                              </g>
+                              {lineIndex === 0 && (
+                                <text x={point.x} y={height - 10} fill="currentColor" opacity="0.58" fontSize="10" textAnchor="middle">{point.label}</text>
+                              )}
+                            </g>
+                          ))}
+                        </g>
+                      ))}
+                    </svg>
+                  </div>
+                </motion.section>
+              );
+            })}
+          </div>
+
+          {/* 4. SUPPORTING KPI CARDS BELOW THE GRAPHS */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
 
             {/* Primary KPI Card 1: Recent ATS Score */}
@@ -773,12 +1179,14 @@ function DashboardContent() {
               {/* ROW 1: RESUME ACTIVITY & RECENT ACTIVITY (SIDE-BY-SIDE) */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
+                <CareerPerformanceRadar metrics={careerRadarMetrics} updatedAt={liveDataUpdatedAt} />
+
                 {/* CARD A: APPLICATION TREND CHART */}
-                <div className="dashboard-panel dashboard-trend-panel dashboard-interactive-surface bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-5 shadow-xs space-y-4 flex flex-col justify-between relative">
+                <div className="hidden dashboard-panel dashboard-trend-panel dashboard-interactive-surface bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-5 shadow-xs space-y-4 flex flex-col justify-between relative">
                   <div className="flex items-center justify-between relative z-20">
                     <div>
-                      <h3 className="text-xs font-bold text-tf-text">Resume Activity</h3>
-                      <p className="text-[11px] text-tf-text-tertiary">Parsing and tailoring events by day</p>
+                      <h3 className="text-xs font-bold text-tf-text">JD Activity</h3>
+                      <p className="text-[11px] text-tf-text-tertiary">Job descriptions extracted by day</p>
                     </div>
 
                     <div className="relative">
@@ -817,7 +1225,7 @@ function DashboardContent() {
                       <div className="mb-3 flex items-center justify-between rounded-xl border border-orange-500/15 bg-orange-500/5 px-3 py-2">
                         <span className="text-[10px] font-semibold text-tf-text-secondary">{activeHoveredPoint.accessibleLabel}</span>
                         <span className="text-[11px] font-bold text-orange-500">
-                          {activeHoveredPoint.count} {activeHoveredPoint.count === 1 ? 'resume' : 'resumes'} tailored
+                          {activeHoveredPoint.count} {activeHoveredPoint.count === 1 ? 'JD' : 'JDs'} extracted
                         </span>
                       </div>
                     )}
@@ -827,7 +1235,7 @@ function DashboardContent() {
                         width={trendLine.width}
                         viewBox={`0 0 ${trendLine.width} 154`}
                         role="img"
-                        aria-label={`Resume activity trend for ${trendTimeframe.toLowerCase()}`}
+                        aria-label={`JD extraction trend for ${trendTimeframe.toLowerCase()}`}
                       >
                         <defs>
                           <linearGradient id="trendLineArea" x1="0" y1="0" x2="0" y2="1">
@@ -952,7 +1360,7 @@ function DashboardContent() {
                               navigate('/job-tracker');
                             }
                           }}
-                          className="dashboard-activity-item w-full flex items-center justify-between p-2.5 rounded-xl text-left hover:bg-tf-surface-2/70 transition cursor-pointer border border-transparent hover:border-tf-border/50"
+                          className="dashboard-activity-item dashboard-solid-row w-full flex items-center justify-between p-2.5 rounded-xl text-left transition cursor-pointer border"
                         >
                           <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-3">
                             <span className="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0" />
@@ -989,7 +1397,7 @@ function DashboardContent() {
               </div>
 
               {/* ROW 2: JOB PIPELINE STAGES FLOW WITH COMPANY FAVICONS */}
-              <div className="dashboard-panel dashboard-pipeline-panel dashboard-interactive-surface bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-6 shadow-xs space-y-5">
+              <div className="hidden dashboard-panel dashboard-pipeline-panel dashboard-interactive-surface bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-6 shadow-xs space-y-5">
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-sm font-bold text-tf-text">Job Pipeline</h3>
@@ -1025,7 +1433,104 @@ function DashboardContent() {
                   </div>
                 </div>
 
-                {/* PIPELINE STAGE COLUMNS */}
+                {/* TWO-CHART PIPELINE SUMMARY */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/job-tracker')}
+                    className="group rounded-2xl border border-blue-500/15 bg-blue-500/[0.04] p-5 text-left transition hover:border-blue-500/35 hover:bg-blue-500/[0.07]"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-xs font-bold text-tf-text">Jobs Applied</p>
+                        <p className="mt-1 text-[11px] text-tf-text-secondary">Applications in the selected period</p>
+                      </div>
+                      <span className="text-3xl font-black tracking-tight text-blue-500">{appliedApps.length}</span>
+                    </div>
+                    <div className="mt-6 flex h-28 items-end gap-2" aria-label={`${appliedApps.length} jobs applied`}>
+                      {appliedGraphBars.map((bar, index) => {
+                        const chartMax = Math.max(...appliedGraphBars.map(item => item.count), 1);
+                        const height = bar.count > 0
+                          ? Math.max(14, Math.round((bar.count / chartMax) * 100))
+                          : 5;
+                        return (
+                          <div key={`${bar.dateLabel}-${index}`} className="group/bar relative flex h-full min-w-0 flex-1 items-end">
+                            <motion.span
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: `${height}%`, opacity: bar.count > 0 ? 1 : 0.18 }}
+                              transition={{ delay: index * 0.035, duration: 0.35 }}
+                              className="w-full rounded-t-md bg-blue-500 transition-colors group-hover/bar:bg-blue-600"
+                            />
+                            <span className="pointer-events-none absolute bottom-[calc(100%+8px)] left-1/2 z-30 hidden -translate-x-1/2 whitespace-nowrap rounded-lg bg-zinc-950 px-2.5 py-1.5 text-[10px] font-bold text-white shadow-xl group-hover/bar:block">
+                              {bar.dateLabel}: {bar.count} {bar.count === 1 ? 'application' : 'applications'}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-3 flex items-center justify-between border-t border-tf-border/60 pt-3">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-tf-text-tertiary">Total applied</span>
+                      <ArrowRight size={14} className="text-blue-500 transition-transform group-hover:translate-x-1" />
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => navigate('/job-tracker')}
+                    className="group rounded-2xl border border-orange-500/15 bg-orange-500/[0.04] p-5 text-left transition hover:border-orange-500/35 hover:bg-orange-500/[0.07]"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-xs font-bold text-tf-text">Offers & Rejections</p>
+                        <p className="mt-1 text-[11px] text-tf-text-secondary">Application outcomes in the selected period</p>
+                      </div>
+                      <div className="flex gap-3 text-right">
+                        <div>
+                          <div className="text-2xl font-black text-emerald-500">{offerApps.length}</div>
+                          <div className="text-[9px] font-bold uppercase tracking-wider text-tf-text-tertiary">Offers</div>
+                        </div>
+                        <div>
+                          <div className="text-2xl font-black text-orange-500">{rejectedApps.length}</div>
+                          <div className="text-[9px] font-bold uppercase tracking-wider text-tf-text-tertiary">Rejected</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-7 space-y-5">
+                      {[
+                        { label: 'Offers', value: offerApps.length, color: 'bg-emerald-500' },
+                        { label: 'Rejected', value: rejectedApps.length, color: 'bg-orange-500' },
+                      ].map((item) => {
+                        const outcomeMax = Math.max(offerApps.length, rejectedApps.length, 1);
+                        return (
+                          <div key={item.label}>
+                            <div className="mb-1.5 flex items-center justify-between text-[10px] font-bold">
+                              <span className="text-tf-text-secondary">{item.label}</span>
+                              <span className="text-tf-text">{item.value}</span>
+                            </div>
+                            <div className="group/outcome relative h-3 rounded-full bg-tf-border/60">
+                              <motion.div
+                                initial={{ width: 0 }}
+                                animate={{ width: `${(item.value / outcomeMax) * 100}%` }}
+                                transition={{ duration: 0.55, ease: 'easeOut' }}
+                                className={`h-full rounded-full ${item.color}`}
+                              />
+                              <span className="pointer-events-none absolute bottom-[calc(100%+8px)] left-1/2 z-30 hidden -translate-x-1/2 whitespace-nowrap rounded-lg bg-zinc-950 px-2.5 py-1.5 text-[10px] font-bold text-white shadow-xl group-hover/outcome:block">
+                                {item.label}: {item.value} {item.value === 1 ? 'job' : 'jobs'}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-5 flex items-center justify-between border-t border-tf-border/60 pt-3">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-tf-text-tertiary">Outcome comparison</span>
+                      <ArrowRight size={14} className="text-orange-500 transition-transform group-hover:translate-x-1" />
+                    </div>
+                  </button>
+                </div>
+
+                {false && (
+                /* Legacy stage columns retained outside the rendered layout. */
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 relative">
 
                   {/* Stage 1: Applied */}
@@ -1239,6 +1744,7 @@ function DashboardContent() {
                   </div>
 
                 </div>
+                )}
               </div>
 
             </div>
@@ -1258,10 +1764,10 @@ function DashboardContent() {
                         key={evt.id}
                         layout
                         onClick={() => setShowRemindersModal(true)}
-                        className="dashboard-reminder-item flex items-center justify-between gap-3 p-3 rounded-xl bg-tf-surface-2/60 border border-tf-border/50 cursor-pointer relative"
+                        className="dashboard-reminder-item dashboard-solid-row flex items-center justify-between gap-3 p-3 rounded-xl border cursor-pointer relative"
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-10 h-10 rounded-xl bg-tf-surface border border-tf-border flex flex-col items-center justify-center leading-none text-tf-text shrink-0">
+                          <div className="dashboard-row-date w-10 h-10 rounded-xl border flex flex-col items-center justify-center leading-none text-tf-text shrink-0">
                             <span className="text-[9px] font-black text-tf-text-tertiary uppercase">{evt.month}</span>
                             <span className="text-sm font-black">{evt.day}</span>
                           </div>
@@ -1293,7 +1799,7 @@ function DashboardContent() {
               </div>
 
               {/* WIDGET 2: PIPELINE OVERVIEW DONUT CHART */}
-              <div className="dashboard-panel dashboard-overview-panel dashboard-interactive-surface bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-6 shadow-xs space-y-5">
+              <div className="hidden dashboard-panel dashboard-overview-panel dashboard-interactive-surface bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-6 shadow-xs space-y-5">
                 <h3 className="text-sm font-bold text-tf-text">Pipeline Overview</h3>
 
                 <div className="flex flex-col items-center gap-5">
