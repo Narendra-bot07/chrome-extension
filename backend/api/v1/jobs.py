@@ -7,8 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from core.logging import logger
 from core.security import verify_supabase_jwt
+from core.database import get_db_connection
 from schemas.jobs import JobUrlExtractRequest
 from services.job_extraction.backend_extractor import extract_job_from_url
+from services.subscriptions.usage_service import UsageService
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -17,6 +19,7 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 async def extract_job_from_provided_url(
     request: JobUrlExtractRequest,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    conn = Depends(get_db_connection),
 ):
     """Run the autonomous graph for the complete current-tab URL."""
     request_id = request.request_id or str(uuid.uuid4())
@@ -28,12 +31,23 @@ async def extract_job_from_provided_url(
         bool(request.browser_evidence),
     )
     try:
-        return await asyncio.to_thread(
+        usage = UsageService(conn)
+        usage.require_available(user["id"], "jd_extraction")
+        result = await asyncio.to_thread(
             extract_job_from_url,
             request.url,
             request_id,
             request.browser_evidence,
         )
+        usage.consume_usage(
+            user["id"],
+            "jd_extraction",
+            request_id=request_id,
+            metadata={"url": request.url},
+        )
+        return result
+    except HTTPException:
+        raise
     except ValueError as exc:
         logger.warning(
             "[JD-EXTRACTION][BACKEND] Request rejected request_id=%s error=%s",

@@ -182,9 +182,8 @@ export default function ProfessionalATS({ resume }) {
           <h2 className="text-sm font-bold border-b border-black mb-1.5 uppercase">Certifications</h2>
           <div className="space-y-1">
             {certifications.map((cert, i) => (
-              <div key={i} className="text-[0.6875rem] flex justify-between items-baseline">
-                <span className="font-bold">{cert.name} <span className="font-normal italic">({cert.issuing_organization})</span></span>
-                <span>{cert.issue_date}</span>
+              <div key={i} className="text-[0.6875rem]">
+                <span className="font-bold">{cert.name}</span>
               </div>
             ))}
           </div>

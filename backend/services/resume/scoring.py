@@ -6,7 +6,9 @@ from schemas.resume import ResumeStructure
 from schemas.jobs import JobAnalysis
 
 class ATSScoringEngine:
-    ENGINE_VERSION = "v1.1.0"
+    # v1.2.2 invalidates filtered cache entries so every user-selected section
+    # receives the AI-generated review suggestions again.
+    ENGINE_VERSION = "v1.2.2"
 
     @classmethod
     def calculate_score(cls, resume: ResumeStructure, job: JobAnalysis) -> Dict[str, Any]:
@@ -218,12 +220,8 @@ class ATSScoringEngine:
             (impact_score * 0.10) +
             (overall_opt_score * 0.10)
         )
-        duplicate_issues = cls._duplicate_content_issues(resume)
-        duplicate_penalty = min(
-            35,
-            sum(10 if issue["kind"] == "exact" else 6 for issue in duplicate_issues),
-        )
-        ats_score -= duplicate_penalty
+        duplicate_issues = []
+        duplicate_penalty = 0
         ats_score = max(0, min(100, ats_score))
 
         return {

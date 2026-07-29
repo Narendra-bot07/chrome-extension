@@ -1,26 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { motion, useSpring, useTransform } from 'framer-motion';
+import React from 'react';
+import { motion } from 'framer-motion';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
 import { EmptyStateHint } from './EmptyStateHint';
-
-function AnimatedNumber({ value }) {
-  const isNumber = typeof value === 'number' && !isNaN(value);
-  const spring = useSpring(0, { stiffness: 120, damping: 20 });
-  const display = useTransform(spring, (current) => Math.round(current));
-  const [currentVal, setCurrentVal] = useState(isNumber ? value : 0);
-
-  useEffect(() => {
-    if (isNumber) {
-      spring.set(value);
-      const unsubscribe = display.on("change", (latest) => setCurrentVal(latest));
-      return () => unsubscribe();
-    }
-  }, [value, isNumber]);
-
-  if (!isNumber) return <span>{value}</span>;
-  return <motion.span className="tabular-nums">{currentVal}</motion.span>;
-}
+import { AnimatedNumber } from '../../motion/MotionSystem';
 
 export function StatCard({
   title,
@@ -62,7 +45,9 @@ export function StatCard({
 
       <div className="mt-3">
         <div className={twMerge("font-semibold tracking-tight text-tf-text flex items-baseline gap-1", isHero ? "text-3xl" : "text-2xl")}>
-          <AnimatedNumber value={value} />
+          {typeof value === 'number' && !Number.isNaN(value)
+            ? <AnimatedNumber value={value} />
+            : <span>{value}</span>}
           {suffix && <span className="text-base font-normal text-tf-text-secondary">{suffix}</span>}
         </div>
 

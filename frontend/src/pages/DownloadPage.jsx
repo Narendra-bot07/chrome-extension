@@ -64,9 +64,9 @@ function DownloadPage({ onClose }) {
   const navigate = useNavigate();
   const {
     companyName,
-    tailoredResume,
-    setTailoredResume,
+    updateFinalizedWorkflowResume,
     parsedResume,
+    workflowResume,
     selectedTemplate,
     handleDownloadFinalPDF,
     loading,
@@ -78,13 +78,13 @@ function DownloadPage({ onClose }) {
 
   const sourceResume = useMemo(() => {
     try {
-      const raw = tailoredResume || parsedResume;
+      const raw = workflowResume;
       return raw ? toRenderableResume(raw) : null;
     } catch (err) {
       console.warn("Failed to convert to renderable resume:", err);
       return null;
     }
-  }, [tailoredResume, parsedResume]);
+  }, [workflowResume]);
 
   const composition = useMemo(() => {
     try {
@@ -360,7 +360,7 @@ function DownloadPage({ onClose }) {
         <div className="flex-1 overflow-y-auto">
           <ResumeEditorView
             parsedResume={activeResume}
-            setParsedResume={setTailoredResume}
+            setParsedResume={updateFinalizedWorkflowResume}
             onLooksGood={handleFinalLooksGood}
             onUploadDifferent={() => navigate('/templates')}
             loading={loading}

@@ -1,4 +1,4 @@
-# TailorFlow Job Description Extraction Engine
+# tailr4u Job Description Extraction Engine
 
 ## End-to-End Engineering Documentation
 
@@ -9,7 +9,7 @@
 
 ## 1. Executive summary
 
-TailorFlow's Job Description Extractor is no longer a simple webpage scraper. It is a hybrid Job Intelligence Engine that combines:
+tailr4u's Job Description Extractor is no longer a simple webpage scraper. It is a hybrid Job Intelligence Engine that combines:
 
 - Evidence rendered inside the user's legitimate Chrome session.
 - A backend Playwright browser for public pages.

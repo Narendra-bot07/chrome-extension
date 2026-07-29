@@ -1,5 +1,5 @@
 {
-  "name": "resume-tailor-extension",
+  "name": "tailr4u",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "test:extraction": "node --test src/services/jdExtractionFlow.test.js",
+    "test:auth": "node --test src/services/inactivity.test.js",
+    "test:tailoring-trend": "node --test src/services/tailoringTrend.test.js",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },

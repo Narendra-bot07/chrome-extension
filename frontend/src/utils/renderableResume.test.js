@@ -50,3 +50,20 @@ test('keeps achievement and certification source arrays lossless', () => {
     ['Hackathon Finalist', 'Cloud Certification']
   );
 });
+
+test('removes standalone certification metadata placeholder records', () => {
+  const result = toRenderableResume({
+    personal_info: {},
+    certifications: [
+      { name: 'Databricks Certified Data Engineer Associate 2026' },
+      '0',
+      { name: '0', confidence: 0 },
+      { name: 'N/A', source_text: 'metadata' }
+    ]
+  });
+
+  assert.deepEqual(
+    result.certifications.map(item => item.name),
+    ['Databricks Certified Data Engineer Associate 2026']
+  );
+});

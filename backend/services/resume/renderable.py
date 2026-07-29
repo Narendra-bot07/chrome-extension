@@ -127,11 +127,25 @@ def project_renderable_resume(record: dict[str, Any]) -> dict[str, Any]:
         for value in achievements
         if _fingerprint(value)
     }
+    internal_cert_keys = {
+        "item_index", "bullet_index", "index", "order", "sort_order",
+        "itemIndex", "bulletIndex", "change_id", "status", "category",
+        "confidence", "source", "source_span", "source_text",
+        "normalized_text", "raw_text", "provenance", "metadata"
+    }
     certifications = []
     for item in credential_items:
         normalized = {"name": _text(item)} if isinstance(item, str) else copy.deepcopy(item)
+        if isinstance(normalized, dict):
+            normalized = {k: v for k, v in normalized.items() if k not in internal_cert_keys and v not in (None, "")}
+            if "description" in normalized and str(normalized["description"]).strip() in ("0", "0.", "1", "1."):
+                del normalized["description"]
         if not normalized.get("name") and normalized.get("title"):
             normalized["name"] = normalized["title"]
+        if str(normalized.get("name") or "").strip().lower() in {
+            "", "0", "0.", "null", "none", "undefined", "n/a", "na"
+        }:
+            continue
         title = _fingerprint(normalized.get("name") or normalized.get("title"))
         if title not in achievement_titles or _credential_like(normalized):
             certifications.append(normalized)

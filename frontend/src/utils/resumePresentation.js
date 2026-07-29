@@ -2,13 +2,20 @@ const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 const fingerprint = value => clean(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const DETAIL_SEPARATOR = /\s+(?:—|–|â€”|â€“|-)\s+/;
 
+const cleanOptionalDetail = value => {
+  const normalized = clean(value);
+  return /^(?:0|null|none|undefined|n\/a|na)$/i.test(normalized)
+    ? ''
+    : normalized;
+};
+
 const oneDescription = value => {
   const values = Array.isArray(value) ? value : [value];
   const seen = new Set();
   return values.flatMap(item => typeof item === 'object' && item !== null
     ? Object.values(item)
     : [item]
-  ).map(clean).filter(text => {
+  ).map(cleanOptionalDetail).filter(text => {
     const key = fingerprint(text);
     if (!key || seen.has(key)) return false;
     seen.add(key);
@@ -40,12 +47,12 @@ export const normalizeDetailedRecords = (items = [], kind = 'achievement') => {
       description: oneDescription(
         item?.description || item?.details || item?.summary || item?.evidence
       ),
-      organization: clean(
+      organization: cleanOptionalDetail(
         item?.organization || item?.issuer || item?.issuing_organization
       ),
-      date: clean(item?.date || item?.issue_date),
-      metric: clean(item?.metric),
-      url: clean(item?.url || item?.link || item?.credential_url),
+      date: cleanOptionalDetail(item?.date || item?.issue_date),
+      metric: cleanOptionalDetail(item?.metric),
+      url: cleanOptionalDetail(item?.url || item?.link || item?.credential_url),
       links: Array.isArray(item?.links) ? item.links : []
     };
   }).filter(record => {

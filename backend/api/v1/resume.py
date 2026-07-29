@@ -34,6 +34,7 @@ from services.layout_intelligence import LayoutIntelligenceService
 from services.resume_intelligence.models import Phase2Output
 from services.resume_intelligence.semantic import GroqSemanticAnalyzer
 from services.resume_intelligence.service import SelectedResumeIntelligenceService
+from services.subscriptions.usage_service import UsageService
 from services.workflow.checkpoints import PostgresCheckpointStore
 from core.config import settings
 
@@ -156,6 +157,8 @@ async def upload_and_parse(
     storage: FileService = Depends(get_storage_service),
     conn = Depends(get_db_connection)
 ):
+    usage = UsageService(conn)
+    usage.require_available(user["id"], "resume_upload")
     ext = file.filename.split(".")[-1].upper()
     if ext not in SUPPORTED_FILE_EXTENSIONS:
         raise HTTPException(
@@ -223,6 +226,12 @@ async def upload_and_parse(
         resource_id=record["id"],
         metadata={"file_name": file.filename, "file_size": len(content)}
     )
+    usage.consume_usage(
+        user["id"],
+        "resume_upload",
+        request_id=f"resume-upload:{record['id']}",
+        metadata={"resume_id": record["id"], "file_name": file.filename},
+    )
     
     return record
 
@@ -261,6 +270,7 @@ async def reconcile_local_resumes(
         if f"{user['id']}/{path.name}" in known_paths
     }
     recovered: list[Dict[str, Any]] = []
+    logged_duplicate_hashes: set[str] = set()
     for local_file in local_files:
         relative_path = f"{user['id']}/{local_file.name}"
         if relative_path in known_paths:
@@ -275,12 +285,14 @@ async def reconcile_local_resumes(
         data = local_file.read_bytes()
         content_hash = hashlib.sha256(data).hexdigest()
         if content_hash in known_content_hashes:
-            logger.info(
-                "[RESUME][BACKEND] Duplicate orphan file skipped "
-                "user_id=%s file_name=%s",
-                user["id"],
-                display_name,
-            )
+            if content_hash not in logged_duplicate_hashes:
+                logger.info(
+                    "[RESUME][BACKEND] Duplicate orphan file skipped "
+                    "user_id=%s file_name=%s",
+                    user["id"],
+                    display_name,
+                )
+                logged_duplicate_hashes.add(content_hash)
             continue
         try:
             raw_text = ResumeParser.extract_text(data, display_name)

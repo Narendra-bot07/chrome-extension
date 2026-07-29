@@ -25,7 +25,18 @@ import {
   Phone,
   Calendar,
   Sparkles,
-  CheckCircle2
+  CheckCircle2,
+  AtSign,
+  UserCheck,
+  Map,
+  Building2,
+  Clock,
+  Languages,
+  Award,
+  Linkedin,
+  Github,
+  FolderGit2,
+  Link as LinkIcon
 } from 'lucide-react';
 
 export default function ProfilePage() {
@@ -275,22 +286,24 @@ export default function ProfilePage() {
         )}
       </AnimatePresence>
 
-      {/* 2. Profile Completeness Progress Card */}
-      <motion.div variants={cardVariants} className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md p-6 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-xs space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <Sparkles className="w-5 h-5 text-tf-accent" />
-            <div>
-              <h2 className="text-base font-bold text-tf-text">Profile Completion</h2>
-              <p className="text-xs text-tf-text-secondary">Complete your profile to tailor resumes and cover letters faster.</p>
+      {/* 2. Profile Completeness Progress Card (Only shown if user profile details are incomplete) */}
+      {completion < 100 && (
+        <motion.div variants={cardVariants} className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md p-6 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-xs space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <Sparkles className="w-5 h-5 text-tf-accent" />
+              <div>
+                <h2 className="text-base font-bold text-tf-text">Profile Completion</h2>
+                <p className="text-xs text-tf-text-secondary">Complete your profile to tailor resumes and cover letters faster.</p>
+              </div>
             </div>
+            <span className="text-base font-extrabold text-tf-accent">{completion}%</span>
           </div>
-          <span className="text-base font-extrabold text-tf-accent">{completion}%</span>
-        </div>
-        <div className="h-2 w-full bg-tf-surface-2 border border-tf-border/60 rounded-full overflow-hidden">
-          <div className="h-full bg-tf-accent rounded-full transition-all duration-500" style={{ width: `${completion}%` }} />
-        </div>
-      </motion.div>
+          <div className="h-2 w-full bg-tf-surface-2 border border-tf-border/60 rounded-full overflow-hidden">
+            <div className="h-full bg-tf-accent rounded-full transition-all duration-500" style={{ width: `${completion}%` }} />
+          </div>
+        </motion.div>
+      )}
 
       {/* 3. User Avatar & Main Hero Card */}
       <motion.div variants={cardVariants} className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md p-6 sm:p-8 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
@@ -351,65 +364,77 @@ export default function ProfilePage() {
             {[
               {
                 title: 'Identity',
+                icon: User,
                 fields: [
-                  ['Full name', [profileForm.first_name, profileForm.last_name].filter(Boolean).join(' ') || profileForm.full_name],
-                  ['Preferred name', profileForm.preferred_name],
-                  ['Username', profileForm.username ? `@${profileForm.username}` : ''],
+                  ['Full name', [profileForm.first_name, profileForm.last_name].filter(Boolean).join(' ') || profileForm.full_name, User],
+                  ['Preferred name', profileForm.preferred_name, Sparkles],
+                  ['Username', profileForm.username ? `@${profileForm.username}` : '', AtSign],
                   ['Date of birth', profileForm.date_of_birth
                     ? new Date(`${profileForm.date_of_birth}T00:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
-                    : ''],
-                  ['Gender', profileForm.gender?.replaceAll('_', ' ')]
+                    : '', Calendar],
+                  ['Gender', profileForm.gender?.replaceAll('_', ' '), UserCheck]
                 ]
               },
               {
                 title: 'Contact & Location',
+                icon: MapPin,
                 fields: [
                   ['Mobile', profileForm.phone_number
                     ? `${profileForm.phone_country_code || ''} ${profileForm.phone_number}`.trim()
-                    : ''],
-                  ['Country', profileForm.country],
-                  ['State / Region', profileForm.state],
-                  ['City', profileForm.city],
-                  ['Timezone', profileForm.timezone]
+                    : '', Phone],
+                  ['Country', profileForm.country, Globe],
+                  ['State / Region', profileForm.state, Map],
+                  ['City', profileForm.city, Building2],
+                  ['Timezone', profileForm.timezone, Clock]
                 ]
               },
               {
                 title: 'Career & Online Profiles',
+                icon: Briefcase,
                 fields: [
-                  ['Preferred language', profileForm.preferred_language],
-                  ['Current title', profileForm.current_title],
+                  ['Preferred language', profileForm.preferred_language, Languages],
+                  ['Current title', profileForm.current_title, Briefcase],
                   ['Experience', profileForm.years_experience !== null && profileForm.years_experience !== undefined && profileForm.years_experience !== ''
                     ? `${profileForm.years_experience} years`
-                    : ''],
-                  ['LinkedIn', profileForm.linkedin_url],
-                  ['GitHub', profileForm.github_url],
-                  ['Portfolio', profileForm.portfolio_url],
-                  ['Website', profileForm.website_url]
+                    : '', Award],
+                  ['LinkedIn', profileForm.linkedin_url, Linkedin],
+                  ['GitHub', profileForm.github_url, Github],
+                  ['Portfolio', profileForm.portfolio_url, FolderGit2],
+                  ['Website', profileForm.website_url, LinkIcon]
                 ]
               }
-            ].map(section => (
-              <section key={section.title} className="space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-tf-text-tertiary">{section.title}</h4>
-                <dl className="grid grid-cols-1 sm:grid-cols-2 rounded-xl border border-tf-border bg-tf-surface divide-y sm:divide-y-0 sm:divide-x divide-tf-border overflow-hidden">
-                  {section.fields.map(([label, value]) => {
-                    const isLink = typeof value === 'string' && /^https?:\/\//i.test(value);
-                    return (
-                      <div key={label} className="p-4 flex flex-col justify-center min-h-[64px]">
-                        <dt className="text-xs font-medium text-tf-text-tertiary">{label}</dt>
-                        <dd className="mt-1 text-xs font-semibold text-tf-text break-words capitalize">
-                          {isLink ? (
-                            <a href={value} target="_blank" rel="noreferrer" className="normal-case text-tf-accent hover:underline inline-flex items-center gap-1">
-                              <span>{value.replace(/^https?:\/\//i, '').replace(/\/$/, '')}</span>
-                              <ExternalLink size={12} />
-                            </a>
-                          ) : value || <span className="text-tf-text-tertiary font-normal">Not provided</span>}
-                        </dd>
-                      </div>
-                    );
-                  })}
-                </dl>
-              </section>
-            ))}
+            ].map(section => {
+              const SectionIcon = section.icon;
+              return (
+                <section key={section.title} className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <SectionIcon size={14} className="text-tf-accent shrink-0" />
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-tf-text-tertiary">{section.title}</h4>
+                  </div>
+                  <dl className="grid grid-cols-1 sm:grid-cols-2 rounded-xl border border-tf-border bg-tf-surface divide-y sm:divide-y-0 sm:divide-x divide-tf-border overflow-hidden">
+                    {section.fields.map(([label, value, FieldIcon]) => {
+                      const isLink = typeof value === 'string' && /^https?:\/\//i.test(value);
+                      return (
+                        <div key={label} className="p-4 flex flex-col justify-center min-h-[64px]">
+                          <dt className="text-xs font-medium text-tf-text-tertiary flex items-center gap-1.5">
+                            {FieldIcon && <FieldIcon size={13} className="text-tf-accent/80 shrink-0" />}
+                            <span>{label}</span>
+                          </dt>
+                          <dd className="mt-1 text-xs font-semibold text-tf-text break-words capitalize">
+                            {isLink ? (
+                              <a href={value} target="_blank" rel="noreferrer" className="normal-case text-tf-accent hover:underline inline-flex items-center gap-1">
+                                <span>{value.replace(/^https?:\/\//i, '').replace(/\/$/, '')}</span>
+                                <ExternalLink size={12} />
+                              </a>
+                            ) : value || <span className="text-tf-text-tertiary font-normal">Not provided</span>}
+                          </dd>
+                        </div>
+                      );
+                    })}
+                  </dl>
+                </section>
+              );
+            })}
           </div>
         ) : (
           <form onSubmit={handleUpdateProfile} className="space-y-5">

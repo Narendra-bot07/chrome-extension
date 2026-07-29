@@ -1,15 +1,20 @@
 /* Final dark-only material layer. Loaded after the shared design system. */
 .dark {
-  --tf-bg: #101216;
-  --tf-surface: #181b20;
-  --tf-surface-2: #20242a;
-  --tf-surface-3: #292e35;
-  --tf-surface-floating: rgba(29, 33, 39, 0.7);
-  --tf-border: rgba(255, 255, 255, 0.072);
-  --tf-border-strong: rgba(255, 255, 255, 0.13);
-  --tf-text: #f4f5f7;
-  --tf-text-secondary: #acb3bd;
-  --tf-text-tertiary: #777f8b;
+  --tf-bg: #0d1726;
+  --tf-surface: #142238;
+  --tf-surface-2: #192a42;
+  --tf-surface-3: #213550;
+  --tf-surface-floating: rgba(20, 34, 56, 0.82);
+  --tf-border: rgba(166, 201, 242, 0.09);
+  --tf-border-strong: rgba(166, 201, 242, 0.17);
+  --tf-text: #f4f8ff;
+  --tf-text-secondary: #abbad0;
+  --tf-text-tertiary: #75869e;
+  --tf-accent: #5b96f7;
+  --tf-accent-hover: #79aaf9;
+  --tf-accent-secondary: #fb923c;
+  --tf-warning: #fb923c;
+  --tf-status-warning: #fb923c;
   --tf-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.26), 0 8px 24px rgba(0, 0, 0, 0.1);
   --tf-shadow-md: 0 2px 6px rgba(0, 0, 0, 0.26), 0 18px 48px rgba(0, 0, 0, 0.2);
   --tf-shadow-floating: 0 8px 20px rgba(0, 0, 0, 0.28), 0 32px 80px rgba(0, 0, 0, 0.38);

@@ -19,6 +19,17 @@
     --tf-warning: #B7791F;
     --tf-danger: #D0342C;
 
+    --motion-instant: 80ms;
+    --motion-fast: 140ms;
+    --motion-base: 200ms;
+    --motion-slow: 280ms;
+    --motion-emphasis: 420ms;
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+    --ease-spring-soft: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-spring-snappy: cubic-bezier(0.34, 1.4, 0.64, 1);
+
     /* Extended Elevation & Status Tokens */
     --tf-shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.03);
     --tf-shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.08), 0 2px 6px -1px rgba(0, 0, 0, 0.04);
@@ -124,6 +135,17 @@
     font-size: 14px;
     line-height: 22px;
     letter-spacing: 0;
+  }
+
+  html:not(.tf-theme-static) body,
+  html:not(.tf-theme-static) #root,
+  html:not(.tf-theme-static) #root :where(
+    header, nav, aside, main, button, input, textarea, select,
+    .tf-card, .tf-motion-card, .tf-motion-modal, .tf-motion-drawer
+  ):not(.pdf-page):not(.react-pdf__Page):not(.tf-no-theme-transition) {
+    transition-property: background-color, border-color, color, fill, stroke;
+    transition-duration: var(--motion-base);
+    transition-timing-function: var(--ease-standard);
   }
   
   *:focus-visible {
@@ -784,6 +806,72 @@ html.dark #root .dashboard-kpi-card:hover {
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
 }
 
+/* tailr4u shared motion primitives */
+.tf-motion-page { width: 100%; min-width: 0; will-change: opacity, transform; }
+.tf-motion-card { will-change: transform, opacity; }
+.tf-motion-card--interactive {
+  transition: border-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+.tf-motion-card--interactive:hover {
+  border-color: var(--tf-border-strong);
+  box-shadow: var(--tf-shadow-md);
+}
+
+.tf-motion-button, #root button, #root [role="button"] {
+  transition: transform var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    opacity var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+@media (hover: hover) and (pointer: fine) {
+  #root button:not(:disabled):hover,
+  #root [role="button"]:not([aria-disabled="true"]):hover { transform: translateY(-1px); }
+}
+#root button:not(:disabled):active,
+#root [role="button"]:not([aria-disabled="true"]):active {
+  transform: translateY(0) scale(0.98);
+}
+
+.tf-motion-backdrop {
+  position: fixed; inset: 0; z-index: 100; display: flex;
+  align-items: center; justify-content: center; padding: 16px;
+  background: rgb(10 11 13 / 0.58);
+}
+.tf-motion-modal {
+  width: min(100%, 640px); max-height: min(90vh, 900px); overflow: auto;
+  border: 1px solid var(--tf-border); border-radius: var(--tf-radius-card);
+  background: var(--tf-surface); color: var(--tf-text);
+  box-shadow: var(--tf-shadow-md); outline: none;
+}
+.tf-motion-drawer {
+  position: absolute; top: 0; bottom: 0; width: min(92vw, 440px);
+  overflow: auto; border-color: var(--tf-border); background: var(--tf-surface);
+  box-shadow: var(--tf-shadow-md); outline: none;
+}
+.tf-motion-drawer--right { right: 0; border-left-width: 1px; }
+.tf-motion-drawer--left { left: 0; border-right-width: 1px; }
+.tf-animated-progress { overflow: hidden; }
+.tf-animated-progress > div { height: 100%; }
+.adaptive-ambient--paused *,
+.adaptive-ambient--paused *::before,
+.adaptive-ambient--paused *::after { animation-play-state: paused !important; }
+
+[role="alert"], [aria-live="polite"], [aria-live="assertive"] {
+  animation: tf-fade-in-up var(--motion-base) var(--ease-enter) both;
+}
+#root input, #root textarea, #root select {
+  transition: border-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-base) var(--ease-standard),
+    color var(--motion-base) var(--ease-standard);
+}
+#root input:focus, #root textarea:focus, #root select:focus {
+  box-shadow: var(--tf-shadow-focus);
+}
+
 /* Page Layout Wrappers */
 .af-page, .tf-page {
   width: 100%;
@@ -798,11 +886,87 @@ html.dark #root .dashboard-kpi-card:hover {
 #root .border-zinc-100, #root .border-zinc-200, #root .border-slate-100, #root .border-slate-200 { border-color: var(--tf-border); }
 #root .text-zinc-950, #root .text-zinc-900, #root .text-slate-950, #root .text-slate-900 { color: var(--tf-text); }
 #root .text-zinc-700, #root .text-zinc-600, #root .text-slate-700, #root .text-slate-600 { color: var(--tf-text-secondary); }
+
+@media (prefers-reduced-motion: reduce) {
+  .tf-motion-page, .tf-motion-card, .tf-motion-button,
+  #root button, #root [role="button"] {
+    transform: none !important;
+    will-change: auto;
+  }
+  .adaptive-ambient *, .adaptive-ambient *::before, .adaptive-ambient *::after {
+    animation: none !important;
+  }
+}
 #root .text-zinc-500, #root .text-zinc-400, #root .text-slate-500, #root .text-slate-400 { color: var(--tf-text-tertiary); }
 #root .bg-indigo-600, #root .bg-violet-600, #root .bg-\[\#00bda5\], #root .bg-blue-600 { background-color: var(--tf-accent); color: var(--tf-accent-fg); }
 #root .hover\:bg-indigo-700:hover, #root .hover\:bg-violet-700:hover, #root .hover\:bg-blue-700:hover { background-color: var(--tf-accent-hover); }
 #root .text-indigo-600, #root .text-violet-600, #root .text-blue-600 { color: var(--tf-accent); }
 #root .border-indigo-500, #root .border-violet-500, #root .border-blue-500 { border-color: var(--tf-accent); }
+
+/* Universal blueprint shell and blue / ink / orange product palette. */
+:root {
+  --tf-bg: #eaf4ff;
+  --tf-surface: #ffffff;
+  --tf-surface-2: #edf6ff;
+  --tf-surface-3: #dcecff;
+  --tf-surface-floating: rgba(255, 255, 255, 0.88);
+  --tf-border: rgba(37, 78, 123, 0.13);
+  --tf-border-strong: rgba(37, 78, 123, 0.24);
+  --tf-text: #101827;
+  --tf-text-secondary: #526176;
+  --tf-text-tertiary: #7c899b;
+  --tf-accent: #3478f6;
+  --tf-accent-hover: #1f62da;
+  --tf-accent-primary: #3478f6;
+  --tf-accent-secondary: #f97316;
+  --tf-warning: #f97316;
+  --tf-status-warning: #f97316;
+  --tf-shadow-focus: 0 0 0 3px rgba(52, 120, 246, 0.2);
+}
+
+.app-main--blueprint-grid {
+  background-color: #eaf4ff;
+  background-image:
+    radial-gradient(circle at 7% 4%, rgba(52, 120, 246, 0.12), transparent 27%),
+    radial-gradient(circle at 94% 88%, rgba(249, 115, 22, 0.065), transparent 23%),
+    linear-gradient(rgba(44, 98, 151, 0.065) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(44, 98, 151, 0.065) 1px, transparent 1px);
+  background-size: auto, auto, 30px 30px, 30px 30px;
+  background-attachment: local;
+}
+
+.app-main--blueprint-grid > .page-container {
+  background: transparent;
+}
+
+.app-main--blueprint-grid :where(.tf-card, [class*="rounded-2xl"], [class*="rounded-3xl"]) {
+  --tf-accent-secondary: #f97316;
+}
+
+#root .text-orange-500,
+#root .text-orange-600,
+#root .text-amber-500,
+#root .text-amber-600 {
+  color: #ea6a0a;
+}
+
+#root .bg-orange-500,
+#root .bg-orange-600,
+#root .bg-amber-500,
+#root .bg-amber-600 {
+  background-color: #f97316;
+  color: #ffffff;
+}
+
+.dark .app-main--blueprint-grid {
+  background-color: #0d1726;
+  background-image:
+    radial-gradient(circle at 7% 4%, rgba(52, 120, 246, 0.15), transparent 27%),
+    radial-gradient(circle at 94% 88%, rgba(249, 115, 22, 0.08), transparent 23%),
+    linear-gradient(rgba(185, 211, 243, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(185, 211, 243, 0.045) 1px, transparent 1px);
+  background-size: auto, auto, 30px 30px, 30px 30px;
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-TAILORING_ENGINE_VERSION = "strict-patch-v5-project-retry"
+TAILORING_ENGINE_VERSION = "stable-patch-v8-factual-guards"
 PATCHABLE_SELECTIONS = frozenset({"summary", "experience", "projects", "skills"})
 
 
@@ -26,10 +26,14 @@ def tailoring_cache_matches(
     selected_sections: Iterable[str] | None,
 ) -> bool:
     payload = breakdown or {}
+    patch = payload.get("patch") or {}
+    has_edits = isinstance(patch, dict) and any(
+        bool(v) for v in patch.values() if v is not None
+    )
     return (
         payload.get("tailoring_engine_version") == TAILORING_ENGINE_VERSION
         and payload.get("tailoring_generation_status") == "completed"
         and payload.get("selected_sections")
         == canonical_selected_sections(selected_sections)
-        and isinstance(payload.get("patch"), dict)
+        and has_edits
     )

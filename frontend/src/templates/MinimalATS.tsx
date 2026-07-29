@@ -133,7 +133,7 @@ export default function MinimalATS({ resume }) {
           <div className="space-y-2">
             {certifications.map((cert, i) => (
               <div key={i} className="text-sm">
-                <span className="font-bold">{cert.name}</span> - {cert.issuing_organization} ({cert.issue_date})
+                <span className="font-bold">{cert.name}</span>
               </div>
             ))}
           </div>

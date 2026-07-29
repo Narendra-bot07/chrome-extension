@@ -13,6 +13,7 @@ import InvalidJdWarningModal from './InvalidJdWarningModal';
 import HowItWorksModal from './modals/HowItWorksModal';
 import FeedbackModal from './modals/FeedbackModal';
 import SupportModal from './modals/SupportModal';
+import RouteTransition from '../motion/RouteTransition';
 import { FlowStepper } from './FlowStepper';
 import { classifyBrowserPageUrl } from '../services/jdExtractionFlow';
 import { InteractiveAuroraBackground } from './layout/InteractiveAuroraBackground';
@@ -588,6 +589,14 @@ function Layout() {
             <button onClick={() => setApiError(null)} className="text-tf-danger hover:opacity-75">
               <X size={14} />
             </button>
+            {/limit|quota|upgrade|current plan/i.test(String(apiError)) && (
+              <Button size="sm" variant="primary" onClick={() => {
+                setApiError(null);
+                navigate('/subscription');
+              }}>
+                View Plans
+              </Button>
+            )}
           </div>
         )}
 
@@ -602,7 +611,7 @@ function Layout() {
         />
 
         {/* VIEW OUTLET */}
-        <main className={`app-main flex-1 min-h-0 flex flex-col ${pageLayout.workspace ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+        <main className={`app-main app-main--blueprint-grid flex-1 min-h-0 flex flex-col ${pageLayout.workspace ? 'overflow-hidden' : 'overflow-y-auto'}`}>
           <PageContainer
             mode={pageLayout.mode}
             workspace={pageLayout.workspace}
@@ -630,7 +639,9 @@ function Layout() {
                   </div>
                 </div>
               )}
-            <Outlet />
+            <RouteTransition>
+              <Outlet />
+            </RouteTransition>
           </PageContainer>
         </main>
 

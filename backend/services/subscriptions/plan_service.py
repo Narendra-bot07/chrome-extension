@@ -2,22 +2,24 @@ from psycopg2.extras import RealDictCursor, Json
 
 PLAN_DISPLAY = {
     "free": {
-        "description": "For users getting started.",
+        "description": "A focused free start.",
     },
     "pro": {
-        "description": "For active job seekers.",
+        "description": "For active job hunting.",
     },
-    "plus": {
-        "description": "For frequent applicants.",
+    "elite": {
+        "description": "For serious job hunters.",
     },
-    "premium": {
-        "description": "For users who need maximum limits.",
+    "advanced": {
+        "description": "For power users and teams.",
     },
 }
 
 FEATURE_LABELS = {
     "jd_extraction": "Job description extractions",
     "resume_upload": "Resume uploads",
+    "resume_generation": "Tailored resumes",
+    "cover_letter_generation": "Cover letters",
     "basic_tailoring": "Basic resume tailoring",
     "advanced_tailoring": "Advanced resume tailoring",
     "application_history": "Application history",
@@ -28,6 +30,8 @@ FEATURE_LABELS = {
 FEATURE_ORDER = [
     "jd_extraction",
     "resume_upload",
+    "resume_generation",
+    "cover_letter_generation",
     "basic_tailoring",
     "advanced_tailoring",
     "application_history",
@@ -52,6 +56,10 @@ class PlanService:
             return f"{limit_value:,} job description extractions per month" if limit_value else "Unlimited job description extractions"
         if feature_key == "resume_upload":
             return f"{limit_value:,} resume upload{'s' if limit_value != 1 else ''}" if limit_value else "Unlimited resume uploads"
+        if feature_key == "resume_generation":
+            return f"{limit_value:,} tailored resume{'s' if limit_value != 1 else ''} per month" if limit_value else "Unlimited tailored resumes"
+        if feature_key == "cover_letter_generation":
+            return f"{limit_value:,} cover letter{'s' if limit_value != 1 else ''} per month" if limit_value else "Unlimited cover letters"
         return label
 
     def _serialize_plan(self, plan):

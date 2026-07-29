@@ -114,6 +114,9 @@ function JobExtractPage() {
           setJobAnalysis(null);
           setComparison(null);
           setJobText("");
+          if (isExtension) {
+            void handleScanPage(true);
+          }
         }}
         loading={loading}
       />
@@ -131,6 +134,26 @@ function JobExtractPage() {
         title="Extracting details"
         progress={progress}
         message={message}
+        checklistItems={[
+          { label: "Reading Job Description", progressThreshold: 20 },
+          { label: "Extracting Company Details", progressThreshold: 40 },
+          { label: "Analyzing Required Skills", progressThreshold: 60 },
+          { label: "Finding ATS Keywords", progressThreshold: 80 },
+          { label: "Calculating Resume Match", progressThreshold: 90 }
+        ]}
+      />
+    );
+  }
+
+  // The extension owns an automatic current-tab workflow. Never fall through
+  // to the website's manual JD form while its first scan is being scheduled or
+  // after extraction state has just been reset.
+  if (isExtension) {
+    return (
+      <ChecklistLoader
+        title="Scanning current job"
+        progress={12}
+        message="Reading the active job page..."
         checklistItems={[
           { label: "Reading Job Description", progressThreshold: 20 },
           { label: "Extracting Company Details", progressThreshold: 40 },

@@ -444,6 +444,19 @@ class ResumeRepository:
             try:
                 cur.execute(query, (resume_id, user_id))
                 record = cur.fetchone()
+                if record:
+                    # Keep a dated source of truth for dashboard time-series data.
+                    # Older flows only incremented tailor_count, which made it
+                    # impossible to reconstruct when tailoring happened.
+                    cur.execute("""
+                        INSERT INTO public.resume_usage_events (
+                            user_id, resume_id, version_id, event_type, created_at
+                        )
+                        SELECT %s, %s, active_version_id, 'tailoring_completed', NOW()
+                        FROM public.resumes
+                        WHERE id = %s
+                          AND to_regclass('public.resume_usage_events') IS NOT NULL
+                    """, (user_id, resume_id, resume_id))
                 self.conn.commit()
                 return self._with_metadata_defaults(record)
             except Exception:

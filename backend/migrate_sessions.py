@@ -1,8 +1,9 @@
 import psycopg2
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / ".env")
 DB_URL = os.getenv("DATABASE_URL")
 
 def run_migration():
@@ -35,6 +36,17 @@ def run_migration():
     """)
     
     cur.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON public.user_sessions(user_id);")
+    cur.execute("""
+        ALTER TABLE public.user_sessions
+        ADD COLUMN IF NOT EXISTS refresh_token_hash TEXT,
+        ADD COLUMN IF NOT EXISTS refresh_expires_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ;
+    """)
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_user_sessions_refresh_token_hash
+        ON public.user_sessions(refresh_token_hash)
+        WHERE refresh_token_hash IS NOT NULL;
+    """)
     conn.commit()
     cur.close()
     conn.close()

@@ -2,17 +2,14 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, Search, BookOpen, Mail, HelpCircle } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { MotionModal } from '../../motion/MotionSystem';
 
 export default function SupportModal({ isOpen, onClose }) {
   const { darkMode, profile, user } = useApp();
   const navigate = useNavigate();
 
-  if (!isOpen) return null;
-
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
-      <div className={`relative w-full max-w-md overflow-hidden rounded-2xl shadow-2xl ${darkMode ? 'bg-zinc-900 text-white border-zinc-800' : 'bg-white text-zinc-900 border-zinc-200'} border`}>
+    <MotionModal open={isOpen} onClose={onClose} className={`relative max-w-md overflow-hidden ${darkMode ? 'bg-zinc-900 text-white border-zinc-800' : 'bg-white text-zinc-900 border-zinc-200'}`}>
         
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b bg-inherit border-inherit">
@@ -74,7 +71,6 @@ export default function SupportModal({ isOpen, onClose }) {
           </button>
 
         </div>
-      </div>
-    </div>
+    </MotionModal>
   );
 }

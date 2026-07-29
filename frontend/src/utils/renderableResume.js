@@ -17,6 +17,7 @@ const PERSONAL_FIELDS = [
 
 const cleanText = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 const fingerprint = value => cleanText(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const isPlaceholderText = value => /^(?:0+\.?|null|none|undefined|n\/a|na)$/i.test(cleanText(value));
 
 const unique = values => {
   const seen = new Set();
@@ -69,6 +70,32 @@ const achievementText = item => {
 const certificationTitle = item => {
   if (typeof item === 'string') return fingerprint(item);
   return fingerprint(item?.name || item?.title || item?.certificate_name || '');
+};
+
+const INTERNAL_EVIDENCE_FIELDS = new Set([
+  'confidence', 'source', 'source_span', 'source_text',
+  'normalized_text', 'raw_text', 'provenance', 'metadata',
+  'item_index', 'bullet_index', 'index', 'order', 'sort_order',
+  'itemIndex', 'bulletIndex', 'change_id', 'status', 'category'
+]);
+
+const cleanCertification = item => {
+  const source = typeof item === 'string'
+    ? { name: splitDetailedText(item).title }
+    : structuredClone(item || {});
+  const cleaned = Object.fromEntries(
+    Object.entries(source).filter(([key, value]) =>
+      !INTERNAL_EVIDENCE_FIELDS.has(key)
+      && value !== null
+      && value !== undefined
+      && value !== ''
+      && !(key === 'description' && String(value).trim().match(/^[0-9]+\.?$/))
+    )
+  );
+  if (!cleaned.name && cleaned.title) cleaned.name = cleaned.title;
+  delete cleaned.title;
+  if (isPlaceholderText(cleaned.name)) cleaned.name = '';
+  return cleaned;
 };
 
 const splitDetailedText = value => {
@@ -271,13 +298,14 @@ export function toRenderableResume(record) {
   output.achievements = (source.achievements || [])
     .map(item => typeof item === 'string' ? item : achievementText(item))
     .filter(value => cleanText(value));
-  output.certifications = (source.certifications || []).map(item => {
-    if (typeof item !== 'string') return structuredClone(item);
-    const split = splitDetailedText(item);
-    return split.description
-      ? { name: split.title, issuing_organization: split.description }
-      : { name: split.title };
-  });
+  output.certifications = unique(
+    (source.certifications || [])
+      .map(cleanCertification)
+      .filter(item => cleanText(item.name) && !isPlaceholderText(item.name))
+      // "Credential verification" is a link/action belonging to the real
+      // certificate, not a second certification record.
+      .filter(item => !/\bcredential\s+verification$/i.test(cleanText(item.name)))
+  );
 
   return repairResumeLinks(output);
 }

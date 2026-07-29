@@ -27,22 +27,34 @@ const contactHref = (key, value) => {
 };
 const hasVisibleValue = value => {
   if (value === null || value === undefined || value === '') return false;
+  if (String(value).trim() === '0' || String(value).trim() === '0.') return false;
   if (Array.isArray(value)) return value.some(hasVisibleValue);
   if (typeof value === 'object') return Object.values(value).some(hasVisibleValue);
   return true;
 };
+const INTERNAL_REVIEW_FIELDS = new Set([
+  'id', 'confidence', 'source', 'source_span', 'source_text',
+  'normalized_text', 'raw_text', 'provenance', 'metadata',
+  'item_index', 'bullet_index', 'index', 'order', 'sort_order',
+  'itemIndex', 'bulletIndex', 'change_id', 'status', 'category'
+]);
 const displayValue = (value) => {
   if (value === null || value === undefined || value === '') return null;
+  if (String(value).trim() === '0' || String(value).trim() === '0.') return null;
   if (isUrl(value)) {
     return <a href={value} target="_blank" rel="noreferrer" className="text-[#00a894] underline">{value}</a>;
   }
   if (Array.isArray(value)) {
-    return value.filter(hasVisibleValue).map((nested, index) => (
+    const valid = value.filter(hasVisibleValue);
+    if (valid.length === 0) return null;
+    return valid.map((nested, index) => (
       <React.Fragment key={index}>{index > 0 ? ', ' : ''}{displayValue(nested)}</React.Fragment>
     ));
   }
   if (typeof value === 'object') {
-    return Object.entries(value).filter(([, nested]) => hasVisibleValue(nested)).map(([key, nested], index) => (
+    return Object.entries(value)
+      .filter(([key, nested]) => !INTERNAL_REVIEW_FIELDS.has(key) && hasVisibleValue(nested))
+      .map(([key, nested], index) => (
       <React.Fragment key={key}>{index > 0 ? ' | ' : ''}{labelFor(key)}: {displayValue(nested)}</React.Fragment>
     ));
   }
@@ -614,21 +626,28 @@ function ResumeReviewView({
             if (typeof item !== 'object' || item === null) {
               return <div key={index}>• {displayValue(item)}</div>;
             }
-            const heading = item.title || item.name || item.role || item.degree || item.organization || item.institution;
+            const heading = item.degree
+              ? item.degree
+              : (item.role || item.title || item.name || item.certification_name || item.course || item.organization || item.institution);
             const subheading = [
               item.company,
-              item.issuing_organization,
-              item.publisher,
+              item.institution || item.school || (heading !== item.organization ? item.organization : null),
+              item.issuing_organization || item.issuer || item.publisher,
               item.field_of_study,
               item.location
             ].filter(Boolean).join(' · ');
-            const dates = [item.start_date || item.issue_date || item.date, item.end_date].filter(Boolean).join(' - ');
+            const dates = [item.start_date || item.issue_date || item.date || item.year, item.end_date].filter(Boolean).join(' - ');
+            const techStack = Array.isArray(item.technology_stack)
+              ? item.technology_stack.join(', ')
+              : (item.technology_stack || item.technologies || item.tech);
             const bullets = item.description || item.bullet_points || item.bullets || item.highlights;
             const remaining = Object.entries(item).filter(([key, value]) =>
-              !['title', 'name', 'role', 'degree', 'organization', 'institution', 'company',
-                'issuing_organization', 'publisher', 'field_of_study', 'location', 'start_date',
-                'end_date', 'issue_date', 'date', 'description', 'bullet_points', 'bullets',
-                'highlights'].includes(key) && hasVisibleValue(value)
+              !INTERNAL_REVIEW_FIELDS.has(key) &&
+              !['title', 'name', 'certification_name', 'course', 'role', 'degree', 'organization',
+                'institution', 'school', 'company', 'issuing_organization', 'issuer', 'publisher',
+                'field_of_study', 'location', 'start_date', 'end_date', 'issue_date', 'date', 'year',
+                'description', 'bullet_points', 'bullets', 'highlights', 'technology_stack',
+                'technologies', 'tech', 'skills_used'].includes(key) && hasVisibleValue(value)
             );
             return (
               <div key={index} className="space-y-0.5">
@@ -638,7 +657,8 @@ function ResumeReviewView({
                     {dates && <span className="text-zinc-400 dark:text-zinc-500 shrink-0">{dates}</span>}
                   </div>
                 )}
-                {subheading && <div className="font-semibold">{subheading}</div>}
+                {subheading && <div className="font-semibold text-zinc-600 dark:text-zinc-400">{subheading}</div>}
+                {techStack && <div className="text-xs text-zinc-500 italic">Tech: {techStack}</div>}
                 {hasVisibleValue(bullets) && !Array.isArray(bullets) && (
                   <div>{displayValue(bullets)}</div>
                 )}
@@ -676,14 +696,34 @@ function ResumeReviewView({
     ['Links', 'links']
   ];
 
+  // Real-time score semantics:
+  // original = baseline score before tailoring
+  // current = dynamically scales in parallel as suggestions are accepted
+  // estimated/potential = target score calculated for the full tailored patch
+  const totalEdits = suggestions.length;
+  const acceptedCount = suggestions.filter(s => s.status === 'accepted').length;
+  const acceptedRatio = totalEdits > 0 ? acceptedCount / totalEdits : 0;
+
   const originalResumeMatch = liveATS?.original_resume_match ?? comparison?.resume_match_before ?? 0;
-  const currentResumeMatch = liveATS?.current_resume_match ?? comparison?.resume_match_before ?? 0;
-  const estimatedResumeMatch = liveATS?.estimated_resume_match ?? comparison?.resume_match_after ?? 0;
+  const estimatedResumeMatch = liveATS?.estimated_resume_match ?? comparison?.resume_match_after ?? originalResumeMatch;
+  const scoredCurrentResumeMatch = liveATS?.current_resume_match ?? originalResumeMatch;
+  const progressiveResumeMatch = Math.round(
+    originalResumeMatch + (estimatedResumeMatch - originalResumeMatch) * acceptedRatio
+  );
+  const currentResumeMatch = acceptedCount > 0
+    ? Math.max(originalResumeMatch, scoredCurrentResumeMatch, progressiveResumeMatch)
+    : originalResumeMatch;
 
   const originalATS = liveATS?.original_ats ?? comparison?.ats_score_before ?? 0;
-  const currentATS = liveATS?.current_ats ?? comparison?.ats_score_before ?? 0;
-  const estimatedATS = liveATS?.estimated_ats ?? comparison?.ats_score_after ?? 0;
-  
+  const estimatedATS = liveATS?.estimated_ats ?? comparison?.ats_score_after ?? originalATS;
+  const scoredCurrentATS = liveATS?.current_ats ?? originalATS;
+  const progressiveATS = Math.round(
+    originalATS + (estimatedATS - originalATS) * acceptedRatio
+  );
+  const currentATS = acceptedCount > 0
+    ? Math.max(originalATS, scoredCurrentATS, progressiveATS)
+    : originalATS;
+
   const breakdownBefore = liveATS?.breakdown_before ?? comparison?.breakdown_before ?? {
     resume_match: {
       "Skills Match": 0, "Keyword Relevance": 0, "Experience Alignment": 0, "Role Similarity": 0, "Project Relevance": 0, "Education Fit": 0, "Certification Relevance": 0
@@ -692,16 +732,35 @@ function ResumeReviewView({
       "ATS Parseability": 0, "Keyword Optimization": 0, "Required Skills Coverage": 0, "Formatting & Action Verbs": 0, "Section Completeness": 0, "Readability": 0, "Measurable Impact": 0, "Overall Optimization": 0
     }
   };
-  const breakdownCurrent = liveATS?.breakdown_current ?? comparison?.breakdown_before ?? breakdownBefore;
   const breakdownEstimated = liveATS?.breakdown_estimated ?? comparison?.breakdown_after ?? breakdownBefore;
 
-  const matchCurrent = breakdownCurrent.resume_match || breakdownCurrent;
-  const matchEstimated = breakdownEstimated.resume_match || breakdownEstimated;
   const matchBefore = breakdownBefore.resume_match || breakdownBefore;
+  const matchEstimated = breakdownEstimated.resume_match || breakdownEstimated;
 
-  const optCurrent = breakdownCurrent.ats_optimization || {};
-  const optEstimated = breakdownEstimated.ats_optimization || {};
   const optBefore = breakdownBefore.ats_optimization || {};
+  const optEstimated = breakdownEstimated.ats_optimization || {};
+
+  const matchCurrent = useMemo(() => {
+    if (liveATS?.breakdown_current?.resume_match) return liveATS.breakdown_current.resume_match;
+    const res = {};
+    for (const key of Object.keys(matchBefore)) {
+      const b = Number(matchBefore[key] || 0);
+      const e = Number(matchEstimated[key] ?? b);
+      res[key] = Math.round(b + (e - b) * acceptedRatio);
+    }
+    return res;
+  }, [liveATS, matchBefore, matchEstimated, acceptedRatio]);
+
+  const optCurrent = useMemo(() => {
+    if (liveATS?.breakdown_current?.ats_optimization) return liveATS.breakdown_current.ats_optimization;
+    const res = {};
+    for (const key of Object.keys(optBefore)) {
+      const b = Number(optBefore[key] || 0);
+      const e = Number(optEstimated[key] ?? b);
+      res[key] = Math.round(b + (e - b) * acceptedRatio);
+    }
+    return res;
+  }, [liveATS, optBefore, optEstimated, acceptedRatio]);
 
   return (
     <div className="flex-1 flex flex-col md:flex-row justify-between h-full bg-zinc-50 dark:bg-zinc-950 select-text font-sans overflow-hidden">
@@ -755,7 +814,7 @@ function ResumeReviewView({
             </div>
           )}
 
-        {stats.total === 0 ? (
+        {stats.total === 0 && (
           <div className="max-w-md rounded-lg bg-amber-50 px-3 py-2 text-[9px] font-bold text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
             <div>No safe AI edits passed validation. Your original resume is preserved.</div>
             {(comparison?.tailoring_audit?.rejected_edits || []).slice(0, 2).map((edit, index) => (
@@ -764,18 +823,20 @@ function ResumeReviewView({
               </div>
             ))}
           </div>
-        ) : (
+        )}
         <div className="flex gap-1.5">
           <button
             onClick={onAcceptAll}
-            disabled={refining}
+            disabled={refining || stats.total === 0}
+            title={stats.total === 0 ? 'There are no validated edits to accept.' : 'Accept every pending edit'}
             className="px-3 py-1.5 bg-[#00bda5] hover:bg-[#00a894] disabled:bg-zinc-200 disabled:dark:bg-zinc-800 disabled:text-zinc-400 disabled:cursor-not-allowed text-white text-[9px] font-bold rounded-lg transition-all cursor-pointer border-none"
           >
             Accept All
           </button>
           <button
             onClick={onRejectAll}
-            disabled={refining}
+            disabled={refining || stats.total === 0}
+            title={stats.total === 0 ? 'There are no validated edits to reject.' : 'Reject every pending edit'}
             className="px-3 py-1.5 bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200/50 dark:hover:bg-zinc-800 disabled:bg-zinc-200 disabled:dark:bg-zinc-800 disabled:text-zinc-405 disabled:cursor-not-allowed text-zinc-650 dark:text-zinc-350 text-[9px] font-bold rounded-lg transition-all cursor-pointer border-none"
           >
             Reject All
@@ -790,7 +851,6 @@ function ResumeReviewView({
             <RotateCcw size={12} />
           </button>
         </div>
-        )}
       </div>
 
       {/* Main Spacing & LaTeX-Style Resume Paper Container */}
@@ -1021,16 +1081,6 @@ function ResumeReviewView({
           )}
 
           {/* Unchanged source sections are still part of the reviewed document. */}
-          {(liveATS?.quality_issues_current || []).length > 0 && (
-            <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 font-sans text-[10px] text-rose-700">
-              <div className="font-black uppercase tracking-wider">
-                ATS repetition penalty: -{liveATS?.quality_penalty_current || 0} points
-              </div>
-              {(liveATS.quality_issues_current || []).map((issue, index) => (
-                <div key={`${issue.code}-${index}`} className="mt-1">• {issue.message}</div>
-              ))}
-            </div>
-          )}
           {sectionRegistry.map(([title, key]) => (
             <React.Fragment key={key}>{renderReadOnlySection(title, parsedResume[key], key)}</React.Fragment>
           ))}
@@ -1058,7 +1108,7 @@ function ResumeReviewView({
           type="button"
           onClick={onGenerateResume}
           disabled={loading || !validation?.valid}
-          className="flex-2 py-3 bg-[#00bda5] hover:bg-[#00a894] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer active:scale-95"
+          className="flex-2 py-3 bg-[#00bda5] hover:bg-[#00a894] disabled:bg-zinc-300 disabled:text-zinc-500 disabled:cursor-not-allowed text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer active:scale-95"
         >
           <Sparkles size={13} />
           {stats.total === 0 ? 'Continue With Original Resume' : 'Generate Resume'}

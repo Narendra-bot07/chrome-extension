@@ -63,7 +63,7 @@ def test_pipeline_rejects_changed_metrics_and_low_confidence_redrafts():
     assert len(result.rejected_edits) == 2
 
 
-def test_summary_growth_and_unsupported_skills_are_rejected():
+def test_summary_growth_is_rejected_but_valid_suggested_skill_is_kept():
     resume = source_resume()
     patch = ResumePatch(
         summary=resume.summary * 3,
@@ -72,7 +72,25 @@ def test_summary_growth_and_unsupported_skills_are_rejected():
     result = StrictTailoringEngine().validate_patch(resume, JobAnalysis(), patch)
 
     assert result.patch.summary is None
-    assert result.patch.skills_append == []
+    assert result.patch.skills_append == ["Kubernetes"]
+
+
+def test_selected_summary_accepts_truthful_polishing():
+    resume = source_resume()
+    polished = (
+        "Results-focused software engineer building reliable, production-ready "
+        "Python APIs."
+    )
+
+    result = StrictTailoringEngine().validate_patch(
+        resume,
+        JobAnalysis(title="Python Engineer"),
+        ResumePatch(summary=polished),
+        requested_sections={"summary"},
+    )
+
+    assert result.patch.summary == polished
+    assert len(result.edits) == 1
 
 
 def test_static_sections_are_never_editable_by_default():

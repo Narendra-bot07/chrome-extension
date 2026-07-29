@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request
+from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, status, Request, Response
 from core.security import verify_supabase_jwt, hash_password, verify_password, validate_password
 from core.database import get_db_connection
 from schemas.auth import (
@@ -21,6 +21,19 @@ from services.notifications import NotificationService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 RESET_CONFIRMATION = "If an account exists for this email, a reset link has been sent."
+REFRESH_COOKIE = "tailorflow_refresh"
+
+
+def _set_refresh_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        REFRESH_COOKIE,
+        token,
+        max_age=settings.REFRESH_TOKEN_DAYS * 24 * 60 * 60,
+        httponly=True,
+        secure=settings.FRONTEND_URL.startswith("https://"),
+        samesite="lax",
+        path="/api/v1/auth",
+    )
 
 @router.post("/forgot-password")
 async def forgot_password(payload: ForgotPasswordRequest, request: Request, background_tasks: BackgroundTasks, conn=Depends(get_db_connection)):
@@ -185,6 +198,7 @@ async def register_user(
 async def login_user(
     payload: LoginRequest,
     request: Request,
+    response: Response,
     conn = Depends(get_db_connection)
 ):
     try:
@@ -214,6 +228,8 @@ async def login_user(
             session_service = SessionService(conn)
             
             session_id = session_service.create_session(user["id"], request, "email")
+            refresh_token = session_service.issue_refresh_token(session_id)
+            _set_refresh_cookie(response, refresh_token)
             access_token = auth_service.generate_custom_jwt(user, session_id)
             has_completed_preferences = JobPreferencesRepository(conn).has_completed(user["id"])
 
@@ -256,6 +272,7 @@ async def login_user(
 async def google_login(
     payload: GoogleAuthRequest,
     request: Request,
+    response: Response,
     conn = Depends(get_db_connection)
 ):
     if not payload.credential:
@@ -280,6 +297,8 @@ async def google_login(
         
         session_service = SessionService(conn)
         session_id = session_service.create_session(user["id"], request, "google")
+        refresh_token = session_service.issue_refresh_token(session_id)
+        _set_refresh_cookie(response, refresh_token)
         
         access_token = auth_service.generate_custom_jwt(user, session_id)
         has_completed_preferences = JobPreferencesRepository(conn).has_completed(user["id"])
@@ -324,6 +343,46 @@ async def google_login(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Google login failed: {str(e)}"
         )
+
+
+@router.post("/refresh")
+async def refresh_session(
+    response: Response,
+    refresh_token: str = Cookie(default=None, alias=REFRESH_COOKIE),
+    conn=Depends(get_db_connection),
+):
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Refresh session unavailable.")
+    rotated = SessionService(conn).rotate_refresh_token(refresh_token)
+    if not rotated:
+        response.delete_cookie(REFRESH_COOKIE, path="/api/v1/auth")
+        raise HTTPException(status_code=401, detail="Refresh session expired or revoked.")
+    user, new_refresh_token = rotated
+    access_token = AuthService(conn).generate_custom_jwt(user, str(user["session_id"]))
+    _set_refresh_cookie(response, new_refresh_token)
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post("/activity", status_code=204)
+async def record_session_activity(
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    conn=Depends(get_db_connection),
+):
+    if user.get("session_id"):
+        SessionService(conn).record_activity(user["session_id"])
+    return None
+
+
+@router.post("/logout", status_code=204)
+async def logout_session(
+    response: Response,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    conn=Depends(get_db_connection),
+):
+    if user.get("session_id"):
+        SessionService(conn).revoke_session(user["session_id"], user["id"])
+    response.delete_cookie(REFRESH_COOKIE, path="/api/v1/auth")
+    return None
 
 
 @router.get("/session")

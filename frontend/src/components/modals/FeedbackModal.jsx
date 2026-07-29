@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Star, UploadCloud, MessageSquare, CheckCircle } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { MotionModal } from '../../motion/MotionSystem';
 
 export default function FeedbackModal({ isOpen, onClose }) {
   const { darkMode, apiUrl, session } = useApp();
@@ -13,8 +14,6 @@ export default function FeedbackModal({ isOpen, onClose }) {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState(null);
-
-  if (!isOpen) return null;
 
   const categories = [
     "Feature Request",
@@ -78,8 +77,7 @@ export default function FeedbackModal({ isOpen, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
-      <div className={`relative w-full max-w-lg overflow-hidden rounded-2xl shadow-2xl ${darkMode ? 'bg-zinc-900 text-white border-zinc-800' : 'bg-white text-zinc-900 border-zinc-200'} border`}>
+    <MotionModal open={isOpen} onClose={onClose} className={`relative max-w-lg overflow-hidden ${darkMode ? 'bg-zinc-900 text-white border-zinc-800' : 'bg-white text-zinc-900 border-zinc-200'}`}>
         
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b bg-inherit border-inherit">
@@ -103,7 +101,7 @@ export default function FeedbackModal({ isOpen, onClose }) {
                 <CheckCircle size={32} />
               </div>
               <h3 className="text-xl font-bold">Thank you for your feedback!</h3>
-              <p className={darkMode ? "text-zinc-400" : "text-zinc-600"}>Your input helps us improve ApplyFlow.</p>
+              <p className={darkMode ? "text-zinc-400" : "text-zinc-600"}>Your input helps us improve tailr4u.</p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-5">
@@ -226,8 +224,7 @@ export default function FeedbackModal({ isOpen, onClose }) {
             </form>
           )}
         </div>
-      </div>
-    </div>
+    </MotionModal>
   );
 }
 

@@ -1,4 +1,4 @@
-"""Apply and verify the TailorFlow notifications/reminders schema.
+"""Apply and verify the tailr4u notifications/reminders schema.
 
 Usage from the backend directory:
 

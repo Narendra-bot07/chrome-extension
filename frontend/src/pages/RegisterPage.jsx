@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { Mail, Lock, ChevronRight, Eye, EyeOff, AlertCircle, User, ShieldCheck } from 'lucide-react';
 import { useGoogleLogin } from '@react-oauth/google';
 
 import { ApplicationLogo } from '../components/ApplicationLogo';
+import { authDestinationFromSearch } from '../utils/authRedirect';
+import { storeAuthenticatedSession } from '../services/authSession';
 
 const isExtension = typeof chrome !== 'undefined' && chrome.identity;
 const BASIC_GOOGLE_SCOPES = ['openid', 'email', 'profile'];
@@ -37,6 +39,8 @@ const WebGoogleLoginButton = ({ onSuccess, onError }) => {
 
 export default function RegisterPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const postAuthDestination = authDestinationFromSearch(location.search);
 
   // --- REGISTER STATES ---
   const [regEmail, setRegEmail] = useState('');
@@ -94,7 +98,7 @@ export default function RegisterPage() {
       
       setRegSuccess("Registration successful! Navigating to Login...");
       setTimeout(() => {
-        navigate('/login');
+        navigate(`/login?redirect=${encodeURIComponent(postAuthDestination)}`);
       }, 1200);
     } catch (err) {
       setRegError(err.message || "Sign up failed. Please try again.");
@@ -110,6 +114,7 @@ export default function RegisterPage() {
     try {
       const res = await fetch('http://localhost:8000/api/v1/auth/google', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ credential: credentialResponse.credential })
       });
@@ -123,10 +128,10 @@ export default function RegisterPage() {
           'tailorflow.google-profile-import-debug',
           JSON.stringify(data.google_profile_import)
         );
-        console.info('[TailorFlow] Google profile import', data.google_profile_import);
+        console.info('[tailr4u] Google profile import', data.google_profile_import);
       }
-      localStorage.setItem('access_token', data.session.access_token);
-      window.location.href = '#/';
+      storeAuthenticatedSession(data.session.access_token);
+      window.location.hash = `#${postAuthDestination}`;
       window.location.reload();
     } catch (err) {
       setRegError(err.message || 'Google registration failed.');
@@ -170,7 +175,7 @@ export default function RegisterPage() {
           <div className="flex items-center gap-3">
             <ApplicationLogo size={36} />
             <span className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white">
-              TailorFlow <span className="text-teal-500 font-bold text-xs uppercase tracking-wider">AI</span>
+              tailr4u
             </span>
           </div>
 
@@ -254,7 +259,7 @@ export default function RegisterPage() {
                 value={regEmail}
                 onChange={(e) => setRegEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-semibold text-zinc-900 dark:text-white focus:outline-none focus:border-teal-500"
+                className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-semibold text-zinc-900 dark:text-white focus:outline-none focus:ring-0 focus:border-[#00bda5]"
               />
             </div>
 
@@ -267,7 +272,7 @@ export default function RegisterPage() {
                   value={regPassword}
                   onChange={(e) => setRegPassword(e.target.value)}
                   placeholder="Password123!"
-                  className="w-full pl-4 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-semibold text-zinc-900 dark:text-white focus:outline-none focus:border-teal-500"
+                  className="w-full pl-4 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-semibold text-zinc-900 dark:text-white focus:outline-none focus:ring-0 focus:border-[#00bda5]"
                 />
                 <button
                   type="button"
@@ -288,7 +293,7 @@ export default function RegisterPage() {
                   value={regConfirmPassword}
                   onChange={(e) => setRegConfirmPassword(e.target.value)}
                   placeholder="Password123!"
-                  className="w-full pl-4 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-semibold text-zinc-900 dark:text-white focus:outline-none focus:border-teal-500"
+                  className="w-full pl-4 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-semibold text-zinc-900 dark:text-white focus:outline-none focus:ring-0 focus:border-[#00bda5]"
                 />
                 <button
                   type="button"
@@ -342,13 +347,15 @@ export default function RegisterPage() {
           <div className="order-5 text-center text-xs font-medium text-zinc-500">
             Already have an account?{' '}
             <Link
-              to="/login"
+              to={`/login?redirect=${encodeURIComponent(postAuthDestination)}`}
               className="text-[#00bda5] font-bold hover:underline ml-1"
             >
               Sign In
             </Link>
             <span className="mx-2 text-zinc-300">·</span>
             <Link to="/forgot-password" className="font-bold text-[#00bda5] hover:underline">Forgot Password?</Link>
+            <span className="mx-2 text-zinc-300">·</span>
+            <Link to="/" className="font-bold text-[#00bda5] hover:underline">Back to tailr4u</Link>
           </div>
 
         </div>

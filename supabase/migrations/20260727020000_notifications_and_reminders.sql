@@ -1,4 +1,4 @@
--- TailorFlow notification, domain-event, delivery, preference, and reminder system.
+-- tailr4u notification, domain-event, delivery, preference, and reminder system.
 create extension if not exists pgcrypto;
 
 -- Stage notes and follow-up dates are application data first. Keeping them on
@@ -58,7 +58,7 @@ create table if not exists public.notifications (
   updated_at timestamptz not null default now()
 );
 
--- Upgrade legacy TailorFlow notification tables in place. CREATE TABLE IF NOT
+-- Upgrade legacy tailr4u notification tables in place. CREATE TABLE IF NOT
 -- EXISTS intentionally does not reconcile columns on an existing installation.
 alter table public.notifications
   add column if not exists event_id uuid references public.notification_events(id) on delete set null,

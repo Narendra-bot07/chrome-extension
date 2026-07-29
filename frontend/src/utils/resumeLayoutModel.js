@@ -125,8 +125,10 @@ export function createResumeLayoutModel(resume = {}, templateId = 'ExecutiveATS'
     }
     return true;
   });
-  const hidden = uniqueSupported(existing.hidden_sections)
-    .filter(section => !IMPORTANT.has(section));
+  // Resume content is immutable after review. Stale saved layout metadata must
+  // never silently remove populated sections from preview/PDF; explicit
+  // content removal belongs to the review workflow, not the layout model.
+  const hidden = [];
   const visible = new Set([...repairedMain, ...repairedSidebar]);
   sourceOrder.forEach(section => {
     if (!visible.has(section) && !hidden.includes(section)) repairedMain.push(section);

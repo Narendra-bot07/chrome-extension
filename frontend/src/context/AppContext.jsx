@@ -2,7 +2,10 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 import { useNavigate } from 'react-router-dom';
 import { compressResumeData } from '../utils/resumeCompression';
 import { toRenderableResume } from '../utils/renderableResume';
-import { mergeReviewResume, validateWorkingResume } from '../utils/resumeReviewMerge';
+import {
+  mergeReviewResume,
+  validateWorkingResume
+} from '../utils/resumeReviewMerge';
 import {
   assessBrowserJobEvidence, captureActiveTabJobEvidence, classifyBrowserPageUrl,
   collectJobSkills, isExtractableHttpUrl, validateJDResponse
@@ -14,6 +17,18 @@ import {
   writeJDPipelineSession
 } from '../utils/jobPipelineSession';
 import { buildTailoringComparePayload } from '../utils/tailoringRequest';
+import { useInactivityManager } from '../hooks/useInactivityManager';
+import { AUTH_STORAGE } from '../config/authConfig';
+import { refreshAccessToken } from '../services/authSession';
+import {
+  createResumeWorkflowState,
+  finalizeTailoredResume,
+  RESUME_WORKFLOW_STORAGE_KEY,
+  resumeWorkflowRepository,
+  selectRenderableResume,
+  stableEditId
+} from '../services/resumeWorkflow';
+import { skillSemanticKey } from '../utils/skillCategorizer';
 
 const AppContext = createContext();
 
@@ -37,6 +52,11 @@ export function AppProvider({ children }) {
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [loadingResume, setLoadingResume] = useState(true);
   const [hasRedirectedOnStartup, setHasRedirectedOnStartup] = useState(false);
+  const resumeReconciliationRef = useRef({
+    token: null,
+    completed: false,
+    promise: null
+  });
 
   useEffect(() => {
     const checkSession = async () => {
@@ -47,19 +67,33 @@ export function AppProvider({ children }) {
         return;
       }
       try {
-        const res = await fetch('http://localhost:8000/api/v1/auth/session', {
+        let activeToken = storedToken;
+        let res = await fetch('http://localhost:8000/api/v1/auth/session', {
+          credentials: 'include',
           headers: { 'Authorization': `Bearer ${storedToken}` }
         });
+        if (res.status === 401) {
+          try {
+            activeToken = await refreshAccessToken();
+            res = await fetch('http://localhost:8000/api/v1/auth/session', {
+              credentials: 'include',
+              headers: { 'Authorization': `Bearer ${activeToken}` }
+            });
+          } catch {
+            // The normal unauthenticated cleanup below handles an invalid
+            // or expired refresh session.
+          }
+        }
         if (res.ok) {
           const data = await res.json();
           setUser(data.user);
-          setSession({ access_token: storedToken });
+          setSession({ access_token: activeToken });
           setHasCompletedPreferences(!!data.has_completed_preferences);
-          await fetchJobPreferences(storedToken);
+          await fetchJobPreferences(activeToken);
 
           // Fetch resumes to check if any exist and load the latest one if not already set
           try {
-            const resumes = await fetchResumesList(storedToken);
+            const resumes = await fetchResumesList(activeToken);
             if (resumes && resumes.length > 0) {
               const latestResume = normalizeResumeRecord(resumes.find((resume) => resume.is_active) || resumes[0]);
               persistParsedResume(latestResume);
@@ -92,7 +126,21 @@ export function AppProvider({ children }) {
     checkSession();
   }, []);
 
-  const logout = () => {
+  const logout = (reason = 'manual_logout', options = {}) => {
+    const token = localStorage.getItem(AUTH_STORAGE.accessToken);
+    if (token) {
+      fetch('http://localhost:8000/api/v1/auth/logout', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include',
+        keepalive: true,
+      }).catch(() => {});
+    }
+    if (options.broadcast !== false) {
+      localStorage.setItem(AUTH_STORAGE.event, JSON.stringify({
+        type: 'LOGOUT', reason, at: Date.now(),
+      }));
+    }
     localStorage.removeItem('access_token');
     localStorage.removeItem('parsed_resume');
     const isExt = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local;
@@ -107,6 +155,8 @@ export function AppProvider({ children }) {
     setReviewSuggestions([]);
     setLiveATS(null);
     setTailoredResume(null);
+    setResumeWorkflow(null);
+    resumeWorkflowRepository.clear().catch(() => {});
     setCoverLetter(null);
     setJobText('');
     setCompanyName('');
@@ -115,8 +165,14 @@ export function AppProvider({ children }) {
     setHasCompletedPreferences(false);
     setLoadingPreferences(false);
     setHasRedirectedOnStartup(false);
-    navigate('/login');
+    if (reason === 'manual_logout') navigate('/');
+    else navigate(`/login?reason=${reason}`, { replace: true });
   };
+  const { showWarning: showInactivityWarning, staySignedIn } = useInactivityManager({
+    accessToken: session?.access_token,
+    apiUrl: 'http://localhost:8000',
+    onLogout: logout,
+  });
   const toggleDarkMode = () => {
     setDarkMode(prev => {
       const next = !prev;
@@ -166,6 +222,27 @@ export function AppProvider({ children }) {
     jdFingerprintRef.current = canonical ? fingerprintJD(canonical) : '';
     setJobAnalysisState(canonical);
   };
+  const adoptAuthenticatedSession = async (accessToken) => {
+    const res = await fetch('http://localhost:8000/api/v1/auth/session', {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    if (!res.ok) throw new Error('Your session could not be restored.');
+    const data = await res.json();
+    setUser(data.user);
+    setSession({ access_token: accessToken });
+    setHasCompletedPreferences(!!data.has_completed_preferences);
+    await fetchJobPreferences(accessToken);
+    try {
+      const resumes = await fetchResumesList(accessToken);
+      if (resumes?.length) {
+        persistParsedResume(normalizeResumeRecord(resumes.find(resume => resume.is_active) || resumes[0]));
+      }
+    } finally {
+      setLoadingResume(false);
+      setLoadingAuth(false);
+    }
+    return data;
+  };
   const getCanonicalJobAnalysis = () => (
     canonicalJDRef.current ? structuredClone(canonicalJDRef.current) : null
   );
@@ -174,6 +251,9 @@ export function AppProvider({ children }) {
   );
   const [comparison, setComparison] = useState(null);
   const [tailoredResume, setTailoredResume] = useState(null);
+  const [resumeWorkflow, setResumeWorkflow] = useState(null);
+  const [resumeWorkflowHydrated, setResumeWorkflowHydrated] = useState(false);
+  const workflowWriteQueueRef = useRef(Promise.resolve());
   const [coverLetter, setCoverLetter] = useState(null);
   const [coverLetterContext, setCoverLetterContext] = useState(null);
   const [coverLetterStrategy, setCoverLetterStrategy] = useState(null);
@@ -230,44 +310,171 @@ export function AppProvider({ children }) {
   const [reviewSuggestions, setReviewSuggestions] = useState([]);
   const [liveATS, setLiveATS] = useState(null);
   const [isRefineStreaming, setIsRefineStreaming] = useState(false);
+  const liveATSRequestRef = useRef({
+    key: '',
+    timer: null,
+    controller: null,
+    sequence: 0
+  });
 
-  const fetchLiveATSScore = async (currentSuggestions) => {
-    const suggestionsToSend = currentSuggestions || reviewSuggestions;
-    if (!parsedResume || !jobAnalysis) return;
-    try {
-      const token = session?.access_token || localStorage.getItem('access_token');
-      const response = await fetch(`${apiUrl}/api/ats/live-score`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { "Authorization": `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({
-          resume: toRenderableResume(parsedResume),
-          job: getCanonicalJobAnalysis(),
-          suggestions: suggestionsToSend
-        })
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setLiveATS(data);
-        return data;
-      }
-    } catch (e) {
-      console.warn("Live ATS score fetch failed", e);
-    }
-  };
-
+  // Score only when the actual resume/JD/review content changes. The workflow
+  // persistence layer recreates these objects, so using object identity as an
+  // effect dependency creates a request -> state update -> request loop.
   useEffect(() => {
-    if (reviewSuggestions && reviewSuggestions.length > 0 && parsedResume && jobAnalysis && !isRefineStreaming) {
-      fetchLiveATSScore(reviewSuggestions);
+    if (
+      !reviewSuggestions?.length
+      || !parsedResume
+      || !jobAnalysis
+      || isRefineStreaming
+    ) {
+      return;
     }
-  }, [reviewSuggestions, parsedResume, jobAnalysis, isRefineStreaming]);
+
+    const currentResume = mergeReviewResume(
+      parsedResume,
+      reviewSuggestions
+    ).workingResume;
+    const potentialSuggestions = reviewSuggestions.map(suggestion => ({
+      ...suggestion,
+      status: suggestion.status === 'rejected' ? 'rejected' : 'accepted'
+    }));
+    const potentialResume = mergeReviewResume(
+      parsedResume,
+      potentialSuggestions
+    ).workingResume;
+    const payload = {
+      resume: toRenderableResume(parsedResume),
+      current_resume: toRenderableResume(currentResume),
+      estimated_resume: toRenderableResume(potentialResume),
+      job: getCanonicalJobAnalysis(),
+      suggestions: reviewSuggestions
+    };
+    const requestKey = JSON.stringify(payload);
+    const requestState = liveATSRequestRef.current;
+
+    if (requestState.key === requestKey) return;
+
+    requestState.key = requestKey;
+    requestState.sequence += 1;
+    const sequence = requestState.sequence;
+    if (requestState.timer) clearTimeout(requestState.timer);
+    if (requestState.controller) requestState.controller.abort();
+
+    requestState.timer = setTimeout(async () => {
+      const controller = new AbortController();
+      requestState.controller = controller;
+
+      try {
+        const token = session?.access_token || localStorage.getItem('access_token');
+        const response = await fetch(`${apiUrl}/api/ats/live-score`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { "Authorization": `Bearer ${token}` } : {})
+          },
+          body: requestKey,
+          signal: controller.signal
+        });
+
+        if (!response.ok) {
+          throw new Error(`Live ATS scoring failed with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        // A slower, obsolete response must never overwrite the newest review.
+        if (
+          !controller.signal.aborted
+          && liveATSRequestRef.current.sequence === sequence
+        ) {
+          setLiveATS(data);
+        }
+      } catch (error) {
+        if (error?.name !== 'AbortError') {
+          console.warn("Live ATS score fetch failed", error);
+          // Allow the same content to be retried after a genuine failure.
+          if (liveATSRequestRef.current.sequence === sequence) {
+            liveATSRequestRef.current.key = '';
+          }
+        }
+      } finally {
+        if (liveATSRequestRef.current.sequence === sequence) {
+          liveATSRequestRef.current.controller = null;
+          liveATSRequestRef.current.timer = null;
+        }
+      }
+    }, 250);
+  });
+
+  useEffect(() => () => {
+    const requestState = liveATSRequestRef.current;
+    if (requestState.timer) clearTimeout(requestState.timer);
+    if (requestState.controller) requestState.controller.abort();
+  }, []);
   const [selectedTemplate, setSelectedTemplate] = useState('ExecutiveATS');
   const [finalPdfArtifact, setFinalPdfArtifact] = useState(null);
   const [customFileName, setCustomFileName] = useState(() => {
     return sessionStorage.getItem('custom_file_name') || '';
   });
+
+  const queueWorkflowWrite = (builder) => {
+    const task = workflowWriteQueueRef.current.then(async () => {
+      const current = await resumeWorkflowRepository.load();
+      const next = await builder(current);
+      if (!next) return current;
+      const saved = await resumeWorkflowRepository.save(
+        next,
+        current?.workflowVersion ?? null
+      );
+      setResumeWorkflow(saved);
+      return saved;
+    });
+    workflowWriteQueueRef.current = task.catch(() => {});
+    return task;
+  };
+
+  useEffect(() => {
+    let active = true;
+    resumeWorkflowRepository.load()
+      .then(workflow => {
+        if (!active || !workflow) return;
+        setResumeWorkflow(workflow);
+        if (workflow.finalizedTailoredResume) {
+          setTailoredResume(workflow.finalizedTailoredResume);
+        }
+        if (workflow.selectedTemplateId) {
+          setSelectedTemplate(workflow.selectedTemplateId);
+        }
+      })
+      .catch(error => setApiError(error.message))
+      .finally(() => {
+        if (active) setResumeWorkflowHydrated(true);
+      });
+    return () => { active = false; };
+  }, []);
+
+  const restoredWorkflowScopeRef = useRef('');
+  useEffect(() => {
+    if (!resumeWorkflowHydrated || !resumeWorkflow || !parsedResume) return;
+    const resumeId = parsedResume.id || parsedResume.resume_id || null;
+    const fingerprint = jdFingerprintRef.current || null;
+    const matchesScope = (
+      (!resumeWorkflow.originalResumeId || resumeWorkflow.originalResumeId === resumeId)
+      && (!resumeWorkflow.jobFingerprint || resumeWorkflow.jobFingerprint === fingerprint)
+    );
+    // Hydrate review decisions once for this resume/JD pair. workflowVersion
+    // changes after every queued save; including it in the scope caused an
+    // older pending write to re-apply over an optimistic Accept/Reject click,
+    // making the review content visibly oscillate.
+    const scope = `${resumeId}|${fingerprint}`;
+    if (!matchesScope || restoredWorkflowScopeRef.current === scope) return;
+    restoredWorkflowScopeRef.current = scope;
+    if (resumeWorkflow.edits?.length) {
+      setReviewSuggestions(resumeWorkflow.edits.map(edit => ({
+        ...edit,
+        status: resumeWorkflow.reviewDecisions?.[stableEditId(edit)]?.status || edit.status || 'pending'
+      })));
+    }
+  }, [resumeWorkflowHydrated, resumeWorkflow, parsedResume]);
 
   useEffect(() => {
     try {
@@ -343,6 +550,10 @@ export function AppProvider({ children }) {
     setReviewSuggestions([]);
     setLiveATS(null);
     setTailoredResume(null);
+    setResumeWorkflow(null);
+    resumeWorkflowRepository.clear().catch(error => {
+      console.warn('[RESUME-WORKFLOW] Failed to clear stale workflow', error);
+    });
     setCompanyName('');
     setJobTitle('');
     setJobDetectionMeta(null);
@@ -424,6 +635,13 @@ export function AppProvider({ children }) {
 
             if (sessionMatchesActiveJob) {
             setJobAnalysis(savedJD);
+            if (saved?.comparison) {
+              setComparison({
+                ...saved.comparison,
+                _baseline_resume_id: saved.comparisonResumeId || null,
+                _baseline_jd_fingerprint: savedFingerprint || null
+              });
+            }
             setJobText(saved.jobText || savedJD.description || '');
             setCompanyName(saved.companyName || savedJD.company || savedJD.company_name || '');
             setJobTitle(saved.jobTitle || savedJD.title || savedJD.job_title || '');
@@ -624,13 +842,20 @@ export function AppProvider({ children }) {
     return () => chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
   }, [isExtension]);
 
-  // Keep the side panel and any full extension tab aligned when the active
-  // resume changes in either context.
+  // Keep the side panel and any full extension tab aligned when either the
+  // source resume or the reviewed workflow resume changes.
   useEffect(() => {
     if (!isExtension || !chrome.storage?.onChanged) return;
 
     const handleStorageChange = (changes, areaName) => {
-      if (areaName !== 'local' || !changes.parsedResume) return;
+      if (areaName !== 'local') return;
+      if (changes.tailoredResume) {
+        setTailoredResume(changes.tailoredResume.newValue || null);
+      }
+      if (changes[RESUME_WORKFLOW_STORAGE_KEY]) {
+        setResumeWorkflow(changes[RESUME_WORKFLOW_STORAGE_KEY].newValue || null);
+      }
+      if (!changes.parsedResume) return;
       const nextResume = changes.parsedResume.newValue || null;
       const signature = JSON.stringify({
         id: nextResume?.id || null,
@@ -639,8 +864,14 @@ export function AppProvider({ children }) {
         isActive: nextResume?.is_active || false
       });
       if (lastSyncedResumeSignatureRef.current === signature) return;
+      const previousResumeId = parsedResume?.id || parsedResume?.resume_id || null;
+      const nextResumeId = nextResume?.id || nextResume?.resume_id || null;
       lastSyncedResumeSignatureRef.current = signature;
       setParsedResume(nextResume);
+      if (previousResumeId && nextResumeId !== previousResumeId) {
+        setComparison(null);
+        setReviewSuggestions([]);
+      }
       fetchResumesList();
       console.info('[RESUME][FRONTEND] Active resume synchronized across extension views', {
         resumeId: nextResume?.id || null,
@@ -650,7 +881,7 @@ export function AppProvider({ children }) {
 
     chrome.storage.onChanged.addListener(handleStorageChange);
     return () => chrome.storage.onChanged.removeListener(handleStorageChange);
-  }, [isExtension]);
+  }, [isExtension, parsedResume?.id, parsedResume?.resume_id]);
 
   // Keep the canonical extracted JD synchronized between the side panel and
   // full extension pages for the lifetime of the Chrome browser session.
@@ -715,7 +946,9 @@ export function AppProvider({ children }) {
             companyName,
             jobTitle,
             lastAnalyzedUrl,
-            jobDetectionMeta
+            jobDetectionMeta,
+            comparison,
+            comparisonResumeId: parsedResume?.id || parsedResume?.resume_id || null
           }
         });
       } else {
@@ -740,7 +973,7 @@ export function AppProvider({ children }) {
       localStorage.removeItem('company_name');
       localStorage.removeItem('job_title');
     }
-  }, [jobAnalysis, jobText, companyName, jobTitle, lastAnalyzedUrl, jobDetectionMeta, jobSessionHydrated, isExtension]);
+  }, [jobAnalysis, jobText, companyName, jobTitle, lastAnalyzedUrl, jobDetectionMeta, jobSessionHydrated, isExtension, comparison, parsedResume?.id, parsedResume?.resume_id]);
 
   // Review decisions are workflow state: survive route changes and refreshes, but
   // expire with the browser session instead of becoming a durable resume copy.
@@ -762,6 +995,40 @@ export function AppProvider({ children }) {
     }
   }, [reviewSuggestions, parsedResume?.id, currentJobIdentity, comparison?.tailoring_audit, isExtension]);
 
+  // Persist the complete review model, not only component state. Pending edits
+  // remain pending in reviewDecisions and are excluded by finalization.
+  useEffect(() => {
+    if (!resumeWorkflowHydrated || !parsedResume || !reviewSuggestions.length) return;
+    const draftSuggestions = reviewSuggestions.map(edit => ({ ...edit, status: 'accepted' }));
+    const tailoredDraft = mergeReviewResume(parsedResume, draftSuggestions).workingResume;
+    queueWorkflowWrite(current => createResumeWorkflowState({
+      originalResume: parsedResume,
+      tailoredDraft,
+      edits: reviewSuggestions,
+      reviewDecisions: current?.reviewDecisions || {},
+      finalizedTailoredResume: null,
+      selectedTemplateId: selectedTemplate,
+      workflowVersion: current?.workflowVersion || 0,
+      originalResumeId: parsedResume.id || parsedResume.resume_id || null,
+      jobFingerprint: jdFingerprintRef.current || null
+    })).catch(error => {
+      console.error('[RESUME-WORKFLOW] Review persistence failed', error);
+      setApiError(error.message || 'WORKFLOW_PERSISTENCE_FAILED');
+    });
+  }, [resumeWorkflowHydrated, parsedResume, reviewSuggestions]);
+
+  useEffect(() => {
+    if (!resumeWorkflowHydrated || !resumeWorkflow?.finalizedTailoredResume) return;
+    if (resumeWorkflow.selectedTemplateId === selectedTemplate) return;
+    queueWorkflowWrite(current => current ? {
+      ...current,
+      selectedTemplateId: selectedTemplate
+    } : null).catch(error => {
+      console.error('[RESUME-WORKFLOW] Template persistence failed', error);
+      setApiError(error.message || 'WORKFLOW_PERSISTENCE_FAILED');
+    });
+  }, [resumeWorkflowHydrated, selectedTemplate]);
+
   // Save/Remove tailored resume context storage
   useEffect(() => {
     if (tailoredResume) {
@@ -778,6 +1045,38 @@ export function AppProvider({ children }) {
       }
     }
   }, [tailoredResume]);
+
+  const persistTailoredWorkflowResume = async (resume) => {
+    const canonical = resume ? toRenderableResume(resume) : null;
+    setTailoredResume(canonical);
+    if (isExtension) {
+      if (canonical) {
+        await chrome.storage.local.set({ tailoredResume: canonical });
+      } else {
+        await chrome.storage.local.remove('tailoredResume');
+      }
+    } else if (canonical) {
+      localStorage.setItem('tailored_resume', JSON.stringify(canonical));
+    } else {
+      localStorage.removeItem('tailored_resume');
+    }
+    return canonical;
+  };
+
+  const updateFinalizedWorkflowResume = (updater) => queueWorkflowWrite(current => {
+    if (!current?.finalizedTailoredResume) {
+      throw new Error('FINALIZED_RESUME_MISSING: Finalize the review before editing layout.');
+    }
+    const nextResume = typeof updater === 'function'
+      ? updater(structuredClone(current.finalizedTailoredResume))
+      : updater;
+    const canonical = toRenderableResume(nextResume);
+    if (!canonical) throw new Error('FINAL_RESUME_VALIDATION_FAILED: Updated resume is invalid.');
+    return { ...current, finalizedTailoredResume: canonical };
+  }).then(saved => {
+    setTailoredResume(saved.finalizedTailoredResume);
+    return saved.finalizedTailoredResume;
+  });
 
   // Save/Remove selected template context storage
   useEffect(() => {
@@ -801,19 +1100,34 @@ export function AppProvider({ children }) {
     if (!token) return [];
     setLoadingResume(true);
     try {
-      const reconcileRes = await fetch(`${apiUrl}/api/v1/resumes/reconcile-local`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (reconcileRes.ok) {
-        const reconciliation = await reconcileRes.json();
-        if (reconciliation.recovered > 0) {
-          console.info('[RESUME][FRONTEND] Orphaned resume files recovered', reconciliation);
+      const reconciliationState = resumeReconciliationRef.current;
+      if (reconciliationState.token !== token) {
+        reconciliationState.token = token;
+        reconciliationState.completed = false;
+        reconciliationState.promise = null;
+      }
+      if (!reconciliationState.completed) {
+        if (!reconciliationState.promise) {
+          reconciliationState.promise = fetch(`${apiUrl}/api/v1/resumes/reconcile-local`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+          }).then(async reconcileRes => {
+            if (reconcileRes.ok) {
+              const reconciliation = await reconcileRes.json();
+              if (reconciliation.recovered > 0) {
+                console.info('[RESUME][FRONTEND] Orphaned resume files recovered', reconciliation);
+              }
+            } else {
+              console.warn('[RESUME][FRONTEND] Resume reconciliation skipped', {
+                status: reconcileRes.status
+              });
+            }
+          }).finally(() => {
+            reconciliationState.completed = true;
+            reconciliationState.promise = null;
+          });
         }
-      } else {
-        console.warn('[RESUME][FRONTEND] Resume reconciliation skipped', {
-          status: reconcileRes.status
-        });
+        await reconciliationState.promise;
       }
       const res = await fetch(`${apiUrl}/api/v1/resumes/`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -1185,6 +1499,7 @@ export function AppProvider({ children }) {
 
     let requestId = null;
     let expectedIdentity = '';
+    let extractionProgressInterval = null;
 
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -1351,6 +1666,19 @@ export function AppProvider({ children }) {
         return;
       }
       setLoadingMessage("Backend planning evidence sources...");
+      setLoadingProgress(24);
+      extractionProgressInterval = window.setInterval(() => {
+        setLoadingProgress((previous) => {
+          if (previous >= 90) return previous;
+          const next = Math.min(90, previous + 4);
+          if (next < 40) setLoadingMessage("Reading the job description...");
+          else if (next < 60) setLoadingMessage("Extracting company and role details...");
+          else if (next < 78) setLoadingMessage("Analyzing required skills...");
+          else if (next < 88) setLoadingMessage("Finding ATS keywords...");
+          else setLoadingMessage("Calculating resume match...");
+          return next;
+        });
+      }, 450);
       logExtraction('Extraction request sent', {
         requestId, url: activeUrl, endpoint,
         hasBrowserEvidence: Boolean(browserEvidence)
@@ -1372,6 +1700,9 @@ export function AppProvider({ children }) {
 
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
+        if (body?.detail?.code === 'QUOTA_EXCEEDED') {
+          throw new Error(body.detail.message || 'Your JD extraction limit has been reached. View plans to continue.');
+        }
         const failure = body?.detail?.error || body?.error || {};
         console.error("[JD-EXTRACTION][FRONTEND] Extraction failed", {
           requestId, status: response.status,
@@ -1529,6 +1860,9 @@ export function AppProvider({ children }) {
         ? 'This browser page cannot be read by extensions. Open an individual job listing in a regular tab.'
         : (err.message || 'Page extraction failed. Retry the scan.'));
     } finally {
+      if (extractionProgressInterval) {
+        window.clearInterval(extractionProgressInterval);
+      }
       if (!requestId || activeRequestIdRef.current === requestId) {
         extractionInFlightRef.current = false;
         extractionAbortControllerRef.current = null;
@@ -1847,7 +2181,13 @@ export function AppProvider({ children }) {
       });
 
       if (!parseRes.ok) {
-        throw new Error("Resume parse error: " + (await parseRes.json()).detail);
+        const failure = await parseRes.json().catch(() => ({}));
+        const detail = failure?.detail;
+        throw new Error(
+          typeof detail === 'object'
+            ? (detail.message || 'Your resume upload limit has been reached. View plans to continue.')
+            : `Resume upload failed: ${detail || parseRes.status}`
+        );
       }
       const resumeRecord = await parseRes.json();
       const optimisticRecord = {
@@ -1944,7 +2284,9 @@ export function AppProvider({ children }) {
 
       if (!compareRes.ok) {
         const errorBody = await compareRes.json().catch(() => ({}));
-        const message = errorBody?.detail || `Comparison failed (${compareRes.status})`;
+        const message = typeof errorBody?.detail === 'object'
+          ? errorBody.detail.message
+          : (errorBody?.detail || `Comparison failed (${compareRes.status})`);
         console.error("[JD-EXTRACTION][FRONTEND] Resume comparison failed", {
           status: compareRes.status,
           message
@@ -1953,7 +2295,11 @@ export function AppProvider({ children }) {
         return null;
       }
       const compResult = await compareRes.json();
-      setComparison(compResult);
+      setComparison({
+        ...compResult,
+        _baseline_resume_id: activeParsed.id || activeParsed.resume_id || null,
+        _baseline_jd_fingerprint: jdFingerprintRef.current || null
+      });
       return compResult;
     } catch (err) {
       console.error("Failed to compare active resume to job:", err);
@@ -2064,11 +2410,39 @@ export function AppProvider({ children }) {
       });
 
       if (!compareRes.ok) {
-        throw new Error("Comparison error: " + (await compareRes.json()).detail);
+        const failure = await compareRes.json().catch(() => ({}));
+        const detail = failure?.detail;
+        throw new Error(
+          typeof detail === 'object'
+            ? (detail.message || 'Your tailored resume generation limit has been reached.')
+            : `Comparison error: ${detail || compareRes.status}`
+        );
       }
 
       const compResult = await compareRes.json();
-      setComparison(compResult);
+      const baselineResumeId = activeParsed.id || activeParsed.resume_id || null;
+      const baselineFingerprint = jdFingerprintRef.current || null;
+      setComparison(previous => {
+        const samePair = Boolean(
+          previous
+          && previous._baseline_resume_id === baselineResumeId
+          && previous._baseline_jd_fingerprint === baselineFingerprint
+        );
+        return {
+          ...compResult,
+          resume_match_before: samePair && previous.resume_match_before != null
+            ? previous.resume_match_before
+            : compResult.resume_match_before,
+          ats_score_before: samePair && previous.ats_score_before != null
+            ? previous.ats_score_before
+            : compResult.ats_score_before,
+          breakdown_before: samePair && previous.breakdown_before
+            ? previous.breakdown_before
+            : compResult.breakdown_before,
+          _baseline_resume_id: baselineResumeId,
+          _baseline_jd_fingerprint: baselineFingerprint
+        };
+      });
       try {
         const usedRes = await fetch(`${apiUrl}/api/v1/resumes/${activeParsed.id}/mark-used`, {
           method: "POST",
@@ -2085,6 +2459,11 @@ export function AppProvider({ children }) {
 
       const list = [];
       const patch = compResult.patch;
+      const semanticEntityId = value => String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 96) || 'entry';
       const auditByPath = new Map(
         (compResult.tailoring_audit?.edits || []).map(edit => [edit.path, edit])
       );
@@ -2125,9 +2504,16 @@ export function AppProvider({ children }) {
             const bulletIdx = parseInt(bulletIdxStr, 10);
             const suggested = bulletsPatch[bulletIdxStr];
             const originalText = activeParsed.experience[itemIdx]?.description[bulletIdx] || '';
+            const experienceItem = activeParsed.experience[itemIdx] || {};
+            const experienceId = experienceItem.id || semanticEntityId([
+              experienceItem.company, experienceItem.role,
+              experienceItem.start_date, experienceItem.end_date
+            ].join('-'));
+            const bulletId = experienceItem.bullet_ids?.[bulletIdx]
+              || semanticEntityId(originalText);
             list.push({
-              id: `experience:${itemIdx}:bullet:${bulletIdx}`,
-              change_id: `experience:${itemIdx}:bullet:${bulletIdx}`,
+              id: `experience-bullet:update:${experienceId}:${bulletId}`,
+              change_id: `experience-bullet:update:${experienceId}:${bulletId}`,
               category: 'Work Experience',
               status: 'pending',
               original: originalText,
@@ -2154,9 +2540,13 @@ export function AppProvider({ children }) {
             const bulletIdx = parseInt(bulletIdxStr, 10);
             const suggested = bulletsPatch[bulletIdxStr];
             const originalText = activeParsed.projects[itemIdx]?.description[bulletIdx] || '';
+            const projectItem = activeParsed.projects[itemIdx] || {};
+            const projectId = projectItem.id || semanticEntityId(projectItem.name);
+            const bulletId = projectItem.bullet_ids?.[bulletIdx]
+              || semanticEntityId(originalText);
             list.push({
-              id: `projects:${itemIdx}:bullet:${bulletIdx}`,
-              change_id: `projects:${itemIdx}:bullet:${bulletIdx}`,
+              id: `project-bullet:update:${projectId}:${bulletId}`,
+              change_id: `project-bullet:update:${projectId}:${bulletId}`,
               category: 'Projects',
               status: 'pending',
               original: originalText,
@@ -2176,8 +2566,27 @@ export function AppProvider({ children }) {
         });
       }
 
-      // Missing JD keywords are reported by ATS analysis, but are never
-      // inserted as candidate skills. Skills remain source-owned evidence.
+      if (selectedSections.includes('skills') && Array.isArray(patch.skills_append)) {
+        patch.skills_append.forEach((skill) => {
+          const skillId = skillSemanticKey(skill).replace(/\s+/g, '-');
+          list.push({
+            id: `skill:add:${skillId}`,
+            change_id: `skill:add:${skillId}`,
+            category: 'Skills',
+            status: 'pending',
+            original: '',
+            suggested: skill,
+            skillName: skill,
+            ...auditMetadata(
+              'skills',
+              'Surface a skill already demonstrated elsewhere in the resume.',
+              'Improves ATS discoverability without introducing unsupported evidence.'
+            ),
+            atsImpact: 3,
+            sectionType: 'skills'
+          });
+        });
+      }
 
       setReviewSuggestions(list);
       clearInterval(progressInterval);
@@ -2215,9 +2624,32 @@ export function AppProvider({ children }) {
           "We could not finalize the resume automatically. Your original resume data is safe. Please retry or review the highlighted sections."
         );
       }
-      const tailoredResult = merged.workingResume;
-      if (!tailoredResult) throw new Error('The complete reviewed resume is unavailable.');
-      setTailoredResume(tailoredResult);
+      const allAcceptedDraft = mergeReviewResume(
+        parsedResume,
+        reviewSuggestions.map(edit => ({ ...edit, status: 'accepted' }))
+      ).workingResume;
+      const finalizedWorkflow = await queueWorkflowWrite(current => {
+        const next = createResumeWorkflowState({
+          originalResume: parsedResume,
+          tailoredDraft: allAcceptedDraft,
+          edits: reviewSuggestions,
+          reviewDecisions: current?.reviewDecisions || {},
+          selectedTemplateId: selectedTemplate,
+          workflowVersion: current?.workflowVersion || 0,
+          originalResumeId: parsedResume.id || parsedResume.resume_id || null,
+          jobFingerprint: jdFingerprintRef.current || null
+        });
+        const finalizedTailoredResume = finalizeTailoredResume({
+          originalResume: next.originalResume,
+          tailoredDraft: next.tailoredDraft,
+          edits: next.edits,
+          reviewDecisions: next.reviewDecisions
+        });
+        return { ...next, finalizedTailoredResume };
+      });
+      const tailoredResult = selectRenderableResume(finalizedWorkflow);
+      if (!tailoredResult) throw new Error('FINAL_RESUME_VALIDATION_FAILED: Final resume is unavailable.');
+      await persistTailoredWorkflowResume(tailoredResult);
       setLoading(false);
       navigate('/templates');
 
@@ -2263,8 +2695,11 @@ export function AppProvider({ children }) {
   };
 
   const handleDownloadFinalPDF = async (layoutLevel, options = {}) => {
-    const activeRes = tailoredResume || parsedResume;
-    if (!activeRes) return;
+    const activeRes = workflowResume;
+    if (!activeRes) {
+      setApiError('FINALIZED_RESUME_MISSING: Return to Document Review and finalize the resume before export.');
+      return false;
+    }
     const reusableArtifact = options.preparedArtifact || finalPdfArtifact;
     if (options.usePrepared && reusableArtifact?.blob && reusableArtifact?.url) {
       const rawName = activeRes.personal_info?.name || 'User';
@@ -2288,8 +2723,6 @@ export function AppProvider({ children }) {
     }
 
     let finalRes = { ...activeRes };
-    let originalForAudit = parsedResume || activeRes;
-
     setLoading(true);
     setLoadingProgress(50);
     setLoadingMessage("Finalizing resume structure...");
@@ -2314,7 +2747,6 @@ export function AppProvider({ children }) {
         }
         const recoveredRecord = normalizeResumeRecord(await recoveryResponse.json());
         const recoveredContent = toRenderableResume(recoveredRecord);
-        originalForAudit = recoveredRecord;
         finalRes = {
           ...finalRes,
           achievements: recoveredContent.achievements,
@@ -2345,7 +2777,10 @@ export function AppProvider({ children }) {
         },
         body: JSON.stringify({
           resume: toRenderableResume(finalRes),
-          original_resume: toRenderableResume(originalForAudit),
+          // Accepted review decisions are already materialized and approved.
+          // Audit the final composed document against that reviewed baseline,
+          // never against the pre-tailoring upload.
+          original_resume: toRenderableResume(finalRes),
           intentional_removals: [],
           approved_additions: [],
           template_name: selectedTemplate || 'ExecutiveATS'
@@ -2640,7 +3075,7 @@ export function AppProvider({ children }) {
         const failure = await response.json().catch(() => ({}));
         const errDetail = typeof failure.detail === 'string'
           ? failure.detail
-          : (Array.isArray(failure.detail) ? failure.detail.map(d => `${d.loc?.join('.')}: ${d.msg}`).join(', ') : "Cover letter generation failed.");
+          : (failure.detail?.message || (Array.isArray(failure.detail) ? failure.detail.map(d => `${d.loc?.join('.')}: ${d.msg}`).join(', ') : "Cover letter generation failed."));
         throw new Error(errDetail);
       }
       const generated = await response.json();
@@ -2939,9 +3374,23 @@ export function AppProvider({ children }) {
     alert("Cover Letter copied to clipboard!");
   };
 
+  const currentResumeId = parsedResume?.id || parsedResume?.resume_id || null;
+  const currentJobFingerprint = jdFingerprintRef.current || null;
+  const workflowMatchesCurrent = Boolean(
+    resumeWorkflow
+    && (!resumeWorkflow.originalResumeId || resumeWorkflow.originalResumeId === currentResumeId)
+    && (!resumeWorkflow.jobFingerprint || resumeWorkflow.jobFingerprint === currentJobFingerprint)
+  );
+  // Strict selector for every post-review page. There is intentionally no
+  // parsedResume/tailoredDraft fallback here: a missing finalized document is
+  // a recoverable workflow error, not permission to show the original.
+  const workflowResume = workflowMatchesCurrent
+    ? toRenderableResume(resumeWorkflow.finalizedTailoredResume)
+    : null;
+
   return (
     <AppContext.Provider value={{
-      user, session, loadingAuth, logout,
+      user, session, loadingAuth, logout, adoptAuthenticatedSession,
       darkMode, setDarkMode, toggleDarkMode,
       showSettings, setShowSettings,
       apiKey, setApiKey,
@@ -2959,6 +3408,10 @@ export function AppProvider({ children }) {
       getCanonicalJobAnalysis,
       comparison, setComparison,
       tailoredResume, setTailoredResume,
+      workflowResume,
+      resumeWorkflow,
+      resumeWorkflowHydrated,
+      updateFinalizedWorkflowResume,
       coverLetter, setCoverLetter,
       coverLetterContext, setCoverLetterContext,
       coverLetterStrategy, setCoverLetterStrategy,
@@ -2978,7 +3431,6 @@ export function AppProvider({ children }) {
       reviewSuggestions, setReviewSuggestions,
       liveATS, setLiveATS,
       isRefineStreaming, setIsRefineStreaming,
-      fetchLiveATSScore,
       selectedTemplate, setSelectedTemplate,
       finalPdfArtifact, setFinalPdfArtifact,
       customFileName, setCustomFileName,
@@ -3033,6 +3485,29 @@ export function AppProvider({ children }) {
       handleCopyToClipboard
     }}>
       {children}
+      {showInactivityWarning && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/35 p-4" role="presentation">
+          <div
+            className="w-full max-w-md rounded-2xl bg-white p-6 text-zinc-900 shadow-2xl dark:bg-zinc-900 dark:text-white"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="inactivity-warning-title"
+          >
+            <h2 id="inactivity-warning-title" className="text-lg font-bold">Your session will expire soon</h2>
+            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+              Your session will expire in 2 minutes due to inactivity.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" onClick={() => logout('manual_logout')} className="rounded-lg px-4 py-2 text-sm font-semibold text-zinc-600 dark:text-zinc-300">
+                Sign out
+              </button>
+              <button type="button" onClick={staySignedIn} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700">
+                Stay signed in
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppContext.Provider>
   );
 }

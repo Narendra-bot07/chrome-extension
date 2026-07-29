@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AppProvider, useApp } from './context/AppContext';
 import Layout from './components/Layout';
@@ -13,8 +13,6 @@ import ReviewChangesPage from './pages/ReviewChangesPage';
 import TemplatesPage from './pages/TemplatesPage';
 import DownloadPage from './pages/DownloadPage';
 import CoverLetterPage from './pages/CoverLetterPage';
-import LoginPage from './pages/LoginPage';
-import RegisterPage from './pages/RegisterPage';
 import PrintLayout from './components/Resume/PrintLayout';
 import PrintCoverLetterLayout from './pages/PrintCoverLetterLayout';
 import DashboardPage from './pages/DashboardPage';
@@ -28,14 +26,19 @@ import NoJobDetectedPage from './pages/NoJobDetectedPage';
 import ManualJobEntryPage from './pages/ManualJobEntryPage';
 import SubscriptionPage from './pages/SubscriptionPage';
 import JobPreferencesPage from './pages/JobPreferencesPage';
-import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import EmailSentPage from './pages/EmailSentPage';
 import NotificationSettingsPage from './pages/NotificationSettingsPage';
+import LandingPage from './pages/LandingPage';
+import ExtensionSetupPage from './pages/ExtensionSetupPage';
+import { ReducedMotionProvider, MotionPage } from './motion/MotionSystem';
+import { loginPathFor } from './utils/authRedirect';
+import GlobalCursor from './components/GlobalCursor';
 
 function ProtectedRoute({ children }) {
   const { user, loadingAuth } = useApp();
+  const location = useLocation();
   
   if (loadingAuth) {
     return (
@@ -51,10 +54,30 @@ function ProtectedRoute({ children }) {
   }
   
   if (!user) {
-    return <Navigate to="/login" replace />;
+    const requested = `${location.pathname}${location.search || ''}`;
+    return <Navigate to={loginPathFor(requested)} replace />;
   }
   
   return children;
+}
+
+function StartupLoader() {
+  return (
+    <div className="min-h-screen bg-[#edf7ff] dark:bg-[#0b1220] text-zinc-900 dark:text-white flex items-center justify-center">
+      <div className="w-72 text-center" role="status" aria-live="polite" aria-label="Restoring your tailr4u session">
+        <div className="mx-auto mb-5 h-14 w-14 overflow-hidden rounded-2xl bg-white/80 p-2 shadow-lg dark:bg-white/10">
+          <img src={`${import.meta.env.BASE_URL || '/'}application-logo.png`} alt="" className="h-full w-full object-contain" />
+        </div>
+        <div className="text-xl font-black tracking-tight">tailr4u</div>
+        <div className="mt-4 h-1 overflow-hidden rounded-full bg-blue-950/10 dark:bg-white/10">
+          <div className="h-full w-2/3 rounded-full bg-gradient-to-r from-blue-500 to-teal-400 motion-safe:animate-pulse" />
+        </div>
+        <p className="mt-3 font-mono text-[9px] font-bold uppercase tracking-[.18em] text-zinc-500 dark:text-zinc-400">
+          Restoring session
+        </p>
+      </div>
+    </div>
+  );
 }
 
 function AppRoutes() {
@@ -65,63 +88,63 @@ function AppRoutes() {
     loadingPreferences,
     hasCompletedPreferences,
     parsedResume,
+    resumesList,
     hasRedirectedOnStartup,
-    setHasRedirectedOnStartup,
-    isExtension
+    setHasRedirectedOnStartup
   } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
+  const extensionStartupHandled = useRef(false);
+  const isExtension = typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id);
+  const hasAnyResume = Boolean(parsedResume) || (Array.isArray(resumesList) && resumesList.length > 0);
 
   useEffect(() => {
-    if (!loadingAuth && !loadingResume && !loadingPreferences && user) {
-      const isExtensionLanding = isExtension && location.pathname === '/';
-      const isOnboardingRoute = location.pathname === '/onboarding/job-preferences';
-      const isSettingsPreferencesRoute = location.pathname === '/settings/job-preferences';
+    if (isExtension && !loadingAuth && !loadingResume && !extensionStartupHandled.current) {
+      extensionStartupHandled.current = true;
+      // Opening the extension action starts at `/`, but workflow hand-offs can
+      // deliberately open a full extension tab at a specific route. Preserve
+      // those deep links instead of forcing every new extension document back
+      // to the extraction screen.
+      if (location.pathname === '/') {
+        navigate(user && hasAnyResume ? '/tailor' : '/extension-setup', { replace: true });
+      }
+      return;
+    }
 
-      if (!hasCompletedPreferences && !isOnboardingRoute) {
+    if (!loadingAuth && !loadingResume && !loadingPreferences && user) {
+      const isOnboardingRoute = location.pathname === '/onboarding/job-preferences';
+      const isPublicOrAuthRoute = ['/', '/login', '/register', '/forgot-password', '/reset-password', '/verify-email', '/email-sent'].includes(location.pathname);
+
+      if (!isExtension && !hasCompletedPreferences && !isOnboardingRoute && !isPublicOrAuthRoute) {
         navigate('/onboarding/job-preferences', { replace: true });
         return;
       }
 
-      if (isExtensionLanding) {
-        setHasRedirectedOnStartup(true);
-        navigate(parsedResume ? '/tailor' : '/resume-detect', { replace: true });
-        return;
-      }
-
       // 1. Dynamic Route Guard: Protect /tailor route when user has no resume
-      if (!parsedResume && location.pathname === '/tailor') {
+      if ((!isExtension && !parsedResume || isExtension && !hasAnyResume) && location.pathname === '/tailor') {
         navigate('/resume-detect', { replace: true });
         return;
       }
 
-      // 2. Startup / Login Redirection: Only run once on startup or login
-      if (!hasRedirectedOnStartup) {
-        if (parsedResume) {
-          if (location.pathname === '/login' || location.pathname === '/register') {
-            setHasRedirectedOnStartup(true);
-            navigate('/tailor', { replace: true });
-          }
-        } else {
-          if (!isSettingsPreferencesRoute && (location.pathname === '/login' || location.pathname === '/register' || location.pathname === '/tailor')) {
-            setHasRedirectedOnStartup(true);
-            navigate('/resume-detect', { replace: true });
-          }
-        }
-      }
+      if (!hasRedirectedOnStartup && !isPublicOrAuthRoute) setHasRedirectedOnStartup(true);
     }
-  }, [loadingAuth, loadingResume, loadingPreferences, user, hasCompletedPreferences, parsedResume, hasRedirectedOnStartup, location.pathname, navigate, setHasRedirectedOnStartup, isExtension]);
+  }, [isExtension, hasAnyResume, loadingAuth, loadingResume, loadingPreferences, user, hasCompletedPreferences, parsedResume, hasRedirectedOnStartup, location.pathname, navigate, setHasRedirectedOnStartup]);
+
+  if (loadingAuth) return <StartupLoader />;
 
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
-      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-      <Route path="/reset-password" element={<ResetPasswordPage />} />
-      <Route path="/verify-email" element={<VerifyEmailPage />} />
-      <Route path="/email-sent" element={<EmailSentPage />} />
+      <Route element={<MotionPage><LandingPage /></MotionPage>}>
+        <Route path="/" element={null} />
+        <Route path="/login" element={null} />
+        <Route path="/register" element={null} />
+        <Route path="/forgot-password" element={null} />
+        <Route path="/email-sent" element={null} />
+      </Route>
+      <Route path="/reset-password" element={<MotionPage><ResetPasswordPage /></MotionPage>} />
+      <Route path="/verify-email" element={<MotionPage><VerifyEmailPage /></MotionPage>} />
+      <Route path="/extension-setup" element={<MotionPage><ExtensionSetupPage /></MotionPage>} />
       <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-        <Route path="/" element={<DashboardPage />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/tailor" element={<JobExtractPage />} />
         <Route path="/job-tracker" element={<JobTrackerPage />} />
@@ -157,7 +180,10 @@ function App() {
   return (
     <HashRouter>
       <AppProvider>
-        <AppRoutes />
+        <ReducedMotionProvider>
+          <GlobalCursor />
+          <AppRoutes />
+        </ReducedMotionProvider>
       </AppProvider>
     </HashRouter>
   );

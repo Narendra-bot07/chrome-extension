@@ -7,7 +7,7 @@ function NoJobDetectedPage() {
   const { handleScanPage, jobDetectionStatus, setJobDetectionStatus, apiError } = useApp();
 
   const states = {
-    'browser-new-tab': ['No Job Page Open', 'Open an individual job posting in this tab, then TailorFlow will scan it automatically.'],
+    'browser-new-tab': ['No Job Page Open', 'Open an individual job posting in this tab, then tailr4u will scan it automatically.'],
     'job-list': ['Job Listing Page Detected', 'This is a job listing page. Open a specific job to extract its description.'],
     'job-search': ['Job Search Results Detected', 'This is a job search results page. Open a specific job posting to extract details.'],
     'career-home': ['Company Careers Homepage', 'Open an individual job vacancy to continue.'],

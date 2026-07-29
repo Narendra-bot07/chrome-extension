@@ -84,7 +84,7 @@ def put_preferences(body: PreferencesUpdate, user: Dict[str, Any] = Depends(veri
                 timezone=excluded.timezone,daily_digest_enabled=excluded.daily_digest_enabled,
                 digest_time=excluded.digest_time,smart_reminders_enabled=excluded.smart_reminders_enabled,
                 updated_at=now()""", (user["id"],category,True if security else item.get("in_app_enabled",True),
-                    True if security else item.get("email_enabled",False),item.get("push_enabled",False),
+                    True if security else item.get("email_enabled",True),item.get("push_enabled",False),
                     item.get("digest_enabled",False),body.quiet_hours_start,body.quiet_hours_end,body.timezone,
                     body.daily_digest_enabled,body.digest_time,body.smart_reminders_enabled))
     conn.commit()

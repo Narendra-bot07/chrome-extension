@@ -1,7 +1,7 @@
 import React from 'react';
 import { 
   Building, MapPin, Calendar, ExternalLink, Layers, Edit3, Archive, Trash2, 
-  Sparkles, FileText, CheckCircle2, Award
+  Sparkles, FileText, CheckCircle2, Award, Maximize2, Minimize2, X
 } from 'lucide-react';
 import CompanyLogo from '../CompanyLogoView';
 
@@ -10,7 +10,10 @@ export function JobWorkspaceHeader({
   onMoveStage,
   onEditJob,
   onArchiveJob,
-  onDeleteJob
+  onDeleteJob,
+  isFullscreenPopup,
+  onToggleFullscreen,
+  onClose
 }) {
   if (!application) return null;
 
@@ -37,85 +40,80 @@ export function JobWorkspaceHeader({
   };
 
   return (
-    <header className="p-4 md:p-6 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4 select-none shadow-xs">
+    <header className="p-4 md:p-5 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4 select-none shadow-xs">
       
       {/* Role, Company, Location Metadata */}
-      <div className="flex min-w-0 items-start gap-3">
+      <div className="flex min-w-0 items-start gap-3.5">
         <CompanyLogo
           companyName={application.company_name}
           companyDomain={application.company_domain}
-          size={48}
+          size={46}
+          className="rounded-xl shrink-0"
         />
-        <div className="min-w-0 space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-xl md:text-2xl font-black text-zinc-900 dark:text-white tracking-tight truncate">
-            {application.job_title || 'Untitled Position'}
-          </h1>
-          <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border uppercase tracking-wider ${getStageColor(stage)}`}>
-            {stage}
-          </span>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-          <div className="flex items-center gap-1.5 text-zinc-800 dark:text-zinc-200 font-semibold">
-            <Building size={14} className="text-teal-600 dark:text-teal-400" />
-            <span>{application.company_name || 'Company Name'}</span>
-          </div>
-
-          {application.location && (
-            <div className="flex items-center gap-1">
-              <MapPin size={13} className="text-zinc-400" />
-              <span>{application.location}</span>
-            </div>
-          )}
-
-          {application.employment_type && (
-            <span className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 text-[11px] font-semibold">
-              {application.employment_type}
+        <div className="min-w-0 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="text-lg md:text-xl font-black text-zinc-900 dark:text-white tracking-tight truncate">
+              {application.job_title || 'Untitled Position'}
+            </h1>
+            <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold border uppercase tracking-wider ${getStageColor(stage)}`}>
+              {stage}
             </span>
-          )}
+          </div>
 
-          {appliedDate && (
-            <div className="flex items-center gap-1 text-zinc-500 dark:text-zinc-400">
-              <Calendar size={13} className="text-zinc-400" />
-              <span>Applied {new Date(appliedDate).toLocaleDateString()}</span>
+          <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+            <div className="flex items-center gap-1.5 text-zinc-800 dark:text-zinc-200 font-bold">
+              <Building size={14} className="text-teal-600 dark:text-teal-400" />
+              <span>{application.company_name || 'Company Name'}</span>
             </div>
-          )}
-        </div>
 
-        {/* Metrics Row: Match % & ATS Score */}
-        <div className="flex items-center gap-3 text-xs pt-1">
-          <div className="flex items-center gap-1.5 bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800/60 px-2.5 py-1 rounded-lg">
-            <Sparkles size={13} className="text-teal-600 dark:text-teal-400" />
-            <span className="text-zinc-600 dark:text-zinc-300 font-semibold">Resume Match:</span>
-            <strong className="text-teal-700 dark:text-teal-400 font-extrabold">{matchScore}%</strong>
+            {application.location && (
+              <div className="flex items-center gap-1">
+                <MapPin size={13} className="text-zinc-400" />
+                <span>{application.location}</span>
+              </div>
+            )}
+
+            {appliedDate && (
+              <div className="flex items-center gap-1 text-zinc-500 dark:text-zinc-400">
+                <Calendar size={13} className="text-zinc-400" />
+                <span>Applied {new Date(appliedDate).toLocaleDateString()}</span>
+              </div>
+            )}
           </div>
 
-          <div className="flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 px-2.5 py-1 rounded-lg">
-            <Award size={13} className="text-emerald-600 dark:text-emerald-400" />
-            <span className="text-zinc-600 dark:text-zinc-300 font-semibold">ATS Score:</span>
-            <strong className="text-emerald-700 dark:text-emerald-400 font-extrabold">{atsScore}/100</strong>
+          {/* Metrics Row: Match % & ATS Score */}
+          <div className="flex items-center gap-2.5 text-xs pt-0.5">
+            <div className="flex items-center gap-1.5 bg-teal-50/80 dark:bg-teal-950/40 border border-teal-200/80 dark:border-teal-800/60 px-2.5 py-0.5 rounded-lg text-[11px]">
+              <Sparkles size={12} className="text-teal-600 dark:text-teal-400" />
+              <span className="text-zinc-600 dark:text-zinc-300 font-semibold">Resume Match:</span>
+              <strong className="text-teal-700 dark:text-teal-400 font-extrabold">{matchScore}%</strong>
+            </div>
+
+            <div className="flex items-center gap-1.5 bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-800/60 px-2.5 py-0.5 rounded-lg text-[11px]">
+              <Award size={12} className="text-emerald-600 dark:text-emerald-400" />
+              <span className="text-zinc-600 dark:text-zinc-300 font-semibold">ATS Score:</span>
+              <strong className="text-emerald-700 dark:text-emerald-400 font-extrabold">{atsScore}/100</strong>
+            </div>
           </div>
-        </div>
         </div>
       </div>
 
-      {/* Header Actions */}
+      {/* Header Actions Row */}
       <div className="flex items-center gap-2 shrink-0 self-start md:self-center">
         {/* Primary Action Button */}
         <button
           onClick={onMoveStage}
-          className="px-4 py-2 bg-[#00bda5] hover:bg-[#00a38e] text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+          className="px-4 py-2 bg-[#3578f6] hover:bg-[#2b65d9] text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
         >
           <Layers size={14} />
           <span>Move Stage</span>
         </button>
 
-        {/* Secondary Actions */}
+        {/* Secondary Action Icons */}
         <button
           onClick={onEditJob}
           title="Edit Job Details"
-          className="p-2 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 rounded-xl transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700 shadow-xs"
+          className="p-2 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 rounded-xl transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700 shadow-xs"
         >
           <Edit3 size={15} />
         </button>
@@ -126,7 +124,7 @@ export function JobWorkspaceHeader({
             target="_blank"
             rel="noopener noreferrer"
             title="View Source Job Posting"
-            className="p-2 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 rounded-xl transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700 shadow-xs flex items-center"
+            className="p-2 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 rounded-xl transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700 shadow-xs flex items-center"
           >
             <ExternalLink size={15} />
           </a>
@@ -135,7 +133,7 @@ export function JobWorkspaceHeader({
         <button
           onClick={onArchiveJob}
           title="Archive Application"
-          className="p-2 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 rounded-xl transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700 shadow-xs"
+          className="p-2 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 rounded-xl transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700 shadow-xs"
         >
           <Archive size={15} />
         </button>
@@ -147,6 +145,26 @@ export function JobWorkspaceHeader({
         >
           <Trash2 size={15} />
         </button>
+
+        {onToggleFullscreen && (
+          <button
+            onClick={onToggleFullscreen}
+            title={isFullscreenPopup ? 'Exit Fullscreen' : 'Fullscreen Expansion'}
+            className="p-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 rounded-xl transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700 shadow-xs ml-1"
+          >
+            {isFullscreenPopup ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          </button>
+        )}
+
+        {onClose && (
+          <button
+            onClick={onClose}
+            title="Close Workspace (ESC)"
+            className="p-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 rounded-xl transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700 shadow-xs"
+          >
+            <X size={15} />
+          </button>
+        )}
       </div>
 
     </header>
@@ -154,3 +172,4 @@ export function JobWorkspaceHeader({
 }
 
 export default JobWorkspaceHeader;
+

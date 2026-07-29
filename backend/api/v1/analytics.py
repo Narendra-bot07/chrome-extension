@@ -13,39 +13,90 @@ async def get_activity_trend(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn=Depends(get_db_connection),
 ):
-    """Return complete daily resume-processing activity, including zero days."""
+    """Return tailored resume-version counts by their creation date."""
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
             """
-            WITH profile_timezone AS (
-              SELECT COALESCE(NULLIF(timezone, ''), 'UTC') AS timezone
+            WITH requested_settings AS (
+              SELECT
+                COALESCE(NULLIF(timezone, ''), 'UTC') AS requested_timezone
               FROM public.profiles WHERE id=%s
+            ),
+            profile_settings AS (
+              SELECT COALESCE(
+                       (
+                         SELECT name
+                         FROM pg_timezone_names
+                         WHERE name = (
+                           SELECT requested_timezone FROM requested_settings
+                         )
+                         LIMIT 1
+                       ),
+                       'UTC'
+                     ) AS timezone
+            ),
+            date_range AS (
+              SELECT
+                timezone,
+                (NOW() AT TIME ZONE timezone)::date AS end_date,
+                (NOW() AT TIME ZONE timezone)::date - (%s - 1) AS start_date
+              FROM profile_settings
             ),
             dates AS (
               SELECT generate_series(
-                current_date - (%s - 1),
-                current_date,
+                (SELECT start_date FROM date_range),
+                (SELECT end_date FROM date_range),
                 interval '1 day'
-              )::date AS activity_date
+              )::date AS tailored_date
             ),
             activity AS (
-              SELECT (e.created_at AT TIME ZONE COALESCE(
-                        (SELECT timezone FROM profile_timezone), 'UTC'
-                     ))::date AS activity_date,
-                     COUNT(*)::int AS count
-              FROM public.user_events e
-              WHERE e.user_id=%s
-                AND e.event_type IN ('RESUME_PARSED', 'RESUME_TAILORED')
-                AND e.created_at >= now() - (%s * interval '1 day')
+              SELECT (
+                       rv.created_at AT TIME ZONE
+                       (SELECT timezone FROM date_range)
+                     )::date AS tailored_date,
+                     COUNT(DISTINCT rv.id)::int AS count
+              FROM public.resume_versions rv
+              WHERE rv.created_by=%s
+                AND rv.version_type = 'tailored'
+                AND rv.deleted_at IS NULL
+                AND (
+                      rv.created_at AT TIME ZONE
+                      (SELECT timezone FROM date_range)
+                    )::date BETWEEN
+                      (SELECT start_date FROM date_range)
+                      AND (SELECT end_date FROM date_range)
               GROUP BY 1
+            ),
+            daily_series AS (
+              SELECT d.tailored_date AS date,
+                     COALESCE(a.count, 0)::int AS count
+              FROM dates d
+              LEFT JOIN activity a USING(tailored_date)
             )
-            SELECT d.activity_date, COALESCE(a.count, 0)::int AS count
-            FROM dates d LEFT JOIN activity a USING(activity_date)
-            ORDER BY d.activity_date
+            SELECT date,
+                   count,
+                   SUM(count) OVER ()::int AS total_in_range,
+                   (SELECT timezone FROM date_range) AS timezone
+            FROM daily_series
+            ORDER BY date
             """,
-            (user["id"], days, user["id"], days),
+            (
+                user["id"], days,
+                user["id"],
+            ),
         )
-        return {"days": days, "series": cur.fetchall()}
+        rows = cur.fetchall()
+        timezone = rows[0]["timezone"] if rows else "UTC"
+        total_in_range = rows[0]["total_in_range"] if rows else 0
+        return {
+            "range": f"last_{days}_days",
+            "timezone": timezone,
+            "total_in_range": total_in_range,
+            "series": [
+                {"date": row["date"], "count": row["count"]}
+                for row in rows
+            ],
+        }
 
 @router.get("/dashboard")
 async def get_dashboard_metrics(

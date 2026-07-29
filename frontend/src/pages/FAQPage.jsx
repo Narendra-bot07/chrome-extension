@@ -21,7 +21,7 @@ export default function FAQPage() {
     },
     {
       question: "Can I download my tailored resume as a Word document?",
-      answer: "Currently, ApplyFlow exports pixel-perfect PDF documents because PDFs guarantee that your formatting will be perfectly preserved across all Applicant Tracking Systems and recruiter devices. Word document export is on our roadmap for Q3."
+      answer: "Currently, tailr4u exports pixel-perfect PDF documents because PDFs guarantee that your formatting will be perfectly preserved across all Applicant Tracking Systems and recruiter devices. Word document export is on our roadmap for Q3."
     },
     {
       question: "Is my data secure?",
@@ -38,7 +38,7 @@ export default function FAQPage() {
         </div>
         <h1 className="text-3xl font-extrabold mb-4">Frequently Asked Questions</h1>
         <p className={`text-lg ${darkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
-          Everything you need to know about ApplyFlow and how it works.
+          Everything you need to know about tailr4u and how it works.
         </p>
       </div>
 

@@ -38,6 +38,7 @@ import { useApp } from '../context/AppContext';
 import TailorRender from './Resume/TailorRender';
 import { ResumeDropzoneOverlay } from './Resume/ResumeDropzoneOverlay';
 import { Button } from './ui/Button';
+import './ResumeDetectionView.css';
 
 
 function formatDate(value) {
@@ -501,10 +502,10 @@ export default function ResumeDetectionView({
 
   return (
     <ResumeDropzoneOverlay onDropFiles={handleDropFiles}>
-      <div className="w-full space-y-6 text-tf-text font-sans relative">
+      <div className="resume-manager-page w-full space-y-6 text-tf-text font-sans relative">
         
         {/* HEADER SECTION */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-tf-surface border border-tf-border p-6 rounded-xl shadow-sm">
+        <div className="resume-manager-hero flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-tf-surface border border-tf-border p-6 rounded-xl shadow-sm">
           <div className="space-y-1">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-tf-accent/10 border border-tf-accent/20 flex items-center justify-center text-tf-accent">
@@ -606,7 +607,7 @@ export default function ResumeDetectionView({
 
 
         {/* FILTER & SEARCH BAR */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-tf-surface-2 border border-tf-border p-3.5 rounded-xl">
+        <div className="resume-manager-toolbar flex flex-col md:flex-row md:items-center justify-between gap-4 bg-tf-surface-2 border border-tf-border p-3.5 rounded-xl">
           
           {/* Search Bar */}
           <div className="relative flex-1 max-w-md">
@@ -679,7 +680,7 @@ export default function ResumeDetectionView({
         </div>
 
         {/* RESUMES TABLE */}
-        <div className="bg-tf-surface border border-tf-border rounded-xl overflow-hidden shadow-sm">
+        <div className="resume-manager-table bg-tf-surface border border-tf-border rounded-xl overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
@@ -882,14 +883,14 @@ export default function ResumeDetectionView({
           {/* Backdrop Overlay */}
           <div
             onClick={() => setSideDrawerResume(null)}
-            className="fixed inset-0 bg-black/40 backdrop-blur-xs z-40 transition-opacity"
+            className="resume-drawer-backdrop fixed inset-0 bg-black/40 backdrop-blur-xs z-40 transition-opacity"
           />
 
           {/* Slide-out Panel */}
-          <div className="fixed inset-y-0 right-0 w-[540px] sm:w-[620px] bg-white border-l border-zinc-200 shadow-2xl z-50 flex flex-col transition-transform duration-300 ease-in-out">
+          <div className="resume-version-drawer fixed inset-y-0 right-0 w-[540px] sm:w-[620px] bg-white border-l border-zinc-200 shadow-2xl z-50 flex flex-col transition-transform duration-300 ease-in-out">
             
             {/* Drawer Header */}
-            <div className="p-5 border-b border-zinc-200 bg-zinc-50 flex items-center justify-between shrink-0">
+            <div className="resume-version-drawer__header p-5 border-b border-zinc-200 bg-zinc-50 flex items-center justify-between shrink-0">
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
                   <FileText size={18} className="text-[#00bda5]" />
@@ -911,7 +912,7 @@ export default function ResumeDetectionView({
             </div>
 
             {/* Tab Switcher: All Versions vs Compare Mode */}
-            <div className="flex items-center border-b border-zinc-200 bg-white px-5 shrink-0">
+            <div className="resume-version-drawer__tabs flex items-center border-b border-zinc-200 bg-white px-5 shrink-0">
               <button
                 onClick={() => setSideDrawerTab('versions')}
                 className={`py-3 px-4 font-black text-xs border-b-2 transition cursor-pointer flex items-center gap-2 ${
@@ -937,7 +938,7 @@ export default function ResumeDetectionView({
             </div>
 
             {/* Drawer Body */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+            <div className="resume-version-drawer__body flex-1 overflow-y-auto p-5 space-y-4">
               
               {loadingSideDrawer ? (
                 <div className="py-4 space-y-4">
@@ -972,7 +973,7 @@ export default function ResumeDetectionView({
                       return (
                         <div
                           key={ver.id}
-                          className={`p-4 rounded-2xl border transition-all ${
+                          className={`resume-version-card p-4 rounded-2xl border transition-all ${
                             isCurrentVer
                               ? 'bg-indigo-50/70 border-indigo-200 shadow-xs'
                               : 'bg-white border-zinc-200 hover:border-zinc-300 shadow-2xs'

@@ -354,32 +354,33 @@ def generate_tailoring_patch(
 Analyze the provided user resume and target job description in one single pass and produce an optimal ResumePatch JSON.
 
 Rules:
-1. summary: When Summary is selected, preserve or minimally improve it. If selected and missing, generate a concise evidence-only summary. Do not invent experience.
-2. skills_append: Always return an empty list. Missing JD keywords are analysis only and must never be added to candidate evidence.
-3. experience: A dict mapping experience item index (as a string "0", "1", ...) to a dict mapping bullet index (as a string "0", "1", ...) to the updated bullet text. Only include bullets that were improved or naturally incorporated keywords.
-4. projects: A dict mapping project item index (as a string "0", "1", ...) to a dict mapping bullet index (as a string "0", "1", ...) to the updated bullet text.
-5. NEVER invent metrics, companies, titles, or dates that do not exist in the resume."""),
+1. Produce changes ONLY for SELECTED SECTIONS. For each selected section, generate strong, high-impact wording improvements that elevate the resume for ATS and human recruiters.
+2. summary: When selected, write a compelling, high-impact professional summary closely aligned with the target job's key requirements.
+3. skills_append: When Skills is selected, suggest relevant skills from the target job description that would strengthen ATS alignment. Return concise skill names only.
+4. experience: Map item index string (e.g. "0") to bullet index string (e.g. "0") to updated bullet text string (e.g. {{"0": {{"0": "Engineered automated PySpark..."}}}}). DO NOT return full experience objects, lists, or arrays.
+5. projects: Map project item index string (e.g. "0") to bullet index string (e.g. "0") to updated bullet text string (e.g. {{"0": {{"0": "Architected an end-to-end..."}}}}). DO NOT return full project objects, lists, or arrays.
+6. Preserve all original numbers, metrics, company names, titles, dates, technologies, and links."""),
         ("human", "SELECTED SECTIONS:\n{selected_sections}\n\nRESUME:\n{resume}\n\nJOB DESCRIPTION:\n{job}")
     ])
 
+    chain = prompt | structured_llm
     try:
-        chain = prompt | structured_llm
         patch = chain.invoke({
             "resume": resume.model_dump_json(include={"summary", "skills", "experience", "projects"}),
             "job": job.model_dump_json(include={"title", "company", "required_skills", "preferred_skills", "qualifications", "responsibilities", "keywords", "ats_keywords"}),
             "selected_sections": sorted(selected_sections or []),
         })
     except Exception as err:
-        print(f"[GroqService] Single-pass tailoring patch failed: {err}")
-        patch = ResumePatch()
+        # An AI/provider/schema failure is not a valid "no changes" result.
+        # Let the API surface it so the UI never presents the original resume
+        # and unchanged scores as a successful tailoring run.
+        raise RuntimeError(f"AI tailoring agent failed: {err}") from err
 
     from services.resume.tailoring_engine import StrictTailoringEngine
     pipeline = StrictTailoringEngine().validate_patch(
         resume, job, patch, requested_sections=selected_sections
     )
-    # A selected project section must not silently degrade into an empty
-    # generic response. Retry once with a project-only, one-to-one editing
-    # contract; the same deterministic guardians still own final authority.
+    # A selected project section must not silently degrade into an empty response.
     if (
         selected_sections is not None
         and "projects" in selected_sections
@@ -387,17 +388,13 @@ Rules:
         and not pipeline.patch.projects
     ):
         retry_prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a conservative project-bullet editor.
+            ("system", """You are a project-bullet editor.
 Return ResumePatch JSON and edit PROJECTS ONLY.
 
 Requirements:
-- Improve at least one existing project bullet when a truthful wording improvement is possible.
-- Keep every project and bullet at the same index.
-- Make a minimal one-to-one wording edit, not a rewrite.
-- Preserve every technology, named tool, metric, URL, and factual claim exactly.
-- Do not introduce any technology or responsibility absent from the source.
-- summary must be null, skills_append empty, and experience empty.
-- projects must use string item and bullet indexes."""),
+- projects must map string item index (e.g. "0") to string bullet index (e.g. "0") to a single updated bullet string (e.g. {{"projects": {{"0": {{"0": "Architected real-time..."}}}}}}).
+- DO NOT return project objects with arrays for description, technology_stack, or links. Each entry inside item index must be string bullet index to string text.
+- summary must be null, skills_append empty, and experience empty."""),
             ("human", "PROJECTS:\n{projects}\n\nTARGET JOB:\n{job}\n\nPREVIOUS VALIDATION:\n{rejections}")
         ])
         try:
@@ -412,11 +409,76 @@ Requirements:
             retry_pipeline = StrictTailoringEngine().validate_patch(
                 resume, job, retry_patch, requested_sections={"projects"}
             )
-            if retry_pipeline.patch.projects or retry_pipeline.rejected_edits:
-                pipeline = retry_pipeline
+            # A section retry must never replace successful edits produced for
+            # the other selected sections.
+            if retry_pipeline.patch.projects:
+                pipeline.patch.projects = retry_pipeline.patch.projects
+            pipeline.edits.extend(retry_pipeline.edits)
+            pipeline.rejected_edits.extend(retry_pipeline.rejected_edits)
         except Exception as err:
             print(f"[GroqService] Project-only tailoring retry failed: {err}")
+
+    # Structured-output models occasionally return the source summary
+    # unchanged while successfully editing other sections. Give an explicitly
+    # selected summary one focused retry and merge only that validated result.
+    if (
+        selected_sections is not None
+        and "summary" in selected_sections
+        and not pipeline.patch.summary
+    ):
+        summary_retry_prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are a conservative professional-summary editor.
+Return ResumePatch JSON and edit SUMMARY ONLY.
+
+Requirements:
+- Return a polished summary that is materially different from the source.
+- Improve clarity, impact, action language, and natural alignment to the target role.
+- Preserve every technology, metric, seniority claim, and factual statement.
+- Do not add any skill or experience not already evidenced in the resume.
+- Keep the result concise and no more than 50% longer than the source.
+- skills_append must be empty; experience and projects must be empty."""),
+            ("human", "SOURCE SUMMARY:\n{summary}\n\nRESUME EVIDENCE:\n{resume}\n\nTARGET JOB:\n{job}\n\nPREVIOUS VALIDATION:\n{rejections}")
+        ])
+        try:
+            summary_retry_patch = (summary_retry_prompt | structured_llm).invoke({
+                "summary": resume.summary or "",
+                "resume": resume.model_dump_json(exclude={"raw_text"}),
+                "job": job.model_dump_json(include={
+                    "title", "required_skills", "preferred_skills",
+                    "responsibilities", "keywords", "ats_keywords",
+                }),
+                "rejections": pipeline.audit_payload().get("rejected_edits", []),
+            })
+            summary_retry_pipeline = StrictTailoringEngine().validate_patch(
+                resume, job, summary_retry_patch, requested_sections={"summary"}
+            )
+            if summary_retry_pipeline.patch.summary:
+                pipeline.patch.summary = summary_retry_pipeline.patch.summary
+            pipeline.edits.extend(summary_retry_pipeline.edits)
+            pipeline.rejected_edits.extend(summary_retry_pipeline.rejected_edits)
+        except Exception as err:
+            print(f"[GroqService] Summary-only tailoring retry failed: {err}")
     patch = pipeline.patch
+
+    has_validated_edits = bool(
+        patch.summary
+        or patch.skills_append
+        or patch.experience
+        or patch.projects
+    )
+    if selected_sections and not has_validated_edits:
+        rejected = pipeline.audit_payload().get("rejected_edits", [])
+        reasons = "; ".join(
+            f"{item.get('path', 'edit')}: {item.get('reason', 'failed validation')}"
+            for item in rejected[:3]
+        )
+        detail = (
+            "The AI tailoring agent returned no validated improvements for the "
+            f"selected sections ({', '.join(sorted(selected_sections))})."
+        )
+        if reasons:
+            detail = f"{detail} Validation details: {reasons}"
+        raise RuntimeError(detail)
 
     changes_made = []
     if patch.summary and patch.summary != resume.summary:

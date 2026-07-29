@@ -25,6 +25,7 @@ from core.security import verify_supabase_jwt
 from core.database import get_db_connection
 from repositories.resume_repository import ResumeRepository
 from repositories.ats_repository import ATSRepository
+from services.subscriptions.usage_service import UsageService
 
 
 from app.template_engine import template_engine
@@ -233,9 +234,12 @@ async def api_compare(
     x_groq_key: Optional[str] = Header(None),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository),
-    ats_repo: ATSRepository = Depends(get_ats_repository)
+    ats_repo: ATSRepository = Depends(get_ats_repository),
+    conn = Depends(get_db_connection),
 ):
     try:
+        usage = UsageService(conn)
+        usage.require_available(user["id"], "resume_generation")
         from services.resume.scoring import ATSScoringEngine
         from app.groq_service import generate_tailoring_patch, apply_tailoring_patch
         import re
@@ -287,6 +291,7 @@ async def api_compare(
             except Exception as e:
                 print(f"[ATS-CACHE][BACKEND] Failed to lookup suggestion impacts: {e}")
 
+            usage.consume_usage(user["id"], "resume_generation", metadata={"resume_id": resume_id, "job_id": jd_id, "cached": True})
             return TailoringReport(
                 changes_made=changes_made,
                 resume_match_before=resume_match_score,
@@ -301,7 +306,6 @@ async def api_compare(
                 tailoring_audit=breakdown_json.get("tailoring_audit") or {},
             )
 
-        tailoring_generation_succeeded = True
         try:
             comparison = generate_tailoring_patch(
                 resume,
@@ -310,16 +314,17 @@ async def api_compare(
                 selected_sections=set(selected_sections),
             )
         except Exception as exc:
-            tailoring_generation_succeeded = False
             print(f"[TAILORING][BACKEND] Patch generation failed: {exc}")
-            comparison = TailoringReport(
-                changes_made=[],
-                ats_score_before=0,
-                ats_score_after=0,
-                patch=ResumePatch()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "code": "TAILORING_AGENT_FAILED",
+                    "message": str(exc),
+                },
             )
 
         res_before = ATSScoringEngine.calculate_score(resume, job)
+
         tailored_resume = apply_tailoring_patch(resume, comparison.patch)
         res_after = ATSScoringEngine.calculate_score(tailored_resume, job)
 
@@ -337,9 +342,7 @@ async def api_compare(
                     "changes_made": comparison.changes_made,
                     "selected_sections": selected_sections,
                     "tailoring_engine_version": TAILORING_ENGINE_VERSION,
-                    "tailoring_generation_status": (
-                        "completed" if tailoring_generation_succeeded else "failed"
-                    ),
+                    "tailoring_generation_status": "completed",
                     "tailoring_audit": getattr(
                         comparison, "tailoring_audit", {}
                     ),
@@ -451,6 +454,7 @@ async def api_compare(
             except Exception as db_err:
                 print(f"[ATS-SAVE][BACKEND] Failed to persist ATS analysis: {db_err}")
 
+        usage.consume_usage(user["id"], "resume_generation", metadata={"resume_id": resume_id, "job_id": jd_id, "cached": False})
         return TailoringReport(
             changes_made=comparison.changes_made,
             resume_match_before=res_before["resume_match_score"],
@@ -461,8 +465,11 @@ async def api_compare(
             ats_analysis_id=ats_analysis_id,
             breakdown_before=res_before["breakdown"],
             breakdown_after=res_after["breakdown"],
-            suggestion_impacts=suggestion_impacts
+            suggestion_impacts=suggestion_impacts,
+            tailoring_audit=getattr(comparison, "tailoring_audit", {}),
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -489,6 +496,8 @@ async def api_score_resume(request: CompareRequest, user: Dict[str, Any] = Depen
 
 class LiveScoreRequest(BaseModel):
     resume: Dict[str, Any]
+    current_resume: Optional[Dict[str, Any]] = None
+    estimated_resume: Optional[Dict[str, Any]] = None
     job: Dict[str, Any]
     suggestions: List[Dict[str, Any]]
 
@@ -502,12 +511,26 @@ async def api_ats_live_score(request: LiveScoreRequest, user: Dict[str, Any] = D
         # Original score (base score)
         res_before = ATSScoringEngine.calculate_score(resume, job)
 
-        # Current score (accepted suggestions applied)
-        current_resume = ATSScoringEngine.apply_suggestions(resume, request.suggestions, {"accepted"})
+        # Prefer the exact canonical working resumes constructed by the review
+        # merge engine. Falling back keeps older extension builds compatible.
+        current_resume = (
+            ResumeStructure(**normalize_resume_payload(request.current_resume))
+            if request.current_resume
+            else ATSScoringEngine.apply_suggestions(
+                resume, request.suggestions, {"accepted"}
+            )
+        )
         res_current = ATSScoringEngine.calculate_score(current_resume, job)
 
-        # Estimated score (accepted + pending suggestions applied)
-        estimated_resume = ATSScoringEngine.apply_suggestions(resume, request.suggestions, {"accepted", "pending"})
+        # Potential means every non-rejected suggestion applied, independently
+        # from the user's current individual acceptance decisions.
+        estimated_resume = (
+            ResumeStructure(**normalize_resume_payload(request.estimated_resume))
+            if request.estimated_resume
+            else ATSScoringEngine.apply_suggestions(
+                resume, request.suggestions, {"accepted", "pending"}
+            )
+        )
         res_estimated = ATSScoringEngine.calculate_score(estimated_resume, job)
 
         return {
@@ -765,13 +788,19 @@ async def api_build_cover_letter_strategy(request: CoverLetterStrategyRequest):
 async def api_generate_cover_letter_draft(
     request: CoverLetterGenerationRequest,
     x_groq_key: Optional[str] = Header(None),
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    conn = Depends(get_db_connection),
 ):
     """Phase 3 only: generate one first draft; no review, repair, chat, or export."""
     from fastapi.concurrency import run_in_threadpool
     try:
-        return await run_in_threadpool(
+        usage = UsageService(conn)
+        usage.require_available(user["id"], "cover_letter_generation")
+        result = await run_in_threadpool(
             generate_cover_letter_draft, request, x_groq_key
         )
+        usage.consume_usage(user["id"], "cover_letter_generation", metadata={"source": "cover-letter/generate"})
+        return result
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -993,11 +1022,20 @@ async def api_render_cover_letter(request: CoverLetterRenderRequest):
 @router.post("/cover-letter", response_model=CoverLetterResult)
 async def api_cover_letter(
     request: CoverLetterRequest,
-    x_groq_key: Optional[str] = Header(None)
+    x_groq_key: Optional[str] = Header(None),
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    conn = Depends(get_db_connection),
 ):
     try:
+        usage = UsageService(conn)
+        usage.require_available(user["id"], "cover_letter_generation")
         letter = generate_cover_letter(request.resume, request.job, api_key=x_groq_key)
+        usage.consume_usage(user["id"], "cover_letter_generation", metadata={"source": "cover-letter"})
         return letter
+    except HTTPException:
+        raise
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

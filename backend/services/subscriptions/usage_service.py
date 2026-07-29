@@ -1,14 +1,36 @@
+import os
+
 from psycopg2.extras import RealDictCursor, Json
 from fastapi import HTTPException, status
 from .subscription_service import SubscriptionService
 
 
+FEATURE_NAMES = {
+    "jd_extraction": "job description extractions",
+    "resume_upload": "resume uploads",
+    "resume_generation": "tailored resume generations",
+    "cover_letter_generation": "cover letter generations",
+}
+
+QUOTAS_ENFORCED = os.getenv("ENFORCE_SUBSCRIPTION_QUOTAS", "false").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+TESTING_UNLIMITED_FEATURES = {
+    "jd_extraction",
+    "resume_upload",
+    "resume_generation",
+    "cover_letter_generation",
+}
+
+
 def quota_error(summary):
+    feature_key = summary.get("feature_key")
+    feature_name = FEATURE_NAMES.get(feature_key, feature_key.replace("_", " "))
     raise HTTPException(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         detail={
             "code": "QUOTA_EXCEEDED",
-            "message": "You have used all JD extractions for this period.",
+            "message": f"You have reached your {feature_name} limit for this billing period. Upgrade your plan to continue.",
             "usage": summary,
         },
     )
@@ -20,9 +42,9 @@ class UsageService:
         self.subscription_service = SubscriptionService(conn)
 
     def get_feature_limit(self, subscription, feature_key):
-        # Temporary local/dev override: keep JD extraction available without a monthly cap.
-        # Usage events are still recorded, but quota checks treat this feature as unlimited.
-        if feature_key == "jd_extraction":
+        # During product testing, retain usage telemetry but do not block workflows.
+        # Set ENFORCE_SUBSCRIPTION_QUOTAS=true when production enforcement is desired.
+        if not QUOTAS_ENFORCED and feature_key in TESTING_UNLIMITED_FEATURES:
             return True, None
 
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -69,8 +91,25 @@ class UsageService:
 
     def get_usage_summary(self, user_id):
         return {
-            "jd_extraction": self.get_current_usage(user_id, "jd_extraction")
+            key: self.get_current_usage(user_id, key)
+            for key in (
+                "jd_extraction",
+                "resume_upload",
+                "resume_generation",
+                "cover_letter_generation",
+            )
         }
+
+    def require_available(self, user_id, feature_key, quantity=1):
+        summary = self.get_current_usage(user_id, feature_key)
+        if not summary["enabled"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "FEATURE_NOT_AVAILABLE", "message": f"{FEATURE_NAMES.get(feature_key, feature_key)} is not available on your current plan."},
+            )
+        if summary["limit"] is not None and summary["used"] + quantity > summary["limit"]:
+            quota_error(summary)
+        return summary
 
     def consume_usage(self, user_id, feature_key, quantity=1, request_id=None, metadata=None):
         metadata = metadata or {}

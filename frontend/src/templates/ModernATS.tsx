@@ -159,11 +159,8 @@ export default function ModernATS({ resume }) {
           <h2 className="text-xl font-semibold text-indigo-900 mb-4 border-b-2 border-indigo-100 pb-2">Certifications</h2>
           <div className="space-y-3">
             {certifications.map((cert, i) => (
-              <div key={i} className="flex justify-between text-sm">
-                <span className="text-gray-800">
-                  <span className="font-bold">{cert.name}</span> <span className="text-gray-500 ml-1">| {cert.issuing_organization}</span>
-                </span>
-                <span className="text-gray-500">{cert.issue_date}</span>
+              <div key={i} className="text-sm text-gray-800">
+                <span className="font-bold">{cert.name}</span>
               </div>
             ))}
           </div>

@@ -215,7 +215,7 @@ export default function SecurityPage() {
             </div>
             <div>
               <h2 className="text-base font-bold text-tf-text">Active Devices & Sessions</h2>
-              <p className="text-xs text-tf-text-secondary mt-0.5">Devices currently signed into your TailorFlow account</p>
+              <p className="text-xs text-tf-text-secondary mt-0.5">Devices currently signed into your tailr4u account</p>
             </div>
           </div>
 

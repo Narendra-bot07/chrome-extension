@@ -326,6 +326,7 @@ class AuthService:
         elif not created_at_val:
             created_at_val = datetime.datetime.utcnow().isoformat()
             
+        issued_at = datetime.datetime.utcnow()
         token_payload = {
             "sub": str(user["id"]),
             "email": user["email"],
@@ -333,7 +334,8 @@ class AuthService:
             "provider": user.get("provider", "email"),
             "created_at": created_at_val,
             "jti": session_id,
-            "exp": datetime.datetime.utcnow() + datetime.timedelta(days=7)
+            "iat": issued_at,
+            "exp": issued_at + datetime.timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
         }
         access_token = jwt.encode(token_payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
         return access_token

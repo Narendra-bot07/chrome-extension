@@ -10,7 +10,7 @@ PLANS = [
         "code": "free",
         "name": "Free",
         "description": "For users getting started.",
-        "monthly_jd_limit": 10,
+        "monthly_jd_limit": 2,
         "resume_limit": 1,
         "price_amount": 0.00,
         "currency": "USD",
@@ -18,8 +18,10 @@ PLANS = [
         "sort_order": 1,
         "is_default": True,
         "features": {
-            "jd_extraction": (True, 10),
+            "jd_extraction": (True, 2),
             "resume_upload": (True, 1),
+            "resume_generation": (True, 1),
+            "cover_letter_generation": (True, 1),
             "basic_tailoring": (True, None),
             "advanced_tailoring": (False, None),
             "application_history": (False, None),
@@ -30,9 +32,9 @@ PLANS = [
     {
         "code": "pro",
         "name": "Pro",
-        "description": "For active job seekers.",
+        "description": "For active job hunting.",
         "monthly_jd_limit": 100,
-        "resume_limit": 5,
+        "resume_limit": 3,
         "price_amount": 9.99,
         "currency": "USD",
         "price_display": "$9.99",
@@ -40,7 +42,9 @@ PLANS = [
         "is_default": False,
         "features": {
             "jd_extraction": (True, 100),
-            "resume_upload": (True, 5),
+            "resume_upload": (True, 3),
+            "resume_generation": (True, 50),
+            "cover_letter_generation": (True, 30),
             "basic_tailoring": (True, None),
             "advanced_tailoring": (True, None),
             "application_history": (True, None),
@@ -49,19 +53,21 @@ PLANS = [
         },
     },
     {
-        "code": "plus",
-        "name": "Plus",
-        "description": "For frequent applicants.",
-        "monthly_jd_limit": 300,
-        "resume_limit": 15,
+        "code": "elite",
+        "name": "Elite",
+        "description": "For serious job hunters.",
+        "monthly_jd_limit": 500,
+        "resume_limit": None,
         "price_amount": 19.99,
         "currency": "USD",
         "price_display": "$19.99",
         "sort_order": 3,
         "is_default": False,
         "features": {
-            "jd_extraction": (True, 300),
-            "resume_upload": (True, 15),
+            "jd_extraction": (True, 500),
+            "resume_upload": (True, None),
+            "resume_generation": (True, 150),
+            "cover_letter_generation": (True, 100),
             "basic_tailoring": (True, None),
             "advanced_tailoring": (True, None),
             "application_history": (True, None),
@@ -70,19 +76,21 @@ PLANS = [
         },
     },
     {
-        "code": "premium",
-        "name": "Premium",
-        "description": "For users who need maximum limits.",
-        "monthly_jd_limit": 1000,
+        "code": "advanced",
+        "name": "Advanced",
+        "description": "For power users and teams.",
+        "monthly_jd_limit": 1200,
         "resume_limit": None,
-        "price_amount": 29.99,
+        "price_amount": 39.99,
         "currency": "USD",
-        "price_display": "$29.99",
+        "price_display": "$39.99",
         "sort_order": 4,
         "is_default": False,
         "features": {
-            "jd_extraction": (True, 1000),
+            "jd_extraction": (True, 1200),
             "resume_upload": (True, None),
+            "resume_generation": (True, 1000),
+            "cover_letter_generation": (True, 700),
             "basic_tailoring": (True, None),
             "advanced_tailoring": (True, None),
             "application_history": (True, None),
@@ -99,6 +107,11 @@ def seed():
 
     conn = psycopg2.connect(DB_URL)
     cur = conn.cursor()
+    active_codes = [plan["code"] for plan in PLANS]
+    cur.execute(
+        "UPDATE public.plans SET is_active = FALSE, is_default = FALSE, updated_at = NOW() WHERE NOT (code = ANY(%s));",
+        (active_codes,),
+    )
 
     for plan in PLANS:
         cur.execute("""
@@ -138,6 +151,30 @@ def seed():
                     limit_value = EXCLUDED.limit_value,
                     updated_at = NOW();
             """, (plan_id, feature_key, enabled, limit_value))
+
+    # Move subscriptions from superseded names to the equivalent price tier in
+    # one statement so renamed IDs do not cascade through multiple updates.
+    cur.execute("""
+        UPDATE public.subscriptions
+        SET plan_id = CASE plan_id
+            WHEN 'basic' THEN 'pro'
+            WHEN 'plus' THEN 'elite'
+            WHEN 'premium' THEN 'advanced'
+            ELSE plan_id
+        END,
+        updated_at = NOW()
+        WHERE plan_id IN ('basic', 'plus', 'premium');
+    """)
+    cur.execute("""
+        UPDATE public.users
+        SET current_plan = CASE
+            WHEN current_plan = 'basic' THEN 'pro'
+            WHEN current_plan = 'plus' THEN 'elite'
+            WHEN current_plan = 'premium' THEN 'advanced'
+            ELSE current_plan
+        END
+        WHERE current_plan IN ('basic', 'plus', 'premium');
+    """)
 
     cur.execute("SELECT id FROM public.plans WHERE code = 'free';")
     free_plan_id = cur.fetchone()[0]

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { toRenderableResume } from '../utils/renderableResume';
 import { Download, Sparkles, CheckCircle2, ShieldCheck, ChevronRight, X, ZoomIn, Eye, ArrowLeft, Layers, Image, Minimize2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -87,8 +88,7 @@ const MiniPreview = ({ resume, templateId }) => {
 export default function TemplateSelectionView({ onBack }) {
   const navigate = useNavigate();
   const { 
-    tailoredResume, 
-    parsedResume, 
+    workflowResume,
     selectedTemplate, 
     setSelectedTemplate,
     customFileName,
@@ -101,7 +101,24 @@ export default function TemplateSelectionView({ onBack }) {
   const baseATS = liveATS?.current_ats ?? comparison?.ats_score_after ?? comparison?.ats_score_before;
   const userATSScore = baseATS !== undefined && baseATS !== null ? Number(baseATS) : null;
 
-  const displayResume = toRenderableResume(tailoredResume || parsedResume);
+  const displayResume = React.useMemo(() => {
+    const rendered = toRenderableResume(workflowResume);
+    if (!rendered) return null;
+    return {
+      ...rendered,
+      // Template UI receives presentation content only. Parser provenance,
+      // numeric placeholders, and credential metadata stay outside the
+      // frontend rendering model.
+      certifications: (rendered.certifications || [])
+        .map(item => ({
+          name: String(item?.name || item?.title || '').replace(/\s+/g, ' ').trim()
+        }))
+        .filter(item =>
+          item.name
+          && !/^(?:0+\.?|null|none|undefined|n\/a|na)$/i.test(item.name)
+        )
+    };
+  }, [workflowResume]);
   const [isDownloading, setIsDownloading] = useState(false);
   const [filter, setFilter] = useState('all'); // 'all' | 'no-photo' | 'with-photo'
   const [zoomModalTemplate, setZoomModalTemplate] = useState(null); // active zoomed template object
@@ -124,7 +141,10 @@ export default function TemplateSelectionView({ onBack }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           resume: toRenderableResume(displayResume),
-          original_resume: toRenderableResume(parsedResume || displayResume),
+          // Review is complete at this boundary. The reviewed resume is the
+          // canonical export baseline; using parsedResume here causes the
+          // preservation workflow to remove accepted tailoring edits.
+          original_resume: toRenderableResume(displayResume),
           template_name: targetTemplate
         })
       });
@@ -289,14 +309,14 @@ export default function TemplateSelectionView({ onBack }) {
       </main>
 
       {/* Canva-Grade Live Overlay Modal */}
-      {zoomModalTemplate && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 lg:p-6">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-6xl h-[90vh] flex flex-col lg:flex-row overflow-hidden shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
+      {zoomModalTemplate && createPortal((
+        <div className="fixed top-[64px] inset-x-0 bottom-0 bg-black/70 backdrop-blur-sm z-[100] flex items-stretch justify-center p-4 lg:p-6">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-6xl h-full flex flex-col lg:flex-row overflow-hidden shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
             
             {/* Modal Body: A4 live replica preview */}
             <div className="flex-1 h-full bg-zinc-950 overflow-auto flex justify-center items-start p-6 custom-scrollbar">
               <div 
-                className="w-[816px] bg-white shadow-2xl ring-1 ring-zinc-200/50 my-auto shrink-0 select-none"
+                className="w-[816px] bg-white shadow-2xl ring-1 ring-zinc-200/50 shrink-0 select-none"
                 style={{ width: '816px' }}
               >
                 <TailorRender resume={displayResume} templateName={zoomModalTemplate.id} />
@@ -369,7 +389,7 @@ export default function TemplateSelectionView({ onBack }) {
 
           </div>
         </div>
-      )}
+      ), document.body)}
       {/* Full Screen Download & Reorder Overlay Pop-up Modal */}
       {selectedTemplateId && (
         <div className="fixed inset-0 z-50 bg-zinc-950 flex flex-col animate-in fade-in duration-200">

@@ -1,4 +1,4 @@
-# TailorFlow account security
+# tailr4u account security
 
 Run `migrate_account_security.py` once per environment, then configure the SMTP
 values in `.env.example`. Use an external SMTP relay; do not run a local mail

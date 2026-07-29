@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildAcceptedTailoringPatch,
   hasReviewOperation,
   mergeReviewResume,
   validateWorkingResume
@@ -57,6 +58,37 @@ test('new summary and skill proposals remain review-visible before acceptance', 
   assert.equal(hasReviewOperation(suggestions, 'summary'), true);
   assert.equal(hasReviewOperation(suggestions, 'skills'), true);
   assert.equal(result.operations[0].proposed_text, 'Proposed professional summary.');
+});
+
+test('accepted AI-suggested skills are added and deduplicated', () => {
+  const result = mergeReviewResume(
+    { personal_info: { name: 'Ada' }, skills: ['SQL'] },
+    [
+      { id: 'skill:data-viz', sectionType: 'skills', suggested: 'Data Visualization', status: 'accepted' },
+      { id: 'skill:sql', sectionType: 'skills', suggested: 'SQL', status: 'accepted' }
+    ]
+  );
+  assert.deepEqual(result.workingResume.skills, ['SQL', 'Data Visualization']);
+  assert.equal(result.invalidOperations.length, 0);
+});
+
+test('accepted review decisions create the canonical backend tailoring patch', () => {
+  const patch = buildAcceptedTailoringPatch([
+    { sectionType: 'summary', suggested: 'Tailored summary', status: 'accepted' },
+    { sectionType: 'skills', suggested: 'Pandas', status: 'accepted' },
+    { sectionType: 'skills', suggested: 'pandas', status: 'accepted' },
+    {
+      sectionType: 'experience', itemIndex: 0, bulletIndex: 1,
+      suggested: 'Tailored experience bullet', status: 'accepted'
+    },
+    { sectionType: 'projects', itemIndex: 0, bulletIndex: 0, suggested: 'Ignored', status: 'pending' }
+  ]);
+  assert.deepEqual(patch, {
+    summary: 'Tailored summary',
+    skills_append: ['Pandas'],
+    experience: { 0: { 1: 'Tailored experience bullet' } },
+    projects: {}
+  });
 });
 
 test('invalid nested targets never replace or truncate arrays', () => {

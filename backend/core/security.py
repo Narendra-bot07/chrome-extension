@@ -42,6 +42,7 @@ async def verify_supabase_jwt(
 
         return {
             "id": payload["sub"],
+            "session_id": session_id,
             "email": payload["email"],
             "created_at": payload.get("created_at", ""),
             "metadata": {

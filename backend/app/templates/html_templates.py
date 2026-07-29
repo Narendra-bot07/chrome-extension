@@ -91,11 +91,9 @@ def get_modern_html(resume: ResumeStructure) -> str:
     # Certifications HTML
     certs_html = ""
     for cert in resume.certifications:
-        issue = f" - Issued: {escape_html(cert.issue_date)}" if cert.issue_date else ""
         certs_html += f"""
         <div class="cert-item">
-            <strong>{escape_html(cert.name)}</strong><br/>
-            <span class="cert-details">{escape_html(cert.issuing_organization)}{issue}</span>
+            <strong>{escape_html(cert.name)}</strong>
         </div>
         """
 
@@ -454,8 +452,7 @@ def get_classic_html(resume: ResumeStructure) -> str:
     if resume.certifications:
         certs_list = []
         for cert in resume.certifications:
-            issue = f" ({escape_html(cert.issue_date)})" if cert.issue_date else ""
-            certs_list.append(f"{escape_html(cert.name)} by {escape_html(cert.issuing_organization)}{issue}")
+            certs_list.append(escape_html(cert.name))
         certs_html = f'<div class="section-item">{"<br/>".join(certs_list)}</div>'
 
     # Achievements / Awards HTML
@@ -737,8 +734,7 @@ def get_minimal_html(resume: ResumeStructure) -> str:
     if resume.certifications:
         certs_list = []
         for c in resume.certifications:
-            d = f" ({escape_html(c.issue_date)})" if c.issue_date else ""
-            certs_list.append(f"{escape_html(c.name)} ({escape_html(c.issuing_organization)}{d})")
+            certs_list.append(escape_html(c.name))
         certs_html = f"""
         <div class="section-item">
             <table width="100%">

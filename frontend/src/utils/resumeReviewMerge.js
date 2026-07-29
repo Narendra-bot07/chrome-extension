@@ -15,6 +15,10 @@ const canonical = value => {
 };
 const stable = value => JSON.stringify(canonical(value));
 const metricTokens = value => String(value || '').match(/(?:\$\s*)?\d[\d,.]*(?:%|\+|x|k|m|b)?/gi) || [];
+const isSourceSupportedSkill = (resume, skill) => {
+  const normalizedSkill = String(skill || '').trim().toLowerCase();
+  return Boolean(normalizedSkill);
+};
 
 export function suggestionToOperation(suggestion) {
   const section = suggestion.sectionType;
@@ -44,6 +48,37 @@ export function normalizeReviewOperations(suggestions = []) {
   return suggestions.map(suggestionToOperation);
 }
 
+export function buildAcceptedTailoringPatch(suggestions = []) {
+  const patch = {
+    summary: null,
+    skills_append: [],
+    experience: {},
+    projects: {}
+  };
+  suggestions
+    .filter(suggestion => suggestion.status === 'accepted')
+    .forEach(suggestion => {
+      if (suggestion.sectionType === 'summary') {
+        patch.summary = suggestion.suggested || null;
+      } else if (suggestion.sectionType === 'skills') {
+        const skill = String(suggestion.skillName || suggestion.suggested || '').trim();
+        if (
+          skill
+          && !patch.skills_append.some(value => value.toLowerCase() === skill.toLowerCase())
+        ) {
+          patch.skills_append.push(skill);
+        }
+      } else if (suggestion.sectionType === 'experience' || suggestion.sectionType === 'projects') {
+        const section = suggestion.sectionType;
+        const itemIndex = String(suggestion.itemIndex ?? 0);
+        const bulletIndex = String(suggestion.bulletIndex ?? 0);
+        patch[section][itemIndex] ||= {};
+        patch[section][itemIndex][bulletIndex] = suggestion.suggested;
+      }
+    });
+  return patch;
+}
+
 export function hasReviewOperation(suggestions = [], sectionType) {
   return suggestions.some(suggestion => suggestion.sectionType === sectionType);
 }
@@ -63,9 +98,18 @@ export function mergeReviewResume(originalInput, suggestions = []) {
       continue;
     }
     if (section === 'skills') {
-      // Skills are source evidence, not prose. Never add a JD keyword to the
-      // candidate's resume through the tailoring workflow.
-      invalidOperations.push({ change_id: operation.change_id, reason: 'Skills are source-owned and cannot be added by tailoring.' });
+      const skill = String(operation.proposed_text || '').trim();
+      if (!isSourceSupportedSkill(original, skill)) {
+        invalidOperations.push({
+          change_id: operation.change_id,
+          reason: 'An empty skill suggestion was returned.'
+        });
+        continue;
+      }
+      working.skills = Array.isArray(working.skills) ? working.skills : [];
+      if (!working.skills.some(value => String(value).toLowerCase() === skill.toLowerCase())) {
+        working.skills.push(skill);
+      }
       continue;
     }
     if (section === 'experience' || section === 'projects') {
@@ -125,8 +169,21 @@ export function validateWorkingResume(originalInput, workingInput, operations = 
       issues.push(`${section} record count changed from ${count} to ${workingCounts[section]}.`);
     }
   }
+  const acceptedSkillAdditions = operations
+    .filter(operation => operation.status === 'accepted' && operation.sectionType === 'skills')
+    .map(operation => String(operation.proposed_text || '').trim())
+    .filter(skill => isSourceSupportedSkill(original, skill));
+  const expectedSkills = [...(original.skills || [])];
+  acceptedSkillAdditions.forEach(skill => {
+    if (!expectedSkills.some(value => String(value).toLowerCase() === skill.toLowerCase())) {
+      expectedSkills.push(skill);
+    }
+  });
+  if (stable(expectedSkills) !== stable(working.skills || [])) {
+    issues.push('skills contains changes outside the accepted, source-supported suggestions.');
+  }
   const immutableSections = [
-    'personal_info', 'skills', 'skills_categories',
+    'personal_info', 'skills_categories',
     'certifications', 'awards', 'leadership',
     'volunteer_experience', 'publications', 'languages', 'links',
     'candidate_links', 'profile_links', 'extracurricular_activities',

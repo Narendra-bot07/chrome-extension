@@ -4,6 +4,9 @@ from fastapi import Request
 from user_agents import parse
 from psycopg2.extras import RealDictCursor
 import threading
+import hashlib
+import secrets
+from core.config import settings
 
 class SessionService:
     def __init__(self, conn):
@@ -60,7 +63,9 @@ class SessionService:
         ip_address = self._get_client_ip(request)
         location = self._get_location_from_ip(ip_address)
         
-        expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=7)
+        expires_at = datetime.datetime.utcnow() + datetime.timedelta(
+            minutes=settings.JWT_EXPIRE_MINUTES
+        )
         
         query = """
             INSERT INTO public.user_sessions (
@@ -84,6 +89,70 @@ class SessionService:
             
         return str(session_id)
 
+    def issue_refresh_token(self, session_id: str) -> str:
+        token = secrets.token_urlsafe(48)
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                UPDATE public.user_sessions
+                SET refresh_token_hash=%s,
+                    refresh_expires_at=NOW() + (%s * INTERVAL '1 day'),
+                    expires_at=NOW() + (%s * INTERVAL '1 minute')
+                WHERE session_id=%s AND is_revoked=FALSE
+            """, (token_hash, settings.REFRESH_TOKEN_DAYS,
+                  settings.JWT_EXPIRE_MINUTES, session_id))
+            self.conn.commit()
+        return token
+
+    def rotate_refresh_token(self, refresh_token: str):
+        token_hash = hashlib.sha256(refresh_token.encode("utf-8")).hexdigest()
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT s.session_id, s.user_id, s.last_active,
+                       s.refresh_expires_at, u.*
+                FROM public.user_sessions s
+                JOIN public.users u ON u.id=s.user_id
+                WHERE s.refresh_token_hash=%s
+                  AND s.is_revoked=FALSE
+                  AND s.refresh_expires_at > NOW()
+                FOR UPDATE OF s
+            """, (token_hash,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            last_active = row["last_active"].replace(tzinfo=None)
+            if datetime.datetime.utcnow() - last_active >= datetime.timedelta(
+                minutes=settings.SESSION_INACTIVITY_MINUTES
+            ):
+                cur.execute("""
+                    UPDATE public.user_sessions
+                    SET is_revoked=TRUE, revoked_at=NOW(), refresh_token_hash=NULL
+                    WHERE session_id=%s
+                """, (row["session_id"],))
+                self.conn.commit()
+                return None
+            new_token = secrets.token_urlsafe(48)
+            new_hash = hashlib.sha256(new_token.encode("utf-8")).hexdigest()
+            cur.execute("""
+                UPDATE public.user_sessions
+                SET refresh_token_hash=%s,
+                    expires_at=NOW() + (%s * INTERVAL '1 minute')
+                WHERE session_id=%s
+            """, (new_hash, settings.JWT_EXPIRE_MINUTES, row["session_id"]))
+            self.conn.commit()
+            return row, new_token
+
+    def record_activity(self, session_id: str) -> bool:
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                UPDATE public.user_sessions
+                SET last_active=NOW()
+                WHERE session_id=%s AND is_revoked=FALSE
+                  AND (refresh_expires_at IS NULL OR refresh_expires_at > NOW())
+            """, (session_id,))
+            self.conn.commit()
+            return cur.rowcount > 0
+
     def verify_and_update_session(self, session_id: str) -> bool:
         """
         Verify if a session is valid. If valid, update last_active asynchronously if older than 5 minutes.
@@ -94,7 +163,7 @@ class SessionService:
             
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT is_revoked, expires_at, last_active 
+                SELECT is_revoked, expires_at, last_active, login_time
                 FROM public.user_sessions 
                 WHERE session_id = %s
             """, (session_id,))
@@ -106,20 +175,6 @@ class SessionService:
             if session["is_revoked"]:
                 return False
                 
-            if session["expires_at"] and session["expires_at"].replace(tzinfo=None) < datetime.datetime.utcnow():
-                return False
-
-            # Throttle last_active update to every 5 minutes
-            last_active = session["last_active"].replace(tzinfo=None)
-            if datetime.datetime.utcnow() - last_active > datetime.timedelta(minutes=5):
-                # Update synchronously for simplicity, but could be pushed to a queue
-                cur.execute("""
-                    UPDATE public.user_sessions 
-                    SET last_active = NOW() 
-                    WHERE session_id = %s
-                """, (session_id,))
-                self.conn.commit()
-                
             return True
 
     def get_active_sessions(self, user_id: str) -> list:
@@ -128,6 +183,10 @@ class SessionService:
                 SELECT * 
                 FROM public.user_sessions 
                 WHERE user_id = %s AND is_revoked = FALSE
+                  AND (
+                    refresh_expires_at > NOW()
+                    OR (refresh_expires_at IS NULL AND expires_at > NOW())
+                  )
                 ORDER BY last_active DESC
             """, (user_id,))
             return cur.fetchall()
@@ -136,7 +195,7 @@ class SessionService:
         with self.conn.cursor() as cur:
             cur.execute("""
                 UPDATE public.user_sessions 
-                SET is_revoked = TRUE 
+                SET is_revoked = TRUE, revoked_at=NOW(), refresh_token_hash=NULL
                 WHERE session_id = %s AND user_id = %s
             """, (session_id, user_id))
             self.conn.commit()

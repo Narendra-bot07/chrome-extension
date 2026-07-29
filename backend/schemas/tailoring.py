@@ -51,11 +51,11 @@ class CoverLetterRequest(BaseModel):
 # Multi-Editor Architecture Schemas
 
 class ResumePatch(BaseModel):
-    summary: Optional[str] = None
-    skills_append: List[str] = []
-    # Keyed by item_index (stringified int), then bullet_index (stringified int)
-    experience: Dict[str, Dict[str, str]] = {}
-    projects: Dict[str, Dict[str, str]] = {}
+    summary: Optional[str] = Field(default=None, description="Updated professional summary text string, or null if unchanged.")
+    skills_append: List[str] = Field(default_factory=list, description="List of skill strings to append to the skills section.")
+    # Keyed by item_index (stringified int e.g. '0'), then bullet_index (stringified int e.g. '0') to updated text string (e.g. {'0': {'0': 'Updated bullet text'}})
+    experience: Dict[str, Dict[str, str]] = Field(default_factory=dict, description="Dictionary mapping item index string (e.g. '0') to bullet index string (e.g. '0') to updated bullet text string (e.g. {'0': {'0': 'Rewritten bullet text'}}). DO NOT return full experience objects or arrays.")
+    projects: Dict[str, Dict[str, str]] = Field(default_factory=dict, description="Dictionary mapping item index string (e.g. '0') to bullet index string (e.g. '0') to updated bullet text string (e.g. {'0': {'0': 'Rewritten bullet text'}}). DO NOT return full project objects or arrays.")
 
 class TailoringReport(BaseModel):
     model_config = ConfigDict(extra="allow")

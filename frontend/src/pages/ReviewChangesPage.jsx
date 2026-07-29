@@ -8,10 +8,11 @@ import {
   validateWorkingResume
 } from '../utils/resumeReviewMerge';
 
-function ReviewChangesPage() {
+export default function ReviewChangesPage() {
   const navigate = useNavigate();
   const {
     parsedResume,
+    setTailoredResume,
     reviewSuggestions, setReviewSuggestions,
     handleGenerateFinalResume, loading
   } = useApp();
@@ -24,37 +25,49 @@ function ReviewChangesPage() {
     () => reviewProgress(reviewSuggestions),
     [reviewSuggestions]
   );
+
   const validation = useMemo(() => {
     const result = validateWorkingResume(
       reviewState.originalResume,
       reviewState.workingResume,
       reviewState.operations
     );
-    const targetIssues = reviewState.invalidOperations.map(issue => issue.reason);
+    const targetIssues = [
+      ...new Set(reviewState.invalidOperations.map(issue => issue.reason))
+    ];
     return {
       valid: result.valid && targetIssues.length === 0,
-      issues: [...result.issues, ...targetIssues]
+      issues: [...new Set([...result.issues, ...targetIssues])]
     };
   }, [reviewState]);
 
   const handleUpdateSuggestionStatus = (id, newStatus) => {
-    setReviewSuggestions(reviewSuggestions.map(s => 
+    setReviewSuggestions(previous => previous.map(s => 
       s.id === id ? { ...s, status: newStatus } : s
     ));
   };
 
   const handleUpdateSuggestionText = (id, newText) => {
-    setReviewSuggestions(reviewSuggestions.map(s =>
+    setReviewSuggestions(previous => previous.map(s =>
       s.id === id ? { ...s, suggested: newText } : s
     ));
   };
 
   const handleAcceptAll = () => {
-    setReviewSuggestions(reviewSuggestions.map(s => ({ ...s, status: 'accepted' })));
+    setReviewSuggestions(previous => previous.map(s => ({ ...s, status: 'accepted' })));
   };
 
   const handleRejectAll = () => {
-    setReviewSuggestions(reviewSuggestions.map(s => ({ ...s, status: 'rejected' })));
+    setReviewSuggestions(previous => previous.map(s => ({ ...s, status: 'rejected' })));
+  };
+
+  const handleGenerateReviewedResume = () => {
+    setTailoredResume(reviewState.workingResume);
+    return handleGenerateFinalResume(
+      reviewState.workingResume,
+      reviewState.operations,
+      validation
+    );
   };
 
   return (
@@ -69,15 +82,9 @@ function ReviewChangesPage() {
       onUpdateSuggestionText={handleUpdateSuggestionText}
       onAcceptAll={handleAcceptAll}
       onRejectAll={handleRejectAll}
-      onGenerateResume={() => handleGenerateFinalResume(
-        reviewState.workingResume,
-        reviewState.operations,
-        validation
-      )}
+      onGenerateResume={handleGenerateReviewedResume}
       onBack={() => navigate('/tailor-config')}
       loading={loading}
     />
   );
 }
-
-export default ReviewChangesPage;

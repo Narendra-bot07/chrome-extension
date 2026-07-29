@@ -58,11 +58,20 @@ function NotificationCenter({ token }) {
     if (item.action_url) navigate(item.action_url);
   };
 
+  const is24h = (timestamp) => {
+    if (!timestamp) return false;
+    const diff = Date.now() - new Date(timestamp).getTime();
+    return diff >= 0 && diff <= 24 * 60 * 60 * 1000;
+  };
+  const filteredItems = items.filter(n => is24h(n.created_at || n.timestamp));
+
   return (
     <div className="relative shrink-0" ref={root}>
       <button onClick={() => setOpen(v => !v)} className="relative p-2 rounded-xl border border-tf-border/60 bg-tf-surface-2/50 text-tf-text-secondary hover:text-tf-text transition cursor-pointer" aria-label={`Notifications, ${count} unread`}>
         <Bell size={16} />
-        {count > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 bg-tf-danger text-white text-[9px] font-black rounded-full flex items-center justify-center border-2 border-tf-surface">{count > 99 ? '99+' : count}</span>}
+        <AnimatePresence>
+          {count > 0 && <motion.span key={count} initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.7 }} className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 bg-tf-danger text-white text-[9px] font-black rounded-full flex items-center justify-center border-2 border-tf-surface">{count > 99 ? '99+' : count}</motion.span>}
+        </AnimatePresence>
       </button>
       <AnimatePresence>
         {open && (
@@ -71,47 +80,63 @@ function NotificationCenter({ token }) {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: -4 }}
             transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className="notification-glass bg-white dark:bg-[#111318] absolute right-0 top-full mt-3 w-[min(94vw,430px)] max-h-[78vh] flex flex-col border border-tf-border rounded-2xl shadow-2xl z-[80] overflow-hidden"
+            className="bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md absolute right-0 top-full mt-3 w-[380px] max-h-[500px] flex flex-col border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl z-[80] overflow-hidden"
           >
-            <div className="p-4 flex items-center justify-between border-b border-tf-border">
-              <div><h2 className="text-sm font-bold text-tf-text">Notifications</h2><p className="text-[10px] text-tf-text-tertiary">Useful updates and next actions</p></div>
+            <div className="p-3.5 flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xs font-black uppercase tracking-wider text-tf-text">Notifications</h2>
+                  <span className="px-1.5 py-0.5 text-[8.5px] font-black rounded bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 uppercase">
+                    LAST 24h
+                  </span>
+                </div>
+                <p className="text-[10px] text-tf-text-tertiary mt-0.5">Useful updates and next actions</p>
+              </div>
               <div className="flex gap-1">
-                <button title="Mark all as read" onClick={async () => { await notificationApi.markAllRead(token); setItems(v => v.map(n => ({...n,status:'read'}))); refreshCount(); }} className="p-2 rounded-lg hover:bg-tf-surface-2"><CheckCheck size={15}/></button>
-                <button title="Notification settings" onClick={() => { setOpen(false); navigate('/settings/notifications'); }} className="p-2 rounded-lg hover:bg-tf-surface-2"><Settings size={15}/></button>
+                <button title="Mark all as read" onClick={async () => { await notificationApi.markAllRead(token); setItems(v => v.map(n => ({...n,status:'read'}))); refreshCount(); }} className="p-1.5 rounded-lg hover:bg-tf-surface-2 text-tf-text-secondary hover:text-tf-text transition cursor-pointer"><CheckCheck size={14}/></button>
+                <button title="Notification settings" onClick={() => { setOpen(false); navigate('/settings/notifications'); }} className="p-1.5 rounded-lg hover:bg-tf-surface-2 text-tf-text-secondary hover:text-tf-text transition cursor-pointer"><Settings size={14}/></button>
               </div>
             </div>
-            <div className="flex gap-1 px-3 py-2 overflow-x-auto border-b border-tf-border">
-              {tabs.map(([label], index) => <button key={label} onClick={() => setTab(index)} className={`whitespace-nowrap px-2.5 py-1.5 rounded-lg text-[10px] font-bold ${tab===index?'bg-tf-accent text-white':'text-tf-text-secondary hover:bg-tf-surface-2'}`}>{label}</button>)}
+
+            <div className="flex gap-1 px-3 py-2 overflow-x-auto border-b border-zinc-200 dark:border-zinc-800 custom-scrollbar shrink-0">
+              {tabs.map(([label], index) => <button key={label} onClick={() => setTab(index)} className={`whitespace-nowrap px-2.5 py-1 rounded-lg text-[10px] font-extrabold cursor-pointer transition ${tab===index?'bg-orange-500 text-white shadow-xs':'text-tf-text-secondary hover:bg-tf-surface-2'}`}>{label}</button>)}
             </div>
-            <div className="overflow-y-auto min-h-52">
-              {loading && [1,2,3].map(i => <div key={i} className="p-4 border-b border-tf-border animate-pulse"><div className="h-3 bg-tf-surface-2 rounded w-2/5 mb-2"/><div className="h-2 bg-tf-surface-2 rounded w-4/5"/></div>)}
-              {!loading && error && <div className="p-8 text-center bg-white dark:bg-[#111318]"><p className="text-xs font-semibold">We couldn’t load notifications.</p><button onClick={load} className="mt-2 text-xs text-tf-accent">Retry</button></div>}
-              {!loading && !error && !items.length && <div className="p-10 text-center bg-white dark:bg-[#111318]"><Bell className="mx-auto mb-2 text-tf-text-tertiary" size={22}/><p className="text-xs font-semibold">You’re all caught up</p></div>}
-              {!loading && items.map(item => {
+
+            <div className="overflow-y-auto custom-scrollbar flex-1 min-h-48">
+              {loading && [1,2].map(i => <div key={i} className="p-3.5 border-b border-zinc-100 dark:border-zinc-800 animate-pulse"><div className="h-3 bg-tf-surface-2 rounded w-2/5 mb-2"/><div className="h-2 bg-tf-surface-2 rounded w-4/5"/></div>)}
+              {!loading && error && <div className="p-8 text-center"><p className="text-xs font-semibold">We couldn’t load notifications.</p><button onClick={load} className="mt-2 text-xs text-tf-accent font-bold">Retry</button></div>}
+              {!loading && !error && !filteredItems.length && (
+                <div className="p-10 text-center space-y-1">
+                  <Bell className="mx-auto text-tf-text-tertiary mb-1" size={20}/>
+                  <p className="text-xs font-bold text-tf-text">No notifications in the last 24h</p>
+                  <p className="text-[10px] text-tf-text-tertiary">New updates will appear here automatically.</p>
+                </div>
+              )}
+              {!loading && filteredItems.map(item => {
                 const Icon = icons[item.category] || Bell;
-                return <div key={item.id} className={`relative p-3.5 border-b border-tf-border hover:bg-tf-surface-2/60 ${item.status==='unread'?'bg-tf-accent/5':''}`}>
-                  <div className="flex gap-3">
-                    <div className="mt-0.5 p-2 rounded-xl bg-tf-surface-2 h-fit"><Icon size={15}/></div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <h3 className="text-xs font-bold text-tf-text">{item.title}</h3>
-                        <button onClick={() => setMenu(menu===item.id?null:item.id)} className="p-1 rounded hover:bg-tf-surface"><MoreHorizontal size={14}/></button>
+                return (
+                  <div key={item.id} className={`p-3.5 border-b border-zinc-100 dark:border-zinc-800/60 transition ${item.status==='unread'?'bg-orange-500/5':''}`}>
+                    <div className="flex gap-3 items-start min-w-0">
+                      <div className="p-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-orange-500 shrink-0">
+                        <Icon size={15}/>
                       </div>
-                      <p className="text-[11px] text-tf-text-secondary mt-0.5 leading-relaxed">{item.message}</p>
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className="text-[9px] text-tf-text-tertiary">{relative(item.created_at)}</span>
-                        {item.priority !== 'normal' && <span className={`text-[8px] uppercase font-black ${item.priority==='critical'?'text-tf-danger':item.priority==='high'?'text-amber-600':'text-tf-text-tertiary'}`}>{item.priority}</span>}
-                        {item.action_label && <button onClick={() => act(item)} className="ml-auto text-[10px] font-bold text-tf-accent hover:underline">{item.action_label}</button>}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <h3 className="text-xs font-bold text-tf-text truncate">{item.title}</h3>
+                          <span className="text-[9.5px] font-medium text-tf-text-tertiary shrink-0">{relative(item.created_at)}</span>
+                        </div>
+                        <p className="text-[11px] text-tf-text-secondary mt-1 leading-relaxed line-clamp-2">{item.message}</p>
+                        {item.action_label && (
+                          <div className="mt-2 flex justify-end">
+                            <button onClick={() => act(item)} className="text-[10px] font-bold text-orange-500 hover:underline cursor-pointer">
+                              {item.action_label}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
-                  {menu===item.id && <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.12 }} className="absolute right-4 top-10 z-10 w-40 bg-white dark:bg-[#181a20] border border-tf-border rounded-xl shadow-xl py-1 text-[11px]">
-                    <button className="w-full px-3 py-2 text-left hover:bg-tf-surface-2" onClick={() => update(item.id,item.status==='unread'?'read':'unread')}>{item.status==='unread'?'Mark read':'Mark unread'}</button>
-                    <button className="w-full px-3 py-2 text-left hover:bg-tf-surface-2 flex gap-2" onClick={() => update(item.id,'archived')}><Archive size={12}/>Archive</button>
-                    <button className="w-full px-3 py-2 text-left hover:bg-tf-surface-2 flex gap-2" onClick={() => update(item.id,'dismissed')}><X size={12}/>Dismiss</button>
-                    {item.action_url && <button className="w-full px-3 py-2 text-left hover:bg-tf-surface-2" onClick={() => act(item)}>Open related item</button>}
-                  </motion.div>}
-                </div>;
+                );
               })}
             </div>
           </motion.div>

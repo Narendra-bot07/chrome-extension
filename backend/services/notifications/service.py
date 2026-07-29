@@ -23,7 +23,7 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
     "security.password_reset_requested": {"category":"security","type":"PASSWORD_RESET_REQUESTED","priority":"high","title":"Password reset requested","message":"A password reset was requested for your account.","action_label":"Review Sessions","action_url":"/settings/security"},
     "security.suspicious_login": {"category":"security","type":"SUSPICIOUS_LOGIN","priority":"critical","title":"Unusual login activity","message":"Unusual login activity was detected.","action_label":"Secure Account","action_url":"/settings/security"},
     "subscription.credits_low": {"category":"subscription","type":"CREDITS_LOW","priority":"high","title":"AI credits are low","message":"You have {credits} AI credits remaining.","action_label":"View Usage","action_url":"/subscription"},
-    "product.new_feature": {"category":"product","type":"NEW_FEATURE","priority":"low","title":"New in TailorFlow","message":"{message}","action_label":"Learn More","action_url":"{action_url}"},
+    "product.new_feature": {"category":"product","type":"NEW_FEATURE","priority":"low","title":"New in tailr4u","message":"{message}","action_label":"Learn More","action_url":"{action_url}"},
 }
 
 class NotificationService:
@@ -69,7 +69,7 @@ class NotificationService:
             cur.execute("""select email_enabled from notification_preferences
                 where user_id=%s and category=%s""", (user_id, policy["category"]))
             preference = cur.fetchone()
-            email_enabled = bool(preference and preference.get("email_enabled"))
+            email_enabled = True if preference is None else bool(preference.get("email_enabled"))
             if email_enabled or (policy["category"] == "security" and policy["priority"] == "critical"):
                 cur.execute("""insert into notification_deliveries(notification_id,channel,status,next_attempt_at)
                     values (%s,'email','pending',now()) on conflict(notification_id,channel) do nothing""",

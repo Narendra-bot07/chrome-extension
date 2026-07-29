@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Mail, Lock, ChevronRight, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { useGoogleLogin } from '@react-oauth/google';
 
 import { ApplicationLogo } from '../components/ApplicationLogo';
+import { authDestinationFromSearch } from '../utils/authRedirect';
+import { storeAuthenticatedSession } from '../services/authSession';
 
 const isExtension = typeof chrome !== 'undefined' && chrome.identity;
 const BASIC_GOOGLE_SCOPES = ['openid', 'email', 'profile'];
@@ -36,7 +38,13 @@ const WebGoogleLoginButton = ({ onSuccess, onError }) => {
 };
 
 export default function LoginPage() {
-  const navigate = useNavigate();
+  const location = useLocation();
+  const postAuthDestination = authDestinationFromSearch(location.search);
+  const completeAuthentication = (accessToken) => {
+    storeAuthenticatedSession(accessToken);
+    window.location.hash = `#${postAuthDestination}`;
+    window.location.reload();
+  };
 
   // --- LOGIN STATES ---
   const [loginEmail, setLoginEmail] = useState('');
@@ -54,6 +62,7 @@ export default function LoginPage() {
     try {
       const res = await fetch('http://localhost:8000/api/v1/auth/login', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: loginEmail, password: loginPassword })
       });
@@ -64,9 +73,7 @@ export default function LoginPage() {
       }
       
       const data = await res.json();
-      localStorage.setItem('access_token', data.session.access_token);
-      window.location.href = '#/';
-      window.location.reload();
+      completeAuthentication(data.session.access_token);
     } catch (err) {
       setLoginError(err.message || 'Authentication failed.');
     } finally {
@@ -81,6 +88,7 @@ export default function LoginPage() {
     try {
       const res = await fetch('http://localhost:8000/api/v1/auth/google', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ credential: credentialResponse.credential })
       });
@@ -94,11 +102,9 @@ export default function LoginPage() {
           'tailorflow.google-profile-import-debug',
           JSON.stringify(data.google_profile_import)
         );
-        console.info('[TailorFlow] Google profile import', data.google_profile_import);
+        console.info('[tailr4u] Google profile import', data.google_profile_import);
       }
-      localStorage.setItem('access_token', data.session.access_token);
-      window.location.href = '#/';
-      window.location.reload();
+      completeAuthentication(data.session.access_token);
     } catch (err) {
       setLoginError(err.message || 'Google login failed.');
     } finally {
@@ -141,7 +147,7 @@ export default function LoginPage() {
           <div className="flex items-center gap-3">
             <ApplicationLogo size={36} />
             <span className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white">
-              TailorFlow <span className="text-teal-500 font-bold text-xs uppercase tracking-wider">AI</span>
+              tailr4u
             </span>
           </div>
 
@@ -211,7 +217,7 @@ export default function LoginPage() {
                 value={loginEmail}
                 onChange={(e) => setLoginEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-semibold text-zinc-900 dark:text-white focus:outline-none focus:border-teal-500"
+                className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-semibold text-zinc-900 dark:text-white focus:outline-none focus:ring-0 focus:border-[#00bda5]"
               />
             </div>
 
@@ -229,7 +235,7 @@ export default function LoginPage() {
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full pl-4 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-semibold text-zinc-900 dark:text-white focus:outline-none focus:border-teal-500"
+                  className="w-full pl-4 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-semibold text-zinc-900 dark:text-white focus:outline-none focus:ring-0 focus:border-[#00bda5]"
                 />
                 <button
                   type="button"
@@ -278,11 +284,13 @@ export default function LoginPage() {
           <div className="order-5 text-center text-xs font-medium text-zinc-500">
             Don't have an account?{' '}
             <Link
-              to="/register"
+              to={`/register?redirect=${encodeURIComponent(postAuthDestination)}`}
               className="text-[#00bda5] font-bold hover:underline ml-1"
             >
               Create Account
             </Link>
+            <span className="mx-2 text-zinc-300">·</span>
+            <Link to="/" className="text-[#00bda5] font-bold hover:underline">Back to tailr4u</Link>
           </div>
 
         </div>

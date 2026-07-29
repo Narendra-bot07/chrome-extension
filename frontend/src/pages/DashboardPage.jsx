@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { 
-  TrendingUp, Calendar, CheckCircle, Briefcase, ChevronRight, 
+import {
+  TrendingUp, Calendar, CheckCircle, Briefcase, ChevronRight,
   Send, Search, Clock, Award, XCircle, ChevronDown, ArrowRight, Sparkles, AlertCircle,
   UserCheck, FileText, Check, ShieldAlert, X, Filter
 } from 'lucide-react';
@@ -11,6 +12,9 @@ import { Button } from '../components/ui/Button';
 import { FadeSwap, PageLoadingState } from '../components/ui/Loading';
 import CompanyLogo from '../components/CompanyLogoView';
 import { notificationApi } from '../services/notificationApi';
+import { mapTailoringSeries } from '../services/tailoringTrend';
+import WaveText from '../components/WaveText';
+import './DashboardPage.css';
 
 // Safe Error Boundary for Dashboard
 class DashboardErrorBoundary extends React.Component {
@@ -140,7 +144,7 @@ const getStageBadgeStyle = (stage) => {
     case 'Applied': return 'bg-blue-500/15 text-blue-500 border-blue-500/20';
     case 'Assessment':
     case 'Screening':
-    case 'Recruiter': return 'bg-purple-500/15 text-purple-500 border-purple-500/20';
+    case 'Recruiter': return 'bg-orange-500/15 text-orange-500 border-orange-500/20';
     case 'Interview':
     case 'Final Round': return 'bg-amber-500/15 text-amber-500 border-amber-500/20';
     case 'Offer':
@@ -160,8 +164,10 @@ function DashboardContent() {
   const [trendTimeframe, setTrendTimeframe] = useState('Last 7 days');
   const [trendDropdownOpen, setTrendDropdownOpen] = useState(false);
   const [trendActivity, setTrendActivity] = useState([]);
+  const trendScrollRef = React.useRef(null);
   const [pipelineFilter, setPipelineFilter] = useState('All Jobs');
   const [pipelineDropdownOpen, setPipelineDropdownOpen] = useState(false);
+  const [activeDonutStage, setActiveDonutStage] = useState(null);
 
   // Session-level completion banner dismissal state
   const [dismissedBanner, setDismissedBanner] = useState(() => {
@@ -226,26 +232,58 @@ function DashboardContent() {
     return () => controller.abort();
   }, [apiUrl, session?.access_token, trendTimeframe]);
 
-  // Clean First Name Resolution
-  const rawName = profile?.preferred_name 
-    || profile?.full_name 
-    || user?.user_metadata?.full_name 
-    || user?.user_metadata?.name 
-    || (user?.email ? user.email.split('@')[0] : '');
+  // Clean Display Name Resolution (First Name, Middle Name, Last Name)
+  const firstName = useMemo(() => {
+    let nameStr = '';
 
-  const getFirstName = (name) => {
-    if (!name) return 'Narendra';
-    const str = name.trim();
-    if (/narendra/i.test(str)) return 'Narendra';
-    if (/bandi/i.test(str) && str.length > 5) {
-      const rest = str.replace(/bandi/i, '');
-      if (rest) return rest.charAt(0).toUpperCase() + rest.slice(1).toLowerCase();
+    if (profile?.preferred_name?.trim()) {
+      nameStr = profile.preferred_name.trim();
+    } else {
+      const profileParts = [
+        profile?.first_name,
+        profile?.middle_name,
+        profile?.last_name
+      ].filter(Boolean).map(s => String(s).trim()).filter(Boolean);
+
+      if (profileParts.length > 0) {
+        nameStr = profileParts.join(' ');
+      } else if (profile?.full_name?.trim()) {
+        nameStr = profile.full_name.trim();
+      } else if (user?.user_metadata?.full_name?.trim()) {
+        nameStr = user.user_metadata.full_name.trim();
+      } else {
+        const userMetaParts = [
+          user?.user_metadata?.first_name,
+          user?.user_metadata?.middle_name,
+          user?.user_metadata?.last_name
+        ].filter(Boolean).map(s => String(s).trim()).filter(Boolean);
+
+        if (userMetaParts.length > 0) {
+          nameStr = userMetaParts.join(' ');
+        } else if (user?.user_metadata?.name?.trim()) {
+          nameStr = user.user_metadata.name.trim();
+        } else if (user?.email) {
+          nameStr = user.email.split('@')[0];
+        }
+      }
     }
-    const firstWord = str.split(/\s+/)[0];
-    return firstWord.charAt(0).toUpperCase() + firstWord.slice(1).toLowerCase();
-  };
 
-  const firstName = getFirstName(rawName);
+    if (!nameStr) return 'there';
+
+    // 1. Split concatenated patterns (e.g. Bandinarendra -> Bandi Narendra) & camelCase/PascalCase
+    // 2. Replace separators (._-+), remove digits
+    const cleaned = String(nameStr)
+      .replace(/(bandi)(narendra)/i, '$1 $2')
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/[._\-+]+/g, ' ')
+      .replace(/\d+/g, '')
+      .trim();
+
+    if (!cleaned) return 'there';
+
+    const words = cleaned.split(/\s+/).filter(Boolean);
+    return words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ') || 'there';
+  }, [profile, user]);
 
   // Dynamic Time-of-Day Greeting
   const greetingPrefix = useMemo(() => {
@@ -277,8 +315,8 @@ function DashboardContent() {
     });
   }, [applications, pipelineFilter]);
 
-  const appliedApps = filteredApplications.filter(a => a.current_stage === 'Applied');
-  const screeningApps = filteredApplications.filter(a => ['Screening', 'Assessment', 'Recruiter'].includes(a.current_stage));
+  const appliedApps = filteredApplications.filter(a => ['Applied', 'Ready To Apply', 'Resume Ready', 'Draft'].includes(a.current_stage));
+  const screeningApps = filteredApplications.filter(a => ['Screening', 'Assessment', 'Recruiter', 'Recruiter Contact'].includes(a.current_stage));
   const interviewApps = filteredApplications.filter(a => ['Interview', 'Final Round'].includes(a.current_stage));
   const offerApps = filteredApplications.filter(a => ['Offer', 'Accepted'].includes(a.current_stage));
   const rejectedApps = filteredApplications.filter(a => a.current_stage === 'Rejected');
@@ -422,30 +460,45 @@ function DashboardContent() {
   const pInterview = totalTracked > 0 ? Math.round((interviewApps.length / totalTracked) * 100) : 0;
   const pOffer = totalTracked > 0 ? Math.round((offerApps.length / totalTracked) * 100) : 0;
   const pRejected = totalTracked > 0 ? Math.round((rejectedApps.length / totalTracked) * 100) : 0;
+  const donutStages = [
+    { key: 'Applied', count: appliedApps.length, percent: pApplied, color: '#3B82F6' },
+    { key: 'Screening', count: screeningApps.length, percent: pScreening, color: '#8B5CF6' },
+    { key: 'Interview', count: interviewApps.length, percent: pInterview, color: '#F59E0B' },
+    { key: 'Offer', count: offerApps.length, percent: pOffer, color: '#10B981' },
+    { key: 'Rejected', count: rejectedApps.length, percent: pRejected, color: '#EF4444' },
+  ];
+  const selectedDonut = donutStages.find(stage => stage.key === activeDonutStage);
+  const completeReminder = async (event, reminderId) => {
+    event.stopPropagation();
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token) return;
+    await notificationApi.completeReminder(token, reminderId);
+    setPersistedReminders(items => items.filter(item => item.id !== reminderId));
+  };
+  const snoozeReminder = async (event, reminderId) => {
+    event.stopPropagation();
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token) return;
+    const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const updated = await notificationApi.snoozeReminder(token, reminderId, until);
+    setPersistedReminders(items => items.map(item => item.id === reminderId ? updated : item));
+  };
 
-  // Complete daily histogram data, including zero-activity dates.
+  // The API already returns the complete timezone-aware daily series.
   const trendPoints = useMemo(() => {
-    const daysCount = trendTimeframe === 'Last 7 days' ? 7 : trendTimeframe === 'Last 90 days' ? 90 : 30;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const counts = Object.fromEntries(
-      trendActivity.map(item => [String(item.activity_date).slice(0, 10), Number(item.count) || 0])
-    );
-    const points = Array.from({ length: daysCount }, (_, index) => {
-      const date = new Date(today);
-      date.setDate(today.getDate() - (daysCount - 1 - index));
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-      return {
-        label: `${date.getMonth() + 1}/${date.getDate()}`,
-        accessibleLabel: date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }),
-        count: counts[key] || 0,
-        timestamp: date.getTime()
-      };
-    });
+    const points = mapTailoringSeries(trendActivity);
     const maxCount = Math.max(...points.map(p => p.count), 1);
     const maxScale = Math.max(maxCount, 4);
     return points.map(point => ({ ...point, maxScale }));
-  }, [trendActivity, trendTimeframe]);
+  }, [trendActivity]);
+
+  useEffect(() => {
+    const container = trendScrollRef.current;
+    if (!container || trendPoints.length === 0) return;
+    window.requestAnimationFrame(() => {
+      container.scrollLeft = container.scrollWidth - container.clientWidth;
+    });
+  }, [trendPoints, trendTimeframe]);
 
   const activeHoveredPoint = trendPoints[hoveredPointIndex] || trendPoints[trendPoints.length - 1];
   const trendLine = useMemo(() => {
@@ -494,862 +547,919 @@ function DashboardContent() {
   const isProfileIncomplete = !profile?.phone_number || !parsedResume;
 
   return (
-    <FadeSwap
-      isLoading={loading}
-      skeleton={
-        <PageLoadingState
-          type="dashboard"
-          stages={[
-            'Loading workspace...',
-            'Calculating pipeline analytics...',
-            'Preparing priority actions...'
-          ]}
-        />
-      }
-    >
-      <div className="flex-1 w-full flex flex-col gap-6 font-sans pb-12 select-none text-tf-text animate-in fade-in slide-in-from-bottom-2 duration-300">
-        
-        {/* 1. HERO GREETING BANNER */}
-        <div className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md p-6 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-xs space-y-1">
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-tf-text">
-            {greetingPrefix}, {firstName}
-          </h1>
-          <p className="text-xs font-medium text-tf-text-secondary">
-            {priorityActionItems.length > 0 
-              ? `Your application pipeline is active. ${priorityActionItems.length} priority ${priorityActionItems.length === 1 ? 'action requires' : 'actions require'} your attention today.`
-              : 'Your application pipeline is up to date and performing smoothly.'}
-          </p>
-        </div>
+      <FadeSwap
+        isLoading={loading}
+        skeleton={
+          <PageLoadingState
+            type="dashboard"
+            stages={[
+              'Loading workspace...',
+              'Calculating pipeline analytics...',
+              'Preparing priority actions...'
+            ]}
+          />
+        }
+      >
+        <div className="dashboard-career-canvas flex-1 w-full flex flex-col gap-6 font-sans pb-12 select-none text-tf-text animate-in fade-in slide-in-from-bottom-2 duration-300">
 
-        {/* 2. COMPACT DISMISSIBLE PROFILE COMPLETION BANNER */}
-        {isProfileIncomplete && !dismissedBanner && (
-          <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/20">
-                <AlertCircle size={16} />
-              </div>
-              <div className="space-y-0.5">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-tf-text">Profile incomplete</span>
-                  <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-bold">
-                    1 item missing
-                  </span>
+          {/* 1. HERO GREETING BANNER */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .35 }} className="dashboard-greeting dashboard-interactive-surface bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md p-6 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-xs space-y-1">
+            <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-tf-text">
+              {greetingPrefix}, <WaveText text={firstName} trigger="hover" amplitude={9} stagger={0.03} duration={0.4} />.
+            </h1>
+            <p className="text-xs font-medium text-tf-text-secondary">
+              {priorityActionItems.length > 0
+                ? `Your application pipeline is active. ${priorityActionItems.length} priority ${priorityActionItems.length === 1 ? 'action requires' : 'actions require'} your attention today.`
+                : 'Your application pipeline is up to date and performing smoothly.'}
+            </p>
+          </motion.div>
+
+          {/* 2. COMPACT DISMISSIBLE PROFILE COMPLETION BANNER */}
+          {isProfileIncomplete && !dismissedBanner && (
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/20">
+                  <AlertCircle size={16} />
                 </div>
-                <p className="text-xs text-tf-text-secondary">
-                  Add your contact details and preferred roles to improve tailr4u recommendation accuracy.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
-              <Button variant="primary" size="sm" onClick={() => navigate('/settings/job-preferences')}>
-                <span>Complete Profile</span>
-              </Button>
-              <button
-                onClick={handleDismissBanner}
-                className="p-2 rounded-xl bg-tf-surface-2 hover:bg-tf-border text-tf-text-tertiary hover:text-tf-text transition cursor-pointer border border-tf-border"
-                title="Dismiss"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          </div>
-        )}
-
-      {/* 3. REFINED KPI CARDS WITH DISTINCT HIERARCHY */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        
-        {/* Primary KPI Card 1: Recent ATS Score */}
-        <div className="dashboard-kpi-card bg-white/80 dark:bg-zinc-900/80 border border-purple-500/30 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
-          <div className="flex justify-between items-start">
-            <div className="space-y-1">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-bold text-purple-600 dark:text-purple-400 uppercase tracking-wider">PRIMARY</span>
-                <span className="text-xs font-semibold text-tf-text-tertiary">• Score</span>
-              </div>
-              <div className="text-3xl font-extrabold tracking-tight text-tf-text flex items-baseline gap-1">
-                <span>{displayScore}</span>
-                <span className="text-xs font-semibold text-tf-text-tertiary">/100</span>
-              </div>
-              <div className="mt-2 h-1.5 w-24 overflow-hidden rounded-full bg-purple-500/10">
-                <motion.div
-                  className="h-full rounded-full bg-purple-500/70"
-                  initial={{ width: 0 }}
-                  animate={{ width: `${Math.max(0, Math.min(100, recentResumeScore || 0))}%` }}
-                  transition={{ duration: 0.7, ease: [0.2, 0, 0, 1] }}
-                />
-              </div>
-            </div>
-            <div className="w-8 h-8 rounded-lg bg-purple-500/10 text-purple-500 flex items-center justify-center border border-purple-500/20">
-              <Award size={16} />
-            </div>
-          </div>
-          <div className="flex items-center justify-between mt-4 pt-2 border-t border-purple-500/10">
-            <span className="text-[11px] font-semibold text-purple-600 dark:text-purple-400 truncate max-w-[110px]" title={recentScoreSubtitle}>
-              {recentResumeScore >= 80 ? (recentScoreSubtitle || 'Optimized match') : '3 improvements'}
-            </span>
-            <button
-              onClick={() => navigate('/resume-detect')}
-              className="text-[11px] font-bold text-tf-accent hover:underline flex items-center gap-0.5 cursor-pointer"
-            >
-              Improve <ArrowRight size={11} />
-            </button>
-          </div>
-        </div>
-
-        {/* Primary KPI Card 2: Active Pipeline */}
-        <div className="dashboard-kpi-card bg-white/80 dark:bg-zinc-900/80 border border-blue-500/30 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
-          <div className="flex justify-between items-start">
-            <div className="space-y-1">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Primary</span>
-                <span className="text-xs font-semibold text-tf-text-tertiary">• Pipeline</span>
-              </div>
-              <div className="text-3xl font-extrabold tracking-tight text-tf-text">
-                {displayActive}
-              </div>
-            </div>
-            <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center border border-blue-500/20">
-              <Briefcase size={16} />
-            </div>
-          </div>
-          <div className="flex items-center justify-between mt-4 pt-2 border-t border-blue-500/10">
-            <span className="text-[11px] font-medium text-tf-text-secondary">Across all stages</span>
-            <svg className="dashboard-sparkline w-14 h-5 text-blue-500 overflow-visible" viewBox="0 0 80 30" fill="none">
-              <path
-                d={activeAppsCount <= 0 ? "M0 24 L 80 24" : activeAppsCount < 5 ? "M0 24 Q 40 22, 80 12" : "M0 22 Q 25 25, 45 18 T 70 10 T 80 6"}
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                opacity={activeAppsCount <= 0 ? 0.35 : 1}
-              />
-            </svg>
-          </div>
-        </div>
-
-        {/* Secondary KPI Card 3: Success Rate */}
-        <div className="dashboard-kpi-card bg-white/80 dark:bg-zinc-900/80 border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
-          <div className="flex justify-between items-start">
-            <div className="space-y-1">
-              <span className="text-xs font-semibold text-tf-text-secondary">Success Rate</span>
-              <div className="text-2xl font-extrabold tracking-tight text-tf-text">{displaySuccess}%</div>
-            </div>
-            <div className="w-8 h-8 rounded-lg bg-zinc-500/10 text-tf-text-secondary flex items-center justify-center border border-zinc-200 dark:border-zinc-800">
-              <TrendingUp size={16} />
-            </div>
-          </div>
-          <div className="flex items-center justify-between mt-4 pt-2 border-t border-tf-border/50">
-            <span className="text-[11px] font-semibold text-emerald-500 flex items-center gap-0.5">
-              ↗ {successRate}% <span className="text-tf-text-tertiary font-normal pl-0.5">vs last month</span>
-            </span>
-            <svg className="dashboard-sparkline w-14 h-5 text-purple-500 overflow-visible" viewBox="0 0 80 30" fill="none">
-              <path
-                d={successRate <= 0 ? "M0 24 L 80 24" : "M0 25 Q 20 28, 35 15 T 70 8 T 80 5"}
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                opacity={successRate <= 0 ? 0.35 : 1}
-              />
-            </svg>
-          </div>
-        </div>
-
-        {/* Secondary KPI Card 4: Interviews */}
-        <div className="dashboard-kpi-card bg-white/80 dark:bg-zinc-900/80 border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
-          <div className="flex justify-between items-start">
-            <div className="space-y-1">
-              <span className="text-xs font-semibold text-tf-text-secondary">Interviews</span>
-              <div className="text-2xl font-extrabold tracking-tight text-tf-text">
-                {displayInterviews}
-              </div>
-            </div>
-            <div className="w-8 h-8 rounded-lg bg-zinc-500/10 text-tf-text-secondary flex items-center justify-center border border-zinc-200 dark:border-zinc-800">
-              <Calendar size={16} />
-            </div>
-          </div>
-          <div className="flex items-center justify-between mt-4 pt-2 border-t border-tf-border/50">
-            <span className="text-[11px] font-medium text-tf-text-secondary">This month</span>
-            <svg className="dashboard-sparkline w-14 h-5 text-amber-500 overflow-visible" viewBox="0 0 80 30" fill="none">
-              <path
-                d={interviewApps.length <= 0 ? "M0 24 L 80 24" : interviewApps.length < 3 ? "M0 24 Q 40 20, 80 10" : "M0 26 Q 20 22, 40 24 T 65 12 T 80 8"}
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                opacity={interviewApps.length <= 0 ? 0.35 : 1}
-              />
-            </svg>
-          </div>
-        </div>
-
-        {/* Secondary KPI Card 5: Offers */}
-        <div className="dashboard-kpi-card bg-white/80 dark:bg-zinc-900/80 border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
-          <div className="flex justify-between items-start">
-            <div className="space-y-1">
-              <span className="text-xs font-semibold text-tf-text-secondary">Offers</span>
-              <div className="text-2xl font-extrabold tracking-tight text-tf-text">
-                {displayOffers}
-              </div>
-            </div>
-            <div className="w-8 h-8 rounded-lg bg-zinc-500/10 text-tf-text-secondary flex items-center justify-center border border-zinc-200 dark:border-zinc-800">
-              <CheckCircle size={16} />
-            </div>
-          </div>
-          <div className="flex items-center justify-between mt-4 pt-2 border-t border-tf-border/50">
-            <span className="text-[11px] font-medium text-tf-text-secondary">Active offers</span>
-            <svg className="dashboard-sparkline w-14 h-5 text-emerald-500 overflow-visible" viewBox="0 0 80 30" fill="none">
-              <path
-                d={offerApps.length <= 0 ? "M0 24 L 80 24" : offerApps.length < 3 ? "M0 24 Q 40 22, 80 10" : "M0 24 Q 25 26, 45 20 T 70 12 T 80 6"}
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                opacity={offerApps.length <= 0 ? 0.35 : 1}
-              />
-            </svg>
-          </div>
-        </div>
-
-      </div>
-
-      {/* 4. MAIN DASHBOARD CONTENT (2 COLUMNS) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-        {/* LEFT COLUMN (2/3 width) */}
-        <div className="lg:col-span-2 space-y-6">
-
-          {/* WIDGET 2: REFINED JOB PIPELINE STAGES FLOW WITH COMPANY FAVICONS */}
-          <div className="bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-6 shadow-xs space-y-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-tf-text">Job Pipeline</h3>
-                <p className="text-xs text-tf-text-secondary">Live activity across active recruitment stages</p>
-              </div>
-              <div className="relative">
-                <button 
-                  onClick={() => setPipelineDropdownOpen((open) => !open)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-tf-border bg-tf-surface-2 text-xs font-semibold text-tf-text-secondary hover:text-tf-text transition cursor-pointer select-none"
-                >
-                  <Filter size={13} />
-                  <span>{pipelineFilter}</span>
-                  <ChevronDown size={13} />
-                </button>
-
-                {pipelineDropdownOpen && (
-                  <div className="absolute right-0 top-full mt-1.5 w-36 bg-tf-surface border border-tf-border rounded-xl shadow-xl z-30 py-1 overflow-hidden select-none">
-                    {['All Jobs', 'Active Only', 'Last 7 days', 'Last 30 days'].map((opt) => (
-                      <button
-                        key={opt}
-                        onClick={() => {
-                          setPipelineFilter(opt);
-                          setPipelineDropdownOpen(false);
-                        }}
-                        className={`w-full text-left px-3.5 py-1.5 text-xs font-medium transition cursor-pointer ${
-                          pipelineFilter === opt ? 'bg-tf-accent/15 text-tf-accent font-bold' : 'text-tf-text hover:bg-tf-surface-2'
-                        }`}
-                      >
-                        {opt}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* PIPELINE STAGE COLUMNS */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 relative">
-              
-              {/* Stage 1: Applied */}
-              <div className="bg-tf-surface-2/60 border border-tf-border/60 rounded-xl p-3.5 space-y-3 relative hover:border-tf-border-strong transition-all">
-                <div className="flex items-center justify-between pb-2 border-b border-tf-border/50">
+                <div className="space-y-0.5">
                   <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 rounded bg-blue-500/10 text-blue-500 flex items-center justify-center">
-                      <Send size={11} />
-                    </div>
-                    <span className="text-xs font-bold text-tf-text">Applied</span>
-                  </div>
-                  <span className="text-xs font-extrabold text-tf-text-secondary">
-                    {appliedApps.length}
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  {appliedApps.length > 0 ? (
-                    appliedApps.slice(0, 3).map((item, idx) => (
-                      <div 
-                        key={item.id || idx} 
-                        onClick={() => navigate(`/job-tracker?appId=${item.id}`, { state: { selectedAppId: item.id } })}
-                        className="flex items-center justify-between text-[11px] p-1.5 rounded-lg hover:bg-tf-surface transition cursor-pointer"
-                      >
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} companyDomain={item.company_domain} className="w-4 h-4" />
-                          <span className="font-semibold text-tf-text truncate max-w-[80px]">{item.company_name}</span>
-                        </div>
-                        <span className="text-[10px] text-tf-text-tertiary shrink-0">{formatRelativeTime(item.created_at)}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-[11px] text-tf-text-tertiary italic py-2 text-center">No jobs in this stage</div>
-                  )}
-                  {appliedApps.length > 3 && (
-                    <div 
-                      onClick={() => navigate('/job-tracker')}
-                      className="text-[10px] text-tf-accent font-semibold pt-1 text-center cursor-pointer hover:underline"
-                    >
-                      + {appliedApps.length - 3} more
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Stage 2: Screening */}
-              <div className="bg-tf-surface-2/60 border border-tf-border/60 rounded-xl p-3.5 space-y-3 relative hover:border-tf-border-strong transition-all">
-                <div className="flex items-center justify-between pb-2 border-b border-tf-border/50">
-                  <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 rounded bg-purple-500/10 text-purple-500 flex items-center justify-center">
-                      <Search size={11} />
-                    </div>
-                    <span className="text-xs font-bold text-tf-text">Screening</span>
-                  </div>
-                  <span className="text-xs font-extrabold text-tf-text-secondary">
-                    {screeningApps.length}
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  {screeningApps.length > 0 ? (
-                    screeningApps.slice(0, 3).map((item, idx) => (
-                      <div 
-                        key={item.id || idx} 
-                        onClick={() => navigate(`/job-tracker?appId=${item.id}`, { state: { selectedAppId: item.id } })}
-                        className="flex items-center justify-between text-[11px] p-1.5 rounded-lg hover:bg-tf-surface transition cursor-pointer"
-                      >
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} companyDomain={item.company_domain} className="w-4 h-4" />
-                          <span className="font-semibold text-tf-text truncate max-w-[80px]">{item.company_name}</span>
-                        </div>
-                        <span className="text-[10px] text-tf-text-tertiary shrink-0">{formatRelativeTime(item.created_at)}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-[11px] text-tf-text-tertiary italic py-2 text-center">No jobs in this stage</div>
-                  )}
-                  {screeningApps.length > 3 && (
-                    <div 
-                      onClick={() => navigate('/job-tracker')}
-                      className="text-[10px] text-tf-accent font-semibold pt-1 text-center cursor-pointer hover:underline"
-                    >
-                      + {screeningApps.length - 3} more
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Stage 3: Interview */}
-              <div className="bg-tf-surface-2/60 border border-tf-border/60 rounded-xl p-3.5 space-y-3 relative hover:border-tf-border-strong transition-all">
-                <div className="flex items-center justify-between pb-2 border-b border-tf-border/50">
-                  <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 rounded bg-amber-500/10 text-amber-500 flex items-center justify-center">
-                      <Calendar size={11} />
-                    </div>
-                    <span className="text-xs font-bold text-tf-text">Interview</span>
-                  </div>
-                  <span className="text-xs font-extrabold text-tf-text-secondary">
-                    {interviewApps.length}
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  {interviewApps.length > 0 ? (
-                    interviewApps.slice(0, 3).map((item, idx) => (
-                      <div 
-                        key={item.id || idx} 
-                        onClick={() => navigate(`/job-tracker?appId=${item.id}`, { state: { selectedAppId: item.id } })}
-                        className="flex items-center justify-between text-[11px] p-1.5 rounded-lg hover:bg-tf-surface transition cursor-pointer"
-                      >
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} companyDomain={item.company_domain} className="w-4 h-4" />
-                          <span className="font-semibold text-tf-text truncate max-w-[80px]">{item.company_name}</span>
-                        </div>
-                        <span className="text-[10px] text-tf-text-tertiary shrink-0">{formatRelativeTime(item.created_at)}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-[11px] text-tf-text-tertiary italic py-2 text-center">No jobs in this stage</div>
-                  )}
-                  {interviewApps.length > 3 && (
-                    <div 
-                      onClick={() => navigate('/job-tracker')}
-                      className="text-[10px] text-tf-accent font-semibold pt-1 text-center cursor-pointer hover:underline"
-                    >
-                      + {interviewApps.length - 3} more
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Stage 4: Offer */}
-              <div className="bg-tf-surface-2/60 border border-tf-border/60 rounded-xl p-3.5 space-y-3 relative hover:border-tf-border-strong transition-all">
-                <div className="flex items-center justify-between pb-2 border-b border-tf-border/50">
-                  <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 rounded bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
-                      <Award size={11} />
-                    </div>
-                    <span className="text-xs font-bold text-tf-text">Offer</span>
-                  </div>
-                  <span className="text-xs font-extrabold text-tf-text-secondary">
-                    {offerApps.length}
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  {offerApps.length > 0 ? (
-                    offerApps.slice(0, 3).map((item, idx) => (
-                      <div 
-                        key={item.id || idx} 
-                        onClick={() => navigate(`/job-tracker?appId=${item.id}`, { state: { selectedAppId: item.id } })}
-                        className="flex items-center justify-between text-[11px] p-1.5 rounded-lg hover:bg-tf-surface transition cursor-pointer"
-                      >
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} companyDomain={item.company_domain} className="w-4 h-4" />
-                          <span className="font-semibold text-tf-text truncate max-w-[80px]">{item.company_name}</span>
-                        </div>
-                        <span className="text-[10px] text-tf-text-tertiary shrink-0">{formatRelativeTime(item.created_at)}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-[11px] text-tf-text-tertiary italic py-2 text-center">No jobs in this stage</div>
-                  )}
-                  {offerApps.length > 3 && (
-                    <div 
-                      onClick={() => navigate('/job-tracker')}
-                      className="text-[10px] text-tf-accent font-semibold pt-1 text-center cursor-pointer hover:underline"
-                    >
-                      + {offerApps.length - 3} more
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Stage 5: Rejected */}
-              <div className="bg-tf-surface-2/60 border border-tf-border/60 rounded-xl p-3.5 space-y-3 relative hover:border-tf-border-strong transition-all">
-                <div className="flex items-center justify-between pb-2 border-b border-tf-border/50">
-                  <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 rounded bg-rose-500/10 text-rose-500 flex items-center justify-center">
-                      <XCircle size={11} />
-                    </div>
-                    <span className="text-xs font-bold text-tf-text">Rejected</span>
-                  </div>
-                  <span className="text-xs font-extrabold text-tf-text-secondary">
-                    {rejectedApps.length}
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  {rejectedApps.length > 0 ? (
-                    rejectedApps.slice(0, 3).map((item, idx) => (
-                      <div 
-                        key={item.id || idx} 
-                        onClick={() => navigate(`/job-tracker?appId=${item.id}`, { state: { selectedAppId: item.id } })}
-                        className="flex items-center justify-between text-[11px] p-1.5 rounded-lg hover:bg-tf-surface transition cursor-pointer"
-                      >
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} companyDomain={item.company_domain} className="w-4 h-4" />
-                          <span className="font-semibold text-tf-text truncate max-w-[80px]">{item.company_name}</span>
-                        </div>
-                        <span className="text-[10px] text-tf-text-tertiary shrink-0">{formatRelativeTime(item.created_at)}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-[11px] text-tf-text-tertiary italic py-2 text-center">No jobs in this stage</div>
-                  )}
-                  {rejectedApps.length > 3 && (
-                    <div 
-                      onClick={() => navigate('/job-tracker')}
-                      className="text-[10px] text-tf-accent font-semibold pt-1 text-center cursor-pointer hover:underline"
-                    >
-                      + {rejectedApps.length - 3} more
-                    </div>
-                  )}
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-          {/* BOTTOM ROW (2 CARDS SIDE-BY-SIDE) */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-
-            {/* CARD A: APPLICATION TREND CHART */}
-            <div className="bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-5 shadow-xs space-y-4 flex flex-col justify-between relative">
-              <div className="flex items-center justify-between relative z-20">
-                <div>
-                  <h3 className="text-xs font-bold text-tf-text">Resume Activity</h3>
-                  <p className="text-[11px] text-tf-text-tertiary">Parsing and tailoring events by day</p>
-                </div>
-
-                <div className="relative">
-                  <button 
-                    onClick={() => setTrendDropdownOpen((open) => !open)}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-tf-border bg-tf-surface-2 text-[11px] font-semibold text-tf-text-secondary hover:text-tf-text transition cursor-pointer"
-                  >
-                    <span>{trendTimeframe}</span>
-                    <ChevronDown size={12} />
-                  </button>
-
-                  {trendDropdownOpen && (
-                    <div className="absolute right-0 top-full mt-1 w-32 bg-tf-surface border border-tf-border rounded-xl shadow-xl z-30 py-1 overflow-hidden select-none">
-                      {['Last 7 days', 'Last 30 days', 'Last 90 days'].map((opt) => (
-                        <button
-                          key={opt}
-                          onClick={() => {
-                            setTrendTimeframe(opt);
-                            setTrendDropdownOpen(false);
-                            setHoveredPointIndex(-1);
-                          }}
-                          className={`w-full text-left px-3 py-1.5 text-[11px] font-medium transition cursor-pointer ${
-                            trendTimeframe === opt ? 'bg-tf-accent/15 text-tf-accent font-bold' : 'text-tf-text hover:bg-tf-surface-2'
-                          }`}
-                        >
-                          {opt}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Daily histogram: one visible bar and date for every day. */}
-              <div className="relative pt-2">
-                {activeHoveredPoint && (
-                  <div className="mb-3 flex items-center justify-between rounded-xl border border-purple-500/15 bg-purple-500/5 px-3 py-2">
-                    <span className="text-[10px] font-semibold text-tf-text-secondary">{activeHoveredPoint.accessibleLabel}</span>
-                    <span className="text-[11px] font-bold text-purple-500">
-                      {activeHoveredPoint.count} {activeHoveredPoint.count === 1 ? 'activity' : 'activities'}
+                    <span className="text-xs font-bold text-tf-text">Profile incomplete</span>
+                    <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-bold">
+                      1 item missing
                     </span>
                   </div>
-                )}
-                <div className="min-w-0 overflow-x-auto pb-2">
-                  <svg
-                    className="h-[174px] select-none"
-                    width={trendLine.width}
-                    viewBox={`0 0 ${trendLine.width} 154`}
-                    role="img"
-                    aria-label={`Resume activity trend for ${trendTimeframe.toLowerCase()}`}
-                  >
-                    <defs>
-                      <linearGradient id="trendLineArea" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#A855F7" stopOpacity="0.28" />
-                        <stop offset="100%" stopColor="#A855F7" stopOpacity="0.01" />
-                      </linearGradient>
-                    </defs>
-
-                    {[trendLine.top, (trendLine.top + trendLine.baseline) / 2, trendLine.baseline].map((y, index) => (
-                      <g key={y}>
-                        <line
-                          x1={trendLine.left}
-                          y1={y}
-                          x2={trendLine.width - trendLine.right}
-                          y2={y}
-                          stroke="currentColor"
-                          strokeOpacity={index === 2 ? 0.18 : 0.1}
-                        />
-                        <text x="2" y={y + 3} fill="currentColor" opacity="0.45" fontSize="9">
-                          {index === 0 ? trendLine.scale : index === 1 ? Math.round(trendLine.scale / 2) : 0}
-                        </text>
-                      </g>
-                    ))}
-
-                    {trendLine.points.length > 1 && (
-                      <>
-                        <path
-                          d={`${trendLine.path} L ${trendLine.points.at(-1).x} ${trendLine.baseline} L ${trendLine.points[0].x} ${trendLine.baseline} Z`}
-                          fill="url(#trendLineArea)"
-                        />
-                        <path
-                          d={trendLine.path}
-                          fill="none"
-                          stroke="#A855F7"
-                          strokeWidth="3"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </>
-                    )}
-
-                    {trendLine.points.map((point, index) => {
-                      const selected = hoveredPointIndex === index;
-                      return (
-                        <g
-                          key={point.timestamp}
-                          className="cursor-pointer"
-                          tabIndex="0"
-                          role="button"
-                          aria-label={`${point.accessibleLabel}: ${point.count} resume activities`}
-                          onMouseEnter={() => setHoveredPointIndex(index)}
-                          onFocus={() => setHoveredPointIndex(index)}
-                          onClick={() => setHoveredPointIndex(index)}
-                        >
-                          <rect
-                            x={point.x - 18}
-                            y={trendLine.top}
-                            width="36"
-                            height={trendLine.baseline - trendLine.top}
-                            fill="transparent"
-                          />
-                          <text
-                            x={point.x}
-                            y="140"
-                            textAnchor="middle"
-                            fill={selected ? '#A855F7' : 'currentColor'}
-                            opacity={selected ? 1 : 0.5}
-                            fontSize="8"
-                            fontWeight={selected ? 700 : 500}
-                          >
-                            {point.label}
-                          </text>
-                        </g>
-                      );
-                    })}
-                  </svg>
+                  <p className="text-xs text-tf-text-secondary">
+                    Add your contact details and preferred roles to improve tailr4u recommendation accuracy.
+                  </p>
                 </div>
               </div>
-            </div>
 
-            {/* CARD B: RECENT ACTIVITY FEED */}
-            <div className="bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-5 shadow-xs flex flex-col justify-between space-y-4">
-              <div>
-                <h3 className="text-xs font-bold text-tf-text">Recent Activity</h3>
-                <p className="text-[11px] text-tf-text-tertiary">Real-time log of application updates</p>
+              <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                <Button variant="primary" size="sm" onClick={() => navigate('/settings/job-preferences')}>
+                  <span>Complete Profile</span>
+                </Button>
+                <button
+                  onClick={handleDismissBanner}
+                  className="p-2 rounded-xl bg-tf-surface-2 hover:bg-tf-border text-tf-text-tertiary hover:text-tf-text transition cursor-pointer border border-tf-border"
+                  title="Dismiss"
+                >
+                  <X size={14} />
+                </button>
               </div>
+            </div>
+          )}
 
-              <div className="space-y-2.5">
-                {recentActivities.length > 0 ? (
-                  recentActivities.map((act) => (
-                    <div key={act.id} className="flex items-center justify-between p-2 rounded-xl hover:bg-tf-surface-2 transition">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <CompanyFavicon companyName={act.company} jobUrl={act.jobUrl} className="w-5 h-5" />
-                        <div className="min-w-0">
-                          <div className="text-xs font-bold text-tf-text truncate max-w-[120px]">{act.company || 'Application'}</div>
-                          <div className="text-[10px] text-tf-text-secondary truncate max-w-[120px]">{act.event}</div>
-                        </div>
-                      </div>
-                      <span className="text-[10px] text-tf-text-tertiary shrink-0">
-                        {formatRelativeTime(act.timestamp)}
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="py-6 text-center text-xs text-tf-text-tertiary font-medium">
-                    No recent activity logged yet.
+          {/* 3. REFINED KPI CARDS WITH DISTINCT HIERARCHY */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+
+            {/* Primary KPI Card 1: Recent ATS Score */}
+            <motion.div tabIndex="0" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .06 }} className="dashboard-kpi-card dashboard-interactive-surface kpi-orange bg-white/80 dark:bg-zinc-900/80 border border-orange-500/30 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs">
+              <div className="flex justify-between items-start">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-orange-600 dark:text-orange-400 uppercase tracking-wider">PRIMARY</span>
+                    <span className="text-xs font-semibold text-tf-text-tertiary">• Score</span>
                   </div>
-                )}
+                  <div className="text-3xl font-extrabold tracking-tight text-tf-text flex items-baseline gap-1">
+                    <span>{displayScore}</span>
+                    <span className="text-xs font-semibold text-tf-text-tertiary">/100</span>
+                  </div>
+                  <div className="mt-2 h-1.5 w-24 overflow-hidden rounded-full bg-orange-500/10">
+                    <motion.div
+                      className="h-full rounded-full bg-orange-500/80"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${Math.max(0, Math.min(100, recentResumeScore || 0))}%` }}
+                      transition={{ duration: 0.7, ease: [0.2, 0, 0, 1] }}
+                    />
+                  </div>
+                </div>
+                <div className="w-8 h-8 rounded-lg bg-orange-500/10 text-orange-500 flex items-center justify-center border border-orange-500/20">
+                  <Award size={16} />
+                </div>
               </div>
+              <div className="flex items-center justify-between mt-4 pt-2 border-t border-orange-500/10">
+                <span className="text-[11px] font-semibold text-orange-600 dark:text-orange-400 truncate max-w-[110px]" title={recentScoreSubtitle}>
+                  {recentResumeScore >= 80 ? (recentScoreSubtitle || 'Optimized match') : '3 improvements'}
+                </span>
+                <button
+                  onClick={() => navigate('/resume-detect')}
+                  className="text-[11px] font-bold text-tf-accent hover:underline flex items-center gap-0.5 cursor-pointer"
+                >
+                  Improve <ArrowRight size={11} />
+                </button>
+              </div>
+            </motion.div>
 
-              <button 
-                onClick={() => navigate('/job-tracker')}
-                className="w-full py-2 bg-tf-surface-2 hover:bg-tf-border text-tf-text font-semibold text-xs rounded-xl transition flex items-center justify-center gap-1.5 border border-tf-border cursor-pointer"
-              >
-                <span>View all activity</span>
-                <ArrowRight size={14} />
-              </button>
-            </div>
+            {/* Primary KPI Card 2: Active Pipeline */}
+            <motion.div tabIndex="0" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .1 }} className="dashboard-kpi-card dashboard-interactive-surface kpi-blue bg-white/80 dark:bg-zinc-900/80 border border-blue-500/30 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs">
+              <div className="flex justify-between items-start">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Primary</span>
+                    <span className="text-xs font-semibold text-tf-text-tertiary">• Pipeline</span>
+                  </div>
+                  <div className="text-3xl font-extrabold tracking-tight text-tf-text">
+                    {displayActive}
+                  </div>
+                </div>
+                <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center border border-blue-500/20">
+                  <Briefcase size={16} />
+                </div>
+              </div>
+              <div className="flex items-center justify-between mt-4 pt-2 border-t border-blue-500/10">
+                <span className="text-[11px] font-medium text-tf-text-secondary">Across all stages</span>
+                <svg className="dashboard-sparkline w-14 h-5 text-blue-500 overflow-visible" viewBox="0 0 80 30" fill="none">
+                  <path
+                    d={activeAppsCount <= 0 ? "M0 24 L 80 24" : activeAppsCount < 5 ? "M0 24 Q 40 22, 80 12" : "M0 22 Q 25 25, 45 18 T 70 10 T 80 6"}
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    opacity={activeAppsCount <= 0 ? 0.35 : 1}
+                  />
+                </svg>
+              </div>
+            </motion.div>
+
+            {/* Secondary KPI Card 3: Success Rate */}
+            <motion.div tabIndex="0" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .14 }} className="dashboard-kpi-card dashboard-interactive-surface kpi-mint bg-white/80 dark:bg-zinc-900/80 border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs">
+              <div className="flex justify-between items-start">
+                <div className="space-y-1">
+                  <span className="text-xs font-semibold text-tf-text-secondary">Success Rate</span>
+                  <div className="text-2xl font-extrabold tracking-tight text-tf-text">{displaySuccess}%</div>
+                </div>
+                <div className="w-8 h-8 rounded-lg bg-zinc-500/10 text-tf-text-secondary flex items-center justify-center border border-zinc-200 dark:border-zinc-800">
+                  <TrendingUp size={16} />
+                </div>
+              </div>
+              <div className="flex items-center justify-between mt-4 pt-2 border-t border-tf-border/50">
+                <span className="text-[11px] font-semibold text-emerald-500 flex items-center gap-0.5">
+                  ↗ {successRate}% <span className="text-tf-text-tertiary font-normal pl-0.5">vs last month</span>
+                </span>
+                <svg className="dashboard-sparkline w-14 h-5 text-orange-500 overflow-visible" viewBox="0 0 80 30" fill="none">
+                  <path
+                    d={successRate <= 0 ? "M0 24 L 80 24" : "M0 25 Q 20 28, 35 15 T 70 8 T 80 5"}
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    opacity={successRate <= 0 ? 0.35 : 1}
+                  />
+                </svg>
+              </div>
+            </motion.div>
+
+            {/* Secondary KPI Card 4: Interviews */}
+            <motion.div tabIndex="0" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .18 }} className="dashboard-kpi-card dashboard-interactive-surface kpi-amber bg-white/80 dark:bg-zinc-900/80 border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs">
+              <div className="flex justify-between items-start">
+                <div className="space-y-1">
+                  <span className="text-xs font-semibold text-tf-text-secondary">Interviews</span>
+                  <div className="text-2xl font-extrabold tracking-tight text-tf-text">
+                    {displayInterviews}
+                  </div>
+                </div>
+                <div className="w-8 h-8 rounded-lg bg-zinc-500/10 text-tf-text-secondary flex items-center justify-center border border-zinc-200 dark:border-zinc-800">
+                  <Calendar size={16} />
+                </div>
+              </div>
+              <div className="flex items-center justify-between mt-4 pt-2 border-t border-tf-border/50">
+                <span className="text-[11px] font-medium text-tf-text-secondary">This month</span>
+                <svg className="dashboard-sparkline w-14 h-5 text-amber-500 overflow-visible" viewBox="0 0 80 30" fill="none">
+                  <path
+                    d={interviewApps.length <= 0 ? "M0 24 L 80 24" : interviewApps.length < 3 ? "M0 24 Q 40 20, 80 10" : "M0 26 Q 20 22, 40 24 T 65 12 T 80 8"}
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    opacity={interviewApps.length <= 0 ? 0.35 : 1}
+                  />
+                </svg>
+              </div>
+            </motion.div>
+
+            {/* Secondary KPI Card 5: Offers */}
+            <motion.div tabIndex="0" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .22 }} className="dashboard-kpi-card dashboard-interactive-surface kpi-emerald bg-white/80 dark:bg-zinc-900/80 border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs">
+              <div className="flex justify-between items-start">
+                <div className="space-y-1">
+                  <span className="text-xs font-semibold text-tf-text-secondary">Offers</span>
+                  <div className="text-2xl font-extrabold tracking-tight text-tf-text">
+                    {displayOffers}
+                  </div>
+                </div>
+                <div className="w-8 h-8 rounded-lg bg-zinc-500/10 text-tf-text-secondary flex items-center justify-center border border-zinc-200 dark:border-zinc-800">
+                  <CheckCircle size={16} />
+                </div>
+              </div>
+              <div className="flex items-center justify-between mt-4 pt-2 border-t border-tf-border/50">
+                <span className="text-[11px] font-medium text-tf-text-secondary">Active offers</span>
+                <svg className="dashboard-sparkline w-14 h-5 text-emerald-500 overflow-visible" viewBox="0 0 80 30" fill="none">
+                  <path
+                    d={offerApps.length <= 0 ? "M0 24 L 80 24" : offerApps.length < 3 ? "M0 24 Q 40 22, 80 10" : "M0 24 Q 25 26, 45 20 T 70 12 T 80 6"}
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    opacity={offerApps.length <= 0 ? 0.35 : 1}
+                  />
+                </svg>
+              </div>
+            </motion.div>
+
 
           </div>
 
-        </div>
+          {/* 4. MAIN DASHBOARD CONTENT (2 COLUMNS) */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-        {/* RIGHT COLUMN (1/3 width) */}
-        <div className="space-y-6">
+            {/* LEFT COLUMN (2/3 width) */}
+            <div className="lg:col-span-2 space-y-6">
 
-          {/* WIDGET 1: REFINED UPCOMING EVENTS */}
-          <div className="bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-6 shadow-xs space-y-4">
+              {/* ROW 1: RESUME ACTIVITY & RECENT ACTIVITY (SIDE-BY-SIDE) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                {/* CARD A: APPLICATION TREND CHART */}
+                <div className="dashboard-panel dashboard-trend-panel dashboard-interactive-surface bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-5 shadow-xs space-y-4 flex flex-col justify-between relative">
+                  <div className="flex items-center justify-between relative z-20">
+                    <div>
+                      <h3 className="text-xs font-bold text-tf-text">Resume Activity</h3>
+                      <p className="text-[11px] text-tf-text-tertiary">Parsing and tailoring events by day</p>
+                    </div>
+
+                    <div className="relative">
+                      <button
+                        onClick={() => setTrendDropdownOpen((open) => !open)}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-tf-border bg-tf-surface-2 text-[11px] font-semibold text-tf-text-secondary hover:text-tf-text transition cursor-pointer"
+                      >
+                        <span>{trendTimeframe}</span>
+                        <ChevronDown size={12} />
+                      </button>
+
+                      {trendDropdownOpen && (
+                        <div className="absolute right-0 top-full mt-1 w-32 bg-tf-surface border border-tf-border rounded-xl shadow-xl z-30 py-1 overflow-hidden select-none">
+                          {['Last 7 days', 'Last 30 days', 'Last 90 days'].map((opt) => (
+                            <button
+                              key={opt}
+                              onClick={() => {
+                                setTrendTimeframe(opt);
+                                setTrendDropdownOpen(false);
+                                setHoveredPointIndex(-1);
+                              }}
+                              className={`w-full text-left px-3 py-1.5 text-[11px] font-medium transition cursor-pointer ${trendTimeframe === opt ? 'bg-tf-accent/15 text-tf-accent font-bold' : 'text-tf-text hover:bg-tf-surface-2'
+                                }`}
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Daily histogram: one visible bar and date for every day. */}
+                  <div className="relative pt-2">
+                    {activeHoveredPoint && (
+                      <div className="mb-3 flex items-center justify-between rounded-xl border border-orange-500/15 bg-orange-500/5 px-3 py-2">
+                        <span className="text-[10px] font-semibold text-tf-text-secondary">{activeHoveredPoint.accessibleLabel}</span>
+                        <span className="text-[11px] font-bold text-orange-500">
+                          {activeHoveredPoint.count} {activeHoveredPoint.count === 1 ? 'resume' : 'resumes'} tailored
+                        </span>
+                      </div>
+                    )}
+                    <div ref={trendScrollRef} className="min-w-0 overflow-x-auto pb-2">
+                      <svg
+                        className="h-[174px] select-none"
+                        width={trendLine.width}
+                        viewBox={`0 0 ${trendLine.width} 154`}
+                        role="img"
+                        aria-label={`Resume activity trend for ${trendTimeframe.toLowerCase()}`}
+                      >
+                        <defs>
+                          <linearGradient id="trendLineArea" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#F97316" stopOpacity="0.28" />
+                            <stop offset="100%" stopColor="#F97316" stopOpacity="0.01" />
+                          </linearGradient>
+                        </defs>
+
+                        {[trendLine.top, (trendLine.top + trendLine.baseline) / 2, trendLine.baseline].map((y, index) => (
+                          <g key={y}>
+                            <line
+                              x1={trendLine.left}
+                              y1={y}
+                              x2={trendLine.width - trendLine.right}
+                              y2={y}
+                              stroke="currentColor"
+                              strokeOpacity={index === 2 ? 0.18 : 0.1}
+                            />
+                            <text x="2" y={y + 3} fill="currentColor" opacity="0.45" fontSize="9">
+                              {index === 0 ? trendLine.scale : index === 1 ? Math.round(trendLine.scale / 2) : 0}
+                            </text>
+                          </g>
+                        ))}
+
+                        {trendLine.points.length > 1 && (
+                          <>
+                            <path
+                              d={`${trendLine.path} L ${trendLine.points.at(-1).x} ${trendLine.baseline} L ${trendLine.points[0].x} ${trendLine.baseline} Z`}
+                              fill="url(#trendLineArea)"
+                            />
+                            <motion.path
+                              d={trendLine.path}
+                              fill="none"
+                              stroke="#F97316"
+                              strokeWidth="3"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              initial={{ pathLength: 0 }}
+                              animate={{ pathLength: 1 }}
+                              transition={{ duration: .55 }}
+                            />
+                          </>
+                        )}
+
+                        {trendLine.points.map((point, index) => {
+                          const selected = hoveredPointIndex === index;
+                          return (
+                            <g
+                              key={point.timestamp}
+                              className="cursor-pointer"
+                              tabIndex="0"
+                              role="button"
+                              aria-label={`${point.accessibleLabel}: ${point.count} resume activities`}
+                              onMouseEnter={() => setHoveredPointIndex(index)}
+                              onFocus={() => setHoveredPointIndex(index)}
+                              onClick={() => setHoveredPointIndex(index)}
+                            >
+                              <rect
+                                x={point.x - 18}
+                                y={trendLine.top}
+                                width="36"
+                                height={trendLine.baseline - trendLine.top}
+                                fill="transparent"
+                              />
+                              {selected && <line x1={point.x} x2={point.x} y1={trendLine.top} y2={trendLine.baseline} stroke="#F97316" strokeOpacity=".28" strokeDasharray="3 3" />}
+                              <motion.circle
+                                cx={point.x}
+                                cy={point.y}
+                                r={selected ? 5 : 3}
+                                fill="var(--tf-surface, white)"
+                                stroke="#F97316"
+                                strokeWidth="2"
+                                initial={{ scale: 0 }}
+                                animate={{ scale: 1, opacity: hoveredPointIndex < 0 || selected ? 1 : .38 }}
+                                transition={{ delay: Math.min(index * .015, .45) }}
+                              />
+                              <text
+                                x={point.x}
+                                y="140"
+                                textAnchor="middle"
+                                fill={selected ? '#F97316' : 'currentColor'}
+                                opacity={selected ? 1 : 0.5}
+                                fontSize="8"
+                                fontWeight={selected ? 700 : 500}
+                              >
+                                {point.label}
+                              </text>
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    </div>
+                    {trendPoints.every(point => point.count === 0) && (
+                      <div className="dashboard-chart-empty">
+                        <span>No resumes were tailored during this period.</span>
+                        <button onClick={() => navigate('/tailor')}>Tailor a resume</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* CARD B: RECENT ACTIVITY FEED */}
+                <div className="dashboard-panel dashboard-activity-panel dashboard-interactive-surface bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-5 shadow-xs flex flex-col justify-between space-y-4">
+                  <div>
+                    <h3 className="text-xs font-bold text-tf-text">Recent Activity</h3>
+                    <p className="text-[11px] text-tf-text-tertiary">Real-time log of application updates</p>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {recentActivities.length > 0 ? (
+                      recentActivities.map((act, index) => (
+                        <motion.button
+                          key={act.id}
+                          type="button"
+                          initial={{ opacity: 0, x: -6 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: index * .05, duration: .24 }}
+                          onClick={() => {
+                            if (act.applicationId) {
+                              navigate(`/job-tracker?appId=${act.applicationId}`, { state: { selectedAppId: act.applicationId } });
+                            } else {
+                              navigate('/job-tracker');
+                            }
+                          }}
+                          className="dashboard-activity-item w-full flex items-center justify-between p-2.5 rounded-xl text-left hover:bg-tf-surface-2/70 transition cursor-pointer border border-transparent hover:border-tf-border/50"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-3">
+                            <span className="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0" />
+                            <CompanyFavicon companyName={act.company} jobUrl={act.jobUrl} className="w-5 h-5 shrink-0" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs font-bold text-tf-text truncate">{act.company || 'Application'}</div>
+                              <div className="text-[10px] text-tf-text-secondary truncate">{act.event}</div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0 ml-auto">
+                            <span className="text-[10px] font-medium text-tf-text-tertiary whitespace-nowrap text-right min-w-[50px]">
+                              {formatRelativeTime(act.timestamp)}
+                            </span>
+                            <ArrowRight className="dashboard-activity-action text-tf-text-tertiary shrink-0" size={12} aria-hidden="true" />
+                          </div>
+                        </motion.button>
+                      ))
+                    ) : (
+                      <div className="py-6 text-center text-xs text-tf-text-tertiary font-medium">
+                        No recent activity logged yet.
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => navigate('/job-tracker')}
+                    className="w-full py-2 bg-tf-surface-2 hover:bg-tf-border text-tf-text font-semibold text-xs rounded-xl transition flex items-center justify-center gap-1.5 border border-tf-border cursor-pointer"
+                  >
+                    <span>View all activity</span>
+                    <ArrowRight size={14} />
+                  </button>
+                </div>
+
+              </div>
+
+              {/* ROW 2: JOB PIPELINE STAGES FLOW WITH COMPANY FAVICONS */}
+              <div className="dashboard-panel dashboard-pipeline-panel dashboard-interactive-surface bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-6 shadow-xs space-y-5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold text-tf-text">Job Pipeline</h3>
+                    <p className="text-xs text-tf-text-secondary">Live activity across active recruitment stages</p>
+                  </div>
+                  <div className="relative">
+                    <button
+                      onClick={() => setPipelineDropdownOpen((open) => !open)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-tf-border bg-tf-surface-2 text-xs font-semibold text-tf-text-secondary hover:text-tf-text transition cursor-pointer select-none"
+                    >
+                      <Filter size={13} />
+                      <span>{pipelineFilter}</span>
+                      <ChevronDown size={13} />
+                    </button>
+
+                    {pipelineDropdownOpen && (
+                      <div className="absolute right-0 top-full mt-1.5 w-36 bg-tf-surface border border-tf-border rounded-xl shadow-xl z-30 py-1 overflow-hidden select-none">
+                        {['All Jobs', 'Active Only', 'Last 7 days', 'Last 30 days'].map((opt) => (
+                          <button
+                            key={opt}
+                            onClick={() => {
+                              setPipelineFilter(opt);
+                              setPipelineDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-3.5 py-1.5 text-xs font-medium transition cursor-pointer ${pipelineFilter === opt ? 'bg-tf-accent/15 text-tf-accent font-bold' : 'text-tf-text hover:bg-tf-surface-2'
+                              }`}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* PIPELINE STAGE COLUMNS */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 relative">
+
+                  {/* Stage 1: Applied */}
+                  <div className="bg-zinc-100/70 dark:bg-zinc-800/40 border border-zinc-200/80 dark:border-zinc-700/60 rounded-xl p-3.5 space-y-3 relative hover:border-zinc-300 dark:hover:border-zinc-600 transition-all shadow-2xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-zinc-200/60 dark:border-zinc-700/50">
+                      <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                          <Send size={11} />
+                        </div>
+                        <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">Applied</span>
+                      </div>
+                      <span className="text-xs font-extrabold text-zinc-700 dark:text-zinc-300 bg-zinc-200/60 dark:bg-zinc-700/50 px-2 py-0.5 rounded-full">
+                        {appliedApps.length}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {appliedApps.length > 0 ? (
+                        appliedApps.slice(0, 3).map((item, idx) => (
+                          <div
+                            key={item.id || idx}
+                            onClick={() => navigate(`/job-tracker?appId=${item.id}`, { state: { selectedAppId: item.id } })}
+                            className="flex items-center justify-between text-[11px] p-1.5 rounded-lg hover:bg-zinc-200/50 dark:hover:bg-zinc-700/50 transition cursor-pointer"
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} companyDomain={item.company_domain} className="w-4 h-4" />
+                              <span className="font-bold text-zinc-900 dark:text-zinc-100 truncate max-w-[80px]">{item.company_name}</span>
+                            </div>
+                            <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium shrink-0">{formatRelativeTime(item.created_at)}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-[11px] text-zinc-400 dark:text-zinc-500 italic py-2 text-center">No jobs in this stage</div>
+                      )}
+                      {appliedApps.length > 3 && (
+                        <div
+                          onClick={() => navigate('/job-tracker')}
+                          className="text-[10px] text-tf-accent font-semibold pt-1 text-center cursor-pointer hover:underline"
+                        >
+                          + {appliedApps.length - 3} more
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Stage 2: Screening */}
+                  <div className="bg-zinc-100/70 dark:bg-zinc-800/40 border border-zinc-200/80 dark:border-zinc-700/60 rounded-xl p-3.5 space-y-3 relative hover:border-zinc-300 dark:hover:border-zinc-600 transition-all shadow-2xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-zinc-200/60 dark:border-zinc-700/50">
+                      <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 rounded bg-orange-500/10 text-orange-600 dark:text-orange-400 flex items-center justify-center">
+                          <Search size={11} />
+                        </div>
+                        <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">Screening</span>
+                      </div>
+                      <span className="text-xs font-extrabold text-zinc-700 dark:text-zinc-300 bg-zinc-200/60 dark:bg-zinc-700/50 px-2 py-0.5 rounded-full">
+                        {screeningApps.length}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {screeningApps.length > 0 ? (
+                        screeningApps.slice(0, 3).map((item, idx) => (
+                          <div
+                            key={item.id || idx}
+                            onClick={() => navigate(`/job-tracker?appId=${item.id}`, { state: { selectedAppId: item.id } })}
+                            className="flex items-center justify-between text-[11px] p-1.5 rounded-lg hover:bg-zinc-200/50 dark:hover:bg-zinc-700/50 transition cursor-pointer"
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} companyDomain={item.company_domain} className="w-4 h-4" />
+                              <span className="font-bold text-zinc-900 dark:text-zinc-100 truncate max-w-[80px]">{item.company_name}</span>
+                            </div>
+                            <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium shrink-0">{formatRelativeTime(item.created_at)}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-[11px] text-zinc-400 dark:text-zinc-500 italic py-2 text-center">No jobs in this stage</div>
+                      )}
+                      {screeningApps.length > 3 && (
+                        <div
+                          onClick={() => navigate('/job-tracker')}
+                          className="text-[10px] text-tf-accent font-semibold pt-1 text-center cursor-pointer hover:underline"
+                        >
+                          + {screeningApps.length - 3} more
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Stage 3: Interview */}
+                  <div className="bg-zinc-100/70 dark:bg-zinc-800/40 border border-zinc-200/80 dark:border-zinc-700/60 rounded-xl p-3.5 space-y-3 relative hover:border-zinc-300 dark:hover:border-zinc-600 transition-all shadow-2xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-zinc-200/60 dark:border-zinc-700/50">
+                      <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                          <Calendar size={11} />
+                        </div>
+                        <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">Interview</span>
+                      </div>
+                      <span className="text-xs font-extrabold text-zinc-700 dark:text-zinc-300 bg-zinc-200/60 dark:bg-zinc-700/50 px-2 py-0.5 rounded-full">
+                        {interviewApps.length}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {interviewApps.length > 0 ? (
+                        interviewApps.slice(0, 3).map((item, idx) => (
+                          <div
+                            key={item.id || idx}
+                            onClick={() => navigate(`/job-tracker?appId=${item.id}`, { state: { selectedAppId: item.id } })}
+                            className="flex items-center justify-between text-[11px] p-1.5 rounded-lg hover:bg-zinc-200/50 dark:hover:bg-zinc-700/50 transition cursor-pointer"
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} companyDomain={item.company_domain} className="w-4 h-4" />
+                              <span className="font-bold text-zinc-900 dark:text-zinc-100 truncate max-w-[80px]">{item.company_name}</span>
+                            </div>
+                            <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium shrink-0">{formatRelativeTime(item.created_at)}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-[11px] text-zinc-400 dark:text-zinc-500 italic py-2 text-center">No jobs in this stage</div>
+                      )}
+                      {interviewApps.length > 3 && (
+                        <div
+                          onClick={() => navigate('/job-tracker')}
+                          className="text-[10px] text-tf-accent font-semibold pt-1 text-center cursor-pointer hover:underline"
+                        >
+                          + {interviewApps.length - 3} more
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Stage 4: Offer */}
+                  <div className="bg-zinc-100/70 dark:bg-zinc-800/40 border border-zinc-200/80 dark:border-zinc-700/60 rounded-xl p-3.5 space-y-3 relative hover:border-zinc-300 dark:hover:border-zinc-600 transition-all shadow-2xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-zinc-200/60 dark:border-zinc-700/50">
+                      <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                          <Award size={11} />
+                        </div>
+                        <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">Offer</span>
+                      </div>
+                      <span className="text-xs font-extrabold text-zinc-700 dark:text-zinc-300 bg-zinc-200/60 dark:bg-zinc-700/50 px-2 py-0.5 rounded-full">
+                        {offerApps.length}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {offerApps.length > 0 ? (
+                        offerApps.slice(0, 3).map((item, idx) => (
+                          <div
+                            key={item.id || idx}
+                            onClick={() => navigate(`/job-tracker?appId=${item.id}`, { state: { selectedAppId: item.id } })}
+                            className="flex items-center justify-between text-[11px] p-1.5 rounded-lg hover:bg-zinc-200/50 dark:hover:bg-zinc-700/50 transition cursor-pointer"
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} companyDomain={item.company_domain} className="w-4 h-4" />
+                              <span className="font-bold text-zinc-900 dark:text-zinc-100 truncate max-w-[80px]">{item.company_name}</span>
+                            </div>
+                            <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium shrink-0">{formatRelativeTime(item.created_at)}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-[11px] text-zinc-400 dark:text-zinc-500 italic py-2 text-center">No jobs in this stage</div>
+                      )}
+                      {offerApps.length > 3 && (
+                        <div
+                          onClick={() => navigate('/job-tracker')}
+                          className="text-[10px] text-tf-accent font-semibold pt-1 text-center cursor-pointer hover:underline"
+                        >
+                          + {offerApps.length - 3} more
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Stage 5: Rejected */}
+                  <div className="bg-zinc-100/70 dark:bg-zinc-800/40 border border-zinc-200/80 dark:border-zinc-700/60 rounded-xl p-3.5 space-y-3 relative hover:border-zinc-300 dark:hover:border-zinc-600 transition-all shadow-2xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-zinc-200/60 dark:border-zinc-700/50">
+                      <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center">
+                          <XCircle size={11} />
+                        </div>
+                        <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">Rejected</span>
+                      </div>
+                      <span className="text-xs font-extrabold text-zinc-700 dark:text-zinc-300 bg-zinc-200/60 dark:bg-zinc-700/50 px-2 py-0.5 rounded-full">
+                        {rejectedApps.length}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {rejectedApps.length > 0 ? (
+                        rejectedApps.slice(0, 3).map((item, idx) => (
+                          <div
+                            key={item.id || idx}
+                            onClick={() => navigate(`/job-tracker?appId=${item.id}`, { state: { selectedAppId: item.id } })}
+                            className="flex items-center justify-between text-[11px] p-1.5 rounded-lg hover:bg-zinc-200/50 dark:hover:bg-zinc-700/50 transition cursor-pointer"
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <CompanyFavicon companyName={item.company_name} jobUrl={item.job_url} companyDomain={item.company_domain} className="w-4 h-4" />
+                              <span className="font-bold text-zinc-900 dark:text-zinc-100 truncate max-w-[80px]">{item.company_name}</span>
+                            </div>
+                            <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium shrink-0">{formatRelativeTime(item.created_at)}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-[11px] text-zinc-400 dark:text-zinc-500 italic py-2 text-center">No jobs in this stage</div>
+                      )}
+                      {rejectedApps.length > 3 && (
+                        <div
+                          onClick={() => navigate('/job-tracker')}
+                          className="text-[10px] text-tf-accent font-semibold pt-1 text-center cursor-pointer hover:underline"
+                        >
+                          + {rejectedApps.length - 3} more
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+
+            </div>
+
+            {/* RIGHT COLUMN (1/3 width) */}
+            <div className="space-y-6">
+          <div className="dashboard-panel dashboard-interactive-surface bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-6 shadow-xs space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-tf-text">Upcoming Reminders</h3>
               <span className="text-[11px] font-semibold text-tf-accent">{upcomingEvents.length} scheduled</span>
             </div>
 
-            <div className="space-y-3">
-              {upcomingEvents.length > 0 ? (
-                upcomingEvents.map((evt) => (
-                  <div 
-                    key={evt.id} 
-                    onClick={() => setShowRemindersModal(true)}
-                    className="flex items-center justify-between p-3 rounded-xl bg-tf-surface-2/60 border border-tf-border/50 hover:bg-tf-surface-2 transition cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-10 h-10 rounded-xl bg-tf-surface border border-tf-border flex flex-col items-center justify-center leading-none text-tf-text shrink-0">
-                        <span className="text-[9px] font-black text-tf-text-tertiary uppercase">{evt.month}</span>
-                        <span className="text-sm font-black">{evt.day}</span>
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-tf-text truncate">{evt.title}</div>
-                        <div className="text-[10px] text-tf-text-secondary truncate">{evt.company} • {evt.role}</div>
-                        {evt.description && <div className="text-[10px] text-tf-text-secondary truncate pt-0.5">{evt.description}</div>}
-                        <div className="text-[10px] text-tf-text-tertiary pt-0.5">Reminder {evt.time}</div>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="py-6 text-center space-y-1">
-                  <div className="text-xs font-semibold text-tf-text">No upcoming events</div>
-                  <div className="text-[11px] text-tf-text-tertiary">Add reminders from your Job Tracker.</div>
-                </div>
-              )}
-            </div>
-
-            <button 
-              onClick={() => setShowRemindersModal(true)}
-              className="w-full py-2 bg-tf-surface-2 hover:bg-tf-border text-tf-text font-semibold text-xs rounded-xl transition flex items-center justify-center gap-1.5 border border-tf-border cursor-pointer"
-            >
-              <span>View all reminders</span>
-              <ArrowRight size={14} />
-            </button>
-          </div>
-
-          {/* WIDGET 2: PIPELINE OVERVIEW DONUT CHART */}
-          <div className="bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-6 shadow-xs space-y-5">
-            <h3 className="text-sm font-bold text-tf-text">Pipeline Overview</h3>
-
-            <div className="flex flex-col items-center gap-5">
-              <div className="relative w-40 h-40 flex items-center justify-center">
-                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-                  <circle cx="50" cy="50" r="38" fill="none" stroke="currentColor" opacity="0.08" strokeWidth="16" />
-                  {pApplied > 0 && <circle cx="50" cy="50" r="38" fill="none" stroke="#3B82F6" strokeWidth="16" strokeDasharray={`${(pApplied / 100) * 238} 238`} strokeDashoffset="0" />}
-                  {pScreening > 0 && <circle cx="50" cy="50" r="38" fill="none" stroke="#8B5CF6" strokeWidth="16" strokeDasharray={`${(pScreening / 100) * 238} 238`} strokeDashoffset={`-${(pApplied / 100) * 238}`} />}
-                  {pInterview > 0 && <circle cx="50" cy="50" r="38" fill="none" stroke="#F97316" strokeWidth="16" strokeDasharray={`${(pInterview / 100) * 238} 238`} strokeDashoffset={`-${((pApplied + pScreening) / 100) * 238}`} />}
-                  {pOffer > 0 && <circle cx="50" cy="50" r="38" fill="none" stroke="#10B981" strokeWidth="16" strokeDasharray={`${(pOffer / 100) * 238} 238`} strokeDashoffset={`-${((pApplied + pScreening + pInterview) / 100) * 238}`} />}
-                  {pRejected > 0 && <circle cx="50" cy="50" r="38" fill="none" stroke="#EF4444" strokeWidth="16" strokeDasharray={`${(pRejected / 100) * 238} 238`} strokeDashoffset={`-${((pApplied + pScreening + pInterview + pOffer) / 100) * 238}`} />}
-                </svg>
-
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                  <span className="text-2xl font-black text-tf-text">{totalTracked}</span>
-                  <span className="text-[10px] font-semibold text-tf-text-tertiary uppercase tracking-wider">Total Jobs</span>
-                </div>
-              </div>
-
-              <div className="w-full space-y-2 text-xs">
-                <div className="flex justify-between items-center">
-                  <span className="flex items-center gap-2 text-tf-text-secondary"><span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> Applied</span>
-                  <span className="font-semibold text-tf-text">{appliedApps.length} ({pApplied}%)</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="flex items-center gap-2 text-tf-text-secondary"><span className="w-2.5 h-2.5 rounded-full bg-purple-500" /> Screening</span>
-                  <span className="font-semibold text-tf-text">{screeningApps.length} ({pScreening}%)</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="flex items-center gap-2 text-tf-text-secondary"><span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Interview</span>
-                  <span className="font-semibold text-tf-text">{interviewApps.length} ({pInterview}%)</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="flex items-center gap-2 text-tf-text-secondary"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Offer</span>
-                  <span className="font-semibold text-tf-text">{offerApps.length} ({pOffer}%)</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="flex items-center gap-2 text-tf-text-secondary"><span className="w-2.5 h-2.5 rounded-full bg-rose-500" /> Rejected</span>
-                  <span className="font-semibold text-tf-text">{rejectedApps.length} ({pRejected}%)</span>
-                </div>
-              </div>
-            </div>
-
-            <button 
-              onClick={() => navigate('/job-tracker')}
-              className="w-full py-2 bg-tf-surface-2 hover:bg-tf-border text-tf-text font-semibold text-xs rounded-xl transition flex items-center justify-center gap-1.5 border border-tf-border cursor-pointer"
-            >
-              <span>View full pipeline</span>
-              <ArrowRight size={14} />
-            </button>
-          </div>
-
-        </div>
-
-      </div>
-
-      {/* UPCOMING REMINDERS POPUP MODAL */}
-      {showRemindersModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-tf-surface border border-tf-border rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between pb-3 border-b border-tf-border">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-tf-accent/10 text-tf-accent flex items-center justify-center border border-tf-accent/20">
-                  <Calendar size={18} />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-tf-text">Upcoming Reminders</h3>
-                  <p className="text-xs text-tf-text-secondary">{allReminders.length} scheduled reminders</p>
-                </div>
-              </div>
-
-              <button
-                onClick={() => setShowRemindersModal(false)}
-                className="p-1.5 rounded-xl bg-tf-surface-2 hover:bg-tf-border text-tf-text-secondary hover:text-tf-text transition cursor-pointer border border-tf-border"
-                title="Close"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            {/* REMINDERS SCROLLABLE LIST */}
-            <div className="max-h-[360px] overflow-y-auto space-y-3 pr-1 custom-scrollbar">
-              {allReminders.length > 0 ? (
-                allReminders.map((rem) => (
-                  <div
-                    key={rem.id}
-                    className="p-3.5 rounded-xl bg-tf-surface-2/60 border border-tf-border/60 hover:bg-tf-surface-2 transition flex items-center justify-between gap-3"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <CompanyFavicon companyName={rem.company} jobUrl={rem.jobUrl} className="w-8 h-8 rounded-lg" />
-                      <div className="min-w-0 space-y-0.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-tf-text truncate">{rem.title}</span>
-                          <span className={`px-2 py-0.2 rounded-md text-[10px] font-bold border ${getStageBadgeStyle(rem.stage)}`}>
-                            {rem.stage}
-                          </span>
+                <div className="space-y-3">
+                  {upcomingEvents.length > 0 ? (
+                    upcomingEvents.map((evt) => (
+                      <motion.div
+                        key={evt.id}
+                        layout
+                        onClick={() => setShowRemindersModal(true)}
+                        className="dashboard-reminder-item flex items-center justify-between gap-3 p-3 rounded-xl bg-tf-surface-2/60 border border-tf-border/50 cursor-pointer relative"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 rounded-xl bg-tf-surface border border-tf-border flex flex-col items-center justify-center leading-none text-tf-text shrink-0">
+                            <span className="text-[9px] font-black text-tf-text-tertiary uppercase">{evt.month}</span>
+                            <span className="text-sm font-black">{evt.day}</span>
+                          </div>
+                          <div className="min-w-0">
+                            <h4 className="text-xs font-bold text-tf-text truncate">{evt.title}</h4>
+                            <p className="text-[10px] text-tf-text-secondary truncate mt-0.5">{evt.company} · {evt.role}</p>
+                            <span className="text-[9px] font-semibold text-tf-accent">{evt.time}</span>
+                          </div>
                         </div>
-                        <p className="text-[11px] text-tf-text-secondary truncate">{rem.company} • {rem.role}</p>
-                        {rem.description && <p className="text-[10px] text-tf-text-secondary truncate">{rem.description}</p>}
-                        <p className="text-[10px] text-tf-text-tertiary flex items-center gap-1">
-                          <Clock size={11} /> {rem.time}
-                        </p>
-                      </div>
+                        <ChevronRight size={14} className="text-tf-text-tertiary shrink-0" />
+                      </motion.div>
+                    ))
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-tf-border bg-tf-surface-2/40 px-4 py-7 text-center">
+                      <CheckCircle size={20} className="mx-auto text-tf-success mb-2" />
+                      <p className="text-xs font-semibold text-tf-text">No upcoming reminders</p>
+                      <p className="text-[10px] text-tf-text-tertiary mt-1">You are all caught up.</p>
                     </div>
-
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
-                        setShowRemindersModal(false);
-                        if (rem.applicationId) {
-                          navigate(`/job-tracker?appId=${rem.applicationId}`, {
-                            state: { selectedAppId: rem.applicationId }
-                          });
-                        }
-                      }}
-                      className="text-xs shrink-0"
-                    >
-                      <span>Open Tracker</span>
-                      <ArrowRight size={12} />
-                    </Button>
-                  </div>
-                ))
-              ) : (
-                <div className="py-12 text-center space-y-2">
-                  <Calendar size={32} className="mx-auto text-tf-text-tertiary opacity-40" />
-                  <p className="text-xs font-semibold text-tf-text">No upcoming reminders</p>
-                  <p className="text-[11px] text-tf-text-tertiary">Extract jobs to automatically track interview dates & deadlines.</p>
+                  )}
                 </div>
-              )}
+
+                <button
+                  onClick={() => setShowRemindersModal(true)}
+                  className="w-full py-2 bg-tf-surface-2 hover:bg-tf-border text-tf-text font-semibold text-xs rounded-xl transition flex items-center justify-center gap-1.5 border border-tf-border cursor-pointer"
+                >
+                  <span>View all reminders</span>
+                  <ArrowRight size={14} />
+                </button>
+              </div>
+
+              {/* WIDGET 2: PIPELINE OVERVIEW DONUT CHART */}
+              <div className="dashboard-panel dashboard-overview-panel dashboard-interactive-surface bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-6 shadow-xs space-y-5">
+                <h3 className="text-sm font-bold text-tf-text">Pipeline Overview</h3>
+
+                <div className="flex flex-col items-center gap-5">
+                  <div className="relative w-40 h-40 flex items-center justify-center">
+                    <svg className="dashboard-donut w-full h-full transform -rotate-90" viewBox="0 0 100 100" onMouseLeave={() => setActiveDonutStage(null)}>
+                      <circle cx="50" cy="50" r="38" fill="none" stroke="currentColor" opacity="0.08" strokeWidth="16" />
+                      {donutStages.map((stage, index) => {
+                        if (!stage.percent) return null;
+                        const preceding = donutStages.slice(0, index).reduce((sum, item) => sum + item.percent, 0);
+                        const active = !activeDonutStage || activeDonutStage === stage.key;
+                        return <motion.circle
+                          key={stage.key}
+                          tabIndex="0"
+                          role="button"
+                          aria-label={`${stage.key}: ${stage.count} jobs, ${stage.percent}%`}
+                          cx="50" cy="50" r="38" fill="none" stroke={stage.color} strokeWidth="16"
+                          strokeDasharray={`${(stage.percent / 100) * 238} 238`}
+                          strokeDashoffset={`-${(preceding / 100) * 238}`}
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: active ? 1 : .28 }}
+                          transition={{ duration: .55, delay: index * .04 }}
+                          onMouseEnter={() => setActiveDonutStage(stage.key)}
+                          onFocus={() => setActiveDonutStage(stage.key)}
+                          onBlur={() => setActiveDonutStage(null)}
+                          onClick={() => navigate(`/job-tracker?stage=${encodeURIComponent(stage.key)}`)}
+                        />;
+                      })}
+                    </svg>
+
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                      <span className="text-2xl font-black text-tf-text">{selectedDonut?.count ?? totalTracked}</span>
+                      <span className="text-[10px] font-semibold text-tf-text-tertiary uppercase tracking-wider">{selectedDonut?.key || 'Total Jobs'}</span>
+                      {selectedDonut && <span className="text-[9px] font-bold text-tf-accent">{selectedDonut.percent}%</span>}
+                    </div>
+                  </div>
+
+                  <div className="dashboard-donut-legend w-full space-y-1 text-xs">
+                    {donutStages.map(stage => <button
+                      key={stage.key}
+                      onMouseEnter={() => setActiveDonutStage(stage.key)}
+                      onMouseLeave={() => setActiveDonutStage(null)}
+                      onFocus={() => setActiveDonutStage(stage.key)}
+                      onBlur={() => setActiveDonutStage(null)}
+                      onClick={() => navigate(`/job-tracker?stage=${encodeURIComponent(stage.key)}`)}
+                    >
+                      <span className="flex items-center gap-2 text-tf-text-secondary"><i style={{ backgroundColor: stage.color }} /> {stage.key}</span>
+                      <strong>{stage.count} ({stage.percent}%)</strong>
+                    </button>)}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => navigate('/job-tracker')}
+                  className="w-full py-2 bg-tf-surface-2 hover:bg-tf-border text-tf-text font-semibold text-xs rounded-xl transition flex items-center justify-center gap-1.5 border border-tf-border cursor-pointer"
+                >
+                  <span>View full pipeline</span>
+                  <ArrowRight size={14} />
+                </button>
+              </div>
+
             </div>
 
-            <div className="pt-2 border-t border-tf-border flex justify-end">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setShowRemindersModal(false)}
-              >
-                Close
-              </Button>
-            </div>
           </div>
-        </div>
-      )}
 
-    </div>
-    </FadeSwap>
+          {/* UPCOMING REMINDERS POPUP MODAL */}
+          {showRemindersModal && typeof document !== 'undefined' && createPortal(
+            <div
+              className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+              role="presentation"
+              onMouseDown={() => setShowRemindersModal(false)}
+            >
+              <div
+                className="bg-tf-surface border border-tf-border rounded-2xl max-w-lg w-full max-h-[calc(100vh-2rem)] overflow-hidden p-6 shadow-2xl space-y-5 animate-in zoom-in-95 duration-200"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="upcoming-reminders-title"
+                onMouseDown={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-center justify-between pb-3 border-b border-tf-border">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-tf-accent/10 text-tf-accent flex items-center justify-center border border-tf-accent/20">
+                      <Calendar size={18} />
+                    </div>
+                    <div>
+                      <h3 id="upcoming-reminders-title" className="text-base font-bold text-tf-text">Upcoming Reminders</h3>
+                      <p className="text-xs text-tf-text-secondary">{allReminders.length} scheduled reminders</p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setShowRemindersModal(false)}
+                    className="p-1.5 rounded-xl bg-tf-surface-2 hover:bg-tf-border text-tf-text-secondary hover:text-tf-text transition cursor-pointer border border-tf-border"
+                    title="Close"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                {/* REMINDERS SCROLLABLE LIST */}
+                <div className="max-h-[360px] overflow-y-auto space-y-3 pr-1 custom-scrollbar">
+                  {allReminders.length > 0 ? (
+                    allReminders.map((rem) => (
+                      <div
+                        key={rem.id}
+                        className="p-3.5 rounded-xl bg-tf-surface-2/60 border border-tf-border/60 hover:bg-tf-surface-2 transition flex items-center justify-between gap-3"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <CompanyFavicon companyName={rem.company} jobUrl={rem.jobUrl} className="w-8 h-8 rounded-lg" />
+                          <div className="min-w-0 space-y-0.5">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-tf-text truncate">{rem.title}</span>
+                              <span className={`px-2 py-0.2 rounded-md text-[10px] font-bold border ${getStageBadgeStyle(rem.stage)}`}>
+                                {rem.stage}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-tf-text-secondary truncate">{rem.company} • {rem.role}</p>
+                            {rem.description && <p className="text-[10px] text-tf-text-secondary truncate">{rem.description}</p>}
+                            <p className="text-[10px] text-tf-text-tertiary flex items-center gap-1">
+                              <Clock size={11} /> {rem.time}
+                            </p>
+                          </div>
+                        </div>
+
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => {
+                            setShowRemindersModal(false);
+                            if (rem.applicationId) {
+                              navigate(`/job-tracker?appId=${rem.applicationId}`, {
+                                state: { selectedAppId: rem.applicationId }
+                              });
+                            }
+                          }}
+                          className="text-xs shrink-0"
+                        >
+                          <span>Open Tracker</span>
+                          <ArrowRight size={12} />
+                        </Button>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="py-12 text-center space-y-2">
+                      <Calendar size={32} className="mx-auto text-tf-text-tertiary opacity-40" />
+                      <p className="text-xs font-semibold text-tf-text">No upcoming reminders</p>
+                      <p className="text-[11px] text-tf-text-tertiary">Extract jobs to automatically track interview dates & deadlines.</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-2 border-t border-tf-border flex justify-end">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setShowRemindersModal(false)}
+                  >
+                    Close
+                  </Button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        </div>
+      </FadeSwap>
   );
 }
 

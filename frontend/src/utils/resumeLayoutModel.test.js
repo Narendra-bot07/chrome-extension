@@ -89,3 +89,22 @@ test('project links never enable candidate header components', () => {
   assert.equal(model.layout_tree.header.components.includes('github'), false);
   assert.equal(model.layout_tree.header.components.includes('other_links'), false);
 });
+
+test('stale hidden metadata cannot remove populated reviewed sections', () => {
+  const model = createResumeLayoutModel({
+    ...resume,
+    section_order: [...resume.section_order, 'achievements'],
+    achievements: ['Improved processing reliability.'],
+    layout_model: {
+      main_column: ['summary', 'experience'],
+      sidebar: ['skills', 'education', 'certifications'],
+      hidden_sections: ['achievements']
+    }
+  }, 'AltaATS', config);
+
+  assert.equal(model.hidden_sections.length, 0);
+  assert.equal(
+    [...model.main_column, ...model.sidebar].includes('achievements'),
+    true
+  );
+});

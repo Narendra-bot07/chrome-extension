@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Briefcase, Search, Trash2, Clock, 
   MapPin, Send, BrainCircuit, ExternalLink, Lightbulb, Bell, FileText,
@@ -82,6 +83,7 @@ function JobTrackerContent() {
       if (found) {
         setSelectedAppId(found.id);
         setShowWorkspaceModal(true);
+        setWorkspaceTab('Workflow');
       }
     }
   }, [searchParams, location, applications]);
@@ -147,6 +149,18 @@ function JobTrackerContent() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showWorkspaceModal]);
+
+  // Prevent background scroll jump when workspace modal is open
+  useEffect(() => {
+    if (showWorkspaceModal) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
   }, [showWorkspaceModal]);
 
   const selectedApp = applications.find(a => a && a.id === selectedAppId);
@@ -679,17 +693,13 @@ function JobTrackerContent() {
 
       </main>
 
-      {/* 5. JOB APPLICATION WORKSPACE POP-UP MODAL (ENHANCED & CENTERING) */}
-      {showWorkspaceModal && selectedApp && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-3 md:p-6 animate-fade-in">
-          <div className={`bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl flex flex-col overflow-hidden shadow-2xl relative text-zinc-900 dark:text-zinc-100 transition-all duration-200 ${
-            isFullscreenPopup 
-              ? 'w-full h-full rounded-none border-none' 
-              : 'w-[94vw] max-w-[1500px] h-[90vh] max-h-[920px]'
-          }`}>
+      {/* 5. JOB APPLICATION WORKSPACE POP-UP MODAL (FULL OVERLAY & PERFECTLY FIT) */}
+      {showWorkspaceModal && selectedApp && createPortal((
+        <div className="fixed inset-x-0 bottom-0 top-16 z-[9999] bg-white dark:bg-zinc-950 overflow-hidden overscroll-none animate-fade-in">
+          <div className="w-full h-full min-h-0 bg-white dark:bg-zinc-950 flex flex-col overflow-hidden relative text-zinc-900 dark:text-zinc-100">
             
             {/* Pop-Up Modal Header */}
-            <div className="relative">
+            <div className="relative shrink-0">
               <JobWorkspaceHeader
                 application={selectedApp}
                 onMoveStage={() => setWorkspaceTab('Workflow')}
@@ -705,25 +715,10 @@ function JobTrackerContent() {
                 }}
                 onArchiveJob={() => handleArchiveJob(selectedApp.id)}
                 onDeleteJob={() => handleDeleteJob(selectedApp.id)}
+                isFullscreenPopup={isFullscreenPopup}
+                onToggleFullscreen={() => setIsFullscreenPopup(!isFullscreenPopup)}
+                onClose={() => setShowWorkspaceModal(false)}
               />
-
-              {/* Controls: Fullscreen Expansion & Close X Buttons */}
-              <div className="absolute top-4 right-4 flex items-center gap-2 z-20">
-                <button
-                  onClick={() => setIsFullscreenPopup(!isFullscreenPopup)}
-                  className="p-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700"
-                  title={isFullscreenPopup ? 'Exit Fullscreen' : 'Fullscreen Expansion'}
-                >
-                  {isFullscreenPopup ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-                </button>
-                <button
-                  onClick={() => setShowWorkspaceModal(false)}
-                  className="p-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700"
-                  title="Close Workspace Pop-Up (ESC)"
-                >
-                  <X size={18} />
-                </button>
-              </div>
             </div>
 
             {/* STICKY TAB NAVIGATION BAR */}
@@ -769,7 +764,7 @@ function JobTrackerContent() {
             </div>
 
             {/* TAB CONTENT WORKSPACE CANVAS */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar bg-zinc-50/40 dark:bg-zinc-950 p-2 md:p-4 relative">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain custom-scrollbar bg-zinc-50/40 dark:bg-zinc-950 p-2 md:p-4 relative">
               {workspaceTab === 'Overview' && (
                 <OverviewTab application={selectedApp} onNavigateTab={(tab) => setWorkspaceTab(tab)} />
               )}
@@ -795,7 +790,7 @@ function JobTrackerContent() {
 
           </div>
         </div>
-      )}
+      ), document.body)}
 
       {/* MODAL 1: EDIT JOB DETAILS MODAL */}
       {showEditJobModal && (

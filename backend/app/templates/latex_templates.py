@@ -220,9 +220,7 @@ def generate_latex_code(resume: ResumeStructure, template_name: str = "modern") 
         certs_list = []
         for cert in resume.certifications:
             cname = escape_latex(cert.name)
-            corg = escape_latex(cert.issuing_organization)
-            cdate = f" ({escape_latex(cert.issue_date)})" if cert.issue_date else ""
-            certs_list.append(f"{cname} by {corg}{cdate}")
+            certs_list.append(cname)
         certs_str = " $|$ ".join(certs_list)
         
         latex += f"""

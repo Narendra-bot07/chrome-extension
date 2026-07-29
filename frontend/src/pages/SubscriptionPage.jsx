@@ -1,6 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { motion } from 'framer-motion';
 import { Check } from 'lucide-react';
 import { useSubscription } from '../hooks/useSubscription';
+import { useTailr4uReducedMotion } from '../motion/MotionSystem';
+import './SubscriptionPage.css';
 
 function formatDate(value) {
   if (!value) return '—';
@@ -31,6 +34,8 @@ function normalizeFeatures(features) {
 }
 
 export default function SubscriptionPage() {
+  const reducedMotion = useTailr4uReducedMotion();
+  const [spreadCards, setSpreadCards] = useState(reducedMotion);
   const { subscription, plans, loading, error, refresh } = useSubscription();
   const jdUsage = subscription?.usage?.jd_extraction;
   const limit = jdUsage?.limit;
@@ -40,6 +45,25 @@ export default function SubscriptionPage() {
   const currentPlanCode = subscription?.plan?.code || subscription?.plan_code || 'free';
   const currentPlan = plans.find((plan) => plan.code === currentPlanCode);
   const currentSortOrder = currentPlan?.sort_order ?? 0;
+  const availablePlans = plans.filter((plan) => plan.code !== 'free');
+  const usageItems = [
+    ['JD extractions', subscription?.usage?.jd_extraction],
+    ['Tailored resumes', subscription?.usage?.resume_generation],
+    ['Cover letters', subscription?.usage?.cover_letter_generation],
+    ['Resume uploads', subscription?.usage?.resume_upload]
+  ];
+
+  useEffect(() => {
+    if (reducedMotion) {
+      setSpreadCards(true);
+      return undefined;
+    }
+    setSpreadCards(false);
+    const frame = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => setSpreadCards(true));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [reducedMotion, availablePlans.length]);
 
   const ctaLabel = (plan) => {
     if (plan.code === currentPlanCode) return 'Current Plan';
@@ -88,20 +112,37 @@ export default function SubscriptionPage() {
             {limit ? `${remaining} extractions remaining` : 'Unlimited extractions'} · Resets on {formatDate(jdUsage?.period_end || subscription?.current_period_end)}
           </div>
         </div>
+        <div className="subscription-usage-grid">
+          {usageItems.map(([label, item]) => (
+            <div key={label}>
+              <span>{label}</span>
+              <strong>{item?.used || 0} / {item?.limit == null ? '∞' : item.limit}</strong>
+              <small>{item?.remaining == null ? 'Unlimited' : `${item.remaining} remaining`}</small>
+            </div>
+          ))}
+        </div>
       </section>
 
       <section>
         <h2 className="text-lg font-black mb-3">Available Plans</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-          {plans.map((plan) => {
+        <div className={`subscription-plans-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 ${spreadCards ? 'is-spread' : 'is-stacked'}`}>
+          {availablePlans.map((plan, index) => {
             const isCurrent = plan.code === currentPlanCode;
-            const isRecommended = plan.code === 'pro';
+            const isRecommended = plan.code === 'elite';
             const features = normalizeFeatures(plan.features).slice(0, 6);
 
             return (
-              <div
+              <motion.div
                 key={plan.id || plan.code}
-                className={`rounded-2xl border bg-white dark:bg-zinc-950 p-5 flex flex-col min-h-[380px] ${
+                layout={!reducedMotion}
+                initial={reducedMotion ? false : { opacity: index === 0 ? 1 : .88, scale: 1 - index * .012 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{
+                  layout: { type: 'spring', stiffness: 155, damping: 21, mass: .82, delay: index * .075 },
+                  opacity: { duration: .22, delay: index * .075 },
+                  scale: { duration: .28, delay: index * .075 }
+                }}
+                className={`subscription-plan-card subscription-plan-${plan.code} rounded-2xl border bg-white dark:bg-zinc-950 p-5 flex flex-col min-h-[420px] ${
                   isRecommended
                     ? 'border-indigo-500 shadow-lg shadow-indigo-500/10'
                     : 'border-zinc-200 dark:border-zinc-800'
@@ -142,7 +183,7 @@ export default function SubscriptionPage() {
                 >
                   {ctaLabel(plan)}
                 </button>
-              </div>
+              </motion.div>
             );
           })}
         </div>

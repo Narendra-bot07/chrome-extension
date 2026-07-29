@@ -22,7 +22,7 @@ function JobSummaryCard({
   const displaySkills = collectJobSkills(details).explicit;
 
   React.useEffect(() => {
-    console.log('[ApplyFlow:Trace 08] Final JobSummaryCard render values', {
+    console.log('[tailr4u:Trace 08] Final JobSummaryCard render values', {
       title: displayTitle,
       company: displayCompany,
       location: jobAnalysis?.location,

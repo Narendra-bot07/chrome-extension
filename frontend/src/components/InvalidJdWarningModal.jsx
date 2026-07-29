@@ -1,20 +1,11 @@
 import React from 'react';
-import { motion } from 'framer-motion';
 import { AlertCircle } from 'lucide-react';
 import { Button } from './ui/Button';
+import { MotionModal } from '../motion/MotionSystem';
 
 function InvalidJdWarningModal({ isOpen, onClose, onPasteManually }) {
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 bg-[#0A0B0D]/50 backdrop-blur-[4px] z-50 flex items-center justify-center p-4 select-none font-sans">
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.98 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.98 }}
-        transition={{ duration: 0.24, ease: [0.2, 0, 0, 1] }}
-        className="bg-tf-surface border border-tf-border rounded-xl p-6 max-w-sm w-full space-y-4 shadow-modal"
-      >
+    <MotionModal open={isOpen} onClose={onClose} className="max-w-sm p-6 space-y-4 select-none font-sans">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-md bg-tf-warning/10 border border-tf-warning/20 flex items-center justify-center text-tf-warning shrink-0">
             <AlertCircle size={18} />
@@ -47,8 +38,7 @@ function InvalidJdWarningModal({ isOpen, onClose, onPasteManually }) {
             Close
           </Button>
         </div>
-      </motion.div>
-    </div>
+    </MotionModal>
   );
 }
 

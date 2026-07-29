@@ -31,10 +31,11 @@ export function Button({
 
   return (
     <motion.button
-      whileHover={isInteractive ? buttonMotion.whileHover.whileHover : undefined}
-      whileTap={isInteractive ? buttonMotion.whileTap.whileTap : undefined}
+      whileHover={isInteractive ? buttonMotion.whileHover : undefined}
+      whileTap={isInteractive ? buttonMotion.whileTap : undefined}
       className={`${baseStyles} ${variants[variant] || variants.primary} ${sizes[size] || sizes.md} ${className}`}
       disabled={disabled || isLoading}
+      aria-busy={isLoading || undefined}
       {...props}
     >
       {isLoading ? (

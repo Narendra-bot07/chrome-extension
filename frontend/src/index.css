@@ -8,6 +8,23 @@
   }
 }
 
+@media (pointer: fine) {
+  html,
+  body,
+  html *,
+  body *,
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  [role="button"],
+  [role="tab"],
+  [data-cursor] {
+    cursor: none !important;
+  }
+}
+
 /* Custom Scrollbar for a cleaner look */
 ::-webkit-scrollbar {
   width: 6px;

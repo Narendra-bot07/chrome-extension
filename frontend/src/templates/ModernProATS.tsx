@@ -120,8 +120,6 @@ export default function ModernProATS({ resume }) {
                 {certifications.map((cert, i) => (
                   <div key={i}>
                     <h3 className="font-bold text-xs text-zinc-900">{cert.name}</h3>
-                    <div className="text-xs text-zinc-700 mt-0.5">{cert.issuing_organization}</div>
-                    <div className="text-xs text-zinc-500 mt-0.5">{cert.issue_date}</div>
                   </div>
                 ))}
               </div>
