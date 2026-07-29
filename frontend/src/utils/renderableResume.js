@@ -283,12 +283,19 @@ export function toRenderableResume(record) {
   output.certifications = output.certifications.map(item => {
     if (typeof item === 'string') {
       const split = splitDetailedText(item);
-      return split.description
-        ? { name: split.title, issuing_organization: split.description }
+      const desc = split.description && split.description !== '0' && split.description !== '0.' ? split.description : null;
+      return desc
+        ? { name: split.title, issuing_organization: desc }
         : { name: split.title };
     }
     const normalized = structuredClone(item);
     if (!normalized.name && normalized.title) normalized.name = normalized.title;
+    for (const key of Object.keys(normalized)) {
+      const val = String(normalized[key] || '').trim();
+      if (val === '0' || val === '0.') {
+        delete normalized[key];
+      }
+    }
     return normalized;
   });
 

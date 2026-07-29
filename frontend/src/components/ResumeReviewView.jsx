@@ -626,6 +626,11 @@ function ResumeReviewView({
             if (typeof item !== 'object' || item === null) {
               return <div key={index}>• {displayValue(item)}</div>;
             }
+            const isValidText = val => {
+              if (val === null || val === undefined) return false;
+              const str = String(val).trim();
+              return str !== '' && str !== '0' && str !== '0.';
+            };
             const heading = item.degree
               ? item.degree
               : (item.role || item.title || item.name || item.certification_name || item.course || item.organization || item.institution);
@@ -635,11 +640,12 @@ function ResumeReviewView({
               item.issuing_organization || item.issuer || item.publisher,
               item.field_of_study,
               item.location
-            ].filter(Boolean).join(' · ');
-            const dates = [item.start_date || item.issue_date || item.date || item.year, item.end_date].filter(Boolean).join(' - ');
-            const techStack = Array.isArray(item.technology_stack)
+            ].filter(isValidText).join(' · ');
+            const dates = [item.start_date || item.issue_date || item.date || item.year, item.end_date].filter(isValidText).join(' - ');
+            const rawTech = Array.isArray(item.technology_stack)
               ? item.technology_stack.join(', ')
               : (item.technology_stack || item.technologies || item.tech);
+            const techStack = isValidText(rawTech) ? String(rawTech).trim() : null;
             const bullets = item.description || item.bullet_points || item.bullets || item.highlights;
             const remaining = Object.entries(item).filter(([key, value]) =>
               !INTERNAL_REVIEW_FIELDS.has(key) &&
@@ -647,7 +653,9 @@ function ResumeReviewView({
                 'institution', 'school', 'company', 'issuing_organization', 'issuer', 'publisher',
                 'field_of_study', 'location', 'start_date', 'end_date', 'issue_date', 'date', 'year',
                 'description', 'bullet_points', 'bullets', 'highlights', 'technology_stack',
-                'technologies', 'tech', 'skills_used'].includes(key) && hasVisibleValue(value)
+                'technologies', 'tech', 'skills_used'].includes(key) &&
+              hasVisibleValue(value) &&
+              isValidText(value)
             );
             return (
               <div key={index} className="space-y-0.5">

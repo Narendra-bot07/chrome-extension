@@ -527,11 +527,11 @@ export default function ResumePreview({
         >
           <div
             id="resume-print-container"
-            className="shadow-2xl bg-white ring-1 ring-zinc-200/70 dark:ring-zinc-800 rounded-sm overflow-hidden text-zinc-900"
+            className="resume-document-light shadow-2xl bg-white ring-1 ring-zinc-200/70 rounded-sm overflow-hidden text-zinc-900"
             style={{ width: '8.5in', minHeight: pageCount === 2 ? '22.5in' : '11in' }}
           >
             {interactiveLayoutMode ? (
-              <div className="w-full bg-white">
+              <div className="resume-document-light w-full bg-white">
                 <LiveTemplateComponent
                   resume={resumeData}
                   sectionOrder={sectionOrder}

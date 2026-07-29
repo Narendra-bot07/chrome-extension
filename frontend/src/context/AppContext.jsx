@@ -623,13 +623,12 @@ export function AppProvider({ children }) {
               : '';
             const sessionMatchesActiveJob = Boolean(
               savedJD
-              && savedIdentity
               && (
-                (activeIdentity && savedIdentity === activeIdentity)
                 // Full-page extension routes cannot identify the originating
                 // browser tab. Retain the current browser-session JD while the
                 // user moves through tailoring, resume, and cover-letter steps.
-                || activeIsExtensionPage
+                activeIsExtensionPage
+                || (savedIdentity && activeIdentity && savedIdentity === activeIdentity)
               )
             );
 

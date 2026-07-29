@@ -469,25 +469,6 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
             {certificationRecords.map((cert: any) => (
               <div key={cert.id} className="break-inside-avoid" style={{ breakInside: 'avoid-page', fontSize: `${params.fontSize}px`, lineHeight: 1.05, margin: 0, padding: '1px 0' }}>
                 {cert.title && <div className="font-bold text-zinc-950">{cert.title}</div>}
-                {cert.description && (
-                  <div className="text-zinc-800 pl-3 relative leading-none">
-                    <span className="absolute left-0">•</span>{renderTextWithLinks(cert.description)}
-                  </div>
-                )}
-                {(cert.organization || cert.date || cert.links?.length) && (
-                  <div className="text-zinc-600 text-[9.5px] leading-none">
-                    {[cert.organization, cert.date].filter(Boolean).join(' · ')}
-                    {(cert.links || []).filter((link: any) =>
-                      link.owner_type === 'certification' && link.owner_id === cert.id
-                      && link.validation_status === 'VALID'
-                    ).map((link: any) => (
-                      <a key={link.id || link.url} href={link.normalized_url || link.url}
-                        target="_blank" rel="noopener noreferrer" className="underline ml-1">
-                        {link.display_label || 'View Credential'}
-                      </a>
-                    ))}
-                  </div>
-                )}
               </div>
             ))}
           </div>
@@ -590,7 +571,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     return (
       <div 
         data-resume-layout="single-column"
-        className="font-sans bg-white text-zinc-900"
+        className="resume-document-light font-sans bg-white text-zinc-900"
         style={{ width: '816px', minHeight: '1056px', padding: `${params.paddingY}px ${params.paddingX}px`, fontSize: `${params.fontSize}px`, lineHeight: params.lineHeight }}
       >
         {/* Centered Header for Classic ATS */}
@@ -643,7 +624,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     return (
       <div 
         data-resume-layout="single-column"
-        className="font-serif bg-white text-zinc-900"
+        className="resume-document-light font-serif bg-white text-zinc-900"
         style={{ width: '816px', minHeight: '1056px', padding: `${params.paddingY + 8}px ${params.paddingX + 8}px`, fontSize: `${params.fontSize}px`, lineHeight: params.lineHeight }}
       >
         {/* Centered Executive Header */}
@@ -704,7 +685,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     return (
       <div 
         data-resume-layout="sidebar"
-        className="font-sans bg-white text-zinc-900 flex flex-row min-h-[1056px]"
+        className="resume-document-light font-sans bg-white text-zinc-900 flex flex-row min-h-[1056px]"
         style={{ width: '816px', lineHeight: params.lineHeight }}
       >
         {/* Left Sidebar */}
@@ -783,7 +764,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     return (
       <div 
         data-resume-layout="single-column"
-        className="font-sans bg-white text-zinc-900"
+        className="resume-document-light font-sans bg-white text-zinc-900"
         style={{ width: '816px', minHeight: '1056px', padding: `${params.paddingY}px ${params.paddingX}px`, fontSize: `${params.fontSize}px`, lineHeight: params.lineHeight }}
       >
         {/* Tech Hero Header */}
@@ -844,7 +825,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     return (
       <div 
         data-resume-layout="sidebar"
-        className="font-sans bg-white text-zinc-900 min-h-[1056px]"
+        className="resume-document-light font-sans bg-white text-zinc-900 min-h-[1056px]"
         style={{ width: '816px', lineHeight: params.lineHeight }}
       >
         {/* Left Accent Banner Header */}
@@ -904,7 +885,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     return (
       <div 
         data-resume-layout="two-column"
-        className="font-serif bg-white text-zinc-900 p-8 min-h-[1056px]"
+        className="resume-document-light font-serif bg-white text-zinc-900 p-8 min-h-[1056px]"
         style={{ width: '816px', lineHeight: params.lineHeight }}
       >
         {/* Executive Header */}

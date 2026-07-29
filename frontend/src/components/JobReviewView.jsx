@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { fingerprintJD } from '../utils/jobPipelineSession';
 import './JobReviewView.css';
 
 const isNotAvailable = (val) => {
@@ -147,7 +148,18 @@ function JobReviewView({
   loading
 }) {
   const navigate = useNavigate();
-  const { user, parsedResume, isExtension, jobTitle, companyName, jobText, jobAnalysis: currentJobAnalysis, comparison } = useApp();
+  const {
+    user,
+    parsedResume,
+    isExtension,
+    jobTitle,
+    companyName,
+    jobText,
+    lastAnalyzedUrl,
+    jobDetectionMeta,
+    jobAnalysis: currentJobAnalysis,
+    comparison
+  } = useApp();
   const [applied, setApplied] = useState(false);
   const [favourite, setFavourite] = useState(false);
   const [showMatchPopup, setShowMatchPopup] = useState(false);
@@ -165,8 +177,10 @@ function JobReviewView({
 
   const openWorkflowRoute = (path) => {
     if (isExtension && typeof chrome !== 'undefined' && chrome.storage?.local) {
+      const canonicalJD = currentJobAnalysis || jobAnalysis;
+      const jdFingerprint = canonicalJD ? fingerprintJD(canonicalJD) : '';
       const snapshot = {
-        jobAnalysis: currentJobAnalysis || jobAnalysis,
+        jobAnalysis: canonicalJD,
         jobText,
         companyName,
         jobTitle,
@@ -181,16 +195,24 @@ function JobReviewView({
             window.open(workflowUrl, '_blank', 'noopener,noreferrer');
           }
         };
-        if (chrome.storage?.session && comparison) {
-          chrome.storage.session.get(['jobExtractionSession'], result => {
-            chrome.storage.session.set({
-              jobExtractionSession: {
-                ...(result.jobExtractionSession || {}),
-                comparison,
-                comparisonResumeId: parsedResume?.id || parsedResume?.resume_id || null
-              }
-            }, openTab);
-          });
+        if (chrome.storage?.session && canonicalJD) {
+          chrome.storage.session.set({
+            jobExtractionSession: {
+              version: 1,
+              canonicalJD,
+              jobAnalysis: canonicalJD,
+              jdFingerprint,
+              fingerprint: jdFingerprint,
+              jobText: jobText || canonicalJD.description || '',
+              companyName: companyName || canonicalJD.company || canonicalJD.company_name || '',
+              jobTitle: jobTitle || canonicalJD.title || canonicalJD.job_title || '',
+              lastAnalyzedUrl: lastAnalyzedUrl || canonicalJD.source_url || '',
+              jobDetectionMeta: jobDetectionMeta || null,
+              comparison: comparison || null,
+              comparisonResumeId: parsedResume?.id || parsedResume?.resume_id || null,
+              createdAt: new Date().toISOString()
+            }
+          }, openTab);
         } else {
           openTab();
         }

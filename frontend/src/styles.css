@@ -1026,3 +1026,18 @@ html.dark #root .dashboard-kpi-card:hover {
 .print-compression-level-1 { font-size: 15px; }
 .print-compression-level-2 { font-size: 14px; }
 .print-compression-level-3, .print-compression-level-4, .print-compression-level-5 { font-size: 13.5px; }
+/*
+ * Resume documents are print artifacts, not themed application surfaces.
+ * Keep every live template, thumbnail, review and download preview on white
+ * paper even when the surrounding application uses dark mode.
+ */
+.resume-document-light,
+html.dark #root .resume-document-light,
+html.dark #root .resume-document-light.bg-white,
+html.dark #root .resume-document-light .bg-white {
+  color-scheme: light;
+  background-color: #ffffff !important;
+  background-image: none !important;
+  color: #18181b;
+  backdrop-filter: none !important;
+}

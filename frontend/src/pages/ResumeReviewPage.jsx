@@ -182,7 +182,7 @@ function ResumeReviewPage() {
                 className="origin-top transition-transform duration-200 ease-out"
                 style={{ transform: `scale(${zoom})`, transformOrigin: 'top center' }}
               >
-                <div className="w-[816px] shadow-2xl bg-white rounded-sm overflow-hidden text-zinc-900">
+                <div className="resume-document-light w-[816px] shadow-2xl bg-white rounded-sm overflow-hidden text-zinc-900">
                   {composition && (
                     <TailorRender
                       resume={composition.resume}

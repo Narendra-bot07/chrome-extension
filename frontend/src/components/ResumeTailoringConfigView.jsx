@@ -67,7 +67,8 @@ function ResumeTailoringConfigView({
   onChangeResume,
   onChooseResume,
   onUploadResume,
-  validationMessage
+  validationMessage,
+  matchScore
 }) {
   const { isExtension, apiUrl, session } = useApp();
   const selectedCount = selectedSections.length;
@@ -142,9 +143,21 @@ function ResumeTailoringConfigView({
 
       <div className="space-y-5 pr-1.5 scrollbar-thin overflow-y-auto max-h-[500px] pb-4">
         {/* Title */}
-        <div className="space-y-1">
-          <h2 className="text-lg font-extrabold tracking-tight text-zinc-950 dark:text-zinc-50">Configure Tailoring</h2>
-          <p className="text-xs text-zinc-400">Fine-tune how AI optimizes your resume details.</p>
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h2 className="text-lg font-extrabold tracking-tight text-zinc-950 dark:text-zinc-50">Configure Tailoring</h2>
+            <p className="text-xs text-zinc-400">Fine-tune how AI optimizes your resume details.</p>
+          </div>
+          {Number.isFinite(Number(matchScore)) && (
+            <div className="shrink-0 rounded-full border border-orange-200 bg-white px-3 py-2 text-center shadow-sm dark:border-orange-900/60 dark:bg-zinc-900">
+              <div className="text-lg font-black leading-none text-blue-600">
+                {Math.round(Number(matchScore))}%
+              </div>
+              <div className="mt-1 text-[8px] font-black uppercase tracking-widest text-zinc-500">
+                JD Match
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="rounded-2xl border border-zinc-200/70 dark:border-zinc-800 bg-white dark:bg-zinc-900/30 p-4 space-y-3">

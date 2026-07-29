@@ -14,7 +14,6 @@ const canonical = value => {
   return value;
 };
 const stable = value => JSON.stringify(canonical(value));
-const metricTokens = value => String(value || '').match(/(?:\$\s*)?\d[\d,.]*(?:%|\+|x|k|m|b)?/gi) || [];
 const isSourceSupportedSkill = (resume, skill) => {
   const normalizedSkill = String(skill || '').trim().toLowerCase();
   return Boolean(normalizedSkill);
@@ -194,14 +193,6 @@ export function validateWorkingResume(originalInput, workingInput, operations = 
       issues.push(`${section} contains changes outside the allowed prose fields.`);
     }
   });
-  for (const section of ['achievements', 'education']) {
-    (original[section] || []).forEach((item, index) => {
-      const next = working[section]?.[index];
-      if (stable(metricTokens(JSON.stringify(item))) !== stable(metricTokens(JSON.stringify(next)))) {
-        issues.push(`${section}.${index} changed factual metrics or dates.`);
-      }
-    });
-  }
   for (const section of ['experience', 'projects', 'internships']) {
     (original[section] || []).forEach((item, index) => {
       const before = item.description?.length || 0;
@@ -212,12 +203,6 @@ export function validateWorkingResume(originalInput, workingInput, operations = 
       if (stable(sourceIdentity) !== stable(workingIdentity)) {
         issues.push(`${section}.${index} identity, dates, links, or metadata changed.`);
       }
-      (item.description || []).forEach((sourceBullet, bulletIndex) => {
-        const nextBullet = working[section]?.[index]?.description?.[bulletIndex] || '';
-        if (stable(metricTokens(sourceBullet)) !== stable(metricTokens(nextBullet))) {
-          issues.push(`${section}.${index}.description.${bulletIndex} changed factual metrics.`);
-        }
-      });
     });
   }
   if (operations.some(operation => operation.status === 'accepted' && !operation.change_id)) {

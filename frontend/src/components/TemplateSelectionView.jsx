@@ -73,9 +73,9 @@ const TEMPLATES_LIST = [
 // Miniature Live A4 preview renderer card
 const MiniPreview = ({ resume, templateId }) => {
   return (
-    <div className="w-full h-[260px] bg-white border-b border-zinc-200 overflow-hidden relative shadow-inner flex justify-center items-start group-hover:shadow-md transition-all">
+    <div className="resume-document-light w-full h-[260px] bg-white border-b border-zinc-200 overflow-hidden relative shadow-inner flex justify-center items-start group-hover:shadow-md transition-all">
       <div 
-        className="absolute top-0 left-1/2 -translate-x-1/2 w-[816px] h-[1056px] bg-white origin-top scale-[0.24] pointer-events-none select-none"
+        className="resume-document-light absolute top-0 left-1/2 -translate-x-1/2 w-[816px] h-[1056px] bg-white origin-top scale-[0.24] pointer-events-none select-none"
         style={{ width: '816px', height: '1056px' }}
       >
         <TailorRender resume={resume} templateName={templateId} />
