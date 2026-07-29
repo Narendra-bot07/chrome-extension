@@ -110,14 +110,6 @@ export function JobWorkspaceHeader({
         </button>
 
         {/* Secondary Action Icons */}
-        <button
-          onClick={onEditJob}
-          title="Edit Job Details"
-          className="p-2 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 rounded-xl transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700 shadow-xs"
-        >
-          <Edit3 size={15} />
-        </button>
-
         {application.job_url && (
           <a
             href={application.job_url}
@@ -145,16 +137,6 @@ export function JobWorkspaceHeader({
         >
           <Trash2 size={15} />
         </button>
-
-        {onToggleFullscreen && (
-          <button
-            onClick={onToggleFullscreen}
-            title={isFullscreenPopup ? 'Exit Fullscreen' : 'Fullscreen Expansion'}
-            className="p-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 rounded-xl transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700 shadow-xs ml-1"
-          >
-            {isFullscreenPopup ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-          </button>
-        )}
 
         {onClose && (
           <button

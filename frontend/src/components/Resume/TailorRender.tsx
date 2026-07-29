@@ -947,6 +947,23 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
             {sidebarList.map(sectionId => (
               <section key={sectionId} data-section={sectionId} style={{ marginBottom: `${params.sectionGap}px` }}>
                 <h2 
+                  style={{ fontSize: `${params.sectionTitleSize}px`, breakAfter: 'avoid-page' }}
+                >
+                  {sectionLabel(sectionId)}
+                </h2>
+                {renderSectionContent(sectionId, false)}
+              </section>
+            ))}
+          </div>
+
+          {/* Divider */}
+          <div className="border-r border-zinc-200 shrink-0"></div>
+
+          {/* Executive Column */}
+          <div className="w-[33%] flex flex-col shrink-0">
+            {sidebarList.map(sectionId => (
+              <section key={sectionId} data-section={sectionId} style={{ marginBottom: `${params.sectionGap}px` }}>
+                <h2 
                   className="font-serif font-extrabold uppercase tracking-wider text-amber-950 border-b border-amber-900/30 pb-0.5 mb-1 text-[11px]"
                   style={{ breakAfter: 'avoid-page' }}
                 >
@@ -961,7 +978,271 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     );
   };
 
+  // =========================================================================
+  // RENDERER 7: JOHNSON'S RESUME (ELEGANT SERIF & STEEL BLUE HEADER)
+  // =========================================================================
+  const renderJohnsonsSectionContent = (sectionId: string) => {
+    if (sectionId === 'summary') {
+      return (
+        <p className="font-serif text-zinc-900 text-[11.5px] leading-relaxed italic">
+          {summary}
+        </p>
+      );
+    }
+
+    if (sectionId === 'education') {
+      return (
+        <div className="space-y-2.5">
+          {(education || []).map((edu: any, idx: number) => (
+            <div key={idx} className="space-y-0.5 font-serif text-[11.5px]">
+              <div className="flex justify-between items-baseline font-serif">
+                <span className="font-bold text-zinc-950 text-[12px]">{edu.degree || edu.institution || edu.school}</span>
+                <span className="italic text-zinc-800 text-[11px]">{edu.institution || edu.school}</span>
+              </div>
+              <div className="flex justify-between items-baseline font-serif italic text-zinc-700 text-[11px]">
+                <span>{edu.field_of_study || edu.degree_type || edu.area || ''}</span>
+                <span>{edu.start_date && edu.end_date ? `${edu.start_date} - ${edu.end_date}` : (edu.dates || edu.year || '')}</span>
+              </div>
+              {edu.honors && <div className="italic text-zinc-700 text-[10.5px]">Graduated with honors: {edu.honors}</div>}
+              {edu.gpa && <div className="italic text-zinc-700 text-[10.5px]">Final grade: {edu.gpa}</div>}
+              {edu.thesis && <div className="italic text-zinc-700 text-[10.5px]">Thesis title: {edu.thesis}</div>}
+              {edu.description && Array.isArray(edu.description) && edu.description.length > 0 && (
+                <ul className="list-disc pl-5 space-y-0.5 mt-1 text-zinc-800 text-[11px]">
+                  {edu.description.map((bullet: string, bIdx: number) => <li key={bIdx}>{bullet}</li>)}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    if (sectionId === 'experience') {
+      return (
+        <div className="space-y-3">
+          {(experience || []).map((exp: any, idx: number) => (
+            <div key={idx} className="space-y-0.5 font-serif text-[11.5px]">
+              <div className="flex justify-between items-baseline font-serif">
+                <span className="font-bold text-zinc-950 text-[12px]">{exp.company || exp.organization}</span>
+                <span className="italic text-zinc-800 text-[11px]">{exp.start_date} - {exp.end_date || 'Present'}</span>
+              </div>
+              <div className="flex justify-between items-baseline font-serif italic text-zinc-700 text-[11px]">
+                <span>{exp.role || exp.title}</span>
+                <span>{exp.location}</span>
+              </div>
+              {exp.description && Array.isArray(exp.description) && exp.description.length > 0 && (
+                <ul className="list-disc pl-5 space-y-1 mt-1 text-zinc-800 text-[11px]">
+                  {exp.description.map((bullet: string, bIdx: number) => (
+                    <li key={bIdx} className="leading-normal">{bullet}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    if (sectionId === 'volunteer') {
+      return (
+        <div className="space-y-2.5">
+          {(volunteer_experience || []).map((vol: any, idx: number) => (
+            <div key={idx} className="space-y-0.5 font-serif text-[11.5px]">
+              <div className="flex justify-between items-baseline font-serif">
+                <span className="font-bold text-zinc-950 text-[12px]">{vol.organization || vol.role}</span>
+                <span className="italic text-zinc-800 text-[11px]">{vol.start_date} - {vol.end_date || 'Present'}</span>
+              </div>
+              <div className="flex justify-between items-baseline font-serif italic text-zinc-700 text-[11px]">
+                <span>{vol.role || vol.title}</span>
+                <span>{vol.location}</span>
+              </div>
+              {vol.description && Array.isArray(vol.description) && vol.description.length > 0 && (
+                <ul className="list-disc pl-5 space-y-0.5 mt-1 text-zinc-800 text-[11px]">
+                  {vol.description.map((bullet: string, bIdx: number) => <li key={bIdx}>{bullet}</li>)}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    if (sectionId === 'skills') {
+      return (
+        <div className="space-y-1.5 font-serif text-[11.5px]">
+          {categorizedSkills.map((cat: any, idx: number) => (
+            <div key={idx} className="flex flex-row items-baseline gap-4">
+              <div className="w-48 shrink-0 font-bold text-zinc-950 text-[11.5px]">
+                {cat.title}
+              </div>
+              <div className="flex-1 text-zinc-800 text-[11.5px]">
+                {cat.skills.join(', ')}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    if (sectionId === 'languages') {
+      return (
+        <div className="space-y-1.5 font-serif text-[11.5px]">
+          {(languages || []).map((lang: any, idx: number) => (
+            <div key={idx} className="flex flex-row items-baseline gap-4">
+              <div className="w-48 shrink-0 font-bold text-zinc-950 text-[11.5px]">
+                {typeof lang === 'string' ? lang : (lang.language || lang.name)}
+              </div>
+              <div className="flex-1 italic text-zinc-800 text-[11.5px]">
+                {typeof lang === 'object' ? (lang.proficiency || lang.level || '') : ''}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    if (sectionId === 'projects') {
+      return (
+        <div className="space-y-2">
+          {(projects || []).map((proj: any, idx: number) => (
+            <div key={idx} className="space-y-0.5 font-serif text-[11.5px]">
+              <div className="flex justify-between items-baseline font-serif">
+                <span className="font-bold text-zinc-950 text-[12px]">{proj.name || proj.title}</span>
+                <span className="italic text-zinc-800 text-[11px]">{proj.date || proj.dates || ''}</span>
+              </div>
+              {proj.technologies && (
+                <div className="italic text-zinc-700 text-[10.5px]">
+                  Technologies: {Array.isArray(proj.technologies) ? proj.technologies.join(', ') : proj.technologies}
+                </div>
+              )}
+              {proj.description && Array.isArray(proj.description) && proj.description.length > 0 && (
+                <ul className="list-disc pl-5 space-y-0.5 mt-1 text-zinc-800 text-[11px]">
+                  {proj.description.map((bullet: string, bIdx: number) => <li key={bIdx}>{bullet}</li>)}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    if (sectionId === 'certifications') {
+      return (
+        <div className="space-y-1.5 font-serif text-[11.5px]">
+          {(certificationRecords || []).map((cert: any, idx: number) => (
+            <div key={idx} className="flex flex-row items-baseline gap-4">
+              <div className="w-48 shrink-0 font-bold text-zinc-950 text-[11.5px]">
+                {cert.title || cert.name}
+              </div>
+              <div className="flex-1 text-zinc-800 text-[11.5px]">
+                {cert.issuer || cert.authority ? `${cert.issuer || cert.authority} (${cert.date || ''})` : cert.date}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    if (sectionId === 'achievements') {
+      return (
+        <div className="space-y-1.5 font-serif text-[11.5px]">
+          {(achievementRecords || []).map((ach: any, idx: number) => (
+            <div key={idx} className="flex flex-row items-baseline gap-4">
+              <div className="w-48 shrink-0 font-bold text-zinc-950 text-[11.5px]">
+                {ach.title || ach.name}
+              </div>
+              <div className="flex-1 text-zinc-800 text-[11.5px]">
+                {ach.description || ach.summary || ach.date}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    return renderSectionContent(sectionId, false);
+  };
+
+  const renderJohnsonsResumeLayout = () => {
+    return (
+      <div 
+        data-resume-layout="single-column"
+        className="resume-document-light font-serif bg-white text-zinc-900"
+        style={{ 
+          width: '816px', 
+          minHeight: '1056px', 
+          padding: `${params.paddingY + 4}px ${params.paddingX + 4}px`, 
+          fontSize: `${params.fontSize}px`, 
+          lineHeight: params.lineHeight 
+        }}
+      >
+        {/* Header - Centered Italic Steel Blue Title & Subtitle Info */}
+        <header className="text-center mb-4">
+          <h1 
+            className="font-serif italic text-[#1d5288] tracking-normal leading-tight font-medium"
+            style={{ fontSize: `${params.nameSize + 4}px` }}
+          >
+            {candidateName}
+          </h1>
+          
+          <div className="font-serif italic text-zinc-700 text-[11px] mt-1 space-y-0.5">
+            {personal_info?.location && (
+              <div>Residence/domicile: {personal_info.location}</div>
+            )}
+            <div className="flex flex-wrap justify-center items-center gap-x-2">
+              {personal_info?.email && <span>E-mail: {personal_info.email}</span>}
+              {personal_info?.email && personal_info?.phone && <span className="text-[#1d5288] select-none">✻</span>}
+              {personal_info?.phone && <span>Telephone number: {personal_info.phone}</span>}
+            </div>
+            {(personal_info?.linkedin || personal_info?.github || personal_info?.website) && (
+              <div className="flex flex-wrap justify-center items-center gap-x-2">
+                {personal_info?.linkedin && <span>LinkedIn: {linkDisplay('linkedin', personal_info.linkedin)}</span>}
+                {personal_info?.linkedin && (personal_info?.github || personal_info?.website) && <span className="text-[#1d5288] select-none">✻</span>}
+                {personal_info?.github && <span>GitHub: {linkDisplay('github', personal_info.github)}</span>}
+                {personal_info?.github && personal_info?.website && <span className="text-[#1d5288] select-none">✻</span>}
+                {personal_info?.website && <span>Portfolio: {linkDisplay('website', personal_info.website)}</span>}
+              </div>
+            )}
+          </div>
+        </header>
+
+        {/* Sections list with Steel Blue Italic headers and bottom divider */}
+        <div className="flex flex-col">
+          {activeOrder.map(sectionId => {
+            if (!hasData(sectionId)) return null;
+            
+            let customLabel = sectionLabel(sectionId);
+            if (sectionId === 'experience') customLabel = 'Work experience';
+            if (sectionId === 'education') customLabel = 'Education';
+            if (sectionId === 'skills') customLabel = 'Technical skills';
+            if (sectionId === 'projects') customLabel = 'Portfolio of most relevant projects';
+            if (sectionId === 'languages') customLabel = 'Language proficiencies';
+            if (sectionId === 'volunteer') customLabel = 'Extracurricular activities';
+            if (sectionId === 'achievements') customLabel = 'Memberships & Achievements';
+
+            return (
+              <section key={sectionId} data-section={sectionId} style={{ marginBottom: `${params.sectionGap}px` }}>
+                <h2 
+                  className="font-serif italic font-bold text-[#1d5288] border-b border-[#7b9ebc] pb-0.5 mb-2 text-left"
+                  style={{ fontSize: `${params.sectionTitleSize + 1}px`, breakAfter: 'avoid-page' }}
+                >
+                  {customLabel}
+                </h2>
+                <div className="font-serif text-zinc-900">
+                  {renderJohnsonsSectionContent(sectionId)}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   // Route layout rendering based on canonical template ID or resolved config layout
+  if (resolvedTemplateKey === 'JohnsonsResume' || resolvedTemplateKey === 'johnsons_resume' || resolvedTemplateKey === 'Johnsons') {
+    return renderJohnsonsResumeLayout();
+  }
   if (resolvedTemplateKey === 'ClassicATS' || resolvedTemplateKey === 'MinimalATS' || resolvedTemplateKey === 'ProfessionalATS') {
     return renderClassicATSLayout();
   }

@@ -236,12 +236,47 @@ const CANONICAL_TEMPLATES: Record<string, TemplateConfig> = {
       headerDivider: true
     },
     icons: true
+  },
+
+  // ==================================================
+  // TEMPLATE 7: JOHNSON'S RESUME (ELEGANT SERIF & STEEL BLUE)
+  // Purpose: Classic Italian academic & executive serif template with steel blue headers and structured two-column key-value alignment.
+  // ==================================================
+  'JohnsonsResume': {
+    id: 'JohnsonsResume',
+    name: "Johnson's Resume",
+    description: "Classic Italian academic and executive serif layout featuring steel blue titles, italic headers, and precise key-value column alignment.",
+    recommendedFor: 'Academia, Legal, Executive Leadership, Research, High-End Corporate',
+    atsScore: 97,
+    layout: 'single-column',
+    profilePhoto: false,
+    fontFamily: 'font-serif',
+    primaryColor: 'text-[#1d5288]',
+    secondaryColor: 'text-[#1d5288]',
+    textColor: 'text-zinc-900',
+    accentColor: 'border-[#7b9ebc]',
+    borderColor: 'border-[#7b9ebc]',
+    spacing: {
+      sectionGap: 'space-y-4 mb-4',
+      itemGap: 'space-y-3',
+      bulletGap: 'space-y-1',
+      paddingX: 'px-14',
+      paddingY: 'py-8'
+    },
+    headerStyle: 'centered',
+    borders: {
+      sectionDivider: true,
+      headerDivider: false
+    },
+    icons: false
   }
 };
 
-// Aliases mapping legacy template IDs to the 6 canonical templates
+// Aliases mapping legacy template IDs to canonical templates
 export const TEMPLATE_CONFIGS: Record<string, TemplateConfig> = {
   ...CANONICAL_TEMPLATES,
+  'johnsons_resume': { ...CANONICAL_TEMPLATES['JohnsonsResume'], id: 'johnsons_resume' },
+  'Johnsons': { ...CANONICAL_TEMPLATES['JohnsonsResume'], id: 'Johnsons' },
   // Legacy aliases
   'TwoColumnATS': { ...CANONICAL_TEMPLATES['ModernSidebar'], id: 'TwoColumnATS' },
   'EuropeanPhotoATS': { ...CANONICAL_TEMPLATES['EuropeanModern'], id: 'EuropeanPhotoATS' },

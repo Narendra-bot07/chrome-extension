@@ -66,6 +66,16 @@ const TEMPLATES_LIST = [
     recommendedFor: 'Senior Managers, Staff Engineers, Principal Engineers, Directors',
     layout: 'Two Column',
     photo: 'Optional Photo',
+    recommended: false
+  },
+  { 
+    id: 'JohnsonsResume', 
+    name: "Johnson's Resume", 
+    description: "Classic Italian academic and executive serif layout featuring steel blue titles, italic headers, and precise key-value column alignment.",
+    atsScore: 97,
+    recommendedFor: 'Academia, Legal, Executive Leadership, Research, High-End Corporate',
+    layout: 'Single Column',
+    photo: 'No Photo',
     recommended: true
   }
 ];
