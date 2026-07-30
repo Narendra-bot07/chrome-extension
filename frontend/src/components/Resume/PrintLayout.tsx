@@ -200,6 +200,7 @@ export default function PrintLayout() {
       <TemplateComponent 
         resume={activeResumeData} 
         layoutLevel={fitLayoutLevel}
+        isExporting={true}
       />
       {/* Invisible div to signal Playwright that Auto-Fit is done */}
       {fittingComplete && <div

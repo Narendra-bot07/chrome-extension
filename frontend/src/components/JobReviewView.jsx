@@ -163,7 +163,9 @@ function JobReviewView({
   const [applied, setApplied] = useState(false);
   const [favourite, setFavourite] = useState(false);
   const [showMatchPopup, setShowMatchPopup] = useState(false);
+  const [isMatchZoomed, setIsMatchZoomed] = useState(false);
   const matchBaselineRef = useRef({ pairKey: '', score: null });
+  const prevScoreRef = useRef(null);
 
   const getInitials = () => {
     if (user?.metadata?.full_name) {
@@ -342,6 +344,28 @@ function JobReviewView({
     source: stableBackendScore !== null ? 'backend' : matchStatus
   };
 
+  const displayScore = matchScore.score;
+
+  useEffect(() => {
+    if (displayScore !== null && displayScore !== undefined) {
+      if (prevScoreRef.current !== displayScore) {
+        prevScoreRef.current = displayScore;
+        setIsMatchZoomed(true);
+        const timer = setTimeout(() => {
+          setIsMatchZoomed(false);
+        }, 1400);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [displayScore]);
+
+  const triggerScoreZoom = () => {
+    setIsMatchZoomed(true);
+    setTimeout(() => {
+      setIsMatchZoomed(false);
+    }, 1400);
+  };
+
   return (
     <div className={`flex-1 flex flex-col justify-between select-none text-zinc-700 dark:text-zinc-300 font-sans mx-auto w-full ${
       isExtension ? 'max-w-md h-full' : 'max-w-4xl py-2'
@@ -402,17 +426,55 @@ function JobReviewView({
           {/* Right Match Score Badge with Vertical Line Divider */}
           <div className="flex items-center gap-4 shrink-0">
             <div className="w-[1px] h-16 bg-zinc-200/80 dark:bg-zinc-800 shrink-0" />
-            <div className="w-20 h-20 rounded-full bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 shadow-md flex flex-col items-center justify-center text-center p-1 shrink-0">
-              <Target size={16} className="text-orange-500 mb-0.5" />
+            <motion.button
+              whileHover={{ scale: 1.08 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={triggerScoreZoom}
+              title="Click to replay match score animation"
+              className="w-20 h-20 rounded-full bg-white dark:bg-zinc-900 border-2 border-[#00bda5] shadow-md flex flex-col items-center justify-center text-center p-1 shrink-0 cursor-pointer transition-shadow hover:shadow-lg group relative overflow-hidden"
+            >
+              <Target size={16} className="text-orange-500 mb-0.5 group-hover:rotate-12 transition-transform" />
               <span className="text-lg font-black text-blue-600 dark:text-blue-400 leading-none">
                 {matchScore.score === null ? '--' : `${matchScore.score}%`}
               </span>
               <span className="text-[8px] font-black tracking-widest text-zinc-400 dark:text-zinc-500 uppercase mt-0.5">
                 MATCH
               </span>
-            </div>
+            </motion.button>
           </div>
         </div>
+
+        {/* Zoom-In Backdrop Overlay when match score is animating */}
+        <AnimatePresence>
+          {isMatchZoomed && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              onClick={() => setIsMatchZoomed(false)}
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex flex-col items-center justify-center pointer-events-auto cursor-pointer"
+            >
+              <motion.div
+                initial={{ scale: 0.2, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.2, opacity: 0 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 22 }}
+                className="bg-white dark:bg-zinc-900 border-4 border-teal-500 rounded-full p-8 shadow-2xl flex flex-col items-center justify-center text-center w-64 h-64 md:w-72 md:h-72 animate-pulse"
+              >
+                <div className="w-14 h-14 rounded-full bg-teal-500/10 text-teal-500 flex items-center justify-center mb-2">
+                  <Target size={36} className="text-[#00bda5] animate-bounce" />
+                </div>
+                <span className="text-5xl md:text-6xl font-black text-teal-600 dark:text-teal-400 tracking-tight">
+                  {matchScore.score === null ? '--' : `${matchScore.score}%`}
+                </span>
+                <span className="text-xs font-black tracking-widest text-zinc-400 dark:text-zinc-500 uppercase mt-2">
+                  ATS MATCH SCORE
+                </span>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Key Highlights */}
         {highlightsList.length > 0 && (

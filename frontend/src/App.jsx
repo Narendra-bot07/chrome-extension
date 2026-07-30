@@ -114,7 +114,7 @@ function AppRoutes() {
     if (loadingAuth || loadingResume) return;
 
     if (isExtension) {
-      const isAuthRoute = ['/', '/login', '/register', '/forgot-password', '/reset-password', '/verify-email', '/email-sent'].includes(location.pathname);
+      const isAuthRoute = ['/login', '/register', '/forgot-password', '/reset-password', '/verify-email', '/email-sent'].includes(location.pathname);
       const isResumeUploadRoute = ['/resume-detect', '/resume-parse', '/resume-review'].includes(location.pathname);
       const isSetupRoute = location.pathname === '/extension-setup';
       const isSetupComplete = Boolean(user && hasAnyResume);
@@ -124,7 +124,7 @@ function AppRoutes() {
           navigate('/extension-setup', { replace: true });
         }
       } else {
-        if (location.pathname === '/extension-setup') {
+        if (location.pathname === '/' || location.pathname === '/extension-setup') {
           navigate('/tailor', { replace: true });
         }
       }

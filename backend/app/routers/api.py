@@ -1206,10 +1206,16 @@ async def api_refine_section_stream(
             resume_id=request.resume_id,
             intelligence_model=request.intelligence_model,
             working_resume=request.working_resume,
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to generate cover letter: {str(e)}"
-        )
+            source_resume=request.source_resume,
+            resume_match_analysis=request.resume_match_analysis,
+            ats_analysis=request.ats_analysis,
+            accepted_changes=request.accepted_changes,
+            pending_changes=request.pending_changes,
+            user_id=user_id,
+            conn=conn
+        ),
+        media_type="text/event-stream"
+    )
 
 @router.post("/download-cover-letter-pdf")
 async def api_download_cover_letter_pdf(request: CoverLetterResult):

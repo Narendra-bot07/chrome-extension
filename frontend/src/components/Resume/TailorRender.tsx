@@ -1,8 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Mail, Phone, MapPin, Linkedin, Github, Globe, Code2, Folder, 
-  ExternalLink, Award, Briefcase, GraduationCap, Star, BookOpen 
+  ExternalLink, Award, Briefcase, GraduationCap, Star, BookOpen, Camera, User, Upload, Trash2 
 } from 'lucide-react';
+import ProfilePhotoCropModal from './ProfilePhotoCropModal';
 import { categorizeSkills } from '../../utils/skillCategorizer';
 import {
   canonicalContactIdentity,
@@ -125,9 +126,10 @@ interface TailorRenderProps {
   templateName: string;
   sectionOrder?: string[];
   layoutLevel?: number;
+  isExporting?: boolean;
 }
 
-export default function TailorRender({ resume, templateName, sectionOrder, layoutLevel = 5 }: TailorRenderProps) {
+export default function TailorRender({ resume, templateName, sectionOrder, layoutLevel = 5, isExporting = false }: TailorRenderProps) {
   const resolvedTemplateKey = TEMPLATE_CONFIGS[templateName] ? templateName : 'ExecutiveATS';
   const config: TemplateConfig = TEMPLATE_CONFIGS[resolvedTemplateKey];
   const params = getParamsForLevel(layoutLevel);
@@ -139,6 +141,45 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
   if (!resume || !resume.personal_info) {
     return <div className="p-5 text-zinc-500 font-sans">Waiting for resume content data...</div>;
   }
+
+  const [cropModalImage, setCropModalImage] = useState<string | null>(null);
+  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
+
+  const openCropModalForFile = (file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result;
+      if (dataUrl && typeof dataUrl === 'string') {
+        setCropModalImage(dataUrl);
+        setIsCropModalOpen(true);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const openCropModalForExisting = () => {
+    const photoUrl = personal_info?.photo_url || resume?.photo_url;
+    if (photoUrl) {
+      setCropModalImage(photoUrl);
+      setIsCropModalOpen(true);
+    }
+  };
+
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    const handlePhotoUpdate = (e: any) => {
+      const { photo_url } = e.detail || {};
+      if (photo_url !== undefined) {
+        if (resume?.personal_info) resume.personal_info.photo_url = photo_url;
+        if (resume) resume.photo_url = photo_url;
+      }
+      setTick(t => t + 1);
+    };
+    window.addEventListener('resume_photo_updated', handlePhotoUpdate);
+    return () => window.removeEventListener('resume_photo_updated', handlePhotoUpdate);
+  }, [resume]);
 
   const {
     personal_info,
@@ -275,20 +316,94 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
       .sort((left, right) => orderIndex(left.key) - orderIndex(right.key));
   };
 
-  // Helper to render optional photo for Templates 3–6 (strictly disabled for Templates 1 & 2)
+  // Helper to render optional photo for photo-enabled templates (or Interactive Upload Frame if photo is empty)
   const renderProfilePhoto = (sizeClass = 'w-20 h-20', extraClass = '') => {
-    if (
-      !config.profilePhoto ||
-      !personal_info.photo_url ||
-      layoutModel.hidden_components?.includes('photo')
-    ) return null;
-    return (
-      <img 
-        src={personal_info.photo_url} 
-        alt={candidateName} 
-        className={`${sizeClass} rounded-full object-cover border-2 shadow-sm shrink-0 ${config.borderColor} ${extraClass}`} 
-      />
-    );
+    if (!config.profilePhoto || layoutModel.hidden_components?.includes('photo')) return null;
+
+    const photoUrl = personal_info?.photo_url || resume?.photo_url;
+    const photoPositionY = personal_info?.photo_position_y ?? resume?.photo_position_y ?? 50;
+
+    const handlePhotoChange = (file: File | undefined) => {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const dataUrl = event.target?.result;
+        if (dataUrl && typeof dataUrl === 'string') {
+          if (personal_info) {
+            personal_info.photo_url = dataUrl;
+            personal_info.photo_position_y = photoPositionY;
+          }
+          resume.photo_url = dataUrl;
+          resume.photo_position_y = photoPositionY;
+          window.dispatchEvent(new CustomEvent('resume_photo_updated', { 
+            detail: { photo_url: dataUrl, photo_position_y: photoPositionY } 
+          }));
+        }
+      };
+      reader.readAsDataURL(file);
+    };
+
+    const handlePositionChange = (newPosY: number) => {
+      if (personal_info) personal_info.photo_position_y = newPosY;
+      resume.photo_position_y = newPosY;
+      window.dispatchEvent(new CustomEvent('resume_photo_updated', {
+        detail: { photo_url: photoUrl, photo_position_y: newPosY }
+      }));
+    };
+
+    const handleRemovePhoto = () => {
+      if (personal_info) personal_info.photo_url = '';
+      resume.photo_url = '';
+      window.dispatchEvent(new CustomEvent('resume_photo_updated', { detail: { photo_url: '' } }));
+    };
+
+    const circleSizeClass = sizeClass.includes('24')
+      ? 'w-24 h-24 min-w-[96px] min-h-[96px] max-w-[96px] max-h-[96px] aspect-square rounded-full shrink-0 overflow-hidden'
+      : 'w-20 h-20 min-w-[80px] min-h-[80px] max-w-[80px] max-h-[80px] aspect-square rounded-full shrink-0 overflow-hidden';
+
+    if (photoUrl) {
+      return (
+        <div 
+          className={`relative group ${circleSizeClass} cursor-pointer`} 
+          title="Click to reposition or adjust photo"
+          onClick={openCropModalForExisting}
+        >
+          <img 
+            src={photoUrl} 
+            alt={candidateName} 
+            className={`w-full h-full rounded-full object-cover border-2 shadow-sm ${config.borderColor} ${extraClass}`} 
+            style={{ objectPosition: `center ${photoPositionY}%` }}
+          />
+          {/* Hover Overlay Badge for Adjusting Photo */}
+          <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white z-20">
+            <Camera size={18} />
+            <span className="text-[7.5px] font-black uppercase mt-0.5 tracking-tight">Adjust</span>
+          </div>
+        </div>
+      );
+    }
+
+    if (!photoUrl) {
+      if (isExporting) {
+        // When downloading/compiling PDF, keep area blank and cleanly formatted without placeholder buttons
+        return null;
+      }
+      return (
+        <label 
+          className={`${circleSizeClass} print:hidden border-2 border-dashed border-indigo-400 hover:border-indigo-600 bg-indigo-50/70 hover:bg-indigo-100/80 flex flex-col items-center justify-center text-center cursor-pointer transition-all shrink-0 group relative shadow-xs ${extraClass}`} 
+          title="Click to upload profile photo"
+        >
+          <Camera size={20} className="text-indigo-600 group-hover:scale-110 transition-transform shrink-0" />
+          <span className="text-[8px] font-black text-indigo-700 uppercase mt-1 tracking-tight shrink-0">Add Photo</span>
+          <input 
+            type="file" 
+            accept="image/*" 
+            className="hidden" 
+            onChange={(e) => openCropModalForFile(e.target.files?.[0])}
+          />
+        </label>
+      );
+    }
   };
 
   // Generic section renderer for common section structures across templates
@@ -719,8 +834,8 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
         {/* Left Sidebar */}
         <div className="w-[32%] bg-slate-50 border-r border-slate-200 p-6 flex flex-col shrink-0 self-stretch">
           {/* Optional Photo */}
-          {config.profilePhoto && personal_info.photo_url && (
-            <div className="flex justify-center mb-1">
+          {config.profilePhoto && (
+            <div className="flex justify-center mb-2">
               {renderProfilePhoto('w-24 h-24', 'shadow-md')}
             </div>
           )}
@@ -796,7 +911,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
         style={{ width: '816px', minHeight: '1056px', padding: `${params.paddingY}px ${params.paddingX}px`, fontSize: `${params.fontSize}px`, lineHeight: params.lineHeight }}
       >
         {/* Tech Hero Header */}
-        <header className="border-b-2 border-indigo-500 pb-2 mb-1 flex justify-between items-start gap-2">
+        <header className="border-b-2 border-indigo-500 pb-2 mb-1 flex justify-between items-center gap-4">
           <div className="flex-1">
             <h1 className="font-extrabold text-indigo-950 uppercase tracking-tight leading-none" style={{ fontSize: `${params.nameSize + 2}px` }}>
               {candidateName}
@@ -821,7 +936,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
             </div>
           </div>
           {/* Optional Photo in Hero */}
-          {config.profilePhoto && personal_info.photo_url && renderProfilePhoto('w-22 h-22', 'border-indigo-400')}
+          {config.profilePhoto && renderProfilePhoto('w-22 h-22', 'border-indigo-400')}
         </header>
 
         {/* Portfolio Pro Sections */}
@@ -878,7 +993,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
             </div>
           </div>
           {/* Optional Photo in Banner */}
-          {config.profilePhoto && personal_info.photo_url && renderProfilePhoto('w-20 h-20', 'border-white/80')}
+          {config.profilePhoto && renderProfilePhoto('w-20 h-20', 'border-white/80')}
         </header>
 
         {/* Content Body */}
@@ -917,7 +1032,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
         style={{ width: '816px', height: '1056px', minHeight: '1056px', lineHeight: params.lineHeight }}
       >
         {/* Executive Header */}
-        <header className="border-b-2 border-amber-900/30 pb-2 mb-1 flex justify-between items-end gap-2">
+        <header className="border-b-2 border-amber-900/30 pb-2 mb-1 flex justify-between items-center gap-4">
           <div className="flex-1">
             <h1 className="font-black uppercase tracking-tight text-zinc-950 leading-tight" style={{ fontSize: `${params.nameSize + 2}px` }}>
               {candidateName}
@@ -937,7 +1052,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
             </div>
           </div>
           {/* Optional Photo */}
-          {config.profilePhoto && personal_info.photo_url && renderProfilePhoto('w-22 h-22', 'border-amber-900/40')}
+          {config.profilePhoto && renderProfilePhoto('w-22 h-22', 'border-amber-900/40')}
         </header>
 
         {/* Executive 2-Column Split */}
@@ -1254,29 +1369,46 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     );
   };
 
-  // Route layout rendering based on canonical template ID or resolved config layout
+  let renderedLayoutContent: React.ReactElement;
   if (resolvedTemplateKey === 'JohnsonsResume' || resolvedTemplateKey === 'johnsons_resume' || resolvedTemplateKey === 'Johnsons') {
-    return renderJohnsonsResumeLayout();
-  }
-  if (resolvedTemplateKey === 'ClassicATS' || resolvedTemplateKey === 'MinimalATS' || resolvedTemplateKey === 'ProfessionalATS') {
-    return renderClassicATSLayout();
-  }
-  if (resolvedTemplateKey === 'ExecutiveATS') {
-    return renderExecutiveATSLayout();
-  }
-  if (resolvedTemplateKey === 'ModernSidebar' || resolvedTemplateKey === 'TwoColumnATS' || resolvedTemplateKey === 'ModernATS') {
-    return renderModernSidebarLayout();
-  }
-  if (resolvedTemplateKey === 'PortfolioPro' || resolvedTemplateKey === 'PortfolioPhotoATS' || resolvedTemplateKey === 'ModernProATS') {
-    return renderPortfolioProLayout();
-  }
-  if (resolvedTemplateKey === 'EuropeanModern' || resolvedTemplateKey === 'EuropeanPhotoATS' || resolvedTemplateKey === 'AltaATS') {
-    return renderEuropeanModernLayout();
-  }
-  if (resolvedTemplateKey === 'PremiumExecutive' || resolvedTemplateKey === 'MarissaATS') {
-    return renderPremiumExecutiveLayout();
+    renderedLayoutContent = renderJohnsonsResumeLayout();
+  } else if (resolvedTemplateKey === 'ClassicATS' || resolvedTemplateKey === 'MinimalATS' || resolvedTemplateKey === 'ProfessionalATS' || resolvedTemplateKey === 'ExecutiveATS') {
+    renderedLayoutContent = renderClassicATSLayout();
+  } else if (resolvedTemplateKey === 'ModernSidebar') {
+    renderedLayoutContent = renderModernSidebarLayout();
+  } else if (resolvedTemplateKey === 'PortfolioPro' || resolvedTemplateKey === 'PortfolioPhotoATS' || resolvedTemplateKey === 'ModernProATS') {
+    renderedLayoutContent = renderPortfolioProLayout();
+  } else if (resolvedTemplateKey === 'EuropeanModern') {
+    renderedLayoutContent = renderEuropeanModernLayout();
+  } else if (resolvedTemplateKey === 'PremiumExecutive' || resolvedTemplateKey === 'MarissaATS' || resolvedTemplateKey === 'TwoColumnATS' || resolvedTemplateKey === 'ModernATS' || resolvedTemplateKey === 'EuropeanPhotoATS' || resolvedTemplateKey === 'AltaATS') {
+    renderedLayoutContent = renderPremiumExecutiveLayout();
+  } else {
+    renderedLayoutContent = renderClassicATSLayout();
   }
 
-  // Fallback default layout
-  return renderClassicATSLayout();
+  return (
+    <>
+      {renderedLayoutContent}
+      <ProfilePhotoCropModal
+        isOpen={isCropModalOpen}
+        imageSrc={cropModalImage}
+        onClose={() => setIsCropModalOpen(false)}
+        onApply={(croppedUrl) => {
+          if (personal_info) personal_info.photo_url = croppedUrl;
+          resume.photo_url = croppedUrl;
+          window.dispatchEvent(new CustomEvent('resume_photo_updated', { 
+            detail: { photo_url: croppedUrl, photo_position_y: 50 } 
+          }));
+          setIsCropModalOpen(false);
+        }}
+        onDelete={() => {
+          if (personal_info) personal_info.photo_url = '';
+          resume.photo_url = '';
+          window.dispatchEvent(new CustomEvent('resume_photo_updated', { detail: { photo_url: '' } }));
+          setIsCropModalOpen(false);
+        }}
+        onChangePhoto={(file) => openCropModalForFile(file)}
+      />
+    </>
+  );
 }

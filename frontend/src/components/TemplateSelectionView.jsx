@@ -18,26 +18,8 @@ const TEMPLATES_LIST = [
     photo: 'No Photo',
     recommended: true
   },
-  { 
-    id: 'ExecutiveATS', 
-    name: 'Executive ATS', 
-    description: 'High-authority executive single-column layout with serif typography and generous spacing.',
-    atsScore: 98,
-    recommendedFor: 'Senior Engineers, Leads, Tech Architects, Engineering Managers',
-    layout: 'Single Column',
-    photo: 'No Photo',
-    recommended: false
-  },
-  { 
-    id: 'ModernSidebar', 
-    name: 'Modern Sidebar', 
-    description: 'Modern engineering profile with a dedicated narrow sidebar for skills, education, and credentials.',
-    atsScore: 94,
-    recommendedFor: 'Developers, Data Scientists, ML Engineers, Tech Specialists',
-    layout: 'Sidebar',
-    photo: 'Optional Photo',
-    recommended: true
-  },
+
+
   { 
     id: 'PortfolioPro', 
     name: 'Portfolio Pro', 
@@ -48,16 +30,7 @@ const TEMPLATES_LIST = [
     photo: 'Optional Photo',
     recommended: false
   },
-  { 
-    id: 'EuropeanModern', 
-    name: 'European Modern', 
-    description: 'European market style featuring a sleek left accent banner, compact typography, and crisp structure.',
-    atsScore: 92,
-    recommendedFor: 'International Applications, Research, Engineering, R&D',
-    layout: 'Left Banner',
-    photo: 'Optional Photo',
-    recommended: false
-  },
+
   { 
     id: 'PremiumExecutive', 
     name: 'Premium Executive', 
@@ -282,19 +255,12 @@ export default function TemplateSelectionView({ onBack }) {
                       <span className="text-[9px] font-bold px-2 py-0.5 bg-zinc-50 border border-zinc-200 text-zinc-600 rounded flex items-center gap-1">
                         <Image size={10} /> {t.photo}
                       </span>
-                      {t.recommended && (
-                        <span className="text-[9px] font-extrabold px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded">
-                          Recommended Choice
-                        </span>
-                      )}
+
                     </div>
                   </div>
 
                   <div className="space-y-4 pt-1 border-t border-zinc-100">
-                    <div className="text-[10px] text-zinc-400 font-medium">
-                      <span className="font-extrabold text-zinc-500 uppercase tracking-widest block text-[8px] mb-0.5">Recommended For</span>
-                      {t.recommendedFor}
-                    </div>
+
 
                     <div className="grid grid-cols-2 gap-2">
                       <button 
@@ -369,12 +335,7 @@ export default function TemplateSelectionView({ onBack }) {
                   </div>
                 </div>
 
-                <div className="border-t border-zinc-800 pt-4 space-y-2">
-                  <span className="text-[9.5px] font-black text-zinc-500 uppercase tracking-widest block">Ideal for positions</span>
-                  <p className="text-xs text-zinc-300 leading-relaxed font-semibold">
-                    {zoomModalTemplate.recommendedFor}
-                  </p>
-                </div>
+
               </div>
 
               {/* Sidebar Action Buttons */}

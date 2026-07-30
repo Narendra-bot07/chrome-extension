@@ -404,7 +404,7 @@ export function AppProvider({ children }) {
           liveATSRequestRef.current.timer = null;
         }
       }
-    }, 250);
+    }, 1000);
   });
 
   useEffect(() => () => {
@@ -452,6 +452,29 @@ export function AppProvider({ children }) {
         if (active) setResumeWorkflowHydrated(true);
       });
     return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    const handlePhotoUpdate = (e) => {
+      const { photo_url, photo_position_y } = e.detail || {};
+      setParsedResume(prev => {
+        if (!prev) return prev;
+        const newPhotoUrl = photo_url !== undefined ? photo_url : (prev?.personal_info?.photo_url || prev?.photo_url);
+        const newPosY = photo_position_y !== undefined ? photo_position_y : (prev?.personal_info?.photo_position_y ?? prev?.photo_position_y ?? 50);
+        return {
+          ...prev,
+          photo_url: newPhotoUrl,
+          photo_position_y: newPosY,
+          personal_info: {
+            ...(prev?.personal_info || {}),
+            photo_url: newPhotoUrl,
+            photo_position_y: newPosY
+          }
+        };
+      });
+    };
+    window.addEventListener('resume_photo_updated', handlePhotoUpdate);
+    return () => window.removeEventListener('resume_photo_updated', handlePhotoUpdate);
   }, []);
 
   const restoredWorkflowScopeRef = useRef('');

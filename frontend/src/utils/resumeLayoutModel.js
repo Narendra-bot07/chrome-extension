@@ -48,7 +48,7 @@ export function resolveLayoutAvailability(resume = {}, templateConfig = {}) {
     'email', 'phone', 'linkedin', 'github', 'portfolio', 'website', 'x'
   ]);
   const header = {
-    photo: Boolean(templateConfig.profilePhoto && personal.photo_url),
+    photo: Boolean(templateConfig.profilePhoto),
     name: meaningful(personal.name),
     headline: meaningful(personal.job_title || personal.title),
     email: meaningful(personal.email),

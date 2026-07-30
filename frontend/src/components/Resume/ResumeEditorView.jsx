@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { 
   Check, RefreshCw, GripVertical, ChevronDown, ChevronRight, Plus, Trash2, Download, Wand2, Eye, 
   User, FileText, GraduationCap, Wrench, Briefcase, FolderGit2, Award, Trophy, Languages, Heart, 
-  BookOpen, CheckCircle2, Circle, Undo2, Redo2, Activity
+  BookOpen, CheckCircle2, Circle, Undo2, Redo2, Activity, Camera, Upload
 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useApp } from '../../context/AppContext';
@@ -206,6 +206,87 @@ export default function ResumeEditorView({
       );
       if (change.valid) commitLayout(change.model);
     };
+    if (region === 'header') {
+      const primaryTypes = ['name', 'photo', 'headline'];
+      const primaryComponents = visibleComponents.filter(c => primaryTypes.includes(c));
+      const contactComponents = visibleComponents.filter(c => !primaryTypes.includes(c));
+
+      return (
+        <div className="space-y-2">
+          <DragDropContext onDragEnd={handleVisibleDragEnd}>
+            <Droppable droppableId="HEADER_COMPONENTS" direction="horizontal" type="HEADER_COMPONENT">
+              {provided => (
+                <div ref={provided.innerRef} {...provided.droppableProps} className="flex min-h-12 flex-col items-center gap-2.5 rounded-xl border border-dashed border-slate-250 bg-slate-50/70 p-3">
+                  {/* Name / Photo / Headline Row */}
+                  {primaryComponents.length > 0 && (
+                    <div className="flex flex-wrap items-center justify-center gap-2 pb-1.5 border-b border-slate-200/60 w-full">
+                      {primaryComponents.map((component) => {
+                        const index = visibleComponents.indexOf(component);
+                        return (
+                          <Draggable key={component} draggableId={`header-${component}`} index={index}>
+                            {drag => (
+                              <div
+                                ref={drag.innerRef}
+                                {...drag.draggableProps}
+                                {...drag.dragHandleProps}
+                                className="flex cursor-grab items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-wide text-slate-850 shadow-sm hover:border-slate-400"
+                              >
+                                <GripVertical size={12} className="text-slate-400" />
+                                <span>{componentLabel(component)}</span>
+                                <button
+                                  type="button"
+                                  title="Hide component"
+                                  onClick={event => { event.stopPropagation(); toggleComponentVisibility(component); }}
+                                  className="ml-1 border-0 bg-transparent p-0 text-slate-500 hover:text-slate-700"
+                                >
+                                  <Eye size={11} />
+                                </button>
+                              </div>
+                            )}
+                          </Draggable>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Contact / Links Row (Email, Phone, LinkedIn, GitHub, X, Divider) */}
+                  <div className="flex flex-wrap items-center justify-center gap-2 w-full">
+                    {contactComponents.map((component) => {
+                      const index = visibleComponents.indexOf(component);
+                      return (
+                        <Draggable key={component} draggableId={`header-${component}`} index={index}>
+                          {drag => (
+                            <div
+                              ref={drag.innerRef}
+                              {...drag.draggableProps}
+                              {...drag.dragHandleProps}
+                              className="flex cursor-grab items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[9px] font-black uppercase tracking-wide text-slate-700 shadow-sm hover:border-slate-350"
+                            >
+                              <GripVertical size={12} className="text-slate-400" />
+                              <span>{componentLabel(component)}</span>
+                              <button
+                                type="button"
+                                title="Hide component"
+                                onClick={event => { event.stopPropagation(); toggleComponentVisibility(component); }}
+                                className="ml-1 border-0 bg-transparent p-0 text-slate-500 hover:text-slate-700"
+                              >
+                                <Eye size={11} />
+                              </button>
+                            </div>
+                          )}
+                        </Draggable>
+                      );
+                    })}
+                  </div>
+                  {provided.placeholder}
+                </div>
+              )}
+            </Droppable>
+          </DragDropContext>
+        </div>
+      );
+    }
+
     return (
       <div>
       <DragDropContext onDragEnd={handleVisibleDragEnd}>
@@ -423,6 +504,80 @@ export default function ResumeEditorView({
       const info = parsedResume?.personal_info || {};
       return (
         <div className="space-y-3 p-4 bg-slate-50/30">
+          {/* Profile Photo Upload Manager */}
+          <div className="p-3 border border-slate-200 rounded-xl bg-white flex items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3">
+              <div className="relative w-12 h-12 rounded-full overflow-hidden border-2 border-indigo-200 bg-slate-100 flex items-center justify-center shrink-0">
+                {(info.photo_url || parsedResume?.photo_url) ? (
+                  <img
+                    src={info.photo_url || parsedResume?.photo_url}
+                    alt="Profile Avatar"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <Camera size={20} className="text-slate-400" />
+                )}
+              </div>
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-wider text-slate-800">Profile Photo</div>
+                <div className="text-[9px] text-slate-400 font-medium mt-0.5">
+                  {(info.photo_url || parsedResume?.photo_url) ? 'Photo loaded & fitted' : 'Optional photo for photo templates'}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <label className="cursor-pointer px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[9px] font-black uppercase tracking-wider transition flex items-center gap-1">
+                <Upload size={11} />
+                <span>{(info.photo_url || parsedResume?.photo_url) ? 'Change' : 'Upload'}</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                      const dataUrl = event.target?.result;
+                      if (dataUrl && typeof dataUrl === 'string') {
+                        const updated = {
+                          ...parsedResume,
+                          photo_url: dataUrl,
+                          personal_info: {
+                            ...(parsedResume?.personal_info || {}),
+                            photo_url: dataUrl
+                          }
+                        };
+                        setParsedResume(updated);
+                      }
+                    };
+                    reader.readAsDataURL(file);
+                  }}
+                />
+              </label>
+              {(info.photo_url || parsedResume?.photo_url) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const updated = {
+                      ...parsedResume,
+                      photo_url: '',
+                      personal_info: {
+                        ...(parsedResume?.personal_info || {}),
+                        photo_url: ''
+                      }
+                    };
+                    setParsedResume(updated);
+                  }}
+                  className="px-2 py-1.5 border border-slate-200 text-rose-500 hover:bg-rose-50 rounded-lg text-[9px] font-black uppercase transition"
+                  title="Remove photo"
+                >
+                  <Trash2 size={11} />
+                </button>
+              )}
+            </div>
+          </div>
+
           <div>
             <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-1">Full Name</label>
             <input className="w-full p-2.5 border rounded-lg text-xs bg-white focus:ring-1 focus:ring-indigo-500 outline-none" value={info.name || ''} onChange={e => handleUpdateField(section, null, 'name', e.target.value)} placeholder="Full Name" />
@@ -794,8 +949,8 @@ export default function ResumeEditorView({
             <div className="mb-3 text-[9px] font-black uppercase tracking-widest text-slate-400">Body</div>
             <DragDropContext onDragEnd={onDragEnd}>
               <div className={splitLayout ? 'grid grid-cols-5 gap-3' : ''}>
-                {splitLayout && structuralColumn('Sidebar', 'LEFT_COLUMN', leftSections, 'col-span-2')}
                 {structuralColumn('Main Column', splitLayout ? 'RIGHT_COLUMN' : 'SECTIONS', splitLayout ? rightSections : leftSections, splitLayout ? 'col-span-3' : '')}
+                {splitLayout && structuralColumn('Sidebar', 'LEFT_COLUMN', leftSections, 'col-span-2')}
               </div>
             </DragDropContext>
 
@@ -914,23 +1069,7 @@ export default function ResumeEditorView({
         <DragDropContext onDragEnd={onDragEnd}>
           {splitLayout ? (
             <div className="grid grid-cols-5 gap-4">
-              {/* Left Column (Skills, Education etc.) */}
-              <div className="col-span-2 space-y-3.5">
-                <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest pb-1 border-b border-slate-100 flex justify-between items-center">
-                  <span>Sidebar</span>
-                  <span className="text-[8px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold">{leftSections.length}</span>
-                </div>
-                <Droppable droppableId="LEFT_COLUMN" type="SECTIONS">
-                  {(provided) => (
-                    <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-3.5 min-h-[100px]">
-                      {leftSections.map((section, index) => renderDraggableSection(section, index))}
-                      {provided.placeholder}
-                    </div>
-                  )}
-                </Droppable>
-              </div>
-              
-              {/* Right Column (Summary, Experience, Projects) */}
+              {/* Main Column (Summary, Experience, Education etc.) */}
               <div className="col-span-3 space-y-3.5">
                 <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest pb-1 border-b border-slate-100 flex justify-between items-center">
                   <span>Main Column</span>
@@ -940,6 +1079,22 @@ export default function ResumeEditorView({
                   {(provided) => (
                     <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-3.5 min-h-[100px]">
                       {rightSections.map((section, index) => renderDraggableSection(section, index))}
+                      {provided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+              </div>
+
+              {/* Sidebar Column (Skills, Languages etc.) */}
+              <div className="col-span-2 space-y-3.5">
+                <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest pb-1 border-b border-slate-100 flex justify-between items-center">
+                  <span>Sidebar</span>
+                  <span className="text-[8px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold">{leftSections.length}</span>
+                </div>
+                <Droppable droppableId="LEFT_COLUMN" type="SECTIONS">
+                  {(provided) => (
+                    <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-3.5 min-h-[100px]">
+                      {leftSections.map((section, index) => renderDraggableSection(section, index))}
                       {provided.placeholder}
                     </div>
                   )}

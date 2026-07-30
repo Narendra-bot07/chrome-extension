@@ -1,7 +1,10 @@
 import os
 import re
 import json
-from typing import List, Optional, Dict, Any
+import time
+import hashlib
+import logging
+from typing import Dict, Any, Optional, List
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -19,6 +22,27 @@ from app.schemas import (
     ProjectEditorOutput
 )
 
+logger = logging.getLogger("groq_pipeline")
+
+_LLM_CACHE: Dict[str, Any] = {}
+_MAX_CACHE_SIZE = 1000
+
+def _get_cache_key(prefix: str, content: str) -> str:
+    return f"{prefix}:{hashlib.sha256(content.encode('utf-8')).hexdigest()}"
+
+def _get_from_cache(key: str) -> Optional[Any]:
+    if key in _LLM_CACHE:
+        logger.info(f"[LLM_CACHE_HIT] key={key[:24]}...")
+        return _LLM_CACHE[key]
+    logger.info(f"[LLM_CACHE_MISS] key={key[:24]}...")
+    return None
+
+def _set_to_cache(key: str, val: Any) -> None:
+    if len(_LLM_CACHE) >= _MAX_CACHE_SIZE:
+        first_key = next(iter(_LLM_CACHE))
+        _LLM_CACHE.pop(first_key, None)
+    _LLM_CACHE[key] = val
+
 def get_llm(api_key: Optional[str] = None, temperature: float = 0.0) -> ChatGroq:
     from core.config import settings
     req_key = (api_key or "").strip()
@@ -34,6 +58,16 @@ def get_llm(api_key: Optional[str] = None, temperature: float = 0.0) -> ChatGroq
     )
 
 def parse_resume(raw_text: str, api_key: Optional[str] = None) -> ResumeStructure:
+    clean_text = raw_text.strip()
+    if not clean_text:
+        return ResumeStructure()
+
+    cache_key = _get_cache_key("parse_resume", clean_text)
+    cached = _get_from_cache(cache_key)
+    if cached:
+        return cached
+
+    start_time = time.time()
     llm = get_llm(api_key, temperature=0.0)
     structured_llm = llm.with_structured_output(ResumeStructure)
     
@@ -47,7 +81,11 @@ If a section is absent, use its empty default. In experience and projects, descr
     ])
     
     chain = prompt | structured_llm
-    return chain.invoke({"text": raw_text})
+    result = chain.invoke({"text": clean_text})
+    duration = round((time.time() - start_time) * 1000, 2)
+    logger.info(f"[LLM_TELEMETRY] call=parse_resume latency_ms={duration} input_chars={len(clean_text)}")
+    _set_to_cache(cache_key, result)
+    return result
 
 def _unique_keep_order(items: List[str]) -> List[str]:
     seen = set()
@@ -136,6 +174,13 @@ def _enrich_job_analysis(result: JobAnalysis, jd_text: str) -> JobAnalysis:
 
 
 def analyze_job_description(jd_text: str, api_key: Optional[str] = None, url: Optional[str] = "", page_title: Optional[str] = "", page_company: Optional[str] = "") -> JobAnalysis:
+    clean_jd = jd_text.strip()
+    cache_key = _get_cache_key("analyze_jd", f"{clean_jd}:{url}:{page_title}:{page_company}")
+    cached = _get_from_cache(cache_key)
+    if cached:
+        return cached
+
+    start_time = time.time()
     llm = get_llm(api_key, temperature=0.0)
     structured_llm = llm.with_structured_output(JobAnalysis)
     
@@ -180,13 +225,17 @@ RULES
     
     chain = prompt | structured_llm
     result = chain.invoke({
-        "text": jd_text,
+        "text": clean_jd,
         "url": url or "",
         "page_title": page_title or "",
         "page_company": page_company or ""
     })
     
-    return _enrich_job_analysis(result, jd_text)
+    enriched = _enrich_job_analysis(result, clean_jd)
+    duration = round((time.time() - start_time) * 1000, 2)
+    logger.info(f"[LLM_TELEMETRY] call=analyze_job_description latency_ms={duration} input_chars={len(clean_jd)}")
+    _set_to_cache(cache_key, enriched)
+    return enriched
 
 def analyze_gaps(resume: ResumeStructure, job: JobAnalysis, api_key: Optional[str] = None) -> GapsAnalysis:
     llm = get_llm(api_key, temperature=0.0)

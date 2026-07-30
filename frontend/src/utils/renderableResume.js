@@ -12,7 +12,7 @@ const TOP_LEVEL_FIELDS = [
 
 const PERSONAL_FIELDS = [
   'name', 'email', 'phone', 'location', 'linkedin', 'website', 'github',
-  'job_title', 'title', 'portfolio_url', 'coding_profiles'
+  'job_title', 'title', 'portfolio_url', 'coding_profiles', 'photo_url', 'photo_position_y', 'photo_zoom'
 ];
 
 const cleanText = value => String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -274,6 +274,15 @@ export function toRenderableResume(record) {
 
   if (resolvedName) {
     output.personal_info.name = resolvedName;
+  }
+
+  if (personal.photo_url || source.photo_url) {
+    output.photo_url = personal.photo_url || source.photo_url;
+    output.personal_info.photo_url = output.photo_url;
+  }
+  if (personal.photo_position_y !== undefined || source.photo_position_y !== undefined) {
+    output.photo_position_y = personal.photo_position_y ?? source.photo_position_y ?? 50;
+    output.personal_info.photo_position_y = output.photo_position_y;
   }
 
   const explicitAchievements = [];

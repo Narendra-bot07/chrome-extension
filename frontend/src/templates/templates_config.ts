@@ -97,41 +97,7 @@ const CANONICAL_TEMPLATES: Record<string, TemplateConfig> = {
     icons: true
   },
 
-  // ==================================================
-  // TEMPLATE 3: MODERN SIDEBAR (PHOTO OPTIONAL)
-  // Purpose: Modern engineering profile with skills, education & certs in a narrow sidebar.
-  // ==================================================
-  'ModernSidebar': {
-    id: 'ModernSidebar',
-    name: 'Modern Sidebar',
-    description: 'Modern engineering profile with a dedicated narrow sidebar for skills, education, and credentials.',
-    recommendedFor: 'Developers, Data Scientists, ML Engineers, Tech Specialists',
-    atsScore: 94,
-    layout: 'sidebar',
-    profilePhoto: true,
-    fontFamily: 'font-sans',
-    primaryColor: 'text-slate-900',
-    secondaryColor: 'text-slate-700',
-    textColor: 'text-slate-900',
-    accentColor: 'border-slate-300',
-    borderColor: 'border-slate-200',
-    sidebarWidth: 'w-[32%]',
-    sidebarBackground: 'bg-slate-50',
-    sidebarBorderRight: 'border-r border-slate-200',
-    spacing: {
-      sectionGap: 'space-y-5 mb-5',
-      itemGap: 'space-y-3.5',
-      bulletGap: 'space-y-1.5',
-      paddingX: 'px-10',
-      paddingY: 'py-8'
-    },
-    headerStyle: 'sidebar',
-    borders: {
-      sectionDivider: true,
-      headerDivider: true
-    },
-    icons: true
-  },
+
 
   // ==================================================
   // TEMPLATE 4: PORTFOLIO PRO (PHOTO OPTIONAL)
@@ -278,13 +244,15 @@ export const TEMPLATE_CONFIGS: Record<string, TemplateConfig> = {
   'johnsons_resume': { ...CANONICAL_TEMPLATES['JohnsonsResume'], id: 'johnsons_resume' },
   'Johnsons': { ...CANONICAL_TEMPLATES['JohnsonsResume'], id: 'Johnsons' },
   // Legacy aliases
-  'TwoColumnATS': { ...CANONICAL_TEMPLATES['ModernSidebar'], id: 'TwoColumnATS' },
-  'EuropeanPhotoATS': { ...CANONICAL_TEMPLATES['EuropeanModern'], id: 'EuropeanPhotoATS' },
+  'ExecutiveATS': { ...CANONICAL_TEMPLATES['ClassicATS'], id: 'ExecutiveATS' },
+  'EuropeanModern': { ...CANONICAL_TEMPLATES['PremiumExecutive'], id: 'EuropeanModern' },
+  'TwoColumnATS': { ...CANONICAL_TEMPLATES['PremiumExecutive'], id: 'TwoColumnATS' },
+  'EuropeanPhotoATS': { ...CANONICAL_TEMPLATES['PremiumExecutive'], id: 'EuropeanPhotoATS' },
   'PortfolioPhotoATS': { ...CANONICAL_TEMPLATES['PortfolioPro'], id: 'PortfolioPhotoATS' },
   'MarissaATS': { ...CANONICAL_TEMPLATES['PremiumExecutive'], id: 'MarissaATS' },
-  'AltaATS': { ...CANONICAL_TEMPLATES['EuropeanModern'], id: 'AltaATS' },
+  'AltaATS': { ...CANONICAL_TEMPLATES['PremiumExecutive'], id: 'AltaATS' },
   'MinimalATS': { ...CANONICAL_TEMPLATES['ClassicATS'], id: 'MinimalATS' },
-  'ModernATS': { ...CANONICAL_TEMPLATES['ModernSidebar'], id: 'ModernATS' },
+  'ModernATS': { ...CANONICAL_TEMPLATES['PremiumExecutive'], id: 'ModernATS' },
   'ModernProATS': { ...CANONICAL_TEMPLATES['PortfolioPro'], id: 'ModernProATS' },
   'ProfessionalATS': { ...CANONICAL_TEMPLATES['ClassicATS'], id: 'ProfessionalATS' }
 };
