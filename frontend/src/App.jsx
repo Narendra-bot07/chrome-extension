@@ -124,7 +124,7 @@ function AppRoutes() {
           navigate('/extension-setup', { replace: true });
         }
       } else {
-        if (location.pathname === '/' || location.pathname === '/extension-setup') {
+        if (location.pathname === '/extension-setup') {
           navigate('/tailor', { replace: true });
         }
       }

@@ -1,8 +1,9 @@
 import React, { useRef, useEffect, useState, useLayoutEffect, useMemo } from 'react';
 import {
   Eye, ZoomIn, ZoomOut, Expand, Shrink, Printer, Download,
-  Wand2, RotateCcw, ChevronUp, ChevronDown, FileText, AlertTriangle, RefreshCw
+  Wand2, RotateCcw, ChevronUp, ChevronDown, FileText, AlertTriangle, RefreshCw, X
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { toRenderableResume } from '../../utils/renderableResume';
 import { getTemplateComponent } from '../../templates';
 import { createCompositionPlan } from '../../utils/resumeComposition';
@@ -20,6 +21,7 @@ interface ResumePreviewProps {
   onCompositionChange?: (plan: any) => void;
   interactiveLayoutMode?: boolean;
   layoutLevel?: number;
+  onClose?: () => void;
   onDownloadArtifact?: (artifact: {
     blob: Blob;
     url: string;
@@ -39,8 +41,11 @@ export default function ResumePreview({
   onCompositionChange,
   interactiveLayoutMode = false,
   layoutLevel,
+  onClose,
   onDownloadArtifact
 }: ResumePreviewProps) {
+  const navigate = useNavigate();
+  const handleClose = onClose || (() => navigate(-1));
   // 1. Zoom and Viewport States
   const [zoomMode, setZoomMode] = useState<ZoomMode>(() => {
     return (localStorage.getItem('preview_zoom_mode') as ZoomMode) || 'fit_width';
@@ -525,6 +530,16 @@ export default function ResumePreview({
           >
             <Download size={15} />
             <span>{isDownloading ? 'Downloading...' : loadingPdf ? 'Optimizing...' : 'Download PDF'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleClose}
+            className="p-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 font-bold transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700 shadow-2xs flex items-center justify-center shrink-0 ml-1"
+            title="Close Preview"
+            aria-label="Close Preview"
+          >
+            <X size={16} />
           </button>
         </div>
 

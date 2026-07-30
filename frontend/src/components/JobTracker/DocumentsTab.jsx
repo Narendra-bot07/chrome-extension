@@ -18,8 +18,71 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
   } = useApp();
 
   const [previewModalType, setPreviewModalType] = useState(null); // null | 'resume' | 'coverletter'
+  const [downloadingType, setDownloadingType] = useState(null);
 
   if (!application) return null;
+
+  const handleDownloadResume = async () => {
+    try {
+      setDownloadingType('resume');
+      const response = await fetch('http://localhost:8000/api/render-unified-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          resume: displayResume,
+          original_resume: displayResume,
+          template_name: application.template || 'ExecutiveATS',
+          page_preference: 'auto',
+          company_name: companyName
+        })
+      });
+      if (!response.ok) {
+        const failure = await response.json().catch(() => ({}));
+        throw new Error(failure.detail || `PDF generation failed with status ${response.status}`);
+      }
+      const data = await response.json();
+      if (!data.pdf_base64) throw new Error('No PDF base64 payload returned');
+
+      const byteCharacters = atob(data.pdf_base64);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = data.filename || resumeFileName;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Direct download failed, redirecting to studio:', err);
+      navigate('/download');
+    } finally {
+      setDownloadingType(null);
+    }
+  };
+
+  const handleDownloadCoverLetter = async () => {
+    try {
+      setDownloadingType('coverletter');
+      const text = typeof activeCoverLetterText === 'string' ? activeCoverLetterText : JSON.stringify(activeCoverLetterText);
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const filename = `${(application.company_name || 'CoverLetter').replace(/\s+/g, '_')}_CoverLetter.txt`;
+      a.download = filename;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Cover letter download failed:', err);
+      navigate('/cover-letter');
+    } finally {
+      setDownloadingType(null);
+    }
+  };
 
   const resumeReady = application.resume_status === 'ready' || Boolean(application.resume_version) || Boolean(tailoredResume);
   const coverLetterReady = application.cover_letter_status === 'ready'
@@ -56,23 +119,40 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
     }
   };
 
-  const displayResume = tailoredResume || parsedResume || {
-    personal_info: {
-      name: application.candidate?.name || 'Candidate Name',
-      email: application.candidate?.email || 'email@example.com',
-      phone: application.candidate?.phone || '+1 (555) 000-0000',
-      location: application.location || 'Remote'
-    },
-    summary: 'Experienced professional with a strong track record of technical delivery.',
-    experience: [
-      {
-        title: application.job_title || 'Software Engineer',
-        company: application.company_name || 'Target Company',
-        dates: '2023 - Present',
-        bullets: ['Led cross-functional initiatives and built scalable cloud backend services.']
-      }
-    ]
-  };
+  const displayResume = (application.resume_snapshot && Object.keys(application.resume_snapshot).length)
+    ? application.resume_snapshot
+    : application.tailored_resume
+    || tailoredResume
+    || parsedResume
+    || {
+        personal_info: {
+          name: application.candidate?.name || 'Candidate Name',
+          email: application.candidate?.email || 'email@example.com',
+          phone: application.candidate?.phone || '+1 (555) 000-0000',
+          location: application.location || 'Remote'
+        },
+        summary: 'Experienced professional with a strong track record of technical delivery.',
+        experience: [
+          {
+            title: application.job_title || 'Software Engineer',
+            company: application.company_name || 'Target Company',
+            dates: '2023 - Present',
+            bullets: ['Led cross-functional initiatives and built scalable cloud backend services.']
+          }
+        ]
+      };
+
+  const rawCandidateName = displayResume?.personal_info?.name
+    || displayResume?.personal_info?.full_name
+    || application.candidate?.name
+    || parsedResume?.personal_info?.name
+    || '';
+
+  const companyName = application.company_name || '';
+
+  const resumeFileName = rawCandidateName.trim()
+    ? (companyName.trim() ? `${rawCandidateName.trim().replace(/\s+/g, '_')}_${companyName.trim().replace(/\s+/g, '_')}_Resume.pdf` : `${rawCandidateName.trim().replace(/\s+/g, '_')}_Resume.pdf`)
+    : (companyName.trim() ? `${companyName.trim().replace(/\s+/g, '_')}_Resume.pdf` : 'Tailored_Resume.pdf');
 
   const coverLetterContext = {
     candidate: application.candidate || { name: 'Candidate Name' },
@@ -132,8 +212,8 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
             <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200/80 dark:border-zinc-800 text-xs space-y-1.5 text-zinc-700 dark:text-zinc-300">
               <div className="flex justify-between">
                 <span className="text-zinc-500 font-semibold">File Name:</span>
-                <span className="font-bold text-zinc-900 dark:text-zinc-200 truncate max-w-[200px]">
-                  {application.company_name ? `${application.company_name}_Resume.pdf` : 'Tailored_Resume.pdf'}
+                <span className="font-bold text-zinc-900 dark:text-zinc-200 truncate max-w-[200px]" title={resumeFileName}>
+                  {resumeFileName}
                 </span>
               </div>
               <div className="flex justify-between">
@@ -161,11 +241,12 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
               Preview Document
             </button>
             <button
-              onClick={() => navigate('/download')}
-              className="p-2 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 rounded-xl transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700 shadow-xs"
+              onClick={handleDownloadResume}
+              disabled={downloadingType === 'resume'}
+              className="p-2 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 rounded-xl transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700 shadow-xs disabled:opacity-50"
               title="Download Resume PDF"
             >
-              <Download size={15} />
+              {downloadingType === 'resume' ? <RefreshCw size={15} className="animate-spin text-[#00bda5]" /> : <Download size={15} />}
             </button>
           </div>
         </div>
@@ -237,11 +318,12 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
                   Studio
                 </button>
                 <button
-                  onClick={() => navigate('/cover-letter')}
-                  className="p-2 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 rounded-xl transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700 shadow-xs"
-                  title="Download Cover Letter PDF"
+                  onClick={handleDownloadCoverLetter}
+                  disabled={downloadingType === 'coverletter'}
+                  className="p-2 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 rounded-xl transition-colors cursor-pointer border border-zinc-200 dark:border-zinc-700 shadow-xs disabled:opacity-50"
+                  title="Download Cover Letter Document"
                 >
-                  <Download size={15} />
+                  {downloadingType === 'coverletter' ? <RefreshCw size={15} className="animate-spin text-[#00bda5]" /> : <Download size={15} />}
                 </button>
               </>
             ) : (
@@ -281,10 +363,11 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
                 Open in Studio
               </button>
               <button
-                onClick={() => navigate(previewModalType === 'resume' ? '/download' : '/cover-letter')}
-                className="px-3 py-1.5 bg-[#00bda5] hover:bg-[#00a38e] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer border-none"
+                onClick={handleDownloadResume}
+                disabled={downloadingType === 'resume'}
+                className="px-3 py-1.5 bg-[#00bda5] hover:bg-[#00a38e] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer border-none disabled:opacity-50"
               >
-                <Download size={13} />
+                {downloadingType === 'resume' ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />}
                 Download PDF
               </button>
               <button
@@ -300,7 +383,7 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
           <div className="flex-1 bg-zinc-100 dark:bg-zinc-950 overflow-auto p-8 flex justify-center items-start custom-scrollbar">
             <div className="w-[816px] min-h-[1056px] bg-white shadow-2xl rounded-sm p-10 md:p-14 text-zinc-900">
               {previewModalType === 'resume' ? (
-                <TailorRender resume={displayResume} />
+                <TailorRender resume={displayResume} templateName={application.template || 'ExecutiveATS'} />
               ) : (
                 <CoverLetterRender
                   coverLetter={activeCoverLetterText}

@@ -242,7 +242,7 @@ export default function LandingPage() {
     <footer className="lp-footer">
       <Link to="/" className="lp-brand"><BrandLogo size={28} /></Link>
       <span>© {new Date().getFullYear()} Tailr4U</span>
-      <nav aria-label="Footer navigation"><Link to="/support/faq">Help</Link><Link to="/support/contact">Contact</Link><a href="#privacy">Privacy</a><a href="#terms">Terms</a></nav>
+      <nav aria-label="Footer navigation"><Link to="/support/faq">Help</Link><Link to="/support/contact">Contact</Link></nav>
     </footer>
   </div>;
 }

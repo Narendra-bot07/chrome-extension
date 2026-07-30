@@ -356,10 +356,10 @@ function DownloadPage({ onClose }) {
               </p>
             </div>
             <button
-              onClick={onClose || (() => navigate('/templates'))}
+              onClick={onClose || (() => navigate(-1))}
               className="flex items-center gap-1.5 text-[9px] border border-zinc-250 hover:border-zinc-350 text-zinc-550 hover:text-zinc-800 hover:bg-zinc-50 px-2.5 py-1.5 rounded-lg font-extrabold uppercase tracking-wider bg-white transition active:scale-95 shadow-2xs cursor-pointer"
             >
-              ← Back to Templates
+              ← Back
             </button>
           </div>
           
@@ -402,6 +402,7 @@ function DownloadPage({ onClose }) {
           companyName={companyName || 'Company'}
           interactiveLayoutMode={true}
           layoutLevel={layoutLevel}
+          onClose={onClose || (() => navigate(-1))}
           onDownloadArtifact={async (artifact) => {
             const syncResult = await handleDownloadFinalPDF(layoutLevel, {
               usePrepared: true,

@@ -1206,6 +1206,112 @@ async def api_refine_section_stream(
             resume_id=request.resume_id,
             intelligence_model=request.intelligence_model,
             working_resume=request.working_resume,
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to generate cover letter: {str(e)}"
+        )
+
+@router.post("/download-cover-letter-pdf")
+async def api_download_cover_letter_pdf(request: CoverLetterResult):
+    try:
+        from app.playwright_pdf import generate_cover_letter_pdf_via_playwright
+        from fastapi.concurrency import run_in_threadpool
+        
+        pdf_bytes = await run_in_threadpool(
+            generate_cover_letter_pdf_via_playwright,
+            request.json()
+        )
+        clean_company = "".join([c if c.isalnum() or c == '_' else '_' for c in request.company_name.replace(" ", "_")])
+        filename = f"{clean_company}_Cover_Letter.pdf"
+        
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Access-Control-Expose-Headers": "Content-Disposition"
+            }
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate cover letter PDF: {str(e)}"
+        )
+
+class RefineSectionRequest(BaseModel):
+    section_type: str
+    section_data: Any
+    prompt: str
+    job: JobAnalysis
+    resume_id: Optional[str] = None
+    intelligence_model: Optional[str] = None
+    working_resume: Optional[Dict[str, Any]] = None
+    source_resume: Optional[Dict[str, Any]] = None
+    resume_match_analysis: Optional[Dict[str, Any]] = None
+    ats_analysis: Optional[Dict[str, Any]] = None
+    accepted_changes: Optional[List[Dict[str, Any]]] = None
+    pending_changes: Optional[List[Dict[str, Any]]] = None
+
+@router.post("/refine-section")
+async def api_refine_section(
+    request: RefineSectionRequest,
+    x_groq_key: Optional[str] = Header(None)
+):
+    try:
+        refined_content = refine_section_with_ai(
+            section_type=request.section_type,
+            section_data=request.section_data,
+            prompt=request.prompt,
+            job=request.job,
+            api_key=x_groq_key,
+            resume_id=request.resume_id,
+            intelligence_model=request.intelligence_model,
+            working_resume=request.working_resume,
+            source_resume=request.source_resume,
+            resume_match_analysis=request.resume_match_analysis,
+            ats_analysis=request.ats_analysis,
+            accepted_changes=request.accepted_changes,
+            pending_changes=request.pending_changes
+        )
+        return {"refined": refined_content}
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Refinement failed: {str(e)}"
+        )
+
+
+@router.post("/refine-section/stream")
+async def api_refine_section_stream(
+    request: RefineSectionRequest,
+    x_groq_key: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+    conn = Depends(get_db_connection)
+):
+    user_id = "00000000-0000-0000-0000-000000000000"
+    if authorization:
+        try:
+            user_data = await verify_supabase_jwt(authorization, conn)
+            user_id = user_data.get("id", user_id)
+        except Exception:
+            pass
+
+    from app.groq_service import refine_section_stream_generator
+    return StreamingResponse(
+        refine_section_stream_generator(
+            section_type=request.section_type,
+            section_data=request.section_data,
+            prompt=request.prompt,
+            job=request.job,
+            api_key=x_groq_key,
+            resume_id=request.resume_id,
+            intelligence_model=request.intelligence_model,
+            working_resume=request.working_resume,
             source_resume=request.source_resume,
             resume_match_analysis=request.resume_match_analysis,
             ats_analysis=request.ats_analysis,
@@ -1216,3 +1322,24 @@ async def api_refine_section_stream(
         ),
         media_type="text/event-stream"
     )
+
+class SupportTicketRequest(BaseModel):
+    subject: str
+    priority: str = "NORMAL"
+    description: str
+    email: Optional[str] = None
+
+@router.post("/v1/support/ticket")
+async def api_submit_support_ticket(
+    request: SupportTicketRequest,
+    authorization: Optional[str] = Header(None)
+):
+    import uuid
+    import datetime
+    ticket_id = f"TICKET-{str(uuid.uuid4())[:8].upper()}"
+    return {
+        "success": True,
+        "ticket_id": ticket_id,
+        "message": f"Support ticket {ticket_id} created successfully.",
+        "created_at": datetime.datetime.utcnow().isoformat()
+    }

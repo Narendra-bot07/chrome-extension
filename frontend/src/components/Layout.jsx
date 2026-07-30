@@ -292,7 +292,7 @@ function Layout() {
         <div className="flex flex-col gap-5 p-3">
           {/* Logo Header */}
           <div className="h-[44px] flex items-center justify-between px-2">
-            <Link to="/dashboard" className="flex items-center overflow-hidden">
+            <Link to="/" className="flex items-center overflow-hidden" title="Go to Home / Landing Page">
               <BrandLogo size={30} />
             </Link>
             <button 
@@ -382,7 +382,7 @@ function Layout() {
             </button>
 
             {/* tailr4u Brand Logo */}
-            <Link to="/dashboard" className="flex items-center shrink-0 group">
+            <Link to="/" className="flex items-center shrink-0 group" title="Go to Home / Landing Page">
               <BrandLogo size={34} />
             </Link>
           </div>
