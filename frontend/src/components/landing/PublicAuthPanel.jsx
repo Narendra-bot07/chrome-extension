@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertCircle, ArrowLeft, Check, Eye, EyeOff, Lock, Mail, Sparkles } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Check, Eye, EyeOff, Lock, Mail, Zap } from 'lucide-react';
 import { useGoogleLogin } from '@react-oauth/google';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
@@ -157,7 +157,6 @@ export default function PublicAuthPanel() {
   if (user && !success) return <div className="public-auth-card public-auth-ready">
     <span><Check size={22} /></span><h2>You’re already signed in</h2><p>Your tailr4u workspace is ready.</p>
     <button className="public-auth-submit" onClick={() => navigate(destination)}>Continue to Dashboard</button>
-    <button className="public-auth-back" onClick={() => navigate('/')}><ArrowLeft size={14} /> Back to tailr4u</button>
   </div>;
 
   return <motion.div className="public-auth-card" initial={reduced ? { opacity: 0 } : { opacity: 0, x: 28, scale: .98 }} animate={{ opacity: 1, x: 0, scale: 1 }} transition={{ duration: reduced ? .1 : .24 }}>
@@ -181,20 +180,20 @@ export default function PublicAuthPanel() {
           )}
           {mode !== 'forgot_password' && <div className="public-auth-divider"><span>or continue with email</span></div>}
           <form onSubmit={submit}>
-            <label>Email address<div><Mail size={15} /><input ref={emailRef} type="email" required autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" /></div></label>
-            {mode !== 'forgot_password' && <label>Password<div><Lock size={15} /><input type={showPassword ? 'text' : 'password'} required autoComplete={mode === 'register' ? 'new-password' : 'current-password'} value={password} onChange={event => setPassword(event.target.value)} placeholder="Enter your password" /><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></label>}
-            {mode === 'register' && <label>Confirm password<div><Lock size={15} /><input type="password" required autoComplete="new-password" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} placeholder="Confirm your password" /></div><small>{password && `${passwordRules.filter(Boolean).length}/4 password requirements met`}</small></label>}
+            <label>Email address<div><Mail size={16} /><input ref={emailRef} type="email" required autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" /></div></label>
+            {mode !== 'forgot_password' && <label>Password<div><Lock size={16} /><input type={showPassword ? 'text' : 'password'} required autoComplete={mode === 'register' ? 'new-password' : 'current-password'} value={password} onChange={event => setPassword(event.target.value)} placeholder="Enter your password" /><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label>}
+            {mode === 'register' && <label>Confirm password<div><Lock size={16} /><input type="password" required autoComplete="new-password" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} placeholder="Confirm your password" /></div><small>{password && `${passwordRules.filter(Boolean).length}/4 password requirements met`}</small></label>}
             {mode === 'login' && <button className="public-auth-link align-right" type="button" onClick={() => go('/forgot-password')}>Forgot password?</button>}
-            <button className="public-auth-submit" disabled={loading}>{loading ? 'Please wait…' : mode === 'register' ? 'Create Account' : mode === 'forgot_password' ? 'Send Reset Link' : 'Sign In'} <Sparkles size={15} /></button>
+            <button className="public-auth-submit" disabled={loading}>{loading ? 'Please wait…' : mode === 'register' ? 'Create Account' : mode === 'forgot_password' ? 'Send Reset Link' : 'Sign In'} <Zap size={15} /></button>
           </form>
           <div className="public-auth-switch">
-            {mode === 'login' && <>New to tailr4u? <button onClick={() => go('/register')}>Create Account</button></>}
+            {mode === 'login' && <>New to Tailr4U? <button onClick={() => go('/register')}>Create Account</button></>}
             {mode === 'register' && <>Already have an account? <button onClick={() => go('/login')}>Sign In</button></>}
             {mode === 'forgot_password' && <button onClick={() => go('/login')}>Back to Sign In</button>}
           </div>
         </>}
       </motion.div>
     </AnimatePresence>
-    {!success && <button className="public-auth-back" onClick={() => navigate('/')}><ArrowLeft size={14} /> Back to tailr4u</button>}
+    {!success && <button className="public-auth-back" onClick={() => navigate('/')}><ArrowLeft size={14} /> Back to Tailr4U</button>}
   </motion.div>;
 }

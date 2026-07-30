@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { 
   User, Mail, Phone, Linkedin, ExternalLink, Copy, Check, Plus, 
-  Trash2, Edit2, Sparkles, Send, RefreshCw, MessageSquare
+  Trash2, Edit2, Wand2, Send, RefreshCw, MessageSquare
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -267,7 +267,7 @@ export function RecruiterTab({ application, onSaveContacts }) {
       <section className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 space-y-4 shadow-xs">
         <div className="flex items-center justify-between">
           <h4 className="text-xs font-black uppercase tracking-wider text-teal-700 dark:text-teal-400 flex items-center gap-1.5">
-            <Sparkles size={15} />
+            <Wand2 size={15} />
             AI Contextual Email Assist
           </h4>
           <span className="text-[10px] font-semibold text-zinc-400">
@@ -313,7 +313,7 @@ export function RecruiterTab({ application, onSaveContacts }) {
           disabled={isGeneratingEmail}
           className="px-4 py-2.5 bg-[#00bda5] hover:bg-[#00a38e] text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-colors cursor-pointer border-none shadow-xs"
         >
-          {isGeneratingEmail ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
+          {isGeneratingEmail ? <RefreshCw size={14} className="animate-spin" /> : <Wand2 size={14} />}
           <span>Generate Outreach Email</span>
         </button>
 

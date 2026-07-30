@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { 
-  FileText, Plus, Search, Pin, Trash2, Edit2, Check, Sparkles, BookOpen, User, DollarSign, Code
+  FileText, Plus, Search, Pin, Trash2, Edit2, Check, Wand2, BookOpen, User, DollarSign, Code
 } from 'lucide-react';
 
 const NOTE_CATEGORIES = [

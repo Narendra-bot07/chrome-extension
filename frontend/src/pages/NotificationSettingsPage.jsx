@@ -10,6 +10,35 @@ const categories = [
 ];
 const initial = categories.map(([category]) => ({ category, in_app_enabled: true, email_enabled: true, push_enabled: false }));
 
+const ALL_TIMEZONES = (() => {
+  try {
+    if (typeof Intl !== 'undefined' && Intl.supportedValuesOf) {
+      return Intl.supportedValuesOf('timeZone');
+    }
+  } catch (e) {}
+  return [
+    'UTC', 'Asia/Kolkata', 'Asia/Dubai', 'Asia/Tokyo', 'Asia/Singapore', 'Asia/Shanghai',
+    'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+    'America/Toronto', 'America/Sao_Paulo', 'Europe/London', 'Europe/Paris',
+    'Europe/Berlin', 'Europe/Moscow', 'Australia/Sydney', 'Pacific/Auckland'
+  ];
+})();
+
+function getTimezoneLabel(tz) {
+  try {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      timeZoneName: 'shortOffset'
+    });
+    const parts = formatter.formatToParts(now);
+    const offset = parts.find(p => p.type === 'timeZoneName')?.value || '';
+    return `${tz} (${offset || 'UTC'})`;
+  } catch {
+    return tz;
+  }
+}
+
 export default function NotificationSettingsPage() {
   const { session } = useApp();
   const token = session?.access_token;
@@ -90,11 +119,20 @@ export default function NotificationSettingsPage() {
         <div className="grid sm:grid-cols-3 gap-3">
           <label className="text-[10px] font-bold text-tf-text-secondary">
             Timezone
-            <input
-              value={settings.timezone}
+            <select
+              value={settings.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone}
               onChange={e => setSettings({ ...settings, timezone: e.target.value })}
-              className="mt-1 w-full p-2 rounded-lg border border-tf-border bg-tf-bg text-xs"
-            />
+              className="mt-1 w-full p-2 rounded-lg border border-tf-border bg-tf-bg text-xs text-tf-text font-medium cursor-pointer focus:outline-none focus:ring-2 focus:ring-tf-accent"
+            >
+              {settings.timezone && !ALL_TIMEZONES.includes(settings.timezone) && (
+                <option value={settings.timezone}>{settings.timezone}</option>
+              )}
+              {ALL_TIMEZONES.map(tz => (
+                <option key={tz} value={tz}>
+                  {getTimezoneLabel(tz)}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="text-[10px] font-bold text-tf-text-secondary">
             Quiet hours start

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check, Sparkles, ShieldCheck, ArrowRight, RefreshCw, FileText, CalendarDays, Clock3, History, Eye, Star, X, Upload } from 'lucide-react';
+import { Check, Wand2, ShieldCheck, ArrowRight, RefreshCw, FileText, CalendarDays, Clock3, History, Eye, Star, X, Upload } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { InlineAIThinking, SkeletonCard } from './ui/Loading';
 
@@ -321,7 +321,7 @@ function ResumeTailoringConfigView({
           disabled={loading || selectedSections.length === 0 || !hasActiveResume}
           className="flex-2 py-3 bg-[#00bda5] hover:bg-[#00a894] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 border-none"
         >
-          <Sparkles size={13} />
+          <Wand2 size={13} />
           Start Tailoring
           <ArrowRight size={13} />
         </button>

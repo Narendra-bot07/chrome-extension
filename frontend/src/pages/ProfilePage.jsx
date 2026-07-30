@@ -24,7 +24,7 @@ import {
   Mail,
   Phone,
   Calendar,
-  Sparkles,
+  Target,
   CheckCircle2,
   AtSign,
   UserCheck,
@@ -291,7 +291,7 @@ export default function ProfilePage() {
         <motion.div variants={cardVariants} className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md p-6 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-xs space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <Sparkles className="w-5 h-5 text-tf-accent" />
+              <Target className="w-5 h-5 text-tf-accent" />
               <div>
                 <h2 className="text-base font-bold text-tf-text">Profile Completion</h2>
                 <p className="text-xs text-tf-text-secondary">Complete your profile to tailor resumes and cover letters faster.</p>
@@ -367,7 +367,7 @@ export default function ProfilePage() {
                 icon: User,
                 fields: [
                   ['Full name', [profileForm.first_name, profileForm.last_name].filter(Boolean).join(' ') || profileForm.full_name, User],
-                  ['Preferred name', profileForm.preferred_name, Sparkles],
+                  ['Preferred name', profileForm.preferred_name, Target],
                   ['Username', profileForm.username ? `@${profileForm.username}` : '', AtSign],
                   ['Date of birth', profileForm.date_of_birth
                     ? new Date(`${profileForm.date_of_birth}T00:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })

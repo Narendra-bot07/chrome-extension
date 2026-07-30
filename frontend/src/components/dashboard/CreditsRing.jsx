@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Sparkles } from 'lucide-react';
+import { Zap } from 'lucide-react';
 
 export function CreditsRing({ remaining, used, isUnlimited, insights = [] }) {
   const total = isUnlimited ? 100 : (remaining + used) || 1;
@@ -82,7 +82,7 @@ export function CreditsRing({ remaining, used, isUnlimited, insights = [] }) {
       {insights.length > 0 && (
         <div className="p-3 bg-tf-surface-2 rounded-md border border-tf-border space-y-1.5">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-tf-text">
-            <Sparkles size={13} className="text-tf-accent" />
+            <Zap size={13} className="text-tf-accent" />
             <span>Search Insights</span>
           </div>
           <ul className="space-y-1 text-xs text-tf-text-secondary font-normal list-disc pl-3.5">

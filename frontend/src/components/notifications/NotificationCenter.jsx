@@ -1,6 +1,6 @@
 import React, { Component, useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bell, CheckCheck, MoreHorizontal, Archive, Clock3, Settings, Shield, Briefcase, Sparkles, CalendarDays, X } from 'lucide-react';
+import { Bell, CheckCheck, MoreHorizontal, Archive, Clock3, Settings, Shield, Briefcase, Zap, CalendarDays, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { notificationApi } from '../../services/notificationApi';
 
@@ -8,7 +8,7 @@ const tabs = [
   ['All', ''], ['Action Required', 'action_required=true'], ['Applications', 'category=application'],
   ['Interviews', 'category=interview'], ['AI Insights', 'category=ai_insight'], ['Security', 'category=security']
 ];
-const icons = { application: Briefcase, interview: CalendarDays, ai_insight: Sparkles, security: Shield, reminder: Clock3 };
+const icons = { application: Briefcase, interview: CalendarDays, ai_insight: Zap, security: Shield, reminder: Clock3 };
 const relative = value => {
   const seconds = Math.max(1, (Date.now() - new Date(value).getTime()) / 1000);
   if (seconds < 60) return 'just now';

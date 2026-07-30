@@ -38,10 +38,12 @@ import { loginPathFor } from './utils/authRedirect';
 import GlobalCursor from './components/GlobalCursor';
 
 function ProtectedRoute({ children }) {
-  const { user, loadingAuth } = useApp();
+  const { user, loadingAuth, parsedResume, resumesList, loadingResume } = useApp();
   const location = useLocation();
+  const isExtension = (typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id)) || window.location.protocol === 'chrome-extension:';
+  const hasAnyResume = Boolean(parsedResume) || (Array.isArray(resumesList) && resumesList.length > 0);
   
-  if (loadingAuth) {
+  if (loadingAuth || (isExtension && loadingResume)) {
     return (
       <div className="min-h-screen bg-[#FAFAFB] dark:bg-[#15171c] text-zinc-900 dark:text-zinc-100 flex flex-col items-center justify-center transition-colors">
         <div className="w-72 space-y-3" role="status" aria-label="Verifying your session">
@@ -55,8 +57,18 @@ function ProtectedRoute({ children }) {
   }
   
   if (!user) {
+    if (isExtension) {
+      return <Navigate to="/extension-setup" replace />;
+    }
     const requested = `${location.pathname}${location.search || ''}`;
     return <Navigate to={loginPathFor(requested)} replace />;
+  }
+
+  if (isExtension && !hasAnyResume) {
+    const isResumeUploadRoute = ['/resume-detect', '/resume-parse', '/resume-review'].includes(location.pathname);
+    if (!isResumeUploadRoute) {
+      return <Navigate to="/extension-setup" replace />;
+    }
   }
   
   return children;
@@ -69,7 +81,7 @@ function StartupLoader() {
         <div className="mx-auto mb-5 h-14 w-14 overflow-hidden rounded-2xl bg-white/80 p-2 shadow-lg dark:bg-white/10">
           <img src={`${import.meta.env.BASE_URL || '/'}application-logo.png`} alt="" className="h-full w-full object-contain" />
         </div>
-        <div className="text-xl font-black tracking-tight">tailr4u</div>
+        <div className="text-xl font-black tracking-tight">Tailr4U</div>
         <div className="mt-4 h-1 overflow-hidden rounded-full bg-blue-950/10 dark:bg-white/10">
           <div className="h-full w-2/3 rounded-full bg-gradient-to-r from-blue-500 to-teal-400 motion-safe:animate-pulse" />
         </div>
@@ -95,43 +107,61 @@ function AppRoutes() {
   } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
-  const extensionStartupHandled = useRef(false);
-  const isExtension = typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id);
+  const isExtension = (typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id)) || window.location.protocol === 'chrome-extension:';
   const hasAnyResume = Boolean(parsedResume) || (Array.isArray(resumesList) && resumesList.length > 0);
 
   useEffect(() => {
-    if (isExtension && !loadingAuth && !loadingResume && !extensionStartupHandled.current) {
-      extensionStartupHandled.current = true;
-      // Opening the extension action starts at `/`, but workflow hand-offs can
-      // deliberately open a full extension tab at a specific route. Preserve
-      // those deep links instead of forcing every new extension document back
-      // to the extraction screen.
-      if (location.pathname === '/') {
-        navigate(user && hasAnyResume ? '/tailor' : '/extension-setup', { replace: true });
+    if (loadingAuth || loadingResume) return;
+
+    if (isExtension) {
+      const isAuthRoute = ['/', '/login', '/register', '/forgot-password', '/reset-password', '/verify-email', '/email-sent'].includes(location.pathname);
+      const isResumeUploadRoute = ['/resume-detect', '/resume-parse', '/resume-review'].includes(location.pathname);
+      const isSetupRoute = location.pathname === '/extension-setup';
+      const isSetupComplete = Boolean(user && hasAnyResume);
+
+      if (!isSetupComplete) {
+        if (!isAuthRoute && !isResumeUploadRoute && !isSetupRoute) {
+          navigate('/extension-setup', { replace: true });
+        }
+      } else {
+        if (location.pathname === '/' || location.pathname === '/extension-setup') {
+          navigate('/tailor', { replace: true });
+        }
       }
-      return;
+    } else {
+      if (!loadingPreferences && user) {
+        const isOnboardingRoute = location.pathname === '/onboarding/job-preferences';
+        const isPublicOrAuthRoute = ['/', '/login', '/register', '/forgot-password', '/reset-password', '/verify-email', '/email-sent'].includes(location.pathname);
+
+        if (!hasCompletedPreferences && !isOnboardingRoute && !isPublicOrAuthRoute) {
+          navigate('/onboarding/job-preferences', { replace: true });
+          return;
+        }
+
+        if (!parsedResume && location.pathname === '/tailor') {
+          navigate('/resume-detect', { replace: true });
+          return;
+        }
+
+        if (!hasRedirectedOnStartup && !isPublicOrAuthRoute) setHasRedirectedOnStartup(true);
+      }
     }
+  }, [
+    isExtension,
+    user,
+    hasAnyResume,
+    loadingAuth,
+    loadingResume,
+    loadingPreferences,
+    hasCompletedPreferences,
+    parsedResume,
+    hasRedirectedOnStartup,
+    location.pathname,
+    navigate,
+    setHasRedirectedOnStartup
+  ]);
 
-    if (!loadingAuth && !loadingResume && !loadingPreferences && user) {
-      const isOnboardingRoute = location.pathname === '/onboarding/job-preferences';
-      const isPublicOrAuthRoute = ['/', '/login', '/register', '/forgot-password', '/reset-password', '/verify-email', '/email-sent'].includes(location.pathname);
-
-      if (!isExtension && !hasCompletedPreferences && !isOnboardingRoute && !isPublicOrAuthRoute) {
-        navigate('/onboarding/job-preferences', { replace: true });
-        return;
-      }
-
-      // 1. Dynamic Route Guard: Protect /tailor route when user has no resume
-      if ((!isExtension && !parsedResume || isExtension && !hasAnyResume) && location.pathname === '/tailor') {
-        navigate('/resume-detect', { replace: true });
-        return;
-      }
-
-      if (!hasRedirectedOnStartup && !isPublicOrAuthRoute) setHasRedirectedOnStartup(true);
-    }
-  }, [isExtension, hasAnyResume, loadingAuth, loadingResume, loadingPreferences, user, hasCompletedPreferences, parsedResume, hasRedirectedOnStartup, location.pathname, navigate, setHasRedirectedOnStartup]);
-
-  if (loadingAuth) return <StartupLoader />;
+  if (loadingAuth || (isExtension && loadingResume)) return <StartupLoader />;
 
   return (
     <Routes>

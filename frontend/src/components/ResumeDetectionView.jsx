@@ -14,7 +14,7 @@ import {
   Download,
   Copy,
   RotateCcw,
-  Sparkles,
+  Wand2,
   Plus,
   Search,
   Filter,

@@ -1,7 +1,8 @@
 import React, { useEffect } from 'react';
-import { ArrowRight, Check, FileText, LockKeyhole, LogIn, Sparkles, UserRoundCheck } from 'lucide-react';
+import { ArrowRight, Check, FileText, LockKeyhole, LogIn, Zap, UserRoundCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { ApplicationLogo } from '../components/ApplicationLogo';
+import BrandLogo from '../components/BrandLogo';
 import { useApp } from '../context/AppContext';
 import './ExtensionSetupPage.css';
 
@@ -20,8 +21,8 @@ export default function ExtensionSetupPage() {
   return (
     <main className="extension-setup">
       <section className="extension-setup-card">
-        <div className="extension-setup-brand"><ApplicationLogo size={46} /><span>tailr4u</span></div>
-        <span className="extension-setup-kicker"><Sparkles size={14} /> Extension setup</span>
+        <div className="extension-setup-brand"><BrandLogo size={42} /></div>
+        <span className="extension-setup-kicker"><Zap size={14} /> Extension setup</span>
         <h1>Complete two steps to start tailoring.</h1>
         <p>We need a secure account and one source resume before we can review the job open in your browser.</p>
 

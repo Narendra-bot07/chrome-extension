@@ -1,6 +1,6 @@
 import React from 'react';
 import { 
-  FileText, Sparkles, UserCheck, ArrowRight, Clock, 
+  FileText, Wand2, UserCheck, ArrowRight, Clock, 
   BrainCircuit, CheckCircle2, AlertCircle, Calendar, Zap, ShieldCheck
 } from 'lucide-react';
 
@@ -80,7 +80,7 @@ export function OverviewTab({ application, onNavigateTab }) {
           <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 flex items-center justify-between shadow-xs">
             <div className="flex items-center gap-3">
               <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${coverLetterReady ? 'bg-teal-50 text-teal-600 border border-teal-200 dark:bg-teal-950/30 dark:text-teal-400 dark:border-teal-800' : 'bg-amber-50 text-amber-600 border border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800'}`}>
-                <Sparkles size={18} />
+                <Wand2 size={18} />
               </div>
               <div>
                 <h4 className="text-xs font-bold text-zinc-900 dark:text-white">Cover Letter</h4>

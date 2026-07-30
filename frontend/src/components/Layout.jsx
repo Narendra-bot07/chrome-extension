@@ -20,6 +20,7 @@ import { InteractiveAuroraBackground } from './layout/InteractiveAuroraBackgroun
 import { PageContainer } from './layout/PageContainer';
 import { getPageLayout } from './layout/pageLayout';
 import { ApplicationLogo, UserAvatar } from './ApplicationLogo';
+import BrandLogo from './BrandLogo';
 import NotificationCenter from './notifications/NotificationCenter';
 
 
@@ -251,7 +252,7 @@ function Layout() {
       case '/support/contact': return 'Contact Support';
       case '/no-job-detected': return 'No Job Detected';
       case '/manual-job-entry': return 'Manual Job Entry';
-      default: return 'tailr4u';
+      default: return 'Tailr4U';
     }
   };
 
@@ -291,13 +292,8 @@ function Layout() {
         <div className="flex flex-col gap-5 p-3">
           {/* Logo Header */}
           <div className="h-[44px] flex items-center justify-between px-2">
-            <Link to="/dashboard" className="flex items-center gap-2.5 overflow-hidden">
-              <ApplicationLogo size={36} />
-              {sidebarOpen && (
-                <span className="text-sm font-semibold tracking-tight text-tf-text truncate">
-                  tailr4u
-                </span>
-              )}
+            <Link to="/dashboard" className="flex items-center overflow-hidden">
+              <BrandLogo size={30} />
             </Link>
             <button 
               className="text-tf-text-tertiary hover:text-tf-text p-1 rounded-md"
@@ -386,14 +382,8 @@ function Layout() {
             </button>
 
             {/* tailr4u Brand Logo */}
-            <Link to="/dashboard" className="flex items-center gap-2.5 shrink-0 group">
-              <ApplicationLogo
-                size={40}
-                className="transition-transform group-hover:scale-105"
-              />
-              <span className="text-base font-bold tracking-tight text-tf-text hidden xs:inline">
-                tailr4u
-              </span>
+            <Link to="/dashboard" className="flex items-center shrink-0 group">
+              <BrandLogo size={34} />
             </Link>
           </div>
 

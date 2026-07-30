@@ -116,3 +116,15 @@ class EmailService:
             text,
             self._shell(title, content),
         )
+
+    def send_account_deletion_otp(self, recipient: str, otp_code: str) -> bool:
+        content = f"""<p style="line-height:1.6">We received a request to permanently delete your tailr4u account.</p>
+        <p style="font-size:14px;font-weight:600">Your verification OTP code for account deletion is:</p>
+        <div style="font-size:32px;font-weight:900;letter-spacing:8px;color:#dc2626;padding:16px 0;text-align:center">{html.escape(otp_code)}</div>
+        <p style="font-size:13px;line-height:1.6">This code expires in 10 minutes. If you did not request account deletion, please secure your account immediately.</p>"""
+        return self.send(
+            recipient,
+            "Confirm Account Deletion - OTP Code",
+            f"Your tailr4u account deletion OTP code is: {otp_code}\nThis code expires in 10 minutes.",
+            self._shell("Confirm Account Deletion", content),
+        )

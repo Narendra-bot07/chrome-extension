@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { 
-  Check, RefreshCw, GripVertical, ChevronDown, ChevronRight, Plus, Trash2, Download, Sparkles, Eye, 
+  Check, RefreshCw, GripVertical, ChevronDown, ChevronRight, Plus, Trash2, Download, Wand2, Eye, 
   User, FileText, GraduationCap, Wrench, Briefcase, FolderGit2, Award, Trophy, Languages, Heart, 
   BookOpen, CheckCircle2, Circle, Undo2, Redo2, Activity
 } from 'lucide-react';
@@ -43,7 +43,7 @@ const getSectionIcon = (section) => {
     case 'languages': return <Languages size={14} className="text-cyan-500" />;
     case 'volunteer_experience': return <Heart size={14} className="text-pink-500" />;
     case 'publications': return <BookOpen size={14} className="text-purple-500" />;
-    default: return <Sparkles size={14} className="text-indigo-500" />;
+    default: return <Wand2 size={14} className="text-indigo-500" />;
   }
 };
 
@@ -662,7 +662,7 @@ export default function ResumeEditorView({
                   {/* AI Tailored Badge */}
                   {!reorderOnly && section === 'summary' && (
                     <span className="px-1.5 py-0.5 bg-indigo-50 border border-indigo-150 text-indigo-700 text-[8px] font-extrabold rounded-md flex items-center gap-0.5 shrink-0">
-                      <Sparkles size={8} /> AI TAILORED
+                      <Wand2 size={8} /> AI TAILORED
                     </span>
                   )}
                 </div>
@@ -865,7 +865,7 @@ export default function ResumeEditorView({
         )}
         {!reorderOnly && (
           <div className="mb-5 p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 flex items-start gap-2.5 shadow-sm">
-            <Sparkles className="text-indigo-600 mt-0.5 shrink-0" size={16} />
+            <Wand2 className="text-indigo-600 mt-0.5 shrink-0" size={16} />
             <div className="text-[11px] text-zinc-550 leading-relaxed font-bold">
               Confirm your parsed resume fields. Drag categories to change A4 section layout order.
             </div>

@@ -4,7 +4,7 @@ import {
   ArrowRight, Award, Briefcase, Building2, Calendar, Check, 
   ChevronRight, Clock, DollarSign, Edit3, Globe, Info, 
   MapPin, RefreshCw, Save, ShieldCheck, SlidersHorizontal, 
-  Sparkles, Star, Target, Trash2, User, X, Zap 
+  Star, Target, Trash2, User, X, Zap 
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Button } from '../components/ui/Button';
@@ -360,11 +360,11 @@ export default function JobPreferencesPage() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-3 border-b border-tf-border">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-xl bg-tf-accent/10 border border-tf-accent/20 text-tf-accent flex items-center justify-center">
-              <Sparkles size={18} />
+              <Target size={18} />
             </div>
             <div>
               <h1 className="text-base font-bold text-tf-text">Live Targeting Summary</h1>
-              <p className="text-xs text-tf-text-secondary">Criteria shaping your tailr4u recommendations and application materials.</p>
+              <p className="text-xs text-tf-text-secondary">Criteria shaping your Tailr4U recommendations and application materials.</p>
             </div>
           </div>
 
@@ -704,7 +704,7 @@ export default function JobPreferencesPage() {
               <div className="p-4 rounded-xl bg-purple-500/10 border border-purple-500/20 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-xs font-bold text-purple-600 dark:text-purple-400">
-                    <Sparkles size={16} />
+                    <Zap size={16} />
                     <span>Suggested from your active resume</span>
                   </div>
                   <span className="text-[10px] text-tf-text-tertiary font-medium">Requires your confirmation</span>

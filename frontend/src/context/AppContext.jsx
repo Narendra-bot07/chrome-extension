@@ -93,7 +93,7 @@ export function AppProvider({ children }) {
 
           // Fetch resumes to check if any exist and load the latest one if not already set
           try {
-            const resumes = await fetchResumesList(activeToken);
+            const resumes = await fetchResumesList(activeToken, true);
             if (resumes && resumes.length > 0) {
               const latestResume = normalizeResumeRecord(resumes.find((resume) => resume.is_active) || resumes[0]);
               persistParsedResume(latestResume);
@@ -233,7 +233,7 @@ export function AppProvider({ children }) {
     setHasCompletedPreferences(!!data.has_completed_preferences);
     await fetchJobPreferences(accessToken);
     try {
-      const resumes = await fetchResumesList(accessToken);
+      const resumes = await fetchResumesList(accessToken, true);
       if (resumes?.length) {
         persistParsedResume(normalizeResumeRecord(resumes.find(resume => resume.is_active) || resumes[0]));
       }
@@ -395,6 +395,7 @@ export function AppProvider({ children }) {
           // Allow the same content to be retried after a genuine failure.
           if (liveATSRequestRef.current.sequence === sequence) {
             liveATSRequestRef.current.key = '';
+            setLiveATS({ scoring_source: 'failed', error: error.message || 'LLM analysis failed at backend' });
           }
         }
       } finally {
@@ -1096,10 +1097,13 @@ export function AppProvider({ children }) {
     }
   }, [selectedTemplate]);
 
-  const fetchResumesList = async (tokenOverride) => {
+  const fetchResumesList = async (tokenOverride, isInitial = false) => {
     const token = tokenOverride || session?.access_token || localStorage.getItem('access_token');
-    if (!token) return [];
-    setLoadingResume(true);
+    if (!token) {
+      setLoadingResume(false);
+      return [];
+    }
+    if (isInitial) setLoadingResume(true);
     try {
       const reconciliationState = resumeReconciliationRef.current;
       if (reconciliationState.token !== token) {
@@ -1145,7 +1149,7 @@ export function AppProvider({ children }) {
       console.error("Failed to fetch resumes:", err);
       return [];
     } finally {
-      setLoadingResume(false);
+      if (isInitial) setLoadingResume(false);
     }
   };
 

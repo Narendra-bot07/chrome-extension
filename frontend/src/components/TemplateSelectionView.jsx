@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toRenderableResume } from '../utils/renderableResume';
-import { Download, Sparkles, CheckCircle2, ShieldCheck, ChevronRight, X, ZoomIn, Eye, ArrowLeft, Layers, Image, Minimize2 } from 'lucide-react';
+import { Download, Wand2, CheckCircle2, ShieldCheck, ChevronRight, X, ZoomIn, Eye, ArrowLeft, Layers, Image, Minimize2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import TailorRender from './Resume/TailorRender';
@@ -198,7 +198,7 @@ export default function TemplateSelectionView({ onBack }) {
             </button>
             <div>
               <h1 className="text-md font-black text-zinc-950 flex items-center gap-2 uppercase tracking-tight">
-                <Sparkles size={16} className="text-indigo-600" />
+                <Wand2 size={16} className="text-indigo-600" />
                 Select Premium Layout Style
               </h1>
               <p className="text-[10px] text-zinc-400 font-bold uppercase mt-0.5">

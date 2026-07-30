@@ -1,36 +1,19 @@
 import React, { memo, useMemo, useState } from 'react';
 import { getInitials } from './companyLogoUtils';
 import { selectProfileImage } from '../services/profilePolicy';
+import BrandLogo from './BrandLogo';
 
 export const APPLICATION_LOGO_SRC = `${import.meta.env.BASE_URL || '/'}application-logo.png`;
 
 export const ApplicationLogo = memo(function ApplicationLogo({
-  size = 40,
+  size = 36,
+  variant = 'icon',
   className = '',
-  alt = 'tailr4u logo',
-  fallbackLabel = 'tailr4u'
+  alt = 'Tailr4U logo',
+  fallbackLabel = 'Tailr4U'
 }) {
-  const [failed, setFailed] = useState(false);
-  const dimension = typeof size === 'number' ? `${size}px` : size;
-
   return (
-    <span
-      className={`inline-flex shrink-0 items-center justify-center ${className}`}
-      style={{ width: dimension, height: dimension }}
-      aria-label={failed ? fallbackLabel : undefined}
-    >
-      {failed ? (
-        <span className="font-extrabold">{getInitials(fallbackLabel)}</span>
-      ) : (
-        <img
-          src={APPLICATION_LOGO_SRC}
-          alt={alt}
-          className="h-full w-full object-contain"
-          decoding="async"
-          onError={() => setFailed(true)}
-        />
-      )}
-    </span>
+    <BrandLogo size={size} variant={variant} className={className} />
   );
 });
 

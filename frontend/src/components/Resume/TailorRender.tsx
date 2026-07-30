@@ -17,6 +17,12 @@ const sectionLabel = (value: string) => value
   .replace(/_/g, ' ')
   .replace(/\b\w/g, char => char.toUpperCase());
 
+const ensureArray = (val: any): any[] => {
+  if (Array.isArray(val)) return val;
+  if (typeof val === 'string' && val.trim()) return [val.trim()];
+  return [];
+};
+
 const linkHref = (kind: string, value: string) => {
   const clean = String(value || '').trim();
   if (!clean) return '';
@@ -24,6 +30,18 @@ const linkHref = (kind: string, value: string) => {
   if (kind === 'phone') return clean.startsWith('tel:') ? clean : `tel:${clean.replace(/[^\d+]/g, '')}`;
   if (/^[a-z][a-z\d+.-]*:/i.test(clean)) return clean;
   return `https://${clean.replace(/^\/+/, '')}`;
+};
+
+const linkDisplay = (kind: string, value: string) => {
+  if (!value) return null;
+  const info = professionalLink(kind, value);
+  const href = info.href || linkHref(kind, value);
+  const label = info.label || value;
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="underline hover:opacity-80">
+      {label}
+    </a>
+  );
 };
 
 const renderScalar = (value: any, key = ''): React.ReactNode => {
@@ -325,12 +343,12 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
                   <span>{exp.company}</span>
                   {exp.location && <span className="text-zinc-600 font-normal">{exp.location}</span>}
                 </div>
-                {exp.description && exp.description.length > 0 && (
+                {ensureArray(exp.description).length > 0 && (
                   <ul 
                     className="list-disc pl-4 text-zinc-900 leading-relaxed"
                     style={{ fontSize: `${params.fontSize - 0.5}px`, lineHeight: params.lineHeight, marginTop: `${params.bulletGap / 2}px` }}
                   >
-                    {exp.description.map((bullet: string, j: number) => (
+                    {ensureArray(exp.description).map((bullet: string, j: number) => (
                       <li key={j} className="pl-0.5" style={{ marginBottom: `${params.bulletGap}px` }}>{renderTextWithLinks(bullet)}</li>
                     ))}
                   </ul>
@@ -369,10 +387,10 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
                   </h3>
                   {proj.role && <span className="text-[9.5px] font-bold uppercase shrink-0 text-zinc-700">{proj.role}</span>}
                 </div>
-                {proj.technology_stack && proj.technology_stack.length > 0 && (
+                {ensureArray(proj.technology_stack).length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1 mb-1">
                     <span className="text-[9.5px] font-semibold text-zinc-600 mr-1 self-center">Tech:</span>
-                    {proj.technology_stack.map((tech: string, tIdx: number) => (
+                    {ensureArray(proj.technology_stack).map((tech: string, tIdx: number) => (
                       <span 
                         key={tIdx} 
                         className={isPortfolioPro 
@@ -380,17 +398,17 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
                           : "text-[9.5px] italic text-zinc-700"
                         }
                       >
-                        {tech}{!isPortfolioPro && tIdx < proj.technology_stack.length - 1 ? ',' : ''}
+                        {tech}{!isPortfolioPro && tIdx < ensureArray(proj.technology_stack).length - 1 ? ',' : ''}
                       </span>
                     ))}
                   </div>
                 )}
-                {proj.description && proj.description.length > 0 && (
+                {ensureArray(proj.description).length > 0 && (
                   <ul 
                     className="list-disc pl-4 text-zinc-900 leading-relaxed"
                     style={{ fontSize: `${params.fontSize - 0.5}px`, lineHeight: params.lineHeight, marginTop: `${params.bulletGap / 2}px` }}
                   >
-                    {proj.description.map((bullet: string, j: number) => (
+                    {ensureArray(proj.description).map((bullet: string, j: number) => (
                       <li key={j} className="pl-0.5" style={{ marginBottom: `${params.bulletGap}px` }}>{renderTextWithLinks(bullet)}</li>
                     ))}
                   </ul>
@@ -514,9 +532,9 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
                   <span className="text-[9.5px] text-zinc-600 font-bold uppercase">{vol.start_date} - {vol.end_date || 'Present'}</span>
                 </div>
                 <div className="font-semibold text-zinc-800 mt-0.5" style={{ fontSize: `${params.fontSize - 1}px` }}>{vol.organization}</div>
-                {vol.description && vol.description.length > 0 && (
+                {ensureArray(vol.description).length > 0 && (
                   <ul className="list-disc pl-4 text-zinc-900 font-medium mt-1" style={{ lineHeight: params.lineHeight }}>
-                    {vol.description.map((b: string, j: number) => (
+                    {ensureArray(vol.description).map((b: string, j: number) => (
                       <li key={j} style={{ marginBottom: `${params.bulletGap}px` }}>{renderTextWithLinks(b)}</li>
                     ))}
                   </ul>

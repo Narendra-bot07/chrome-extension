@@ -2,9 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   BellRing, Check, ChevronRight, PauseCircle, PlayCircle, FileCheck2,
-  FileText, MapPin, MousePointer2, RefreshCw, Sparkles
+  FileText, MapPin, MousePointer2, RefreshCw, Wand2
 } from 'lucide-react';
 import { ApplicationLogo } from '../ApplicationLogo';
+import BrandLogo from '../BrandLogo';
 import { useTailr4uReducedMotion } from '../../motion/MotionSystem';
 import './WorkflowSimulation.css';
 
@@ -112,14 +113,14 @@ function ExtensionPopup({ state }) {
   return <motion.aside className="ws-extension" initial={{ opacity: 0, y: -10, scale: .97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -8 }}>
     <div className="ws-extension-head"><span><ApplicationLogo size={27} /><strong>tailr4u</strong></span><em>ACTIVE PAGE</em></div>
     <div className="ws-scan-state">
-      <span className={atLeast(state, 'JD_VERIFIED') ? 'verified' : 'scanning'}>{atLeast(state, 'JD_VERIFIED') ? <Check size={15} /> : <Sparkles size={15} />}</span>
+      <span className={atLeast(state, 'JD_VERIFIED') ? 'verified' : 'scanning'}>{atLeast(state, 'JD_VERIFIED') ? <Check size={15} /> : <Wand2 size={15} />}</span>
       <div><small>{label}</small><strong>{atLeast(state, 'JOB_DETECTED') ? 'Platform Software Engineer' : 'Reading page structure…'}</strong></div>
     </div>
     {atLeast(state, 'JD_EXTRACTING') && <div className="ws-extracted">
       <span>Python</span><span>FastAPI</span><span>PostgreSQL</span>
       <p><Check size={12} /> Role, company, skills, location, and experience verified</p>
     </div>}
-    <button className={atLeast(state, 'JD_VERIFIED') ? 'ready' : ''}><Sparkles size={14} /> Tailor application <ChevronRight size={14} /></button>
+    <button className={atLeast(state, 'JD_VERIFIED') ? 'ready' : ''}><Wand2 size={14} /> Tailor application <ChevronRight size={14} /></button>
     <small className="ws-context-id">JD CONTEXT · NS-PLATFORM-042</small>
   </motion.aside>;
 }
@@ -163,7 +164,7 @@ function ResumeTransformation({ ready, analyzing }) {
     <section><b>SUMMARY</b><motion.p className={ready || analyzing ? 'patched' : ''}>Software engineer building reliable <mark>API platforms</mark> and intelligent workflows.</motion.p></section>
     <section><b>EXPERIENCE</b><p>Built production services with Python and FastAPI.</p><motion.p className={ready ? 'patched' : ''}>Improved API reliability with validated inputs and <mark>persistent PostgreSQL storage</mark>.</motion.p></section>
     <section><b>SKILLS</b><div className="ws-resume-skills"><motion.span layout>Python</motion.span><motion.span layout>FastAPI</motion.span><span>PostgreSQL</span><span>Redis</span></div></section>
-    {analyzing && <span className="ws-analysis-line"><Sparkles size={12} /> Comparing evidence to verified requirements…</span>}
+    {analyzing && <span className="ws-analysis-line"><Wand2 size={12} /> Comparing evidence to verified requirements…</span>}
   </div>;
 }
 
@@ -178,7 +179,7 @@ function DocumentsWorkspace({ state }) {
         <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 1.1 }}>My experience building reliable FastAPI services and persistent data workflows aligns directly with the Platform Engineer role.</motion.p>
         <small>Candidate evidence only</small>
       </motion.div>
-      <div className="ws-generation-status">{complete ? <Check size={15} /> : <Sparkles size={15} />}<span><strong>{complete ? 'Both documents ready' : 'Generating from verified context'}</strong><small>JD CONTEXT · NS-PLATFORM-042</small></span></div>
+      <div className="ws-generation-status">{complete ? <Check size={15} /> : <Wand2 size={15} />}<span><strong>{complete ? 'Both documents ready' : 'Generating from verified context'}</strong><small>JD CONTEXT · NS-PLATFORM-042</small></span></div>
     </div>
   </div>;
 }
@@ -198,7 +199,7 @@ function TrackerWorkspace({ state }) {
         <div className="ws-tracker-meta"><span>JD NS-PLATFORM-042</span><span>2 documents</span><span>Next: Submit application</span></div>
       </div>
       <AnimatePresence>{reminder && <motion.div className="ws-reminder-created" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}><span><BellRing size={18} /></span><p><small>FOLLOW-UP SCHEDULED</small><strong>Check in with recruiter · 5 days after applying</strong></p><Check size={16} /></motion.div>}</AnimatePresence>
-      {complete && <motion.div className="ws-complete-message" initial={{ opacity: 0 }} animate={{ opacity: 1 }}><Sparkles size={17} /><strong>From job page to follow-up—without losing context.</strong></motion.div>}
+      {complete && <motion.div className="ws-complete-message" initial={{ opacity: 0 }} animate={{ opacity: 1 }}><Wand2 size={17} /><strong>From job page to follow-up—without losing context.</strong></motion.div>}
     </div>
   </div>;
 }

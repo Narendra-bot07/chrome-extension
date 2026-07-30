@@ -4,6 +4,7 @@ import { Mail, Lock, ChevronRight, Eye, EyeOff, AlertCircle } from 'lucide-react
 import { useGoogleLogin } from '@react-oauth/google';
 
 import { ApplicationLogo } from '../components/ApplicationLogo';
+import BrandLogo from '../components/BrandLogo';
 import { authDestinationFromSearch } from '../utils/authRedirect';
 import { storeAuthenticatedSession } from '../services/authSession';
 
@@ -144,11 +145,8 @@ export default function LoginPage() {
       {/* LEFT SIDE BRANDING HERO PANEL */}
       <div className="hidden lg:flex flex-col justify-between w-[48%] p-12 bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 relative z-10">
         <div>
-          <div className="flex items-center gap-3">
-            <ApplicationLogo size={36} />
-            <span className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white">
-              tailr4u
-            </span>
+          <div className="flex items-center">
+            <BrandLogo size={40} />
           </div>
 
           <div className="mt-20 max-w-lg space-y-6">
@@ -210,37 +208,41 @@ export default function LoginPage() {
           {/* Form */}
           <form onSubmit={handleLogin} className="order-4 space-y-4">
             <div>
-              <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider mb-1">Email Address</label>
-              <input
-                type="email"
-                required
-                value={loginEmail}
-                onChange={(e) => setLoginEmail(e.target.value)}
-                placeholder="you@example.com"
-                className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-semibold text-zinc-900 dark:text-white focus:outline-none focus:ring-0 focus:border-[#00bda5]"
-              />
+              <label className="block text-[11px] font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider mb-1">Email Address</label>
+              <div className="relative">
+                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 shrink-0" size={16} />
+                <input
+                  type="email"
+                  required
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="w-full pl-10 pr-3.5 py-2 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm font-medium text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#00bda5]/25 focus:border-[#00bda5] transition-all"
+                />
+              </div>
             </div>
 
             <div>
               <div className="mb-1 flex items-center justify-between">
-                <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider">Password</label>
-                <Link to="/forgot-password" state={{ email: loginEmail }} className="text-[10px] font-bold text-[#00bda5] hover:underline">
+                <label className="block text-[11px] font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">Password</label>
+                <Link to="/forgot-password" state={{ email: loginEmail }} className="text-xs font-bold text-[#00bda5] hover:underline">
                   Forgot password?
                 </Link>
               </div>
               <div className="relative">
+                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 shrink-0" size={16} />
                 <input
                   type={showLoginPassword ? "text" : "password"}
                   required
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full pl-4 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-semibold text-zinc-900 dark:text-white focus:outline-none focus:ring-0 focus:border-[#00bda5]"
+                  className="w-full pl-10 pr-10 py-2 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm font-medium text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-[#00bda5]/25 focus:border-[#00bda5] transition-all"
                 />
                 <button
                   type="button"
                   onClick={() => setShowLoginPassword(!showLoginPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-white border-none bg-transparent cursor-pointer"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-white border-none bg-transparent cursor-pointer p-0.5"
                 >
                   {showLoginPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
@@ -250,7 +252,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loginLoading}
-              className="w-full py-3 bg-[#00bda5] hover:bg-[#00a38e] text-white font-extrabold rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer border-none shadow-xs disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+              className="w-full py-2.5 bg-[#00bda5] hover:bg-[#00a38e] text-white font-bold rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer border-none shadow-xs disabled:opacity-50 disabled:cursor-not-allowed mt-2"
             >
               <span>{loginLoading ? 'Signing In...' : 'Sign In'}</span>
               <ChevronRight size={16} />

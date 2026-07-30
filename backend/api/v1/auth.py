@@ -4,6 +4,7 @@ from core.database import get_db_connection
 from schemas.auth import (
     RegisterRequest, LoginRequest, GoogleAuthRequest, ForgotPasswordRequest,
     ResetPasswordRequest, ChangePasswordRequest, TokenRequest, ResendVerificationRequest,
+    DeleteAccountOtpRequest,
 )
 from app.services.auth_service import AuthService
 from app.services.session_service import SessionService
@@ -395,4 +396,47 @@ async def verify_session(
         "status": "authenticated",
         "user": {**user, "has_completed_preferences": has_completed_preferences},
         "has_completed_preferences": has_completed_preferences
+    }
+
+
+@router.post("/delete-account/request-otp")
+async def request_delete_account_otp(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    conn=Depends(get_db_connection)
+):
+    service = AccountSecurityService(conn)
+    if service.rate_limited("delete-account-otp", user["id"], 5, 15):
+        raise HTTPException(status_code=429, detail="Too many OTP requests. Please wait a few minutes before trying again.")
+    
+    otp_code = service.issue_deletion_otp(user["id"])
+    background_tasks.add_task(EmailService().send_account_deletion_otp, user["email"], otp_code)
+    return {
+        "status": "success",
+        "message": f"Verification OTP code sent to {user['email']}.",
+        "email": user["email"]
+    }
+
+
+@router.post("/delete-account/confirm")
+async def confirm_delete_account(
+    payload: DeleteAccountOtpRequest,
+    response: Response,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    conn=Depends(get_db_connection)
+):
+    service = AccountSecurityService(conn)
+    verified = service.verify_deletion_otp(user["id"], payload.otp_code)
+    if not verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired OTP code. Please check your email or request a new code."
+        )
+    
+    service.delete_account(user["id"])
+    response.delete_cookie(REFRESH_COOKIE, path="/api/v1/auth")
+    return {
+        "status": "success",
+        "message": "Your account and all associated data have been permanently deleted."
     }

@@ -31,3 +31,6 @@ class TokenRequest(BaseModel):
 class ResendVerificationRequest(BaseModel):
     email: Optional[str] = None
 
+class DeleteAccountOtpRequest(BaseModel):
+    otp_code: str
+

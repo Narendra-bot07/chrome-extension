@@ -38,7 +38,68 @@ export default function SecurityPage() {
   const [passwordStatus, setPasswordStatus] = useState({ loading: false, error: '', message: '' });
   const [revokingId, setRevokingId] = useState(null);
   const [revokingAll, setRevokingAll] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const [deleteSuccess, setDeleteSuccess] = useState('');
   const navigate = useNavigate();
+
+  const handleRequestDeleteOtp = async () => {
+    setDeleteLoading(true);
+    setDeleteError('');
+    try {
+      const token = session?.access_token || localStorage.getItem('access_token');
+      const res = await fetch('http://localhost:8000/api/v1/auth/delete-account/request-otp', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Failed to send deletion OTP.');
+      }
+      setShowDeleteModal(true);
+    } catch (err) {
+      alert(`Error requesting OTP: ${err.message}`);
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const handleConfirmDeleteAccount = async () => {
+    if (!otpCode || otpCode.trim().length < 6) {
+      setDeleteError('Please enter the full 6-digit OTP code.');
+      return;
+    }
+    setDeleteLoading(true);
+    setDeleteError('');
+    try {
+      const token = session?.access_token || localStorage.getItem('access_token');
+      const res = await fetch('http://localhost:8000/api/v1/auth/delete-account/confirm', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ otp_code: otpCode.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Invalid or expired OTP code.');
+      }
+      setDeleteSuccess('Your account has been permanently deleted. Redirecting...');
+      setTimeout(() => {
+        localStorage.clear();
+        sessionStorage.clear();
+        if (handleLogout) handleLogout();
+        navigate('/onboarding');
+      }, 1500);
+    } catch (err) {
+      setDeleteError(err.message);
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
 
   useEffect(() => {
     fetchSessions();
@@ -321,11 +382,111 @@ export default function SecurityPage() {
               Permanently remove your account credentials, saved resumes, job tracker records, and active sessions. This action is irreversible.
             </p>
           </div>
-          <Button variant="danger" size="md" onClick={() => alert("Account deletion requires contacting support or confirming email verification.")}>
-            Delete Account
+          <Button 
+            variant="danger" 
+            size="md" 
+            onClick={handleRequestDeleteOtp}
+            disabled={deleteLoading}
+          >
+            {deleteLoading ? 'Sending OTP...' : 'Delete Account'}
           </Button>
         </div>
       </motion.div>
+
+      {/* Account Deletion OTP Confirmation Modal */}
+      <AnimatePresence>
+        {showDeleteModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs select-none">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-rose-200 dark:border-rose-900/40 p-6 space-y-5 relative"
+            >
+              <div className="flex items-center gap-3 text-rose-600 dark:text-rose-400">
+                <div className="p-2.5 bg-rose-100 dark:bg-rose-950/40 rounded-xl shrink-0">
+                  <AlertTriangle size={24} />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-zinc-900 dark:text-white">
+                    Confirm Account Deletion
+                  </h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                    This action is permanent and cannot be undone.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200/60 dark:border-rose-900/30 rounded-xl p-3.5 text-xs text-zinc-700 dark:text-zinc-300 leading-relaxed">
+                We sent a 6-digit verification OTP code to <strong className="text-zinc-900 dark:text-white">{account?.email || session?.user?.email || 'your email'}</strong>. Please enter the OTP code below to confirm deletion.
+              </div>
+
+              {deleteError && (
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-xl text-xs font-semibold text-rose-600 dark:text-rose-400">
+                  {deleteError}
+                </div>
+              )}
+
+              {deleteSuccess ? (
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 rounded-xl text-xs font-semibold text-emerald-600 dark:text-emerald-400 text-center">
+                  {deleteSuccess}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">
+                      6-Digit OTP Code
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value.replace(/[^0-9]/g, ''))}
+                      placeholder="000000"
+                      className="w-full text-center tracking-[0.5em] font-mono text-xl font-black py-2.5 px-3 bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-xl text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs pt-1">
+                    <span className="text-zinc-500 dark:text-zinc-400">Didn't receive the code?</span>
+                    <button
+                      type="button"
+                      onClick={handleRequestDeleteOtp}
+                      disabled={deleteLoading}
+                      className="font-bold text-teal-600 dark:text-teal-400 hover:underline cursor-pointer disabled:opacity-50"
+                    >
+                      Resend OTP
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-3 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setShowDeleteModal(false);
+                        setOtpCode('');
+                        setDeleteError('');
+                      }}
+                      disabled={deleteLoading}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={handleConfirmDeleteAccount}
+                      disabled={deleteLoading || otpCode.length < 6}
+                    >
+                      {deleteLoading ? 'Deleting...' : 'Verify & Delete Account'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

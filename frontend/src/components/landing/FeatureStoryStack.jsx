@@ -5,7 +5,7 @@ import {
 } from 'framer-motion';
 import {
   BellRing, Check, CheckCircle2, ChevronRight, Clock3, FileCheck2,
-  FileText, Mail, Sparkles, UserRound
+  FileText, Mail, Zap, UserRound
 } from 'lucide-react';
 import './FeatureStoryStack.css';
 
@@ -47,7 +47,7 @@ function ResumeStoryVisual({ active }) {
       <section><b>SUMMARY</b><p>Software engineer building reliable <mark>API platforms</mark> and intelligent workflows.</p></section>
       <section><b>EXPERIENCE</b><p>Built production services using <mark>Python and FastAPI</mark> with persistent PostgreSQL storage.</p></section>
       <section><b>SKILLS</b><div><span>Python</span><span>FastAPI</span><span>PostgreSQL</span><span>Redis</span></div></section>
-      <aside><Sparkles size={13} /> 2 precise improvements ready</aside>
+      <aside><Zap size={13} /> 2 precise improvements ready</aside>
     </div>
     <motion.div className="fs-match-orb" animate={active ? { scale: [1, 1.035, 1] } : { scale: 1 }} transition={{ duration: 2.4, repeat: active ? Infinity : 0 }}><small>MATCH</small><strong>92</strong><em>/100</em></motion.div>
     <span className="fs-preserved"><Check size={13} /> Original experience preserved</span>

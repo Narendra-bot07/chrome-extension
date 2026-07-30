@@ -280,29 +280,71 @@
   box-shadow:0 8px 18px rgba(19,32,51,.16)
 }
 .dashboard-donut-legend button:hover,.dashboard-donut-legend button:focus-visible{background:rgba(255,255,255,.46)}
-.dashboard-reminder-item{background:rgba(255,255,255,.46)!important}
-.dashboard-activity-item:hover,.dashboard-activity-item:focus-visible{background:rgba(255,255,255,.42)}
-.dashboard-panel .dashboard-solid-row{
-  background:#f2f6fb!important;
-  border-color:#d8e2ee!important;
-  box-shadow:0 1px 0 rgba(255,255,255,.9),0 7px 18px rgba(38,72,112,.06)!important;
-  backdrop-filter:none!important;
+/* Distinct Soft Light Color Tints for Dashboard Boxes */
+
+/* 1. Upcoming Reminders (Soft Lime Green) */
+.dashboard-reminder-item {
+  background: linear-gradient(135deg, rgba(247, 254, 231, 0.95) 0%, rgba(236, 253, 245, 0.85) 100%) !important;
+  border-color: rgba(132, 204, 22, 0.4) !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,.9), 0 4px 14px rgba(132, 204, 22, 0.08) !important;
 }
-.dashboard-panel .dashboard-solid-row:hover,.dashboard-panel .dashboard-solid-row:focus-visible,.dashboard-panel .dashboard-solid-row:focus-within{
-  background:#e8f0fa!important;
-  border-color:rgba(59,130,246,.38)!important;
-  box-shadow:0 8px 20px rgba(38,72,112,.11)!important;
+.dashboard-reminder-item:hover, .dashboard-reminder-item:focus-visible {
+  background: linear-gradient(135deg, rgba(236, 252, 203, 0.95) 0%, rgba(209, 250, 229, 0.9) 100%) !important;
+  border-color: rgba(132, 204, 22, 0.65) !important;
+  box-shadow: 0 6px 18px rgba(132, 204, 22, 0.16) !important;
 }
-.dashboard-row-date{background:#132033!important;border-color:#263b57!important;color:#fff!important}
-.dark .dashboard-panel .dashboard-solid-row{
-  background:#0f1b2c!important;
-  border-color:#26364c!important;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.025),0 8px 20px rgba(0,0,0,.16)!important;
+.dashboard-row-date {
+  background: rgba(132, 204, 22, 0.18) !important;
+  border-color: rgba(132, 204, 22, 0.38) !important;
+  color: #3f6212 !important;
 }
-.dark .dashboard-panel .dashboard-solid-row:hover,.dark .dashboard-panel .dashboard-solid-row:focus-visible,.dark .dashboard-panel .dashboard-solid-row:focus-within{
-  background:#17263b!important;
-  border-color:rgba(249,115,22,.42)!important;
-  box-shadow:0 9px 24px rgba(0,0,0,.24)!important;
+
+/* 2. Recent Activity Items (Soft Sky Blue) */
+.dashboard-activity-item {
+  background: linear-gradient(135deg, rgba(240, 249, 255, 0.95) 0%, rgba(224, 242, 254, 0.85) 100%) !important;
+  border-color: rgba(56, 189, 248, 0.38) !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,.9), 0 4px 14px rgba(56, 189, 248, 0.08) !important;
+}
+.dashboard-activity-item:hover, .dashboard-activity-item:focus-visible {
+  background: linear-gradient(135deg, rgba(224, 242, 254, 0.95) 0%, rgba(186, 230, 253, 0.9) 100%) !important;
+  border-color: rgba(56, 189, 248, 0.65) !important;
+  box-shadow: 0 6px 18px rgba(56, 189, 248, 0.16) !important;
+}
+
+/* 3. General Solid Rows & Follow-ups (Soft Purple / Lavender) */
+.dashboard-panel .dashboard-solid-row:not(.dashboard-reminder-item):not(.dashboard-activity-item) {
+  background: linear-gradient(135deg, rgba(245, 243, 255, 0.95) 0%, rgba(238, 242, 255, 0.85) 100%) !important;
+  border-color: rgba(168, 85, 247, 0.35) !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,.9), 0 4px 14px rgba(168, 85, 247, 0.08) !important;
+}
+.dashboard-panel .dashboard-solid-row:not(.dashboard-reminder-item):not(.dashboard-activity-item):hover {
+  background: linear-gradient(135deg, rgba(237, 233, 254, 0.95) 0%, rgba(224, 231, 255, 0.9) 100%) !important;
+  border-color: rgba(168, 85, 247, 0.6) !important;
+  box-shadow: 0 6px 18px rgba(168, 85, 247, 0.15) !important;
+}
+
+/* Dark Mode Overrides */
+.dark .dashboard-reminder-item {
+  background: linear-gradient(135deg, rgba(20, 35, 25, 0.85) 0%, rgba(13, 27, 22, 0.85) 100%) !important;
+  border-color: rgba(132, 204, 22, 0.28) !important;
+}
+.dark .dashboard-reminder-item:hover {
+  background: linear-gradient(135deg, rgba(26, 45, 30, 0.95) 0%, rgba(18, 38, 30, 0.95) 100%) !important;
+  border-color: rgba(132, 204, 22, 0.55) !important;
+}
+.dark .dashboard-row-date {
+  background: rgba(132, 204, 22, 0.2) !important;
+  border-color: rgba(132, 204, 22, 0.4) !important;
+  color: #a3e635 !important;
+}
+
+.dark .dashboard-activity-item {
+  background: linear-gradient(135deg, rgba(12, 30, 42, 0.85) 0%, rgba(8, 22, 32, 0.85) 100%) !important;
+  border-color: rgba(56, 189, 248, 0.28) !important;
+}
+.dark .dashboard-activity-item:hover {
+  background: linear-gradient(135deg, rgba(14, 40, 58, 0.95) 0%, rgba(10, 30, 45, 0.95) 100%) !important;
+  border-color: rgba(56, 189, 248, 0.55) !important;
 }
 .dashboard-chart-empty button,.dashboard-reminder-actions button{background:#132033;color:#fff}
 .dashboard-career-canvas select,.dashboard-career-canvas input{

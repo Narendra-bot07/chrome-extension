@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import {
   Check, Code2, Folder, Github, Globe, Linkedin, Mail, MapPin, Phone,
-  RotateCcw, Sparkles, X, Award, BookOpen, Layers, Edit2, ShieldAlert, Target
+  RotateCcw, Wand2, X, Award, BookOpen, Layers, Edit2, ShieldAlert, Target,
+  CheckCircle2, RefreshCw, AlertCircle
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
@@ -133,7 +134,7 @@ function ResumeReviewView({
 }) {
   const { 
     darkMode, apiUrl, apiKey, jobAnalysis, jdFingerprint, setReviewSuggestions, 
-    comparison, selectedSections, liveATS, isRefineStreaming, setIsRefineStreaming 
+    comparison, selectedSections, liveATS, setLiveATS, isRefineStreaming, setIsRefineStreaming 
   } = useApp();
   const [activeEditSection, setActiveEditSection] = useState(null);
   const [customPrompt, setCustomPrompt] = useState("");
@@ -417,7 +418,7 @@ function ResumeReviewView({
       <div className="p-4 bg-emerald-550/[0.04] dark:bg-emerald-950/10 border border-emerald-500/20 dark:border-emerald-900/30 rounded-xl space-y-3 mt-3 select-none text-left font-sans">
         <div className="flex justify-between items-center text-[#00bda5] dark:text-emerald-400">
           <div className="flex items-center gap-1.5 font-sans font-black text-[10px] uppercase tracking-wider">
-            <Sparkles size={12} />
+            <Wand2 size={12} />
             <span>Edit with AI</span>
             {refining && streamingSection === sectionType && (
               <span className="ml-2 text-rose-500 font-extrabold animate-pulse text-[8px] tracking-widest">Generating...</span>
@@ -593,7 +594,7 @@ function ResumeReviewView({
               }}
               className="flex items-center gap-1 text-[8px] bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 text-[#00bda5] px-2 py-0.5 rounded font-extrabold uppercase tracking-wider transition cursor-pointer border-none"
             >
-              <Sparkles size={8} /> Edit with AI
+              <Wand2 size={8} /> Edit with AI
             </button>
           )}
         </div>
@@ -906,7 +907,7 @@ function ResumeReviewView({
                 }}
                 className="flex items-center gap-1 text-[8px] bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 text-[#00bda5] px-2 py-0.5 rounded font-extrabold uppercase tracking-wider transition cursor-pointer border-none"
               >
-                <Sparkles size={8} /> Edit with AI
+                <Wand2 size={8} /> Edit with AI
               </button>}
             </div>
             <div className="text-[11px] leading-relaxed text-justify text-zinc-600 dark:text-zinc-350">
@@ -942,7 +943,7 @@ function ResumeReviewView({
                   }}
                   className="flex items-center gap-1 text-[8px] bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 text-[#00bda5] px-2 py-0.5 rounded font-extrabold uppercase tracking-wider transition cursor-pointer border-none"
                 >
-                  <Sparkles size={8} /> Edit with AI
+                  <Wand2 size={8} /> Edit with AI
                 </button>}
               </div>
               {activeEditSection === 'experience' && renderRefinePanel('experience')}
@@ -986,7 +987,7 @@ function ResumeReviewView({
                   }}
                   className="flex items-center gap-1 text-[8px] bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 text-[#00bda5] px-2 py-0.5 rounded font-extrabold uppercase tracking-wider transition cursor-pointer border-none"
                 >
-                  <Sparkles size={8} /> Edit with AI
+                  <Wand2 size={8} /> Edit with AI
                 </button>}
               </div>
               {activeEditSection === 'projects' && renderRefinePanel('projects')}
@@ -1028,7 +1029,7 @@ function ResumeReviewView({
                   }}
                   className="flex items-center gap-1 text-[8px] bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 text-[#00bda5] px-2 py-0.5 rounded font-extrabold uppercase tracking-wider transition cursor-pointer border-none"
                 >
-                  <Sparkles size={8} /> Edit with AI
+                  <Wand2 size={8} /> Edit with AI
                 </button>}
               </div>
               {activeEditSection === 'skills' && renderRefinePanel('skills')}
@@ -1107,7 +1108,7 @@ function ResumeReviewView({
           disabled={loading || !validation?.valid}
           className="flex-2 py-3 bg-[#00bda5] hover:bg-[#00a894] disabled:bg-zinc-300 disabled:text-zinc-500 disabled:cursor-not-allowed text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer active:scale-95"
         >
-          <Sparkles size={13} />
+          <Wand2 size={13} />
           {stats.total === 0 ? 'Continue With Original Resume' : 'Generate Resume'}
         </button>
       </div>
@@ -1115,16 +1116,33 @@ function ResumeReviewView({
 
       {/* Right Column: Live ATS Dashboard Panel */}
       <div className="w-full md:w-80 lg:w-96 bg-white dark:bg-zinc-900 border-l border-zinc-200/60 dark:border-zinc-800 flex flex-col h-full overflow-y-auto select-none p-5 shrink-0 space-y-6 scrollbar-thin">
-        <div className="space-y-1 pb-4 border-b border-zinc-150 dark:border-zinc-800">
+        <div className="space-y-1.5 pb-4 border-b border-zinc-150 dark:border-zinc-800">
           <div className="flex items-center gap-2 text-zinc-950 dark:text-zinc-50">
             <Target size={18} className="text-[#00bda5] shrink-0" />
             <h2 className="text-xs font-black uppercase tracking-wider">ATS Intelligence</h2>
           </div>
-          <p className="text-[10px] text-zinc-400 dark:text-zinc-500 font-bold">
-            {liveATS?.scoring_source === 'llm'
-              ? 'Live LLM analysis grounded in resume evidence'
-              : 'Waiting for live LLM analysis…'}
-          </p>
+          {liveATS?.scoring_source === 'failed' ? (
+            <div className="flex items-center justify-between gap-2 pt-0.5">
+              <span className="text-[10px] text-rose-500 font-bold flex items-center gap-1 truncate">
+                <AlertCircle size={12} className="shrink-0" /> LLM analysis failed at backend
+              </span>
+              <button
+                type="button"
+                onClick={() => setLiveATS(null)}
+                className="text-[10px] font-extrabold text-[#00bda5] hover:underline cursor-pointer shrink-0"
+              >
+                Retry
+              </button>
+            </div>
+          ) : liveATS?.scoring_source === 'llm' ? (
+            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+              <CheckCircle2 size={11} className="shrink-0" /> Live LLM analysis grounded in resume evidence
+            </p>
+          ) : (
+            <p className="text-[10px] text-amber-500 font-bold flex items-center gap-1.5 animate-pulse">
+              <RefreshCw size={11} className="animate-spin shrink-0" /> Calculating live LLM analysis...
+            </p>
+          )}
         </div>
 
         {/* Section 1: Resume Match (%) */}
@@ -1195,7 +1213,7 @@ function ResumeReviewView({
                 "Section Completeness": Check,
                 "Readability": BookOpen,
                 "Measurable Impact": ShieldAlert,
-                "Overall Optimization": Sparkles
+                "Overall Optimization": Wand2
               }[cat] || Target;
 
               return (
@@ -1248,7 +1266,7 @@ function ResumeReviewView({
                 "Skills Match": Award,
                 "Keyword Relevance": Target,
                 "Experience Alignment": Layers,
-                "Role Similarity": Sparkles,
+                "Role Similarity": Wand2,
                 "Project Relevance": Code2,
                 "Education Fit": BookOpen,
                 "Certification Relevance": Check

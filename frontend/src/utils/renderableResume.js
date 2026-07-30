@@ -178,6 +178,8 @@ const sanitizeAchievementEvidence = values => {
   });
 };
 
+const safeArray = val => Array.isArray(val) ? val : (val && typeof val === 'object' ? [val] : (typeof val === 'string' && val.trim() ? [val.trim()] : []));
+
 export function toRenderableResume(record) {
   if (!record || typeof record !== 'object') return null;
   const source = record?.parsed_content && typeof record.parsed_content === 'object'
@@ -203,8 +205,8 @@ export function toRenderableResume(record) {
   output.objective = structuredClone(
     source.objective || source.career_objective || ''
   );
-  output.experience = structuredClone(source.experience || source.work_experience || []).map(item => {
-    const normalized = { ...item };
+  output.experience = safeArray(source.experience || source.work_experience).map(item => {
+    const normalized = typeof item === 'string' ? { description: [item] } : { ...item };
     const descriptions = normalized.description
       ?? normalized.responsibilities
       ?? normalized.bullet_points
@@ -215,8 +217,8 @@ export function toRenderableResume(record) {
       : String(descriptions || '').split(/\r?\n/).map(cleanText).filter(Boolean);
     return normalized;
   });
-  output.projects = structuredClone(source.projects || source.project_experience || []).map(item => {
-    const normalized = { ...item };
+  output.projects = safeArray(source.projects || source.project_experience).map(item => {
+    const normalized = typeof item === 'string' ? { name: item, description: [item] } : { ...item };
     const descriptions = normalized.description
       ?? normalized.responsibilities
       ?? normalized.bullet_points
@@ -225,6 +227,9 @@ export function toRenderableResume(record) {
     normalized.description = Array.isArray(descriptions)
       ? descriptions.map(cleanText).filter(Boolean)
       : String(descriptions || '').split(/\r?\n/).map(cleanText).filter(Boolean);
+    normalized.technology_stack = Array.isArray(normalized.technology_stack)
+      ? normalized.technology_stack.map(cleanText).filter(Boolean)
+      : String(normalized.technology_stack || '').split(',').map(cleanText).filter(Boolean);
     return normalized;
   });
 
@@ -273,7 +278,7 @@ export function toRenderableResume(record) {
 
   const explicitAchievements = [];
   const achievementCredentials = [];
-  (source.achievements || []).forEach(item => {
+  safeArray(source.achievements).forEach(item => {
     const normalized = typeof item === 'string'
       ? { name: splitDetailedText(item).title, description: splitDetailedText(item).description }
       : item;
@@ -283,10 +288,10 @@ export function toRenderableResume(record) {
       if (evidence) explicitAchievements.push(evidence);
     }
   });
-  output.awards = Array.isArray(source.awards) ? structuredClone(source.awards) : [];
+  output.awards = safeArray(source.awards);
 
   const reclassifiedAchievements = [];
-  const credentialItems = [...achievementCredentials, ...(source.certifications || [])].filter(item => {
+  const credentialItems = [...achievementCredentials, ...safeArray(source.certifications)].filter(item => {
     const normalized = typeof item === 'string' ? { name: cleanText(item) } : item;
     if (isCredential(normalized)) return true;
     const evidence = achievementText(normalized);
@@ -328,11 +333,11 @@ export function toRenderableResume(record) {
   // Final source-authoritative override. Earlier compatibility classification
   // supports legacy imports, but must never alter the two lossless static
   // sections in the final renderer payload.
-  output.achievements = (source.achievements || [])
+  output.achievements = safeArray(source.achievements)
     .map(item => typeof item === 'string' ? item : achievementText(item))
     .filter(value => cleanText(value));
   output.certifications = unique(
-    (source.certifications || [])
+    safeArray(source.certifications)
       .map(cleanCertification)
       .filter(item => cleanText(item.name) && !isPlaceholderText(item.name))
       // "Credential verification" is a link/action belonging to the real

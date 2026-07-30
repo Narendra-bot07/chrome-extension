@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { 
   Search, Filter, Briefcase, MapPin, Clock, ArrowRight,
-  FileText, CheckCircle2, AlertCircle, Sparkles, ExternalLink,
+  FileText, CheckCircle2, AlertCircle, Wand2, ExternalLink,
   ChevronDown, Calendar, Layers, ShieldCheck
 } from 'lucide-react';
 import CompanyLogo from '../CompanyLogoView';
@@ -237,7 +237,7 @@ export function JobTrackerSidebar({
                   </div>
                   <span className="text-zinc-300 dark:text-zinc-700">•</span>
                   <div className={`flex items-center gap-1 font-semibold ${coverLetterReady ? 'text-teal-700 dark:text-teal-400' : 'text-zinc-400'}`}>
-                    <Sparkles size={12} />
+                    <Wand2 size={12} />
                     <span>Cover Letter: {coverLetterReady ? 'Ready' : 'Pending'}</span>
                   </div>
                 </div>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Briefcase, Sparkles, FilterX, Plus, RefreshCw } from 'lucide-react';
+import { Briefcase, Zap, FilterX, Plus, RefreshCw } from 'lucide-react';
 
 export function JobTrackerEmptyState({ 
   isFilterEmpty, 
@@ -70,7 +70,7 @@ export function JobTrackerEmptyState({
           onClick={onOpenExtensionGuide}
           className="px-5 py-2.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 font-bold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer border border-zinc-200 dark:border-zinc-700"
         >
-          <Sparkles size={15} className="text-teal-600 dark:text-teal-400" />
+          <Zap size={15} className="text-teal-600 dark:text-teal-400" />
           Open Extension Guide
         </button>
       </div>

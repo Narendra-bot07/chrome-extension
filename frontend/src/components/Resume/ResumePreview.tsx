@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useLayoutEffect, useMemo } from 'react';
 import {
   Eye, ZoomIn, ZoomOut, Expand, Shrink, Printer, Download,
-  Sparkles, RotateCcw, ChevronUp, ChevronDown, FileText, AlertTriangle, RefreshCw
+  Wand2, RotateCcw, ChevronUp, ChevronDown, FileText, AlertTriangle, RefreshCw
 } from 'lucide-react';
 import { toRenderableResume } from '../../utils/renderableResume';
 import { getTemplateComponent } from '../../templates';

@@ -2,9 +2,10 @@ import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  ArrowRight, BellRing, Check, LayoutDashboard, Moon, Sparkles, Sun
+  ArrowRight, BellRing, Check, LayoutDashboard, Moon, Zap, Sun
 } from 'lucide-react';
 import { ApplicationLogo } from '../components/ApplicationLogo';
+import BrandLogo from '../components/BrandLogo';
 import { useApp } from '../context/AppContext';
 import { useTailr4uReducedMotion } from '../motion/MotionSystem';
 import PublicAuthPanel from '../components/landing/PublicAuthPanel';
@@ -20,7 +21,7 @@ function ResumePreview() {
     <strong>SOFTWARE ENGINEER</strong>
     <p>Built reliable API workflows with <mark>FastAPI</mark>, PostgreSQL, and Redis.</p>
     <p>Designed <mark>multi-agent systems</mark> with persistent contextual memory.</p>
-    <div className="lp-doc-note"><Sparkles size={13} /> 2 precise improvements ready</div>
+    <div className="lp-doc-note"><Zap size={13} /> 2 precise improvements ready</div>
   </div>;
 }
 
@@ -97,8 +98,23 @@ export default function LandingPage() {
   const reduced = useTailr4uReducedMotion();
   const [loadWorkflow, setLoadWorkflow] = useState(false);
   const [activeSection, setActiveSection] = useState('home');
+  const [scrolled, setScrolled] = useState(false);
+  const [navVisible, setNavVisible] = useState(true);
+  const lastScrollY = useRef(0);
   const workflowRef = useRef(null);
   const authMode = ['/login', '/register', '/forgot-password', '/email-sent'].includes(location.pathname);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      setScrolled(currentScrollY > 30);
+      setNavVisible(true);
+      lastScrollY.current = currentScrollY;
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const openApp = () => navigate(user ? '/dashboard' : '/login?redirect=%2Fdashboard');
   const scrollToWorkflow = () => document.getElementById('how-it-works')?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth' });
@@ -112,8 +128,8 @@ export default function LandingPage() {
   };
 
   useEffect(() => {
-    document.title = 'tailr4u — Stronger applications, grounded in your experience';
-    return () => { document.title = 'tailr4u'; };
+    document.title = 'Tailr4U — Stronger applications, grounded in your experience';
+    return () => { document.title = 'Tailr4U'; };
   }, []);
 
   useEffect(() => {
@@ -145,10 +161,9 @@ export default function LandingPage() {
 
   return <div className="landing-page">
     <a className="lp-skip" href="#main-content">Skip to content</a>
-    <header className="lp-nav">
-      <Link to="/" className="lp-brand" aria-label="tailr4u home">
-        <ApplicationLogo size={38} />
-        <span>tailr4u</span><em>AI</em>
+    <header className={`lp-nav ${scrolled ? 'is-scrolled' : ''} ${navVisible ? 'nav-visible' : 'nav-hidden'}`}>
+      <Link to="/" className="lp-brand" aria-label="Tailr4U home">
+        <BrandLogo size={36} />
       </Link>
       <nav className="lp-public-links" aria-label="Landing page sections">
         {[
@@ -178,7 +193,7 @@ export default function LandingPage() {
       <section id="home" className="lp-hero">
         <AnimatePresence mode="wait" initial={false}>
           {!authMode ? <motion.div key="landing-copy" className="lp-hero-copy" initial={reduced ? { opacity: 0 } : { opacity: 0, x: -18 }} animate={{ opacity: 1, x: 0 }} exit={reduced ? { opacity: 0 } : { opacity: 0, x: -24 }} transition={{ duration: reduced ? .08 : .18 }}>
-            <span className="lp-kicker"><Sparkles size={14} /> Your application, intelligently connected</span>
+            <span className="lp-kicker"><Zap size={14} /> Your application, intelligently connected</span>
             <h1>Turn every job description into a <span>stronger application.</span></h1>
             <p>Tailor resumes, generate cover letters, track applications, and stay ahead of every recruiter follow-up from one intelligent workspace.</p>
             <div className="lp-actions">
@@ -187,7 +202,7 @@ export default function LandingPage() {
             </div>
             <small className="lp-trust"><Check size={14} /> Resume tailoring that preserves your real experience.</small>
           </motion.div> : <motion.div key="auth-context" className="lp-auth-context" initial={reduced ? { opacity: 0 } : { opacity: 0, x: -18 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} transition={{ duration: reduced ? .08 : .18 }}>
-            <span className="lp-kicker"><Sparkles size={14} /> One connected application workspace</span>
+            <span className="lp-kicker"><Zap size={14} /> One connected application workspace</span>
             <h1>Your next opportunity, <span>kept in context.</span></h1>
             <p>Return to your verified job descriptions, tailored documents, application pipeline, and recruiter follow-ups.</p>
             <div className="lp-auth-benefits"><span><Check size={15} /> Evidence-backed resume tailoring</span><span><Check size={15} /> Verified JD across every document</span><span><Check size={15} /> Applications and reminders connected</span></div>
@@ -225,8 +240,8 @@ export default function LandingPage() {
     </main>
 
     <footer className="lp-footer">
-      <Link to="/" className="lp-brand"><ApplicationLogo size={28} /><span>tailr4u</span></Link>
-      <span>© {new Date().getFullYear()} tailr4u</span>
+      <Link to="/" className="lp-brand"><BrandLogo size={28} /></Link>
+      <span>© {new Date().getFullYear()} Tailr4U</span>
       <nav aria-label="Footer navigation"><Link to="/support/faq">Help</Link><Link to="/support/contact">Contact</Link><a href="#privacy">Privacy</a><a href="#terms">Terms</a></nav>
     </footer>
   </div>;

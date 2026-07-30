@@ -1,7 +1,7 @@
 import React from 'react';
 import { 
   Building, MapPin, Calendar, ExternalLink, Layers, Edit3, Archive, Trash2, 
-  Sparkles, FileText, CheckCircle2, Award, Maximize2, Minimize2, X
+  FileText, CheckCircle2, Award, Maximize2, Minimize2, X, Zap
 } from 'lucide-react';
 import CompanyLogo from '../CompanyLogoView';
 
@@ -84,7 +84,7 @@ export function JobWorkspaceHeader({
           {/* Metrics Row: Match % & ATS Score */}
           <div className="flex items-center gap-2.5 text-xs pt-0.5">
             <div className="flex items-center gap-1.5 bg-teal-50/80 dark:bg-teal-950/40 border border-teal-200/80 dark:border-teal-800/60 px-2.5 py-0.5 rounded-lg text-[11px]">
-              <Sparkles size={12} className="text-teal-600 dark:text-teal-400" />
+              <Zap size={12} className="text-teal-600 dark:text-teal-400" />
               <span className="text-zinc-600 dark:text-zinc-300 font-semibold">Resume Match:</span>
               <strong className="text-teal-700 dark:text-teal-400 font-extrabold">{matchScore}%</strong>
             </div>

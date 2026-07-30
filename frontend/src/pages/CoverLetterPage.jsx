@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   FileText,
   CheckCircle2,
-  Sparkles,
+  Wand2,
   Download,
   ZoomIn,
   ZoomOut,
@@ -508,7 +508,7 @@ export default function CoverLetterPage() {
               onClick={() => navigate('/tailor-config')}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#f97316] hover:bg-[#ea580c] text-white text-[9px] font-black uppercase tracking-wider shadow-sm cursor-pointer"
             >
-              <Sparkles size={12} />
+              <Wand2 size={12} />
               Generate Resume
             </button>
             <button
@@ -721,7 +721,7 @@ export default function CoverLetterPage() {
           <div className="space-y-3 bg-indigo-50/60 border border-indigo-200 p-4 rounded-xl">
             <div className="flex items-center justify-between">
               <label className="text-[10px] font-black text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
-                <Sparkles size={14} className="text-indigo-600" />
+                <Wand2 size={14} className="text-indigo-600" />
                 3. AI Editor Studio
               </label>
 

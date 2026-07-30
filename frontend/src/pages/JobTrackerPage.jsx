@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { 
   Briefcase, Search, Trash2, Clock, 
   MapPin, Send, BrainCircuit, ExternalLink, Lightbulb, Bell, FileText,
-  X, Zap, CheckCircle2, AlertCircle, Building, Sparkles, ArrowRight, Check,
+  X, Zap, CheckCircle2, AlertCircle, Building, ArrowRight, Check,
   ClipboardCheck, Eye, Calendar, FileEdit, ShieldCheck, DollarSign, User, Link, Plus, Archive,
   ArrowLeft, Layers, UserCheck, BookOpen, LayoutGrid, List, Columns, Filter, RefreshCw, MoreHorizontal, Maximize2, Minimize2
 } from 'lucide-react';

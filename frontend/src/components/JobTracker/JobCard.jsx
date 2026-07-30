@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { 
-  FileText, Sparkles, MapPin, Clock, MoreVertical, Eye, Layers, 
+  FileText, Wand2, MapPin, Clock, MoreVertical, Eye, Layers, 
   FileEdit, Bell, ExternalLink, Calendar, CheckCircle2, ChevronRight
 } from 'lucide-react';
 import CompanyLogo from '../CompanyLogoView';
@@ -103,7 +103,7 @@ export function JobCard({
           </span>
           <span className="text-zinc-300 dark:text-zinc-700">•</span>
           <span className={`flex items-center gap-1 font-bold ${coverLetterReady ? 'text-teal-700 dark:text-teal-400' : 'text-zinc-400'}`}>
-            <Sparkles size={13} />
+            <Wand2 size={13} />
             Cover Letter: <span className="font-extrabold">{coverLetterReady ? 'Ready' : 'Pending'}</span>
           </span>
         </div>

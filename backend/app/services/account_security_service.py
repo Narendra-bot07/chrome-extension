@@ -140,3 +140,77 @@ class AccountSecurityService:
             self.audit("password_changed", user_id)
         self.conn.commit()
         return user["email"]
+
+    def issue_deletion_otp(self, user_id: str) -> str:
+        import secrets
+        otp_code = f"{secrets.randbelow(1000000):06d}"
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS public.account_deletion_otps (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+                    otp_code TEXT NOT NULL,
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    used_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS account_deletion_otps_user_idx
+                    ON public.account_deletion_otps(user_id, created_at DESC);
+            """)
+            cur.execute("UPDATE public.account_deletion_otps SET used_at=NOW() WHERE user_id=%s AND used_at IS NULL", (user_id,))
+            expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+            cur.execute(
+                """INSERT INTO public.account_deletion_otps (user_id, otp_code, expires_at)
+                   VALUES (%s, %s, %s)""",
+                (user_id, otp_code, expires_at),
+            )
+        self.conn.commit()
+        return otp_code
+
+    def verify_deletion_otp(self, user_id: str, otp_code: str) -> bool:
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS public.account_deletion_otps (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+                    otp_code TEXT NOT NULL,
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    used_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+            """)
+            cur.execute(
+                """SELECT id FROM public.account_deletion_otps
+                   WHERE user_id=%s AND otp_code=%s AND used_at IS NULL AND expires_at>NOW()
+                   ORDER BY created_at DESC LIMIT 1""",
+                (user_id, otp_code.strip()),
+            )
+            row = cur.fetchone()
+            if not row:
+                return False
+            cur.execute("UPDATE public.account_deletion_otps SET used_at=NOW() WHERE id=%s", (row[0],))
+        self.conn.commit()
+        return True
+
+    def delete_account(self, user_id: str):
+        with self.conn.cursor() as cur:
+            tables = [
+                ("public.tailored_resumes", "user_id"),
+                ("public.job_descriptions", "user_id"),
+                ("public.applications", "user_id"),
+                ("public.resumes", "user_id"),
+                ("public.user_sessions", "user_id"),
+                ("public.account_deletion_otps", "user_id"),
+                ("public.password_reset_tokens", "user_id"),
+                ("public.email_verification_tokens", "user_id"),
+                ("public.security_audit_events", "user_id"),
+                ("public.job_preferences", "user_id"),
+                ("public.profiles", "id"),
+                ("public.users", "id")
+            ]
+            for table, col in tables:
+                try:
+                    cur.execute(f"DELETE FROM {table} WHERE {col} = %s", (user_id,))
+                except Exception:
+                    pass
+        self.conn.commit()

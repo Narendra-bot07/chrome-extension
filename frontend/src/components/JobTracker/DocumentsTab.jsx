@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  FileText, Sparkles, Download, Eye, RefreshCw, Trash2, 
+  FileText, Wand2, Download, Eye, RefreshCw, Trash2, 
   ExternalLink, AlertCircle, CheckCircle2, Clock, Plus, X, Edit3
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
@@ -176,7 +176,7 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-600 border border-teal-200 dark:bg-teal-950/30 dark:text-teal-400 dark:border-teal-800 flex items-center justify-center">
-                  <Sparkles size={20} />
+                  <Wand2 size={20} />
                 </div>
                 <div>
                   <h3 className="text-sm font-extrabold text-zinc-900 dark:text-white">Cover Letter</h3>

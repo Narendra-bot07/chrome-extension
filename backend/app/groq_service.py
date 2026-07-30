@@ -21,9 +21,11 @@ from app.schemas import (
 
 def get_llm(api_key: Optional[str] = None, temperature: float = 0.0) -> ChatGroq:
     from core.config import settings
-    key = api_key or settings.GROQ_API_KEY or os.environ.get("GROQ_API_KEY")
+    req_key = (api_key or "").strip()
+    env_key = (settings.GROQ_API_KEY or "").strip() or os.environ.get("GROQ_API_KEY", "").strip()
+    key = req_key or env_key
     if not key:
-        raise ValueError("Groq API Key is missing. Please provide it in the request header or environment variables.")
+        raise ValueError("Groq API Key is missing. Please provide a valid key starting with 'gsk_' in backend/.env or settings.")
     return ChatGroq(
         temperature=temperature,
         groq_api_key=key,

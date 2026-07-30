@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import {
   TrendingUp, Calendar, CheckCircle, Briefcase, ChevronRight,
-  Send, Search, Clock, Award, XCircle, ChevronDown, ArrowRight, Sparkles, AlertCircle,
+  Send, Search, Clock, Award, XCircle, ChevronDown, ArrowRight, Zap, AlertCircle,
   UserCheck, FileText, Check, ShieldAlert, X, Filter
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
@@ -155,12 +155,15 @@ const getStageBadgeStyle = (stage) => {
 };
 
 function CareerPerformanceRadar({ metrics, updatedAt }) {
-  const width = 390;
-  const height = 250;
-  const centerX = 195;
-  const centerY = 125;
-  const radius = 82;
+  const width = 400;
+  const height = 310;
+  const centerX = 200;
+  const centerY = 155;
+  const radius = 98;
+
+  // 6 Hexagon Vertices (Top, Top-Right, Bottom-Right, Bottom, Bottom-Left, Top-Left)
   const angleFor = index => -Math.PI / 2 + (index * Math.PI * 2) / metrics.length;
+
   const pointAt = (index, scale = 1) => {
     const angle = angleFor(index);
     return {
@@ -168,91 +171,171 @@ function CareerPerformanceRadar({ metrics, updatedAt }) {
       y: centerY + Math.sin(angle) * radius * scale,
     };
   };
-  const polygon = scale => metrics
+
+  const polygonPoints = scale => metrics
     .map((_, index) => {
       const point = pointAt(index, scale);
       return `${point.x},${point.y}`;
     })
     .join(' ');
+
+  // Benchmark "Twins" Polygon (Baseline reference)
+  const benchmarkValues = [78, 85, 72, 75, 80, 70];
+  const benchmarkPolygon = metrics
+    .map((_, index) => {
+      const val = benchmarkValues[index % benchmarkValues.length];
+      const point = pointAt(index, val / 100);
+      return `${point.x},${point.y}`;
+    })
+    .join(' ');
+
+  // Candidate Score Polygon
   const scorePolygon = metrics
     .map((metric, index) => {
-      const point = pointAt(index, Math.max(0.06, Math.min(100, metric.value)) / 100);
+      const point = pointAt(index, Math.max(0.1, Math.min(100, metric.value)) / 100);
       return `${point.x},${point.y}`;
     })
     .join(' ');
 
   return (
-    <div className="dashboard-panel dashboard-interactive-surface rounded-2xl border border-tf-border bg-white/80 p-5 shadow-xs dark:bg-zinc-900/80">
+    <div className="dashboard-panel rounded-2xl border border-zinc-200/80 dark:border-slate-800/80 bg-white/90 dark:bg-[#0B0F19] p-6 shadow-xs text-zinc-900 dark:text-white transition-colors">
       <div>
         <div className="flex items-center justify-between gap-3">
-          <p className="text-[9px] font-bold tracking-[0.18em] text-orange-500">CAREER INTELLIGENCE</p>
-          <span className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-emerald-500" title={updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : 'Loading live metrics'}>
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+          <p className="text-[10px] font-bold tracking-[0.2em] text-zinc-400 dark:text-slate-400 uppercase">
+            CAREER & ATS ANALYTICS
+          </p>
+          <span className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-lime-600 dark:text-lime-400" title={updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : 'Live metrics'}>
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-lime-500" />
             Live
           </span>
         </div>
-        <h3 className="mt-1 text-xs font-bold text-tf-text">Performance Signature</h3>
-        <p className="mt-0.5 text-[11px] text-tf-text-tertiary">Your current job-search health across six metrics</p>
+        <h3 className="mt-1 text-xl font-bold tracking-tight text-zinc-900 dark:text-white font-sans">Performance Signature</h3>
       </div>
-      <svg className="mt-2 h-[250px] w-full overflow-visible" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Career performance radar chart">
-        {[0.25, 0.5, 0.75, 1].map(scale => (
-          <polygon
-            key={scale}
-            points={polygon(scale)}
-            fill="none"
-            stroke="currentColor"
-            strokeOpacity={scale === 1 ? 0.2 : 0.1}
-            strokeWidth="1"
-          />
-        ))}
-        {metrics.map((metric, index) => {
-          const endpoint = pointAt(index);
-          return (
-            <line
-              key={metric.label}
-              x1={centerX}
-              y1={centerY}
-              x2={endpoint.x}
-              y2={endpoint.y}
+
+      <div className="relative mt-2 flex justify-center">
+        <svg className="h-[310px] w-full max-w-[400px] overflow-visible" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Performance Signature radar chart">
+          {/* Concentric Hexagon Grid Rings */}
+          {[0.25, 0.5, 0.75, 1.0].map(scale => (
+            <polygon
+              key={scale}
+              points={polygonPoints(scale)}
+              fill="none"
               stroke="currentColor"
-              strokeOpacity="0.12"
+              strokeOpacity={scale === 1.0 ? "0.18" : "0.08"}
+              strokeWidth="1"
             />
-          );
-        })}
-        <motion.polygon
-          points={scorePolygon}
-          fill="rgba(249, 115, 22, 0.22)"
-          stroke="#F97316"
-          strokeWidth="2.5"
-          strokeLinejoin="round"
-          initial={{ opacity: 0, scale: 0.7, transformOrigin: `${centerX}px ${centerY}px` }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: .55, ease: 'easeOut' }}
-        />
-        {metrics.map((metric, index) => {
-          const scorePoint = pointAt(index, Math.max(0.06, Math.min(100, metric.value)) / 100);
-          const labelPoint = pointAt(index, 1.27);
-          const anchor = Math.abs(labelPoint.x - centerX) < 8 ? 'middle' : labelPoint.x > centerX ? 'start' : 'end';
-          return (
-            <g key={metric.label} className="group/radar">
-              <circle cx={scorePoint.x} cy={scorePoint.y} r="12" fill="transparent" />
-              <circle cx={scorePoint.x} cy={scorePoint.y} r="4" fill="#F97316" stroke="white" strokeWidth="1.5" />
-              <text x={labelPoint.x} y={labelPoint.y} textAnchor={anchor} dominantBaseline="middle" fill="currentColor" opacity="0.72" fontSize="9" fontWeight="700">
-                {metric.label}
-              </text>
-              <g className="pointer-events-none hidden group-hover/radar:block">
-                <rect x={Math.min(width - 148, Math.max(4, scorePoint.x - 70))} y={Math.max(4, scorePoint.y - 54)} width="140" height="39" rx="8" fill="#09090b" />
-                <text x={Math.min(width - 78, Math.max(74, scorePoint.x))} y={Math.max(19, scorePoint.y - 37)} textAnchor="middle" fill="white" fontSize="10" fontWeight="700">
-                  {metric.label}: {metric.value}%
+          ))}
+
+          {/* Hexagon Radial Spokes */}
+          {metrics.map((metric, index) => {
+            const endpoint = pointAt(index, 1.0);
+            return (
+              <line
+                key={`spoke-${metric.label}`}
+                x1={centerX}
+                y1={centerY}
+                x2={endpoint.x}
+                y2={endpoint.y}
+                stroke="currentColor"
+                strokeOpacity="0.08"
+                strokeWidth="1"
+              />
+            );
+          })}
+
+          {/* Benchmark "Twins" Polygon Overlay */}
+          <polygon
+            points={benchmarkPolygon}
+            fill="currentColor"
+            fillOpacity="0.03"
+            stroke="currentColor"
+            strokeOpacity="0.22"
+            strokeWidth="1"
+            strokeDasharray="4 4"
+            strokeLinejoin="round"
+          />
+
+          {/* Active User Performance Polygon (Lime Green) */}
+          <motion.polygon
+            points={scorePolygon}
+            fill="rgba(132, 204, 22, 0.38)"
+            stroke="#84cc16"
+            strokeWidth="2.5"
+            strokeLinejoin="round"
+            initial={{ opacity: 0, scale: 0.7, transformOrigin: `${centerX}px ${centerY}px` }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.6, ease: 'easeOut' }}
+          />
+
+          {/* User Score Points & Labels */}
+          {metrics.map((metric, index) => {
+            const scorePoint = pointAt(index, Math.max(0.1, Math.min(100, metric.value)) / 100);
+            const labelPoint = pointAt(index, 1.24);
+
+            let anchor = 'middle';
+            let dy = 0;
+            if (index === 0) { anchor = 'middle'; dy = -6; }
+            else if (index === 1 || index === 2) { anchor = 'start'; }
+            else if (index === 3) { anchor = 'middle'; dy = 12; }
+            else if (index === 4 || index === 5) { anchor = 'end'; }
+
+            return (
+              <g key={metric.label} className="group/radar cursor-pointer">
+                {/* Score Point Marker */}
+                <circle cx={scorePoint.x} cy={scorePoint.y} r="10" fill="transparent" />
+                <circle cx={scorePoint.x} cy={scorePoint.y} r="4" fill="#f97316" stroke="#ffffff" strokeWidth="1.5" />
+
+                {/* Axis Text Label - High contrast dark slate in light mode, slate-300 in dark mode */}
+                <text
+                  x={labelPoint.x}
+                  y={labelPoint.y + dy}
+                  textAnchor={anchor}
+                  dominantBaseline="middle"
+                  fill="currentColor"
+                  fontSize="12"
+                  fontWeight="600"
+                  className="transition-colors text-slate-600 dark:text-slate-300 font-sans"
+                >
+                  {metric.label}
                 </text>
-                <text x={Math.min(width - 78, Math.max(74, scorePoint.x))} y={Math.max(31, scorePoint.y - 25)} textAnchor="middle" fill="#a1a1aa" fontSize="8">
-                  {metric.detail}
-                </text>
+
+                {/* Tooltip on Hover */}
+                <g className="pointer-events-none hidden group-hover/radar:block z-50">
+                  <rect
+                    x={Math.min(width - 150, Math.max(4, scorePoint.x - 70))}
+                    y={Math.max(4, scorePoint.y - 54)}
+                    width="140"
+                    height="42"
+                    rx="8"
+                    fill="#0f172a"
+                    stroke="#334155"
+                    strokeWidth="1"
+                  />
+                  <text
+                    x={Math.min(width - 80, Math.max(74, scorePoint.x))}
+                    y={Math.max(20, scorePoint.y - 36)}
+                    textAnchor="middle"
+                    fill="#a3e635"
+                    fontSize="11"
+                    fontWeight="700"
+                  >
+                    {metric.label}: {metric.value}%
+                  </text>
+                  <text
+                    x={Math.min(width - 80, Math.max(74, scorePoint.x))}
+                    y={Math.max(34, scorePoint.y - 22)}
+                    textAnchor="middle"
+                    fill="#94a3b8"
+                    fontSize="9"
+                  >
+                    {metric.detail}
+                  </text>
+                </g>
               </g>
-            </g>
-          );
-        })}
-      </svg>
+            );
+          })}
+        </svg>
+      </div>
     </div>
   );
 }
@@ -272,7 +355,14 @@ function DashboardContent() {
   const [pipelineDropdownOpen, setPipelineDropdownOpen] = useState(false);
   const [activeDonutStage, setActiveDonutStage] = useState(null);
   const [liveDataUpdatedAt, setLiveDataUpdatedAt] = useState(null);
-  const [performanceSignature, setPerformanceSignature] = useState(null);
+  const [performanceSignature, setPerformanceSignature] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('tf_perf_signature');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
   const liveRefreshInFlightRef = React.useRef(false);
 
   // Session-level completion banner dismissal state
@@ -346,6 +436,9 @@ function DashboardContent() {
             .filter(item => !['completed', 'cancelled'].includes(item.status))
         );
         setPerformanceSignature(signature || null);
+        if (signature) {
+          try { sessionStorage.setItem('tf_perf_signature', JSON.stringify(signature)); } catch {}
+        }
         setLiveDataUpdatedAt(new Date());
       } catch (error) {
         console.warn('Live dashboard refresh unavailable:', error);
@@ -665,7 +758,7 @@ function DashboardContent() {
     if (recentResumeScore < 85) {
       items.push({
         id: 'optimize-resume',
-        icon: Sparkles,
+        icon: Zap,
         type: 'Optimizer',
         title: 'Resume score can improve',
         subtitle: `Your recent ATS match score is ${recentResumeScore}/100`,
@@ -816,17 +909,74 @@ function DashboardContent() {
   const careerRadarMetrics = useMemo(() => {
     const db = performanceSignature?.metrics || {};
     const counts = performanceSignature?.counts || {};
-    const applicationsCount = Number(counts.applications) || 0;
-    const submittedCount = Number(counts.submitted) || 0;
+
+    const applicationsCount = Number(counts.applications) || applications.length;
+    const submittedCount = Number(counts.submitted) || applications.filter(a => a && a.current_stage !== 'Ready To Apply').length;
+
+    // Instant client-side fallback metrics calculation if backend signature is loading/empty
+    const computeAtsScore = () => {
+      if (db.ats_match != null && Number(db.ats_match) > 0) return Math.round(Number(db.ats_match));
+      if (recentResumeScore > 0) return recentResumeScore;
+      return 75;
+    };
+
+    const computeResumeReady = () => {
+      if (db.resume_ready != null && Number(db.resume_ready) > 0) return Math.round(Number(db.resume_ready));
+      if (applications.length === 0) return 80;
+      const readyCount = applications.filter(a => a?.resume_status === 'ready' || Boolean(a?.resume_version)).length;
+      return Math.round((readyCount / applications.length) * 100);
+    };
+
+    const computeAppProgress = () => {
+      if (db.application_progress != null && Number(db.application_progress) > 0) return Math.round(Number(db.application_progress));
+      if (applications.length === 0) return 65;
+      const stageScores = applications.map(a => {
+        const stg = a?.current_stage;
+        if (stg === 'Offer' || stg === 'Accepted') return 100;
+        if (stg === 'Final Round') return 85;
+        if (stg === 'Interview') return 70;
+        if (stg === 'Assessment' || stg === 'Recruiter' || stg === 'Recruiter Contact') return 55;
+        if (stg === 'Applied') return 35;
+        return 15;
+      });
+      const avg = stageScores.reduce((sum, val) => sum + val, 0) / applications.length;
+      return Math.round(avg);
+    };
+
+    const computeInterviews = () => {
+      if (db.interviews != null && Number(db.interviews) > 0) return Math.round(Number(db.interviews));
+      if (submittedCount === 0) return 0;
+      const interviewCount = applications.filter(a => ['Interview', 'Final Round', 'Offer', 'Accepted'].includes(a?.current_stage)).length;
+      return Math.round((interviewCount / submittedCount) * 100);
+    };
+
+    const computeCoverLetters = () => {
+      if (db.cover_letter_ready != null && Number(db.cover_letter_ready) > 0) return Math.round(Number(db.cover_letter_ready));
+      if (applications.length === 0) return 70;
+      const clCount = applications.filter(a => a?.cover_letter_status === 'ready' || Boolean(a?.cover_letter_version)).length;
+      return Math.round((clCount / applications.length) * 100);
+    };
+
+    const computeOffers = () => {
+      if (db.offer_success != null && Number(db.offer_success) > 0) return Math.round(Number(db.offer_success));
+      if (submittedCount === 0) return 0;
+      const offerCount = applications.filter(a => ['Offer', 'Accepted'].includes(a?.current_stage)).length;
+      return Math.round((offerCount / submittedCount) * 100);
+    };
+
+    const resumeReadyCount = Number(counts.resume_ready) || applications.filter(a => a?.resume_status === 'ready' || Boolean(a?.resume_version)).length;
+    const interviewCount = Number(counts.interviews) || applications.filter(a => ['Interview', 'Final Round', 'Offer', 'Accepted'].includes(a?.current_stage)).length;
+    const coverLetterCount = Number(counts.cover_letters) || applications.filter(a => a?.cover_letter_status === 'ready' || Boolean(a?.cover_letter_version)).length;
+
     return [
-      { label: 'ATS Score', value: Number(db.ats_match) || 0, detail: 'Average saved ATS score' },
-      { label: 'Resume Ready', value: Number(db.resume_ready) || 0, detail: `${Number(counts.resume_ready) || 0} of ${applicationsCount} jobs` },
-      { label: 'App Progress', value: Number(db.application_progress) || 0, detail: 'Weighted by current stages' },
-      { label: 'Interview Rate', value: Number(db.interviews) || 0, detail: `${Number(counts.interviews) || 0} of ${submittedCount} submitted` },
-      { label: 'Cover Letters', value: Number(db.cover_letter_ready) || 0, detail: `${Number(counts.cover_letters) || 0} of ${applicationsCount} jobs` },
-      { label: 'Offer Rate', value: Number(db.offer_success) || 0, detail: `${Number(counts.offers) || 0} of ${submittedCount} submitted` },
+      { label: 'ATS Match', value: computeAtsScore(), detail: 'ATS Match & Keyword Strength' },
+      { label: 'Tailored Fit', value: computeResumeReady(), detail: `${resumeReadyCount} of ${applicationsCount} resumes tailored` },
+      { label: 'Impact Score', value: computeAppProgress(), detail: 'Impact & Conversion Score' },
+      { label: 'Interviews', value: computeInterviews(), detail: `${interviewCount} of ${submittedCount || 1} interviews` },
+      { label: 'Cover Letters', value: computeCoverLetters(), detail: `${coverLetterCount} active pipeline volume` },
+      { label: 'Offer Rate', value: computeOffers(), detail: `${offerApps.length} offers & career mobility` },
     ];
-  }, [performanceSignature]);
+  }, [performanceSignature, applications, recentResumeScore, offerApps.length]);
 
   const isProfileIncomplete = !profile?.phone_number || !parsedResume;
 
@@ -847,7 +997,7 @@ function DashboardContent() {
         <div className="dashboard-career-canvas flex-1 w-full flex flex-col gap-6 font-sans pb-12 select-none text-tf-text animate-in fade-in slide-in-from-bottom-2 duration-300">
 
           {/* 1. HERO GREETING BANNER */}
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .35 }} className="dashboard-greeting dashboard-interactive-surface bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md p-6 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-xs space-y-1">
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .35 }} className="dashboard-greeting dashboard-interactive-surface bg-gradient-to-br from-sky-50/70 via-white to-teal-50/40 dark:bg-zinc-900/80 backdrop-blur-md p-6 rounded-2xl border border-sky-200/60 dark:border-zinc-800 shadow-2xs space-y-1">
             <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-tf-text">
               {greetingPrefix}, <WaveText text={firstName} trigger="hover" amplitude={9} stagger={0.03} duration={0.4} />.
             </h1>
@@ -902,7 +1052,7 @@ function DashboardContent() {
                 title: 'Generated Documents',
                 description: 'Completed resume and cover-letter outputs over the last eight weeks',
                 lines: [
-                  { label: 'Resumes', total: topDashboardGraphs.downloadedTotal, series: topDashboardGraphs.downloadedSeries, stroke: '#3B82F6', unit: 'resumes' },
+                  { label: 'Resumes', total: topDashboardGraphs.downloadedTotal, series: topDashboardGraphs.downloadedSeries, stroke: '#38BDF8', unit: 'resumes' },
                   { label: 'Cover letters', total: topDashboardGraphs.coverLetterTotal, series: topDashboardGraphs.coverLetterSeries, stroke: '#F97316', unit: 'cover letters' },
                 ],
               },
@@ -912,8 +1062,8 @@ function DashboardContent() {
                 title: 'Offer Outcomes',
                 description: 'Secured and rejected offers over the last eight weeks',
                 lines: [
-                  { label: 'Secured', total: topDashboardGraphs.successfulTotal, series: topDashboardGraphs.successfulSeries, stroke: '#10B981', unit: 'offers' },
-                  { label: 'Rejected', total: topDashboardGraphs.rejectedTotal, series: topDashboardGraphs.rejectedSeries, stroke: '#F97316', unit: 'rejections' },
+                  { label: 'Secured', total: topDashboardGraphs.successfulTotal, series: topDashboardGraphs.successfulSeries, stroke: '#F97316', unit: 'offers' },
+                  { label: 'Rejected', total: topDashboardGraphs.rejectedTotal, series: topDashboardGraphs.rejectedSeries, stroke: '#38BDF8', unit: 'rejections' },
                 ],
               },
             ].map((graph, graphIndex) => {
@@ -943,7 +1093,9 @@ function DashboardContent() {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: .04 + graphIndex * .06 }}
-                  className="dashboard-panel dashboard-interactive-surface overflow-hidden rounded-2xl border border-tf-border bg-white/85 p-6 shadow-xs dark:bg-zinc-900/85"
+                  className={`dashboard-panel dashboard-interactive-surface overflow-hidden rounded-2xl border ${
+                    graph.key === 'downloads' ? 'border-sky-200/60 bg-gradient-to-br from-sky-50/50 via-white to-blue-50/30' : 'border-orange-200/60 bg-gradient-to-br from-orange-50/50 via-white to-amber-50/30'
+                  } dark:border-tf-border dark:bg-zinc-900/85 p-6 shadow-2xs`}
                 >
                   <div className="flex items-start justify-between gap-5">
                     <div>
@@ -1016,23 +1168,20 @@ function DashboardContent() {
           </div>
 
           {/* 4. SUPPORTING KPI CARDS BELOW THE GRAPHS */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
-            {/* Primary KPI Card 1: Recent ATS Score */}
-            <motion.div tabIndex="0" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .06 }} className="dashboard-kpi-card dashboard-interactive-surface kpi-orange bg-white/80 dark:bg-zinc-900/80 border border-orange-500/30 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs">
+            {/* KPI Card 1: Recent ATS */}
+            <motion.div tabIndex="0" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .06 }} className="dashboard-kpi-card dashboard-interactive-surface kpi-emerald bg-gradient-to-br from-emerald-50/80 via-white to-lime-50/30 dark:bg-zinc-900/80 border border-emerald-300/60 dark:border-emerald-500/30 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-2xs">
               <div className="flex justify-between items-start">
                 <div className="space-y-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-bold text-orange-600 dark:text-orange-400 uppercase tracking-wider">PRIMARY</span>
-                    <span className="text-xs font-semibold text-tf-text-tertiary">• Score</span>
-                  </div>
+                  <span className="text-xs font-semibold text-tf-text-secondary">Recent ATS</span>
                   <div className="text-3xl font-extrabold tracking-tight text-tf-text flex items-baseline gap-1">
                     <span>{displayScore}</span>
                     <span className="text-xs font-semibold text-tf-text-tertiary">/100</span>
                   </div>
-                  <div className="mt-2 h-1.5 w-24 overflow-hidden rounded-full bg-orange-500/10">
+                  <div className="mt-2 h-1.5 w-24 overflow-hidden rounded-full bg-emerald-500/10">
                     <motion.div
-                      className="h-full rounded-full bg-orange-500/80"
+                      className="h-full rounded-full bg-emerald-500/80"
                       initial={{ width: 0 }}
                       animate={{ width: `${Math.max(0, Math.min(100, recentResumeScore || 0))}%` }}
                       transition={{ duration: 0.7, ease: [0.2, 0, 0, 1] }}
@@ -1056,44 +1205,14 @@ function DashboardContent() {
               </div>
             </motion.div>
 
-            {/* Primary KPI Card 2: Active Pipeline */}
-            <motion.div tabIndex="0" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .1 }} className="dashboard-kpi-card dashboard-interactive-surface kpi-blue bg-white/80 dark:bg-zinc-900/80 border border-blue-500/30 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs">
-              <div className="flex justify-between items-start">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Primary</span>
-                    <span className="text-xs font-semibold text-tf-text-tertiary">• Pipeline</span>
-                  </div>
-                  <div className="text-3xl font-extrabold tracking-tight text-tf-text">
-                    {displayActive}
-                  </div>
-                </div>
-                <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center border border-blue-500/20">
-                  <Briefcase size={16} />
-                </div>
-              </div>
-              <div className="flex items-center justify-between mt-4 pt-2 border-t border-blue-500/10">
-                <span className="text-[11px] font-medium text-tf-text-secondary">Across all stages</span>
-                <svg className="dashboard-sparkline w-14 h-5 text-blue-500 overflow-visible" viewBox="0 0 80 30" fill="none">
-                  <path
-                    d={activeAppsCount <= 0 ? "M0 24 L 80 24" : activeAppsCount < 5 ? "M0 24 Q 40 22, 80 12" : "M0 22 Q 25 25, 45 18 T 70 10 T 80 6"}
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    opacity={activeAppsCount <= 0 ? 0.35 : 1}
-                  />
-                </svg>
-              </div>
-            </motion.div>
-
-            {/* Secondary KPI Card 3: Success Rate */}
-            <motion.div tabIndex="0" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .14 }} className="dashboard-kpi-card dashboard-interactive-surface kpi-mint bg-white/80 dark:bg-zinc-900/80 border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs">
+            {/* KPI Card 2: Success Rate */}
+            <motion.div tabIndex="0" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .14 }} className="dashboard-kpi-card dashboard-interactive-surface kpi-mint bg-gradient-to-br from-teal-50/80 via-white to-emerald-50/30 dark:bg-zinc-900/80 border border-teal-200/60 dark:border-zinc-800 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-2xs">
               <div className="flex justify-between items-start">
                 <div className="space-y-1">
                   <span className="text-xs font-semibold text-tf-text-secondary">Success Rate</span>
                   <div className="text-2xl font-extrabold tracking-tight text-tf-text">{displaySuccess}%</div>
                 </div>
-                <div className="w-8 h-8 rounded-lg bg-zinc-500/10 text-tf-text-secondary flex items-center justify-center border border-zinc-200 dark:border-zinc-800">
+                <div className="w-8 h-8 rounded-lg bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center border border-teal-500/20">
                   <TrendingUp size={16} />
                 </div>
               </div>
@@ -1101,7 +1220,7 @@ function DashboardContent() {
                 <span className="text-[11px] font-semibold text-emerald-500 flex items-center gap-0.5">
                   ↗ {successRate}% <span className="text-tf-text-tertiary font-normal pl-0.5">vs last month</span>
                 </span>
-                <svg className="dashboard-sparkline w-14 h-5 text-orange-500 overflow-visible" viewBox="0 0 80 30" fill="none">
+                <svg className="dashboard-sparkline w-14 h-5 text-emerald-500 overflow-visible" viewBox="0 0 80 30" fill="none">
                   <path
                     d={successRate <= 0 ? "M0 24 L 80 24" : "M0 25 Q 20 28, 35 15 T 70 8 T 80 5"}
                     stroke="currentColor"
@@ -1114,7 +1233,7 @@ function DashboardContent() {
             </motion.div>
 
             {/* Secondary KPI Card 4: Interviews */}
-            <motion.div tabIndex="0" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .18 }} className="dashboard-kpi-card dashboard-interactive-surface kpi-amber bg-white/80 dark:bg-zinc-900/80 border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs">
+            <motion.div tabIndex="0" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .18 }} className="dashboard-kpi-card dashboard-interactive-surface kpi-amber bg-gradient-to-br from-indigo-50/80 via-white to-sky-50/30 dark:bg-zinc-900/80 border border-indigo-200/60 dark:border-zinc-800 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-2xs">
               <div className="flex justify-between items-start">
                 <div className="space-y-1">
                   <span className="text-xs font-semibold text-tf-text-secondary">Interviews</span>
@@ -1122,13 +1241,13 @@ function DashboardContent() {
                     {displayInterviews}
                   </div>
                 </div>
-                <div className="w-8 h-8 rounded-lg bg-zinc-500/10 text-tf-text-secondary flex items-center justify-center border border-zinc-200 dark:border-zinc-800">
+                <div className="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-500 flex items-center justify-center border border-indigo-500/20">
                   <Calendar size={16} />
                 </div>
               </div>
               <div className="flex items-center justify-between mt-4 pt-2 border-t border-tf-border/50">
                 <span className="text-[11px] font-medium text-tf-text-secondary">This month</span>
-                <svg className="dashboard-sparkline w-14 h-5 text-amber-500 overflow-visible" viewBox="0 0 80 30" fill="none">
+                <svg className="dashboard-sparkline w-14 h-5 text-indigo-500 overflow-visible" viewBox="0 0 80 30" fill="none">
                   <path
                     d={interviewApps.length <= 0 ? "M0 24 L 80 24" : interviewApps.length < 3 ? "M0 24 Q 40 20, 80 10" : "M0 26 Q 20 22, 40 24 T 65 12 T 80 8"}
                     stroke="currentColor"
@@ -1141,7 +1260,7 @@ function DashboardContent() {
             </motion.div>
 
             {/* Secondary KPI Card 5: Offers */}
-            <motion.div tabIndex="0" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .22 }} className="dashboard-kpi-card dashboard-interactive-surface kpi-emerald bg-white/80 dark:bg-zinc-900/80 border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-xs">
+            <motion.div tabIndex="0" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .22 }} className="dashboard-kpi-card dashboard-interactive-surface kpi-emerald bg-gradient-to-br from-lime-50/80 via-white to-emerald-50/30 dark:bg-zinc-900/80 border border-lime-200/60 dark:border-zinc-800 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-2xs">
               <div className="flex justify-between items-start">
                 <div className="space-y-1">
                   <span className="text-xs font-semibold text-tf-text-secondary">Offers</span>
@@ -1338,7 +1457,7 @@ function DashboardContent() {
                 </div>
 
                 {/* CARD B: RECENT ACTIVITY FEED */}
-                <div className="dashboard-panel dashboard-activity-panel dashboard-interactive-surface bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-5 shadow-xs flex flex-col justify-between space-y-4">
+                <div className="dashboard-panel dashboard-activity-panel dashboard-interactive-surface bg-gradient-to-br from-sky-50/70 via-white to-cyan-50/40 dark:bg-zinc-900/80 border border-sky-200/60 dark:border-zinc-800 rounded-2xl p-5 shadow-xs flex flex-col justify-between space-y-4">
                   <div>
                     <h3 className="text-xs font-bold text-tf-text">Recent Activity</h3>
                     <p className="text-[11px] text-tf-text-tertiary">Real-time log of application updates</p>
@@ -1363,7 +1482,7 @@ function DashboardContent() {
                           className="dashboard-activity-item dashboard-solid-row w-full flex items-center justify-between p-2.5 rounded-xl text-left transition cursor-pointer border"
                         >
                           <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-3">
-                            <span className="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-lime-500 shrink-0" />
                             <CompanyFavicon companyName={act.company} jobUrl={act.jobUrl} className="w-5 h-5 shrink-0" />
                             <div className="min-w-0 flex-1">
                               <div className="text-xs font-bold text-tf-text truncate">{act.company || 'Application'}</div>
@@ -1751,7 +1870,7 @@ function DashboardContent() {
 
             {/* RIGHT COLUMN (1/3 width) */}
             <div className="space-y-6">
-          <div className="dashboard-panel dashboard-interactive-surface bg-white/80 dark:bg-zinc-900/80 border border-tf-border rounded-2xl p-6 shadow-xs space-y-4">
+          <div className="dashboard-panel dashboard-interactive-surface bg-gradient-to-br from-lime-50/70 via-white to-emerald-50/40 dark:bg-zinc-900/80 border border-lime-200/60 dark:border-zinc-800 rounded-2xl p-6 shadow-xs space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-tf-text">Upcoming Reminders</h3>
               <span className="text-[11px] font-semibold text-tf-accent">{upcomingEvents.length} scheduled</span>

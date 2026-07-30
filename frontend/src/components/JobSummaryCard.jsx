@@ -1,6 +1,6 @@
 import React from 'react';
 import { collectJobSkills, formatSalary } from '../services/jdExtractionFlow';
-import { Heart, RefreshCw, Sparkles, FileText } from 'lucide-react';
+import { Heart, RefreshCw, Wand2, FileText } from 'lucide-react';
 
 function JobSummaryCard({
   jobAnalysis,
@@ -119,7 +119,7 @@ function JobSummaryCard({
             onClick={() => setStep('dashboard')}
             className="flex-1 py-3 bg-brand hover:bg-brand-hover text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all duration-150 shadow-md flex items-center justify-center gap-2 cursor-pointer hover:shadow-indigo-900/40"
           >
-            <Sparkles size={14} className="fill-white/10" />
+            <Wand2 size={14} className="fill-white/10" />
             Resume
           </button>
           <button 

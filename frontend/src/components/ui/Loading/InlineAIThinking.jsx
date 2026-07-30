@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Sparkles, Bot } from 'lucide-react';
+import { Wand2, Bot } from 'lucide-react';
 import { LoadingStage } from './LoadingStage';
 
 export function InlineAIThinking({
@@ -19,7 +19,7 @@ export function InlineAIThinking({
             animate={{ rotate: [0, 15, -15, 0], scale: [1, 1.08, 1] }}
             transition={{ repeat: Infinity, duration: 2, ease: 'easeInOut' }}
           >
-            <Sparkles size={15} />
+            <Wand2 size={15} />
           </motion.div>
         </div>
 

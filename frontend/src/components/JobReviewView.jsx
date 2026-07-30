@@ -14,7 +14,7 @@ import {
   Building2,
   Timer,
   Tag,
-  Sparkles
+  Wand2
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
@@ -418,7 +418,7 @@ function JobReviewView({
         {highlightsList.length > 0 && (
           <div className="space-y-1.5">
             <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
-              <Sparkles size={14} /><span>Key Highlights</span>
+              <Wand2 size={14} /><span>Key Highlights</span>
             </h3>
             <ul className="list-disc pl-5 space-y-1.5 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed font-semibold">
               {highlightsList.map((highlight, idx) => (

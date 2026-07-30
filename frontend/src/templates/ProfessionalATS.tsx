@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { categorizeSkills } from '../utils/skillCategorizer';
+import { ensureArray, ensureStringArray } from '../utils/arrayUtils';
 
 export default function ProfessionalATS({ resume }) {
   useEffect(() => {
@@ -107,19 +108,13 @@ export default function ProfessionalATS({ resume }) {
                   <span>{exp.role}</span>
                   <span>{exp.start_date} - {exp.end_date || 'Present'}</span>
                 </div>
-                {exp.bullet_points && exp.bullet_points.length > 0 ? (
+                {ensureStringArray(exp.bullet_points || exp.description).length > 0 && (
                   <ul className="list-disc pl-4 space-y-0.5">
-                    {exp.bullet_points.map((bp, j) => (
+                    {ensureStringArray(exp.bullet_points || exp.description).map((bp, j) => (
                       <li key={j} className="leading-snug">{bp}</li>
                     ))}
                   </ul>
-                ) : exp.description && exp.description.length > 0 ? (
-                  <ul className="list-disc pl-4 space-y-0.5">
-                    {exp.description.map((bp, j) => (
-                      <li key={j} className="leading-snug">{bp}</li>
-                    ))}
-                  </ul>
-                ) : null}
+                )}
               </div>
             ))}
           </div>
@@ -161,12 +156,12 @@ export default function ProfessionalATS({ resume }) {
                 {proj.role && (
                   <div className="italic mb-1">{proj.role}</div>
                 )}
-                {proj.technology_stack && proj.technology_stack.length > 0 && (
-                  <div className="italic mb-1">{proj.technology_stack.join(', ')}</div>
+                {ensureStringArray(proj.technology_stack).length > 0 && (
+                  <div className="italic mb-1">{ensureStringArray(proj.technology_stack).join(', ')}</div>
                 )}
-                {proj.description && proj.description.length > 0 && (
+                {ensureStringArray(proj.description).length > 0 && (
                   <ul className="list-disc pl-4 space-y-0.5">
-                    {proj.description.map((bp, j) => (
+                    {ensureStringArray(proj.description).map((bp, j) => (
                       <li key={j} className="leading-snug">{bp}</li>
                     ))}
                   </ul>
