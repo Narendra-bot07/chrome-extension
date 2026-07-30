@@ -713,11 +713,11 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     return (
       <div 
         data-resume-layout="sidebar"
-        className="resume-document-light font-sans bg-white text-zinc-900 flex flex-row min-h-[1056px]"
-        style={{ width: '816px', lineHeight: params.lineHeight }}
+        className="resume-document-light font-sans bg-white text-zinc-900 flex flex-row items-stretch min-h-[1056px] box-border"
+        style={{ width: '816px', height: '1056px', minHeight: '1056px', lineHeight: params.lineHeight }}
       >
         {/* Left Sidebar */}
-        <div className="w-[32%] bg-slate-50 border-r border-slate-200 p-6 flex flex-col shrink-0">
+        <div className="w-[32%] bg-slate-50 border-r border-slate-200 p-6 flex flex-col shrink-0 self-stretch">
           {/* Optional Photo */}
           {config.profilePhoto && personal_info.photo_url && (
             <div className="flex justify-center mb-1">
@@ -913,8 +913,8 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     return (
       <div 
         data-resume-layout="two-column"
-        className="resume-document-light font-serif bg-white text-zinc-900 p-8 min-h-[1056px]"
-        style={{ width: '816px', lineHeight: params.lineHeight }}
+        className="resume-document-light font-serif bg-white text-zinc-900 p-8 min-h-[1056px] flex flex-col justify-between box-border"
+        style={{ width: '816px', height: '1056px', minHeight: '1056px', lineHeight: params.lineHeight }}
       >
         {/* Executive Header */}
         <header className="border-b-2 border-amber-900/30 pb-2 mb-1 flex justify-between items-end gap-2">
@@ -941,7 +941,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
         </header>
 
         {/* Executive 2-Column Split */}
-        <div className="flex gap-7 font-sans">
+        <div className="flex gap-7 font-sans flex-1 items-stretch mt-2">
           {/* Main Column */}
           <div className="flex-1 flex flex-col">
             {mainList.map(sectionId => (
@@ -958,10 +958,10 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
           </div>
 
           {/* Divider */}
-          <div className="border-r border-zinc-200 shrink-0"></div>
+          <div className="border-r border-zinc-200 shrink-0 self-stretch"></div>
 
           {/* Executive Sidebar Column */}
-          <div className="w-[33%] flex flex-col shrink-0">
+          <div className="w-[33%] flex flex-col shrink-0 self-stretch">
             {sidebarList.map(sectionId => (
               <section key={sectionId} data-section={sectionId} style={{ marginBottom: `${params.sectionGap}px` }}>
                 <h2 
