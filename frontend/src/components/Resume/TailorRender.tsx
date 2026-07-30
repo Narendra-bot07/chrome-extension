@@ -468,7 +468,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
                   key={cat}
                   className="grid text-zinc-900"
                   style={{
-                    gridTemplateColumns: '135px minmax(0, 1fr)',
+                    gridTemplateColumns: '100px minmax(0, 1fr)',
                     columnGap: '8px',
                     rowGap: 0,
                     fontSize: `${params.fontSize}px`,
@@ -960,24 +960,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
           {/* Divider */}
           <div className="border-r border-zinc-200 shrink-0"></div>
 
-          {/* Executive Column */}
-          <div className="w-[33%] flex flex-col shrink-0">
-            {sidebarList.map(sectionId => (
-              <section key={sectionId} data-section={sectionId} style={{ marginBottom: `${params.sectionGap}px` }}>
-                <h2 
-                  style={{ fontSize: `${params.sectionTitleSize}px`, breakAfter: 'avoid-page' }}
-                >
-                  {sectionLabel(sectionId)}
-                </h2>
-                {renderSectionContent(sectionId, false)}
-              </section>
-            ))}
-          </div>
-
-          {/* Divider */}
-          <div className="border-r border-zinc-200 shrink-0"></div>
-
-          {/* Executive Column */}
+          {/* Executive Sidebar Column */}
           <div className="w-[33%] flex flex-col shrink-0">
             {sidebarList.map(sectionId => (
               <section key={sectionId} data-section={sectionId} style={{ marginBottom: `${params.sectionGap}px` }}>
@@ -1086,15 +1069,29 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     }
 
     if (sectionId === 'skills') {
+      const skillEntries = Array.isArray(categorizedSkills)
+        ? categorizedSkills
+        : Object.entries(categorizedSkills || {}).map(([title, skillsList]) => ({
+            title,
+            skills: Array.isArray(skillsList) ? skillsList : [skillsList]
+          }));
+
+      if (skillEntries.length === 0 && skills) {
+        const rawList = Array.isArray(skills) ? skills : [skills];
+        skillEntries.push({ title: 'Skills', skills: rawList });
+      }
+
       return (
         <div className="space-y-1.5 font-serif text-[11.5px]">
-          {categorizedSkills.map((cat: any, idx: number) => (
+          {skillEntries.map((cat: any, idx: number) => (
             <div key={idx} className="flex flex-row items-baseline gap-4">
               <div className="w-48 shrink-0 font-bold text-zinc-950 text-[11.5px]">
-                {cat.title}
+                {cat.title || cat.category || cat.name || 'Skills'}
               </div>
               <div className="flex-1 text-zinc-800 text-[11.5px]">
-                {cat.skills.join(', ')}
+                {Array.isArray(cat.skills)
+                  ? cat.skills.join(', ')
+                  : String(cat.skills || cat.name || '')}
               </div>
             </div>
           ))}
@@ -1213,7 +1210,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
               {personal_info?.phone && <span>Telephone number: {personal_info.phone}</span>}
             </div>
             {(personal_info?.linkedin || personal_info?.github || personal_info?.website) && (
-              <div className="flex flex-wrap justify-center items-center gap-x-2">
+              <div data-contact-links="true" className="flex flex-wrap justify-center items-center gap-x-2">
                 {personal_info?.linkedin && <span>LinkedIn: {linkDisplay('linkedin', personal_info.linkedin)}</span>}
                 {personal_info?.linkedin && (personal_info?.github || personal_info?.website) && <span className="text-[#1d5288] select-none">✻</span>}
                 {personal_info?.github && <span>GitHub: {linkDisplay('github', personal_info.github)}</span>}

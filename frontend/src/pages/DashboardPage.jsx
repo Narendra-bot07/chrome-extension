@@ -255,14 +255,15 @@ function CareerPerformanceRadar({ metrics, updatedAt }) {
             strokeLinejoin="round"
           />
 
-          {/* Active User Performance Polygon (Lime Green) */}
+          {/* Active User Performance Polygon (Vibrant Orange) */}
           <motion.polygon
             points={scorePolygon}
-            fill="rgba(132, 204, 22, 0.38)"
-            stroke="#84cc16"
+            fill="rgba(249, 115, 22, 0.22)"
+            stroke="#f97316"
             strokeWidth="2.5"
             strokeLinejoin="round"
-            initial={{ opacity: 0, scale: 0.7, transformOrigin: `${centerX}px ${centerY}px` }}
+            style={{ transformOrigin: `${centerX}px ${centerY}px` }}
+            initial={{ opacity: 0, scale: 0.7 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.6, ease: 'easeOut' }}
           />

@@ -2,12 +2,9 @@ import React, { memo } from 'react';
 
 /**
  * BrandLogo Component
- * Renders the official Tailr4U Logo [Logo Image] + [Brand Wordmark]
- * 
- * Features:
+ * Renders the official Tailr4U Logo:
  * - Application logo image (raccoon mark) on the left
- * - 3D Tailr4U wordmark text on the right (Navy Tailr, Electric Blue 4, Vibrant Orange U)
- * - Responsive size presets (xs, sm, md, lg, xl, 2xl) or custom numeric size
+ * - Tailr4U wordmark on the right (Dark Navy/White 'Tailr' with top-right floating Electric Blue accent on 'T', Electric Blue '4', Vibrant Orange 'U')
  */
 export const BrandLogo = memo(function BrandLogo({
   size = 'md', // 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl' | number
@@ -50,7 +47,7 @@ export const BrandLogo = memo(function BrandLogo({
 
   return (
     <div 
-      className={`inline-flex items-center gap-2.5 font-black tracking-[-0.04em] select-none font-sans ${onClick ? 'cursor-pointer' : ''} ${className}`}
+      className={`inline-flex items-center gap-2.5 select-none font-sans shrink-0 ${onClick ? 'cursor-pointer' : ''} ${className}`}
       onClick={onClick}
       role={onClick ? 'button' : undefined}
     >
@@ -67,27 +64,28 @@ export const BrandLogo = memo(function BrandLogo({
       {/* 2. BRAND NAME WORDMARK */}
       {variant !== 'icon' && (
         <span 
-          className="inline-flex items-baseline filter drop-shadow-[0_3px_5px_rgba(15,23,42,0.12)]"
+          className="inline-flex items-baseline font-black tracking-[-0.04em] leading-none shrink-0 filter drop-shadow-[0_2px_4px_rgba(15,23,42,0.12)]"
           style={{ fontSize: currentSize.fontSize, lineHeight: 1 }}
         >
-          {/* 'T' with Top-Left Electric Blue Accent Notch */}
-          <span className="relative inline-flex items-baseline text-slate-900 dark:text-slate-100">
-            <span className="relative">
-              <span 
-                className="absolute -top-[0.08em] -left-[0.08em] w-[0.35em] h-[0.35em] bg-blue-500 rounded-tl-sm rounded-tr-md rounded-bl-sm shadow-[0_2px_4px_rgba(37,99,235,0.4)]"
-              />
+          {/* 'T' with Top-Right Floating Blue Accent Notch */}
+          <span className="relative inline-flex items-baseline text-slate-900 dark:text-slate-100 mr-[0.18em]">
+            <span className="relative inline-block font-black">
               T
+              {/* Floating Blue Accent Badge to the top-right of T */}
+              <span 
+                className="absolute -top-[0.16em] -right-[0.38em] w-[0.42em] h-[0.28em] bg-blue-500 rounded-tr-lg rounded-tl-xs rounded-br-xs rounded-bl-sm shadow-[0_2px_4px_rgba(37,99,235,0.4)] pointer-events-none"
+              />
             </span>
             <span>ailr</span>
           </span>
 
           {/* '4' in Electric Blue */}
-          <span className="text-blue-600 dark:text-blue-500 ml-[0.01em] filter drop-shadow-[0_2px_4px_rgba(37,99,235,0.3)]">
+          <span className="text-blue-600 dark:text-blue-500 font-black ml-[0.01em] filter drop-shadow-[0_2px_4px_rgba(37,99,235,0.3)]">
             4
           </span>
 
           {/* 'U' in Vibrant Orange */}
-          <span className="text-orange-500 dark:text-orange-400 ml-[0.01em] filter drop-shadow-[0_2px_4px_rgba(249,115,22,0.3)]">
+          <span className="text-orange-500 dark:text-orange-400 font-black ml-[0.01em] filter drop-shadow-[0_2px_4px_rgba(249,115,22,0.3)]">
             U
           </span>
         </span>
