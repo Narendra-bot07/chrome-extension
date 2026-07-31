@@ -13,10 +13,28 @@ import {
 } from '../../utils/resumePresentation';
 import { TEMPLATE_CONFIGS, TemplateConfig } from '../../templates/templates_config';
 import { createResumeLayoutModel } from '../../utils/resumeLayoutModel';
+import { AcademicATSTemplate } from './templates/AcademicATSTemplate';
+import { JohnsonsATSTemplate } from './templates/JohnsonsATSTemplate';
 
-const sectionLabel = (value: string) => value
-  .replace(/_/g, ' ')
-  .replace(/\b\w/g, char => char.toUpperCase());
+const sectionLabel = (value: string) => {
+  const overrides: Record<string, string> = {
+    positions_of_responsibility: 'Position of Responsibility',
+    position_of_responsibility: 'Position of Responsibility',
+    leadership: 'Position of Responsibility',
+    extracurricular_activities: 'Extra-Curricular',
+    extracurricular: 'Extra-Curricular',
+    research_publications: 'Research Publication',
+    publications: 'Research Publication',
+    internships: 'Internship / Trainings',
+    trainings: 'Internship / Trainings',
+    declaration: 'Declaration',
+    personal_info: 'Personal Info'
+  };
+  if (overrides[value]) return overrides[value];
+  return value
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase());
+};
 
 const ensureArray = (val: any): any[] => {
   if (Array.isArray(val)) return val;
@@ -236,33 +254,63 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
   const hasData = (sectionId: string): boolean => {
     switch (sectionId) {
       case 'summary':
-        return !!summary && summary.trim() !== '';
+        return !!summary && typeof summary === 'string' && summary.trim() !== '';
       case 'experience':
-        return experience && experience.length > 0;
+        return Array.isArray(experience) && experience.filter(item => item && (item.role || item.company || item.description)).length > 0;
       case 'projects':
-        return projects && projects.length > 0;
+        return Array.isArray(projects) && projects.filter(item => item && (item.name || item.description)).length > 0;
       case 'education':
-        return education && education.length > 0;
+        return Array.isArray(education) && education.filter(item => item && (item.degree || item.institution)).length > 0;
       case 'skills':
         return !!categorizedSkills && Object.keys(categorizedSkills).length > 0;
       case 'certifications':
-        return certifications && certifications.length > 0;
+        return Array.isArray(certifications) && certifications.filter(item => item && (item.title || item.name)).length > 0;
       case 'achievements':
-        return achievements && achievements.length > 0;
+        return Array.isArray(achievements) && achievements.filter(item => item && (item.title || item.description)).length > 0;
       case 'volunteer':
-        return volunteer_experience && volunteer_experience.length > 0;
+      case 'volunteer_experience': {
+        const vol = volunteer_experience || resume.volunteer;
+        return Array.isArray(vol) && vol.filter((item: any) => item && (item.role || item.organization)).length > 0;
+      }
       case 'publications':
-        return publications && publications.length > 0;
+      case 'research_publications': {
+        const pub = publications || resume.research_publications || resume.publications;
+        return Array.isArray(pub) && pub.filter((item: any) => item && (item.title || item.name || typeof item === 'string')).length > 0;
+      }
       case 'languages':
-        return languages && languages.length > 0;
+        return Array.isArray(languages) && languages.filter((item: any) => item && (item.language || typeof item === 'string')).length > 0;
       case 'awards':
-        return awards && awards.length > 0;
+        return Array.isArray(awards) && awards.filter((item: any) => item && (item.title || typeof item === 'string')).length > 0;
       case 'interests':
-        return interests && interests.length > 0;
+        return Array.isArray(interests) && interests.filter((item: any) => item && String(item).trim() !== '').length > 0;
       case 'objective':
-        return !!resume.objective && resume.objective.trim() !== '';
-      default:
-        return Array.isArray(resume[sectionId]) && resume[sectionId].length > 0;
+        return !!resume.objective && typeof resume.objective === 'string' && resume.objective.trim() !== '';
+      case 'internships':
+      case 'trainings': {
+        const intern = resume.internships || resume.trainings;
+        return Array.isArray(intern) && intern.filter((item: any) => item && (item.role || item.title || item.company || item.organization || typeof item === 'string')).length > 0;
+      }
+      case 'leadership':
+      case 'positions_of_responsibility':
+      case 'position_of_responsibility': {
+        const lead = resume.leadership || resume.positions_of_responsibility || resume.position_of_responsibility;
+        return Array.isArray(lead) && lead.filter((item: any) => item && (item.role || item.position || item.organization || typeof item === 'string')).length > 0;
+      }
+      case 'extracurricular_activities':
+      case 'extracurricular': {
+        const extra = resume.extracurricular_activities || resume.extracurricular;
+        return Array.isArray(extra) && extra.filter((item: any) => item && (item.title || item.name || item.activity || typeof item === 'string')).length > 0;
+      }
+      case 'declaration': {
+        const dec = resume.declaration || resume.declaration_text;
+        return !!dec && typeof dec === 'string' && dec.trim() !== '';
+      }
+      default: {
+        const val = resume[sectionId];
+        if (Array.isArray(val)) return val.filter((item: any) => item && (typeof item === 'string' ? item.trim() !== '' : Object.keys(item).length > 0)).length > 0;
+        if (typeof val === 'string') return val.trim() !== '';
+        return !!val;
+      }
     }
   };
 
@@ -286,14 +334,12 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
       { key: 'phone', val: personal_info.phone, display: personal_info.phone, icon: <Phone size={11} className="shrink-0" /> },
       { key: 'email', val: personal_info.email, display: personal_info.email, icon: <Mail size={11} className="shrink-0" /> },
       { key: 'location', val: personal_info.location, display: personal_info.location, icon: <MapPin size={11} className="shrink-0" /> },
+      ...(personal_info.github ? [linkedItem('github', personal_info.github)] : []),
+      ...(personal_info.linkedin ? [linkedItem('linkedin', personal_info.linkedin)] : []),
+      ...(personal_info.website || personal_info.portfolio ? [linkedItem('website', personal_info.website || personal_info.portfolio)] : []),
       ...(resume.candidate_links || resume.profile_links || [])
         .filter((link: any) => link.owner_type === 'candidate' && link.validation_status === 'VALID')
-        .map((link: any) => ({
-          key: link.platform,
-          val: link.normalized_url || link.url,
-          display: link.display_label,
-          icon: iconFor(link.platform)
-        }))
+        .map((link: any) => linkedItem(link.platform, link.normalized_url || link.url))
     ].filter(item => {
       if (!item.val) return false;
       const identity = canonicalContactIdentity(item.key, item.val);
@@ -384,25 +430,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     }
 
     if (!photoUrl) {
-      if (isExporting) {
-        // When downloading/compiling PDF, keep area blank and cleanly formatted without placeholder buttons
-        return null;
-      }
-      return (
-        <label 
-          className={`${circleSizeClass} print:hidden border-2 border-dashed border-indigo-400 hover:border-indigo-600 bg-indigo-50/70 hover:bg-indigo-100/80 flex flex-col items-center justify-center text-center cursor-pointer transition-all shrink-0 group relative shadow-xs ${extraClass}`} 
-          title="Click to upload profile photo"
-        >
-          <Camera size={20} className="text-indigo-600 group-hover:scale-110 transition-transform shrink-0" />
-          <span className="text-[8px] font-black text-indigo-700 uppercase mt-1 tracking-tight shrink-0">Add Photo</span>
-          <input 
-            type="file" 
-            accept="image/*" 
-            className="hidden" 
-            onChange={(e) => openCropModalForFile(e.target.files?.[0])}
-          />
-        </label>
-      );
+      return null;
     }
   };
 
@@ -660,18 +688,139 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
         );
 
       case 'publications':
+      case 'research_publications': {
+        const pubs = ensureArray(publications || resume.research_publications || resume.publications);
+        if (pubs.length === 0) return null;
         return (
           <div className="flex flex-col gap-1.5">
-            {publications.map((pub: any, i: number) => (
-              <div key={i} className="break-inside-avoid text-zinc-900 font-medium" style={{ breakInside: 'avoid-page', fontSize: `${params.fontSize}px` }}>
-                <span className="font-bold text-zinc-950">{pub.title}</span>
-                {pub.publisher && <span className="italic">, {pub.publisher}</span>}
-                {pub.date && <span className="text-zinc-600"> ({pub.date})</span>}
-                {pub.url && <a href={linkHref('link', pub.url)} target="_blank" rel="noopener noreferrer" className="underline ml-2">Link</a>}
-              </div>
-            ))}
+            {pubs.map((pub: any, i: number) => {
+              const title = typeof pub === 'string' ? pub : pub.title || pub.name;
+              const journal = typeof pub === 'object' ? pub.journal || pub.publisher : '';
+              const issn = typeof pub === 'object' ? pub.issn : '';
+              const date = typeof pub === 'object' ? pub.date || pub.month_year || pub.year : '';
+              const url = typeof pub === 'object' ? pub.url || pub.link : '';
+              return (
+                <div key={i} className="break-inside-avoid text-zinc-900 font-medium" style={{ breakInside: 'avoid-page', fontSize: `${params.fontSize}px` }}>
+                  <span className="font-bold text-zinc-950">{title}</span>
+                  {journal && <span className="italic">, {journal}</span>}
+                  {issn && <span className="text-zinc-700"> (ISSN: {issn})</span>}
+                  {date && <span className="text-zinc-600 font-semibold float-right uppercase text-[9.5px]"> {date}</span>}
+                  {url && <div className="text-[9.5px]">{renderTextWithLinks(url)}</div>}
+                </div>
+              );
+            })}
           </div>
         );
+      }
+
+      case 'internships':
+      case 'trainings': {
+        const items = ensureArray(resume.internships || resume.trainings);
+        if (items.length === 0) return null;
+        return (
+          <div className="flex flex-col" style={{ gap: `${params.itemGap}px` }}>
+            {items.map((item: any, i: number) => {
+              const title = typeof item === 'string' ? item : item.role || item.title || item.name;
+              const org = typeof item === 'object' ? item.company || item.organization || item.institution || item.industry : '';
+              const date = typeof item === 'object' ? (item.start_date ? `${item.start_date} - ${item.end_date || 'Present'}` : item.date || item.duration) : '';
+              return (
+                <div key={i} className="break-inside-avoid" style={{ breakInside: 'avoid-page' }}>
+                  <div className="flex justify-between items-baseline flex-wrap gap-x-2" style={{ fontSize: `${params.fontSize}px` }}>
+                    <h3 className="font-bold text-zinc-950" style={{ fontSize: `${params.fontSize}px`, lineHeight: 1.1 }}>
+                      {title}
+                    </h3>
+                    {date && (
+                      <span className="text-[9.5px] font-bold uppercase shrink-0 text-zinc-700">{date}</span>
+                    )}
+                  </div>
+                  {org && (
+                    <div className="font-semibold text-zinc-800 italic mt-0.5" style={{ fontSize: `${params.fontSize - 0.5}px` }}>
+                      {org}
+                    </div>
+                  )}
+                  {typeof item === 'object' && ensureArray(item.description).length > 0 && (
+                    <ul className="list-disc pl-4 text-zinc-900 leading-relaxed" style={{ fontSize: `${params.fontSize - 0.5}px`, lineHeight: params.lineHeight, marginTop: `${params.bulletGap / 2}px` }}>
+                      {ensureArray(item.description).map((bullet: string, j: number) => (
+                        <li key={j} style={{ marginBottom: `${params.bulletGap}px` }}>{renderTextWithLinks(bullet)}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      }
+
+      case 'leadership':
+      case 'positions_of_responsibility':
+      case 'position_of_responsibility': {
+        const items = ensureArray(resume.leadership || resume.positions_of_responsibility || resume.position_of_responsibility);
+        if (items.length === 0) return null;
+        return (
+          <div className="flex flex-col" style={{ gap: `${params.itemGap}px` }}>
+            {items.map((item: any, i: number) => {
+              const title = typeof item === 'string' ? item : item.role || item.position || item.title;
+              const org = typeof item === 'object' ? item.organization || item.company || item.institution || item.club : '';
+              const date = typeof item === 'object' ? (item.start_date ? `${item.start_date} - ${item.end_date || 'Present'}` : item.date || item.duration) : '';
+              return (
+                <div key={i} className="break-inside-avoid" style={{ breakInside: 'avoid-page' }}>
+                  <div className="flex justify-between items-baseline flex-wrap gap-x-2" style={{ fontSize: `${params.fontSize}px` }}>
+                    <h3 className="font-bold text-zinc-950" style={{ fontSize: `${params.fontSize}px`, lineHeight: 1.1 }}>
+                      {title}
+                    </h3>
+                    {date && (
+                      <span className="text-[9.5px] font-bold uppercase shrink-0 text-zinc-700">{date}</span>
+                    )}
+                  </div>
+                  {org && (
+                    <div className="font-semibold text-zinc-800 italic mt-0.5" style={{ fontSize: `${params.fontSize - 0.5}px` }}>
+                      {org}
+                    </div>
+                  )}
+                  {typeof item === 'object' && ensureArray(item.description).length > 0 && (
+                    <ul className="list-disc pl-4 text-zinc-900 leading-relaxed" style={{ fontSize: `${params.fontSize - 0.5}px`, lineHeight: params.lineHeight, marginTop: `${params.bulletGap / 2}px` }}>
+                      {ensureArray(item.description).map((bullet: string, j: number) => (
+                        <li key={j} style={{ marginBottom: `${params.bulletGap}px` }}>{renderTextWithLinks(bullet)}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      }
+
+      case 'extracurricular_activities':
+      case 'extracurricular': {
+        const items = ensureArray(resume.extracurricular_activities || resume.extracurricular);
+        if (items.length === 0) return null;
+        return (
+          <ul className="list-disc pl-4 text-zinc-900 font-medium" style={{ fontSize: `${params.fontSize}px`, lineHeight: params.lineHeight }}>
+            {items.map((item: any, i: number) => {
+              const text = typeof item === 'string' ? item : item.title || item.name || item.activity || item.description;
+              const date = typeof item === 'object' ? item.date || item.year : null;
+              return (
+                <li key={i} className="break-inside-avoid" style={{ breakInside: 'avoid-page', marginBottom: `${params.bulletGap}px` }}>
+                  <span className="font-semibold">{renderTextWithLinks(text)}</span>
+                  {date && <span className="text-zinc-600 text-[9.5px] float-right uppercase font-bold">{date}</span>}
+                </li>
+              );
+            })}
+          </ul>
+        );
+      }
+
+      case 'declaration': {
+        const text = String(resume.declaration || resume.declaration_text || '').trim();
+        if (!text) return null;
+        return (
+          <p className="text-zinc-900 font-normal leading-relaxed pt-0.5" style={{ fontSize: `${params.fontSize}px`, lineHeight: params.lineHeight }}>
+            {renderTextWithLinks(text)}
+          </p>
+        );
+      }
 
       case 'languages':
         return (
@@ -1293,85 +1442,26 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     return renderSectionContent(sectionId, false);
   };
 
-  const renderJohnsonsResumeLayout = () => {
-    return (
-      <div 
-        data-resume-layout="single-column"
-        className="resume-document-light font-serif bg-white text-zinc-900"
-        style={{ 
-          width: '816px', 
-          minHeight: '1056px', 
-          padding: `${params.paddingY + 4}px ${params.paddingX + 4}px`, 
-          fontSize: `${params.fontSize}px`, 
-          lineHeight: params.lineHeight 
-        }}
-      >
-        {/* Header - Centered Italic Steel Blue Title & Subtitle Info */}
-        <header className="text-center mb-4">
-          <h1 
-            className="font-serif italic text-[#1d5288] tracking-normal leading-tight font-medium"
-            style={{ fontSize: `${params.nameSize + 4}px` }}
-          >
-            {candidateName}
-          </h1>
-          
-          <div className="font-serif italic text-zinc-700 text-[11px] mt-1 space-y-0.5">
-            {personal_info?.location && (
-              <div>Residence/domicile: {personal_info.location}</div>
-            )}
-            <div className="flex flex-wrap justify-center items-center gap-x-2">
-              {personal_info?.email && <span>E-mail: {personal_info.email}</span>}
-              {personal_info?.email && personal_info?.phone && <span className="text-[#1d5288] select-none">✻</span>}
-              {personal_info?.phone && <span>Telephone number: {personal_info.phone}</span>}
-            </div>
-            {(personal_info?.linkedin || personal_info?.github || personal_info?.website) && (
-              <div data-contact-links="true" className="flex flex-wrap justify-center items-center gap-x-2">
-                {personal_info?.linkedin && <span>LinkedIn: {linkDisplay('linkedin', personal_info.linkedin)}</span>}
-                {personal_info?.linkedin && (personal_info?.github || personal_info?.website) && <span className="text-[#1d5288] select-none">✻</span>}
-                {personal_info?.github && <span>GitHub: {linkDisplay('github', personal_info.github)}</span>}
-                {personal_info?.github && personal_info?.website && <span className="text-[#1d5288] select-none">✻</span>}
-                {personal_info?.website && <span>Portfolio: {linkDisplay('website', personal_info.website)}</span>}
-              </div>
-            )}
-          </div>
-        </header>
-
-        {/* Sections list with Steel Blue Italic headers and bottom divider */}
-        <div className="flex flex-col">
-          {activeOrder.map(sectionId => {
-            if (!hasData(sectionId)) return null;
-            
-            let customLabel = sectionLabel(sectionId);
-            if (sectionId === 'experience') customLabel = 'Work experience';
-            if (sectionId === 'education') customLabel = 'Education';
-            if (sectionId === 'skills') customLabel = 'Technical skills';
-            if (sectionId === 'projects') customLabel = 'Portfolio of most relevant projects';
-            if (sectionId === 'languages') customLabel = 'Language proficiencies';
-            if (sectionId === 'volunteer') customLabel = 'Extracurricular activities';
-            if (sectionId === 'achievements') customLabel = 'Memberships & Achievements';
-
-            return (
-              <section key={sectionId} data-section={sectionId} style={{ marginBottom: `${params.sectionGap}px` }}>
-                <h2 
-                  className="font-serif italic font-bold text-[#1d5288] border-b border-[#7b9ebc] pb-0.5 mb-2 text-left"
-                  style={{ fontSize: `${params.sectionTitleSize + 1}px`, breakAfter: 'avoid-page' }}
-                >
-                  {customLabel}
-                </h2>
-                <div className="font-serif text-zinc-900">
-                  {renderJohnsonsSectionContent(sectionId)}
-                </div>
-              </section>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
-
   let renderedLayoutContent: React.ReactElement;
-  if (resolvedTemplateKey === 'JohnsonsResume' || resolvedTemplateKey === 'johnsons_resume' || resolvedTemplateKey === 'Johnsons') {
-    renderedLayoutContent = renderJohnsonsResumeLayout();
+  if (resolvedTemplateKey === 'AcademicATS' || resolvedTemplateKey === 'academic_ats' || resolvedTemplateKey === 'DeedyAcademic') {
+    renderedLayoutContent = (
+      <AcademicATSTemplate
+        resume={resume}
+        params={params}
+        contacts={getContactItems()}
+        candidateName={candidateName}
+        activeOrder={activeOrder}
+      />
+    );
+  } else if (resolvedTemplateKey === 'JohnsonsResume' || resolvedTemplateKey === 'johnsons_resume' || resolvedTemplateKey === 'Johnsons') {
+    renderedLayoutContent = (
+      <JohnsonsATSTemplate
+        resume={resume}
+        params={params}
+        candidateName={candidateName}
+        activeOrder={activeOrder}
+      />
+    );
   } else if (resolvedTemplateKey === 'ClassicATS' || resolvedTemplateKey === 'MinimalATS' || resolvedTemplateKey === 'ProfessionalATS' || resolvedTemplateKey === 'ExecutiveATS') {
     renderedLayoutContent = renderClassicATSLayout();
   } else if (resolvedTemplateKey === 'ModernSidebar') {

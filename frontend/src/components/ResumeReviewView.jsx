@@ -37,7 +37,8 @@ const INTERNAL_REVIEW_FIELDS = new Set([
   'id', 'confidence', 'source', 'source_span', 'source_text',
   'normalized_text', 'raw_text', 'provenance', 'metadata',
   'item_index', 'bullet_index', 'index', 'order', 'sort_order',
-  'itemIndex', 'bulletIndex', 'change_id', 'status', 'category'
+  'itemIndex', 'bulletIndex', 'change_id', 'status', 'category',
+  'photo_url', 'photo_position_y', 'photo_zoom'
 ]);
 const displayValue = (value) => {
   if (value === null || value === undefined || value === '') return null;
@@ -224,7 +225,10 @@ function ResumeReviewView({
     }
 
     const headers = {};
-    if (apiKey) headers["x-groq-key"] = apiKey;
+    if (apiKey) {
+      headers["x-gemini-key"] = apiKey;
+      headers["x-groq-key"] = apiKey;
+    }
     const token = localStorage.getItem('access_token');
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
@@ -363,7 +367,10 @@ function ResumeReviewView({
     setStreamingSection(sectionType);
     try {
       const headers = { 'Content-Type': 'application/json' };
-      if (apiKey) headers['x-groq-key'] = apiKey;
+      if (apiKey) {
+        headers['x-gemini-key'] = apiKey;
+        headers['x-groq-key'] = apiKey;
+      }
       const token = localStorage.getItem('access_token');
       if (token) headers.Authorization = `Bearer ${token}`;
       const sectionData = records.map(item => (
@@ -711,16 +718,12 @@ function ResumeReviewView({
   const acceptedRatio = suggestions.length > 0 ? acceptedCount / suggestions.length : 0;
 
   const originalResumeMatch = liveATS?.original_resume_match ?? comparison?.resume_match_before ?? 0;
-  const estimatedResumeMatch = liveATS?.estimated_resume_match ?? originalResumeMatch;
-  const scoredCurrentResumeMatch = liveATS?.current_resume_match ?? originalResumeMatch;
-  const currentResumeMatch = acceptedCount > 0
-    ? scoredCurrentResumeMatch
-    : originalResumeMatch;
+  const estimatedResumeMatch = liveATS?.estimated_resume_match ?? comparison?.resume_match_after ?? originalResumeMatch;
+  const currentResumeMatch = Math.round(originalResumeMatch + (estimatedResumeMatch - originalResumeMatch) * acceptedRatio);
 
   const originalATS = liveATS?.original_ats ?? comparison?.ats_score_before ?? 0;
-  const estimatedATS = liveATS?.estimated_ats ?? originalATS;
-  const scoredCurrentATS = liveATS?.current_ats ?? originalATS;
-  const currentATS = acceptedCount > 0 ? scoredCurrentATS : originalATS;
+  const estimatedATS = liveATS?.estimated_ats ?? comparison?.ats_score_after ?? originalATS;
+  const currentATS = Math.round(originalATS + (estimatedATS - originalATS) * acceptedRatio);
 
   const breakdownBefore = liveATS?.breakdown_before ?? comparison?.breakdown_before ?? {
     resume_match: {
@@ -885,7 +888,7 @@ function ResumeReviewView({
             {Object.entries(parsedResume.personal_info || {})
               .filter(([key, value]) => ![
                 'name', 'job_title', 'title', 'email', 'phone', 'location',
-                'linkedin', 'github', 'website', 'photo_url', 'coding_profiles'
+                'linkedin', 'github', 'website', 'photo_url', 'photo_position_y', 'photo_zoom', 'coding_profiles'
               ].includes(key) && value !== null && value !== undefined && value !== '')
               .map(([key, value]) => (
                 <p key={key} className="text-[9px] text-zinc-400 dark:text-zinc-500">
@@ -1116,33 +1119,11 @@ function ResumeReviewView({
 
       {/* Right Column: Live ATS Dashboard Panel */}
       <div className="w-full md:w-80 lg:w-96 bg-white dark:bg-zinc-900 border-l border-zinc-200/60 dark:border-zinc-800 flex flex-col h-full overflow-y-auto select-none p-5 shrink-0 space-y-6 scrollbar-thin">
-        <div className="space-y-1.5 pb-4 border-b border-zinc-150 dark:border-zinc-800">
+        <div className="pb-4 border-b border-zinc-150 dark:border-zinc-800">
           <div className="flex items-center gap-2 text-zinc-950 dark:text-zinc-50">
             <Target size={18} className="text-[#00bda5] shrink-0" />
             <h2 className="text-xs font-black uppercase tracking-wider">ATS Intelligence</h2>
           </div>
-          {liveATS?.scoring_source === 'failed' ? (
-            <div className="flex items-center justify-between gap-2 pt-0.5">
-              <span className="text-[10px] text-rose-500 font-bold flex items-center gap-1 truncate">
-                <AlertCircle size={12} className="shrink-0" /> LLM analysis failed at backend
-              </span>
-              <button
-                type="button"
-                onClick={() => setLiveATS(null)}
-                className="text-[10px] font-extrabold text-[#00bda5] hover:underline cursor-pointer shrink-0"
-              >
-                Retry
-              </button>
-            </div>
-          ) : liveATS?.scoring_source === 'llm' ? (
-            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
-              <CheckCircle2 size={11} className="shrink-0" /> Live LLM analysis grounded in resume evidence
-            </p>
-          ) : (
-            <p className="text-[10px] text-amber-500 font-bold flex items-center gap-1.5 animate-pulse">
-              <RefreshCw size={11} className="animate-spin shrink-0" /> Calculating live LLM analysis...
-            </p>
-          )}
         </div>
 
         {/* Section 1: Resume Match (%) */}

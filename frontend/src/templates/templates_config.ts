@@ -235,12 +235,46 @@ const CANONICAL_TEMPLATES: Record<string, TemplateConfig> = {
       headerDivider: false
     },
     icons: false
+  },
+  // ==================================================
+  // TEMPLATE 8: ACADEMIC ATS (DEEDY / LATEX ACADEMIC STYLE)
+  // Purpose: Clean LaTeX/Deedy academic & tech resume with header links, bulleted headings, italic sub-roles, and nested achievement bullets.
+  // ==================================================
+  'AcademicATS': {
+    id: 'AcademicATS',
+    name: 'Academic ATS',
+    description: 'Deedy/LaTeX academic layout featuring clean split contact headers, bulleted entry titles, italicized sub-roles, and nested achievement bullets.',
+    recommendedFor: 'Computer Science, Software Engineers, Research, Higher Education, Technical Roles',
+    atsScore: 99,
+    layout: 'single-column',
+    profilePhoto: false,
+    fontFamily: 'font-serif',
+    primaryColor: 'text-zinc-950',
+    secondaryColor: 'text-zinc-800',
+    textColor: 'text-zinc-900',
+    accentColor: 'border-zinc-400',
+    borderColor: 'border-zinc-300',
+    spacing: {
+      sectionGap: 'space-y-4 mb-4',
+      itemGap: 'space-y-3',
+      bulletGap: 'space-y-1',
+      paddingX: 'px-14',
+      paddingY: 'py-8'
+    },
+    headerStyle: 'split-photo',
+    borders: {
+      sectionDivider: true,
+      headerDivider: true
+    },
+    icons: false
   }
 };
 
 // Aliases mapping legacy template IDs to canonical templates
 export const TEMPLATE_CONFIGS: Record<string, TemplateConfig> = {
   ...CANONICAL_TEMPLATES,
+  'academic_ats': { ...CANONICAL_TEMPLATES['AcademicATS'], id: 'academic_ats' },
+  'DeedyAcademic': { ...CANONICAL_TEMPLATES['AcademicATS'], id: 'DeedyAcademic' },
   'johnsons_resume': { ...CANONICAL_TEMPLATES['JohnsonsResume'], id: 'johnsons_resume' },
   'Johnsons': { ...CANONICAL_TEMPLATES['JohnsonsResume'], id: 'Johnsons' },
   // Legacy aliases

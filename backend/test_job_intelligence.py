@@ -303,3 +303,29 @@ def test_sensitive_values_are_not_written_to_execution_log():
 def test_private_or_non_web_urls_are_rejected(url):
     with pytest.raises(ValueError):
         validate_public_url(url)
+
+
+def test_missing_company_name_falls_back_to_page_title_and_succeeds():
+    from services.job_extraction.agents import reviewer_agent, repair_agent
+    extracted_job = {
+        "job_title": "Python Developer",
+        "company_name": None,
+        "description": "Develop high performance backend Python microservices.",
+        "responsibilities": ["Develop Python microservices", "Code review"],
+        "requirements": ["5+ years Python"],
+        "skills": ["Python"],
+        "suggested_skills": ["Software Development", "Design Patterns", "Cloud Computing", "Agile Methodologies"],
+    }
+    s = state(
+        extracted_job=extracted_job,
+        extension_evidence={
+            "title": "Python Developer | Remote | Crossing Hurdles",
+            "company_hint": "",
+            "job_title_hint": "Python Developer",
+        },
+        repair_attempts=1,
+    )
+    result = reviewer_agent(s)
+    assert result["is_valid"] is True
+    assert result["extracted_job"]["company_name"] == "Crossing Hurdles"
+

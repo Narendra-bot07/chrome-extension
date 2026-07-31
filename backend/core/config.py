@@ -7,6 +7,7 @@ from typing import Optional
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 class Settings(BaseSettings):
+    GEMINI_API_KEY: str = Field(default="", env="GEMINI_API_KEY")
     GROQ_API_KEY: str = Field(default="", env="GROQ_API_KEY")
     DEEPSEEK_API_KEY: str = Field(default="", env="DEEPSEEK_API_KEY")
     AI_PROVIDER: str = Field(default="auto", env="AI_PROVIDER")

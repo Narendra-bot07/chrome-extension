@@ -211,78 +211,127 @@ export default function ResumeEditorView({
       const primaryComponents = visibleComponents.filter(c => primaryTypes.includes(c));
       const contactComponents = visibleComponents.filter(c => !primaryTypes.includes(c));
 
-      return (
-        <div className="space-y-2">
-          <DragDropContext onDragEnd={handleVisibleDragEnd}>
-            <Droppable droppableId="HEADER_COMPONENTS" direction="horizontal" type="HEADER_COMPONENT">
-              {provided => (
-                <div ref={provided.innerRef} {...provided.droppableProps} className="flex min-h-12 flex-col items-center gap-2.5 rounded-xl border border-dashed border-slate-250 bg-slate-50/70 p-3">
-                  {/* Name / Photo / Headline Row */}
-                  {primaryComponents.length > 0 && (
-                    <div className="flex flex-wrap items-center justify-center gap-2 pb-1.5 border-b border-slate-200/60 w-full">
-                      {primaryComponents.map((component) => {
-                        const index = visibleComponents.indexOf(component);
-                        return (
-                          <Draggable key={component} draggableId={`header-${component}`} index={index}>
-                            {drag => (
-                              <div
-                                ref={drag.innerRef}
-                                {...drag.draggableProps}
-                                {...drag.dragHandleProps}
-                                className="flex cursor-grab items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-wide text-slate-850 shadow-sm hover:border-slate-400"
-                              >
-                                <GripVertical size={12} className="text-slate-400" />
-                                <span>{componentLabel(component)}</span>
-                                <button
-                                  type="button"
-                                  title="Hide component"
-                                  onClick={event => { event.stopPropagation(); toggleComponentVisibility(component); }}
-                                  className="ml-1 border-0 bg-transparent p-0 text-slate-500 hover:text-slate-700"
-                                >
-                                  <Eye size={11} />
-                                </button>
-                              </div>
-                            )}
-                          </Draggable>
-                        );
-                      })}
-                    </div>
-                  )}
+      const handlePrimaryDragEnd = result => {
+        if (!result.destination) return;
+        const reordered = Array.from(primaryComponents);
+        const [moved] = reordered.splice(result.source.index, 1);
+        reordered.splice(result.destination.index, 0, moved);
 
-                  {/* Contact / Links Row (Email, Phone, LinkedIn, GitHub, X, Divider) */}
-                  <div className="flex flex-wrap items-center justify-center gap-2 w-full">
-                    {contactComponents.map((component) => {
-                      const index = visibleComponents.indexOf(component);
-                      return (
-                        <Draggable key={component} draggableId={`header-${component}`} index={index}>
-                          {drag => (
-                            <div
-                              ref={drag.innerRef}
-                              {...drag.draggableProps}
-                              {...drag.dragHandleProps}
-                              className="flex cursor-grab items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[9px] font-black uppercase tracking-wide text-slate-700 shadow-sm hover:border-slate-350"
+        let pIdx = 0;
+        const newHeaderComponents = components.map(c =>
+          primaryTypes.includes(c) ? reordered[pIdx++] : c
+        );
+
+        commitLayout({
+          ...layoutModel,
+          layout_tree: {
+            ...layoutModel.layout_tree,
+            header: { ...(layoutModel.layout_tree?.header || {}), components: newHeaderComponents }
+          }
+        });
+      };
+
+      const handleContactDragEnd = result => {
+        if (!result.destination) return;
+        const reordered = Array.from(contactComponents);
+        const [moved] = reordered.splice(result.source.index, 1);
+        reordered.splice(result.destination.index, 0, moved);
+
+        let cIdx = 0;
+        const newHeaderComponents = components.map(c =>
+          !primaryTypes.includes(c) ? reordered[cIdx++] : c
+        );
+
+        commitLayout({
+          ...layoutModel,
+          layout_tree: {
+            ...layoutModel.layout_tree,
+            header: { ...(layoutModel.layout_tree?.header || {}), components: newHeaderComponents }
+          }
+        });
+      };
+
+      return (
+        <div className="space-y-3 rounded-xl border border-dashed border-slate-250 bg-slate-50/70 p-3">
+          {/* Primary Row (Photo / Name / Headline) */}
+          {primaryComponents.length > 0 && (
+            <DragDropContext onDragEnd={handlePrimaryDragEnd}>
+              <Droppable droppableId="HEADER_PRIMARY_COMPONENTS" direction="horizontal" type="HEADER_PRIMARY">
+                {provided => (
+                  <div
+                    ref={provided.innerRef}
+                    {...provided.droppableProps}
+                    className="flex flex-wrap items-center justify-center gap-2 pb-2.5 border-b border-slate-200/60 w-full min-h-[36px]"
+                  >
+                    {primaryComponents.map((component, index) => (
+                      <Draggable key={component} draggableId={`header-primary-${component}`} index={index}>
+                        {drag => (
+                          <div
+                            ref={drag.innerRef}
+                            {...drag.draggableProps}
+                            {...drag.dragHandleProps}
+                            className="flex cursor-grab items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-wide text-slate-850 shadow-sm hover:border-slate-400"
+                          >
+                            <GripVertical size={12} className="text-slate-400" />
+                            <span>{componentLabel(component)}</span>
+                            <button
+                              type="button"
+                              title="Hide component"
+                              onClick={event => { event.stopPropagation(); toggleComponentVisibility(component); }}
+                              className="ml-1 border-0 bg-transparent p-0 text-slate-500 hover:text-slate-700"
                             >
-                              <GripVertical size={12} className="text-slate-400" />
-                              <span>{componentLabel(component)}</span>
-                              <button
-                                type="button"
-                                title="Hide component"
-                                onClick={event => { event.stopPropagation(); toggleComponentVisibility(component); }}
-                                className="ml-1 border-0 bg-transparent p-0 text-slate-500 hover:text-slate-700"
-                              >
-                                <Eye size={11} />
-                              </button>
-                            </div>
-                          )}
-                        </Draggable>
-                      );
-                    })}
+                              <Eye size={11} />
+                            </button>
+                          </div>
+                        )}
+                      </Draggable>
+                    ))}
+                    {provided.placeholder}
                   </div>
-                  {provided.placeholder}
-                </div>
-              )}
-            </Droppable>
-          </DragDropContext>
+                )}
+              </Droppable>
+            </DragDropContext>
+          )}
+
+          {/* Contact / Links Row (Email, Phone, LinkedIn, GitHub, X, Divider) */}
+          {contactComponents.length > 0 && (
+            <DragDropContext onDragEnd={handleContactDragEnd}>
+              <Droppable droppableId="HEADER_CONTACT_COMPONENTS" direction="horizontal" type="HEADER_CONTACT">
+                {provided => (
+                  <div
+                    ref={provided.innerRef}
+                    {...provided.droppableProps}
+                    className="flex flex-wrap items-center justify-center gap-2 w-full min-h-[36px]"
+                  >
+                    {contactComponents.map((component, index) => (
+                      <Draggable key={component} draggableId={`header-contact-${component}`} index={index}>
+                        {drag => (
+                          <div
+                            ref={drag.innerRef}
+                            {...drag.draggableProps}
+                            {...drag.dragHandleProps}
+                            className="flex cursor-grab items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[9px] font-black uppercase tracking-wide text-slate-700 shadow-sm hover:border-slate-350"
+                          >
+                            <GripVertical size={12} className="text-slate-400" />
+                            <span>{componentLabel(component)}</span>
+                            <button
+                              type="button"
+                              title="Hide component"
+                              onClick={event => { event.stopPropagation(); toggleComponentVisibility(component); }}
+                              className="ml-1 border-0 bg-transparent p-0 text-slate-500 hover:text-slate-700"
+                            >
+                              <Eye size={11} />
+                            </button>
+                          </div>
+                        )}
+                      </Draggable>
+                    ))}
+                    {provided.placeholder}
+                  </div>
+                )}
+              </Droppable>
+            </DragDropContext>
+          )}
         </div>
       );
     }
@@ -923,7 +972,7 @@ export default function ResumeEditorView({
     return (
       <div className="resume-editor-contrast flex h-full flex-col bg-white text-slate-800">
         <div className="flex-1 overflow-y-auto px-4 pb-24 pt-4 custom-scrollbar">
-          <div className="sticky top-0 z-20 mb-4 flex items-center justify-between rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
+          <div className="mb-4 flex items-center justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
             <div>
               <div className="text-[10px] font-black uppercase tracking-widest text-slate-800">Layout structure</div>
               <div className="mt-0.5 text-[9px] font-semibold text-slate-400">Placement only · Resume content stays unchanged</div>
@@ -939,11 +988,6 @@ export default function ResumeEditorView({
               {layoutMessage}
             </div>
           )}
-
-          <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-            <div className="mb-2 text-[9px] font-black uppercase tracking-widest text-slate-400">Header</div>
-            {renderRegionBuilder('header')}
-          </section>
 
           <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
             <div className="mb-3 text-[9px] font-black uppercase tracking-widest text-slate-400">Body</div>

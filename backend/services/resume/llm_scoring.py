@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field, field_validator
 
-from app.groq_service import get_llm, _get_from_cache, _set_to_cache, _get_cache_key
+from app.gemini_service import get_llm, _get_from_cache, _set_to_cache, _get_cache_key
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ def calculate_llm_live_scores(
         return cached
 
     try:
-        structured_llm = get_llm(api_key, temperature=0.0).with_structured_output(
+        structured_llm = get_llm(api_key, temperature=0.0, max_retries=3).with_structured_output(
             LiveSemanticScores
         )
         prompt = ChatPromptTemplate.from_messages(

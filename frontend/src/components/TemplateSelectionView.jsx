@@ -50,6 +50,16 @@ const TEMPLATES_LIST = [
     layout: 'Single Column',
     photo: 'No Photo',
     recommended: true
+  },
+  { 
+    id: 'AcademicATS', 
+    name: 'Academic ATS', 
+    description: 'Deedy/LaTeX academic layout featuring clean split contact headers, bulleted entry titles, italicized sub-roles, and nested achievement bullets.',
+    atsScore: 99,
+    recommendedFor: 'Computer Science, Software Engineers, Research, Higher Education, Technical Roles',
+    layout: 'Single Column',
+    photo: 'No Photo',
+    recommended: true
   }
 ];
 

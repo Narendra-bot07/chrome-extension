@@ -81,14 +81,53 @@ export const normalizeDetailedRecords = (items = [], kind = 'achievement') => {
 };
 
 export const professionalLink = (key, value) => {
-  const source = `${key} ${value}`.toLowerCase();
-  if (source.includes('linkedin')) return { label: 'LinkedIn', type: 'linkedin' };
-  if (source.includes('github')) return { label: 'GitHub', type: 'github' };
-  if (source.includes('leetcode')) return { label: 'LeetCode', type: 'code' };
-  if (source.includes('smartinterview')) return { label: 'Smart Interviews', type: 'code' };
-  if (source.includes('drive.google') || source.includes('certificate')) return { label: 'Certificates', type: 'folder' };
-  if (source.includes('portfolio') || source.includes('website')) return { label: 'Portfolio', type: 'website' };
-  return { label: clean(key).replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase()) || 'Profile', type: 'website' };
+  const raw = String(value || '').trim();
+  const cleanUrl = raw
+    .replace(/^https?:\/\/(?:www\.)?/i, '')
+    .replace(/[?#].*$/, '')
+    .replace(/\/$/, '');
+  const lowerKey = String(key || '').toLowerCase();
+  const lowerVal = raw.toLowerCase();
+
+  if (lowerKey.includes('github') || lowerVal.includes('github.com')) {
+    let username = cleanUrl;
+    if (cleanUrl.includes('github.com/')) {
+      username = cleanUrl.split('github.com/')[1]?.split('/')[0] || cleanUrl;
+    }
+    return {
+      label: username || 'GitHub',
+      type: 'github',
+      href: /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^https?:\/\//i, '')}`
+    };
+  }
+
+  if (lowerKey.includes('linkedin') || lowerVal.includes('linkedin.com')) {
+    let username = cleanUrl;
+    if (cleanUrl.includes('linkedin.com/in/')) {
+      username = cleanUrl.split('linkedin.com/in/')[1]?.split('/')[0] || cleanUrl;
+    } else if (cleanUrl.includes('linkedin.com/pub/')) {
+      username = cleanUrl.split('linkedin.com/pub/')[1]?.split('/')[0] || cleanUrl;
+    }
+    return {
+      label: username || 'LinkedIn',
+      type: 'linkedin',
+      href: /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^https?:\/\//i, '')}`
+    };
+  }
+
+  if (lowerVal.includes('leetcode.com')) {
+    let username = cleanUrl;
+    if (cleanUrl.includes('leetcode.com/')) {
+      username = cleanUrl.split('leetcode.com/')[1]?.split('/')[0] || cleanUrl;
+    }
+    return { label: username || cleanUrl, type: 'code' };
+  }
+
+  if (lowerVal.includes('drive.google') || lowerVal.includes('certificate')) {
+    return { label: 'Certificates', type: 'folder' };
+  }
+
+  return { label: cleanUrl || raw || 'Profile', type: 'website' };
 };
 
 export const normalizePersonName = value => {

@@ -8,7 +8,7 @@ from datetime import date
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
-from app.groq_service import get_llm
+from app.gemini_service import get_llm
 from schemas.cover_letter_generation import (
     CoverLetterGenerationRequest,
     GeneratedCoverLetter,

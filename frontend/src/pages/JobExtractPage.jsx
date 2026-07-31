@@ -151,7 +151,7 @@ function JobExtractPage() {
   if (isExtension) {
     return (
       <ChecklistLoader
-        title="Scanning current job"
+        title="Extracting details"
         progress={12}
         message="Reading the active job page..."
         checklistItems={[

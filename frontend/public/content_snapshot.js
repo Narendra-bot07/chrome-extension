@@ -73,12 +73,22 @@
     const jobTitleHint = firstText([
       '.job-details-jobs-unified-top-card__job-title',
       '.jobs-unified-top-card__job-title',
+      '.job-details-jobs-unified-top-card__job-title h1',
       '[data-automation-id="jobPostingHeader"] h2',
       '[class*="job-title"]', '[class*="jobTitle"]', 'h1'
     ]);
     const companyHint = firstText([
       '.job-details-jobs-unified-top-card__company-name',
       '.jobs-unified-top-card__company-name',
+      '.job-details-jobs-unified-top-card__primary-description-container a',
+      '.job-details-jobs-unified-top-card__subtitle-primary-grouping-line a',
+      '.jobs-unified-top-card__primary-description a',
+      '.jobs-unified-top-card__subtitle-primary-grouping-line a',
+      'a[href*="/company/"]',
+      '.artdeco-entity-lockup__subtitle',
+      '.topcard__flavor',
+      '.topcard__org-name-link',
+      'span.jobs-unified-top-card__company-name',
       '[data-automation-id="company"]',
       '[class*="company-name"]', '[class*="companyName"]'
     ]);
@@ -88,6 +98,15 @@
       '[data-automation-id="locations"]',
       '[class*="job-location"]', '[class*="location"]'
     ]);
+    const topCardText = firstText([
+      '.job-details-jobs-unified-top-card',
+      '.jobs-unified-top-card',
+      '.top-card-layout'
+    ]);
+    let panelText = selected?.text || '';
+    if (topCardText && !panelText.includes(topCardText.slice(0, 50))) {
+      panelText = `${topCardText}\n\n${panelText}`;
+    }
     const jsonLd = [];
     document.querySelectorAll('script[type="application/ld+json"]').forEach(script => {
       if (jsonLd.length >= 30) return;
@@ -147,8 +166,8 @@
       html: String(document.documentElement.outerHTML || '').slice(0, 350000),
       cleaned_dom: String(clone.outerHTML || '').slice(0, 300000),
       visible_text: visibleText,
-      selected_job_panel: selected?.text || '',
-      selected_panel_text: selected?.text || '',
+      selected_job_panel: panelText || '',
+      selected_panel_text: panelText || '',
       selected_panel_selector: selected?.selector || null,
       metadata,
       json_ld: jsonLd,

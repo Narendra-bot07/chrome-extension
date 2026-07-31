@@ -194,7 +194,7 @@ function Layout() {
     ]);
     if (recoveryStates.has(jobDetectionStatus) && currentPath === '/tailor') {
       navigate('/no-job-detected', { replace: true });
-    } else if (jobDetectionStatus === 'ready' && currentPath === '/no-job-detected') {
+    } else if (['ready', 'checking', 'extracting'].includes(jobDetectionStatus) && currentPath === '/no-job-detected') {
       navigate('/tailor', { replace: true });
     }
   }, [jobDetectionStatus, currentPath, navigate, isExtension]);

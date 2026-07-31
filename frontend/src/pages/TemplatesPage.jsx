@@ -11,7 +11,7 @@ function TemplatesPage() {
     loading
   } = useApp();
 
-  const activeResume = workflowResume;
+  const activeResume = workflowResume || tailoredResume || parsedResume;
 
   if (loading || !resumeWorkflowHydrated) {
     return (

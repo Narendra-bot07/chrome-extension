@@ -371,7 +371,7 @@ export function AppProvider({ children }) {
           headers: {
             "Content-Type": "application/json",
             ...(token ? { "Authorization": `Bearer ${token}` } : {}),
-            ...(apiKey ? { "x-groq-key": apiKey } : {})
+            ...(apiKey ? { "x-gemini-key": apiKey, "x-groq-key": apiKey } : {})
           },
           body: requestKey,
           signal: controller.signal
@@ -404,7 +404,7 @@ export function AppProvider({ children }) {
           liveATSRequestRef.current.timer = null;
         }
       }
-    }, 1000);
+    }, 2500);
   });
 
   useEffect(() => () => {
@@ -454,28 +454,7 @@ export function AppProvider({ children }) {
     return () => { active = false; };
   }, []);
 
-  useEffect(() => {
-    const handlePhotoUpdate = (e) => {
-      const { photo_url, photo_position_y } = e.detail || {};
-      setParsedResume(prev => {
-        if (!prev) return prev;
-        const newPhotoUrl = photo_url !== undefined ? photo_url : (prev?.personal_info?.photo_url || prev?.photo_url);
-        const newPosY = photo_position_y !== undefined ? photo_position_y : (prev?.personal_info?.photo_position_y ?? prev?.photo_position_y ?? 50);
-        return {
-          ...prev,
-          photo_url: newPhotoUrl,
-          photo_position_y: newPosY,
-          personal_info: {
-            ...(prev?.personal_info || {}),
-            photo_url: newPhotoUrl,
-            photo_position_y: newPosY
-          }
-        };
-      });
-    };
-    window.addEventListener('resume_photo_updated', handlePhotoUpdate);
-    return () => window.removeEventListener('resume_photo_updated', handlePhotoUpdate);
-  }, []);
+
 
   const restoredWorkflowScopeRef = useRef('');
   useEffect(() => {
@@ -612,8 +591,8 @@ export function AppProvider({ children }) {
       // Resume/configuration data is durable. Job extraction data is deliberately
       // excluded: it belongs to the active-tab session and must never leak from
       // a previously viewed job.
-      chrome.storage.local.get(['groqApiKey', 'apiUrl', 'parsedResume', 'tailoredResume', 'selectedTemplate'], (result) => {
-        if (result.groqApiKey) setApiKey(result.groqApiKey);
+      chrome.storage.local.get(['geminiApiKey', 'groqApiKey', 'apiUrl', 'parsedResume', 'tailoredResume', 'selectedTemplate'], (result) => {
+        if (result.geminiApiKey || result.groqApiKey) setApiKey(result.geminiApiKey || result.groqApiKey);
         if (result.apiUrl) setApiUrl(result.apiUrl);
         if (result.parsedResume) setParsedResume(result.parsedResume);
         if (result.tailoredResume) setTailoredResume(result.tailoredResume);
@@ -704,7 +683,7 @@ export function AppProvider({ children }) {
         setJobSessionHydrated(true);
       }
     } else {
-      const savedKey = localStorage.getItem('groq_api_key');
+      const savedKey = localStorage.getItem('gemini_api_key') || localStorage.getItem('groq_api_key');
       const savedUrl = localStorage.getItem('fastapi_api_url');
       const savedResume = localStorage.getItem('parsed_resume');
       const savedTailored = localStorage.getItem('tailored_resume');
@@ -1098,10 +1077,35 @@ export function AppProvider({ children }) {
     const canonical = toRenderableResume(nextResume);
     if (!canonical) throw new Error('FINAL_RESUME_VALIDATION_FAILED: Updated resume is invalid.');
     return { ...current, finalizedTailoredResume: canonical };
-  }).then(saved => {
-    setTailoredResume(saved.finalizedTailoredResume);
-    return saved.finalizedTailoredResume;
   });
+
+  useEffect(() => {
+    const handlePhotoUpdate = (e) => {
+      const { photo_url, photo_position_y } = e.detail || {};
+      const updater = prev => {
+        if (!prev) return prev;
+        const newPhotoUrl = photo_url !== undefined ? photo_url : (prev?.personal_info?.photo_url || prev?.photo_url);
+        const newPosY = photo_position_y !== undefined ? photo_position_y : (prev?.personal_info?.photo_position_y ?? prev?.photo_position_y ?? 50);
+        return {
+          ...prev,
+          photo_url: newPhotoUrl,
+          photo_position_y: newPosY,
+          personal_info: {
+            ...(prev?.personal_info || {}),
+            photo_url: newPhotoUrl,
+            photo_position_y: newPosY
+          }
+        };
+      };
+      setParsedResume(updater);
+      setTailoredResume(updater);
+      if (typeof updateFinalizedWorkflowResume === 'function') {
+        updateFinalizedWorkflowResume(updater).catch(() => {});
+      }
+    };
+    window.addEventListener('resume_photo_updated', handlePhotoUpdate);
+    return () => window.removeEventListener('resume_photo_updated', handlePhotoUpdate);
+  }, []);
 
   // Save/Remove selected template context storage
   useEffect(() => {

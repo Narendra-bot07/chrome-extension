@@ -42,23 +42,39 @@ export default function ReviewChangesPage() {
   }, [reviewState]);
 
   const handleUpdateSuggestionStatus = (id, newStatus) => {
-    setReviewSuggestions(previous => previous.map(s => 
-      s.id === id ? { ...s, status: newStatus } : s
-    ));
+    setReviewSuggestions(previous => {
+      const next = previous.map(s => s.id === id ? { ...s, status: newStatus } : s);
+      const merged = mergeReviewResume(parsedResume, next);
+      if (merged.workingResume) setTailoredResume(merged.workingResume);
+      return next;
+    });
   };
 
   const handleUpdateSuggestionText = (id, newText) => {
-    setReviewSuggestions(previous => previous.map(s =>
-      s.id === id ? { ...s, suggested: newText } : s
-    ));
+    setReviewSuggestions(previous => {
+      const next = previous.map(s => s.id === id ? { ...s, suggested: newText } : s);
+      const merged = mergeReviewResume(parsedResume, next);
+      if (merged.workingResume) setTailoredResume(merged.workingResume);
+      return next;
+    });
   };
 
   const handleAcceptAll = () => {
-    setReviewSuggestions(previous => previous.map(s => ({ ...s, status: 'accepted' })));
+    setReviewSuggestions(previous => {
+      const next = previous.map(s => ({ ...s, status: 'accepted' }));
+      const merged = mergeReviewResume(parsedResume, next);
+      if (merged.workingResume) setTailoredResume(merged.workingResume);
+      return next;
+    });
   };
 
   const handleRejectAll = () => {
-    setReviewSuggestions(previous => previous.map(s => ({ ...s, status: 'rejected' })));
+    setReviewSuggestions(previous => {
+      const next = previous.map(s => ({ ...s, status: 'rejected' }));
+      const merged = mergeReviewResume(parsedResume, next);
+      if (merged.workingResume) setTailoredResume(merged.workingResume);
+      return next;
+    });
   };
 
   const handleGenerateReviewedResume = () => {

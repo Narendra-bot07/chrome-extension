@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, UploadFile, File, Header, HTTPException, status
 from fastapi.responses import Response
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from pathlib import Path
 import copy
 import re
 import hashlib
+import uuid
+
 from core.security import verify_supabase_jwt
 from core.constants import MAX_FILE_SIZE_BYTES, SUPPORTED_FILE_EXTENSIONS
 from api.dependencies import get_resume_repository, get_storage_service
@@ -17,7 +19,7 @@ from services.resume.source_preservation import (
     restore_source_evidence,
 )
 from services.resume.recovery_engine import ResumeRecoveryAgent
-from services.ai.groq_service import GroqService
+from services.ai.gemini_service import GeminiService, GroqService
 from app.analytics.events.tracking.analytics_service import AnalyticsService
 from core.database import get_db_connection
 from core.logging import logger
@@ -82,7 +84,7 @@ def _resume_intelligence_service(
     conn,
     api_key: str | None,
 ) -> SelectedResumeIntelligenceService:
-    parser_service = GroqService(api_key=api_key) if api_key else None
+    parser_service = GeminiService(api_key=api_key) if api_key else None
     semantic_analyzer = GroqSemanticAnalyzer(api_key) if api_key else None
     return SelectedResumeIntelligenceService(
         repository=repo,
@@ -97,13 +99,14 @@ def _resume_intelligence_service(
 def build_selected_resume_intelligence(
     resume_id: str,
     payload: SelectedResumeIntelligenceRequest,
+    x_gemini_key: str = Header(None),
     x_groq_key: str = Header(None),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository),
     storage: FileService = Depends(get_storage_service),
     conn=Depends(get_db_connection),
 ):
-    api_key = x_groq_key or settings.GROQ_API_KEY
+    api_key = x_gemini_key or x_groq_key or settings.GEMINI_API_KEY or settings.GROQ_API_KEY
     service = _resume_intelligence_service(
         user_id=user["id"],
         repo=repo,
@@ -129,6 +132,7 @@ def confirm_selected_resume_intelligence(
     resume_id: str,
     workflow_id: str,
     payload: SelectedResumeConfirmationRequest,
+    x_gemini_key: str = Header(None),
     x_groq_key: str = Header(None),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository),
@@ -140,7 +144,7 @@ def confirm_selected_resume_intelligence(
         repo=repo,
         storage=storage,
         conn=conn,
-        api_key=x_groq_key or settings.GROQ_API_KEY,
+        api_key=x_gemini_key or x_groq_key or settings.GEMINI_API_KEY or settings.GROQ_API_KEY,
     )
     return service.confirm(
         workflow_id=workflow_id,
@@ -148,9 +152,11 @@ def confirm_selected_resume_intelligence(
         confirmed=payload.confirmed,
     )
 
+
 @router.post("/upload")
 async def upload_and_parse(
     file: UploadFile = File(...),
+    x_gemini_key: str = Header(None),
     x_groq_key: str = Header(None),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     resume_repo: ResumeRepository = Depends(get_resume_repository),
@@ -173,12 +179,9 @@ async def upload_and_parse(
             detail="File size exceeds limits."
         )
 
-    # Text extraction
     raw_text = ResumeParser.extract_text(content, file.filename)
     source_links = ResumeParser.extract_links(content, file.filename)
 
-    # Save to storage
-    import uuid
     unique_path = f"{user['id']}/{uuid.uuid4()}_{file.filename}"
     stored_path = storage.upload_file("original-resumes", unique_path, content, file.content_type)
     logger.info(
@@ -190,7 +193,6 @@ async def upload_and_parse(
         stored_path,
     )
 
-    # Save to database before AI parsing so uploaded files are never lost from the Resume Manager.
     parsed_res = {
         "raw_text": raw_text,
         "links": source_links,
@@ -213,9 +215,6 @@ async def upload_and_parse(
         record.get("file_name"),
     )
 
-    # Return immediately after durable upload. AI parsing is intentionally
-    # deferred to /{resume_id}/parse so rate limits cannot prevent the Resume
-    # Manager from displaying and activating the newly uploaded file.
     record["parsed_content"] = parsed_res
     record["parsing_status"] = "pending"
     
@@ -235,6 +234,7 @@ async def upload_and_parse(
     
     return record
 
+
 @router.get("/")
 async def list_resumes(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
@@ -249,7 +249,6 @@ async def reconcile_local_resumes(
     repo: ResumeRepository = Depends(get_resume_repository),
     storage: FileService = Depends(get_storage_service),
 ):
-    """Recover this user's locally stored files whose DB insert was rolled back."""
     base_dir = getattr(storage, "base_dir", None)
     if not base_dir:
         return {"recovered": 0, "active_resume_id": None}
@@ -342,12 +341,14 @@ async def reconcile_local_resumes(
         "active_resume_id": active.get("id") if active else None,
     }
 
+
 @router.get("/active")
 async def get_active_resume(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository)
 ):
     return repo.get_active(user["id"]) or None
+
 
 @router.get("/{resume_id}/file")
 async def get_resume_file(
@@ -370,6 +371,7 @@ async def get_resume_file(
         headers={"Content-Disposition": f'inline; filename="{record.get("file_name") or "resume"}"'}
     )
 
+
 @router.get("/{resume_id}/preview")
 async def preview_resume_file(
     resume_id: str,
@@ -378,6 +380,7 @@ async def preview_resume_file(
     storage: FileService = Depends(get_storage_service)
 ):
     return await get_resume_file(resume_id, user, repo, storage)
+
 
 @router.post("/{resume_id}/activate")
 async def activate_resume(
@@ -392,6 +395,7 @@ async def activate_resume(
             detail="Resume not found."
         )
     return record
+
 
 @router.post("/{resume_id}/mark-used")
 async def mark_resume_used(
@@ -429,6 +433,7 @@ async def save_resume_layout(
         "updated_at": record.get("updated_at"),
     }
 
+
 @router.delete("/{resume_id}")
 async def delete_resume(
     resume_id: str,
@@ -442,6 +447,7 @@ async def delete_resume(
             detail="Resume not found or already deleted."
         )
     return {"status": "success", "message": "Resume soft-deleted."}
+
 
 @router.put("/{resume_id}/rename")
 async def rename_resume(
@@ -463,9 +469,11 @@ async def rename_resume(
         repo.conn.commit()
     return {"status": "success", "message": "Resume renamed successfully.", "file_name": new_name}
 
+
 @router.post("/{resume_id}/parse")
 async def parse_existing_resume(
     resume_id: str,
+    x_gemini_key: str = Header(None),
     x_groq_key: str = Header(None),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository),
@@ -487,11 +495,10 @@ async def parse_existing_resume(
             detail="No raw text found in this resume to parse."
         )
         
-    # Run Groq AI parse on-demand
-    ai = GroqService(api_key=x_groq_key)
+    api_key = x_gemini_key or x_groq_key or settings.GEMINI_API_KEY or settings.GROQ_API_KEY
+    ai = GeminiService(api_key=api_key)
     parsed_res = ai.parse_resume(raw_text)
     
-    # Save back to database
     updated_content = parsed_res.dict()
     source_links = dict(parsed_content.get("links") or {})
     if record.get("file_path") and str(record.get("file_type") or "").lower() == "pdf":
@@ -514,7 +521,6 @@ async def parse_existing_resume(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update parsed resume content in database."
         )
-    # Emit Analytics Event
     AnalyticsService(conn).emit_event(
         user_id=user["id"],
         event_type="RESUME_PARSED",
@@ -523,7 +529,6 @@ async def parse_existing_resume(
         metadata={"source": "on-demand"}
     )
         
-    # Return updated record format
     record["parsed_content"] = updated_content
     return record
 
@@ -531,6 +536,7 @@ async def parse_existing_resume(
 @router.post("/{resume_id}/recover-source")
 async def recover_resume_source_details(
     resume_id: str,
+    x_gemini_key: str = Header(None),
     x_groq_key: str = Header(None),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository),
@@ -560,9 +566,6 @@ async def recover_resume_source_details(
             "file_type": record.get("file_type"),
         },
     )
-    # Renderer-compatible fields remain byte-for-byte equivalent to parser
-    # output. Recovered boundaries live in canonical_resume until explicitly
-    # confirmed; low-confidence blocks are never silently substituted.
     recovered = recovery.recovered_resume
     recovered["links"] = {**(recovered.get("links") or {}), **source_links}
     if not repo.update_parsed_content(resume_id, user["id"], recovered):
@@ -755,4 +758,3 @@ async def record_resume_usage_event(
     except Exception as e:
         logger.error(f"Usage event recording failed: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to record usage event.")
-

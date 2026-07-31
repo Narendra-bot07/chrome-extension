@@ -12,17 +12,31 @@ export default function ProfilePhotoCropModal({
   const [zoom, setZoom] = useState(1.0);
   const [posX, setPosX] = useState(0);
   const [posY, setPosY] = useState(0);
+  const [imgSize, setImgSize] = useState({ width: 208, height: 208 });
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef({ x: 0, y: 0 });
   const posRef = useRef({ x: 0, y: 0 });
   const fileInputRef = useRef(null);
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && imageSrc) {
       setZoom(1.0);
       setPosX(0);
       setPosY(0);
       posRef.current = { x: 0, y: 0 };
+      const img = new Image();
+      if (!imageSrc.startsWith('data:')) {
+        img.crossOrigin = 'anonymous';
+      }
+      img.onload = () => {
+        // Base cover scale so image fills the 208px viewport circle with 0 gaps
+        const baseScale = Math.max(208 / img.width, 208 / img.height);
+        setImgSize({
+          width: img.width * baseScale,
+          height: img.height * baseScale
+        });
+      };
+      img.src = imageSrc;
     }
   }, [isOpen, imageSrc]);
 
@@ -42,7 +56,7 @@ export default function ProfilePhotoCropModal({
     const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
     const newX = clientX - dragStartRef.current.x;
     const newY = clientY - dragStartRef.current.y;
-    // Bound drag range
+    // Bounded drag range
     const maxOffset = 180 * zoom;
     const clampedX = Math.max(-maxOffset, Math.min(maxOffset, newX));
     const clampedY = Math.max(-maxOffset, Math.min(maxOffset, newY));
@@ -55,7 +69,7 @@ export default function ProfilePhotoCropModal({
     setIsDragging(false);
   };
 
-  // Generate high-resolution cropped canvas Data URL
+  // Generate high-resolution cropped canvas Data URL matching 208px viewport exactly
   const handleApply = () => {
     try {
       const img = new Image();
@@ -71,27 +85,25 @@ export default function ProfilePhotoCropModal({
             return;
           }
 
-          const size = 600; // 600x600 HD avatar resolution
-          canvas.width = size;
-          canvas.height = size;
+          const outputSize = 600; // 600x600 HD crop resolution
+          canvas.width = outputSize;
+          canvas.height = outputSize;
 
-          // Draw circular mask for crisp clean output
-          ctx.beginPath();
-          ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
-          ctx.closePath();
-          ctx.clip();
+          // Compute exact base cover scale for 208px viewport
+          const baseScale = Math.max(208 / img.width, 208 / img.height);
+          const baseWidth = img.width * baseScale;
+          const baseHeight = img.height * baseScale;
 
-          const minDim = Math.min(img.width, img.height);
-          const drawWidth = (img.width / minDim) * size * zoom;
-          const drawHeight = (img.height / minDim) * size * zoom;
+          // Scale factor between 208px modal circle and 600px canvas
+          const scaleRatio = outputSize / 208;
+          const drawWidth = baseWidth * zoom * scaleRatio;
+          const drawHeight = baseHeight * zoom * scaleRatio;
 
-          // Convert modal displacement (208px circle) to canvas resolution (600px circle)
-          const scaleFactor = size / 208;
-          const drawX = (size - drawWidth) / 2 + posX * scaleFactor;
-          const drawY = (size - drawHeight) / 2 + posY * scaleFactor;
+          const drawX = (outputSize - drawWidth) / 2 + posX * scaleRatio;
+          const drawY = (outputSize - drawHeight) / 2 + posY * scaleRatio;
 
           ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
-          const croppedDataUrl = canvas.toDataURL('image/png', 0.95);
+          const croppedDataUrl = canvas.toDataURL('image/jpeg', 0.95);
           onApply(croppedDataUrl, { posX, posY, zoom });
         } catch (err) {
           console.error("Error cropping image on canvas:", err);
@@ -146,11 +158,11 @@ export default function ProfilePhotoCropModal({
           <img 
             src={imageSrc} 
             alt="Crop preview" 
-            className="max-none pointer-events-none transition-transform duration-75"
+            className="max-none pointer-events-none transition-transform duration-75 select-none"
             style={{
-              transform: `translate(${posX}px, ${posY}px) scale(${zoom})`,
-              maxHeight: '260px',
-              objectFit: 'contain'
+              width: `${imgSize.width}px`,
+              height: `${imgSize.height}px`,
+              transform: `translate(${posX}px, ${posY}px) scale(${zoom})`
             }}
           />
 
@@ -180,49 +192,39 @@ export default function ProfilePhotoCropModal({
         </div>
 
         {/* Sliders & Adjustments */}
-        <div className="p-6 bg-zinc-950 border-t border-zinc-800/80 flex flex-col gap-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex-1 flex flex-col gap-1.5">
-              <div className="flex justify-between text-xs font-medium text-zinc-400">
-                <span className="flex items-center gap-1.5 text-zinc-200 font-semibold">
-                  <ZoomIn size={13} className="text-indigo-400" /> Zoom
-                </span>
-                <span className="font-mono text-zinc-300">{Math.round(zoom * 100)}%</span>
-              </div>
-              <input 
-                type="range" 
-                min="1.0" 
-                max="2.5" 
-                step="0.02" 
-                value={zoom} 
-                onChange={(e) => setZoom(Number(e.target.value))}
-                className="w-full h-1.5 bg-zinc-800 rounded-lg accent-indigo-500 cursor-pointer" 
-              />
-            </div>
+        <div className="p-6 space-y-5 bg-zinc-950">
+          <div className="flex items-center gap-4">
+            <ZoomIn size={18} className="text-zinc-400 shrink-0" />
+            <input 
+              type="range"
+              min="1.0"
+              max="3.0"
+              step="0.05"
+              value={zoom}
+              onChange={(e) => setZoom(parseFloat(e.target.value))}
+              className="w-full accent-[#00bda5] bg-zinc-800 h-1.5 rounded-lg appearance-none cursor-pointer"
+            />
+            <span className="text-xs font-bold text-zinc-400 w-10 text-right font-mono">
+              {Math.round(zoom * 100)}%
+            </span>
           </div>
 
-          {/* Action Footer */}
-          <div className="pt-3 border-t border-zinc-800/80 flex items-center justify-between">
-            {onDelete ? (
-              <button 
-                type="button"
-                onClick={onDelete}
-                className="text-xs font-semibold text-rose-400 hover:text-rose-300 flex items-center gap-1.5 px-3 py-2 rounded-xl hover:bg-rose-500/10 transition-colors"
-              >
-                <Trash2 size={14} /> Delete photo
-              </button>
-            ) : <div />}
-
-            <div className="flex items-center gap-2.5">
+          {/* Action Buttons */}
+          <div className="flex items-center justify-between pt-2">
+            <div className="flex items-center gap-2">
+              {onDelete && (
+                <button
+                  type="button"
+                  onClick={onDelete}
+                  className="p-2.5 rounded-xl bg-zinc-900 hover:bg-rose-950/40 text-zinc-400 hover:text-rose-400 border border-zinc-800 hover:border-rose-900/50 transition-colors flex items-center gap-2 text-xs font-bold"
+                  title="Remove photo"
+                >
+                  <Trash2 size={16} />
+                  <span>Delete</span>
+                </button>
+              )}
               {onChangePhoto && (
                 <>
-                  <button 
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="text-xs font-semibold text-zinc-300 hover:text-white border border-zinc-700 hover:border-zinc-500 bg-zinc-900 px-4 py-2 rounded-xl transition-all flex items-center gap-1.5"
-                  >
-                    <Camera size={14} /> Change photo
-                  </button>
                   <input 
                     type="file" 
                     ref={fileInputRef} 
@@ -230,17 +232,36 @@ export default function ProfilePhotoCropModal({
                     className="hidden" 
                     onChange={(e) => {
                       const file = e.target.files?.[0];
-                      if (file && onChangePhoto) onChangePhoto(file);
+                      if (file) onChangePhoto(file);
                     }}
                   />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 transition-colors flex items-center gap-2 text-xs font-bold"
+                  >
+                    <Camera size={16} />
+                    <span>Change</span>
+                  </button>
                 </>
               )}
-              <button 
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-bold text-xs transition-colors"
+              >
+                Cancel
+              </button>
+              <button
                 type="button"
                 onClick={handleApply}
-                className="text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 px-6 py-2.5 rounded-xl shadow-lg shadow-indigo-600/30 hover:shadow-indigo-500/40 transition-all flex items-center gap-1.5"
+                className="px-5 py-2.5 rounded-xl bg-[#00bda5] hover:bg-[#00a894] text-white font-extrabold text-xs transition-colors shadow-lg shadow-emerald-950/40 flex items-center gap-1.5"
               >
-                <Check size={14} /> Apply
+                <Check size={16} />
+                <span>Apply</span>
               </button>
             </div>
           </div>

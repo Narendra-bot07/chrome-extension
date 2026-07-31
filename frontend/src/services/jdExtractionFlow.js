@@ -107,12 +107,22 @@ export async function captureActiveTabJobEvidence(tabId) {
         ? firstText([
             '.job-details-jobs-unified-top-card__company-name',
             '.jobs-unified-top-card__company-name',
-            '.jobs-unified-top-card__primary-description a'
+            '.job-details-jobs-unified-top-card__primary-description-container a',
+            '.job-details-jobs-unified-top-card__subtitle-primary-grouping-line a',
+            '.jobs-unified-top-card__primary-description a',
+            '.jobs-unified-top-card__subtitle-primary-grouping-line a',
+            'a[href*="/company/"]',
+            '.artdeco-entity-lockup__subtitle',
+            '.topcard__flavor',
+            '.topcard__org-name-link',
+            'span.jobs-unified-top-card__company-name'
           ])
         : firstText([
             '[class*="company-name"]',
             '[class*="companyName"]',
-            '[data-company-name="true"]'
+            '[data-company-name="true"]',
+            'a[href*="/company/"]',
+            '[data-automation-id="company"]'
           ]);
       const locationHint = location.hostname.includes('linkedin.com')
         ? firstText([
@@ -120,6 +130,15 @@ export async function captureActiveTabJobEvidence(tabId) {
             '.jobs-unified-top-card__primary-description'
           ])
         : '';
+      const topCardText = firstText([
+        '.job-details-jobs-unified-top-card',
+        '.jobs-unified-top-card',
+        '.top-card-layout'
+      ]);
+      let panelText = selected?.text || '';
+      if (topCardText && !panelText.includes(topCardText.slice(0, 50))) {
+        panelText = `${topCardText}\n\n${panelText}`;
+      }
       const jsonld = [];
       roots.forEach((root) => {
         root.querySelectorAll('script[type="application/ld+json"]').forEach((script) => {
@@ -158,7 +177,7 @@ export async function captureActiveTabJobEvidence(tabId) {
         company_hint: companyHint,
         location_hint: locationHint,
         visible_text: visibleText,
-        selected_panel_text: selected?.text || '',
+        selected_panel_text: panelText || '',
         selected_panel_selector: selected
           ? (selected.selector || `${selected.node.tagName.toLowerCase()}${selected.node.id ? `#${selected.node.id}` : ''}`)
           : null,

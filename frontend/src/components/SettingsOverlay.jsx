@@ -49,13 +49,13 @@ function SettingsOverlay({
           </div>
 
           <div>
-            <label className="text-[8px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1.5 block select-none">Groq API Key (Optional)</label>
+            <label className="text-[8px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1.5 block select-none">Gemini API Key (Optional)</label>
             <input 
               type="password" 
               className="w-full bg-white border border-slate-200 dark:bg-[#09090b] dark:border-slate-900 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand placeholder-slate-400 dark:placeholder-slate-650 shadow-sm"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Enter Groq API Key"
+              placeholder="Enter Gemini API Key"
             />
             <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-1.5 leading-normal select-none">
               If defined inside your backend <code>.env</code> file, you can leave this empty.

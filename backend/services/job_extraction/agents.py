@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 from langchain_core.messages import HumanMessage, SystemMessage
 from markdownify import markdownify
 
-from app.groq_service import get_llm
+from app.gemini_service import get_llm
 from core.logging import logger
 from services.job_extraction.schemas import (
     ClassificationDecision, EvidenceSource, ExtractedJob, JDState, ReviewDecision,
@@ -61,6 +61,16 @@ def _extension_rendered_html(evidence: dict[str, Any]) -> str:
         title_hint = html_lib.escape(str(evidence.get("job_title_hint") or "").strip())
         company_hint = html_lib.escape(str(evidence.get("company_hint") or "").strip())
         location_hint = html_lib.escape(str(evidence.get("location_hint") or "").strip())
+        if not company_hint:
+            page_title = str(evidence.get("title") or "").strip()
+            if page_title:
+                parts = [p.strip() for p in re.split(r"\s+[|\-–—]\s+|\s+at\s+", page_title, flags=re.I) if p.strip()]
+                company_candidates = [
+                    p for p in parts[1:]
+                    if p.lower() not in {"linkedin", "indeed", "glassdoor", "ziprecruiter", "jobs", "careers", "remote"}
+                ]
+                if company_candidates:
+                    company_hint = html_lib.escape(company_candidates[0])
         scripts = ""
         for item in (evidence.get("jsonld") or [])[:20]:
             if isinstance(item, (dict, list)):
@@ -305,7 +315,7 @@ def _source_rank(source: EvidenceSource) -> float:
         + source.quality_score * .27
         + source.specificity_score * .25
         + source.freshness_score * .14
-        + (.12 if source.selected_job_signal else 0)
+        + (.25 if source.selected_job_signal else 0)
         + agreement_bonus,
         4,
     )
@@ -714,23 +724,26 @@ def planner_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
 
 
 def _deterministic_classification(state: JDState) -> ClassificationDecision:
-    text = f"{state.final_url} {state.page_title} {' '.join(state.metadata.get('headings', []))} {state.markdown[:12000]}".lower()
+    url_text = str(state.final_url or state.url or "")
+    text = f"{url_text} {state.page_title or ''} {' '.join(state.metadata.get('headings', []))} {state.markdown[:12000]}".lower()
     if state.blocked_reason:
         return ClassificationDecision(page_type="non_job", confidence=1, reasons=["Page access is blocked"])
     if state.jobposting_jsonld:
         return ClassificationDecision(page_type="job_detail", confidence=.98, reasons=["JobPosting JSON-LD found"])
 
     apply_signals = len(re.findall(
-        r"\b(?:apply now|apply for this job|submit application|start application|easy apply)\b",
+        r"\b(?:apply now|apply for this job|submit application|start application|easy apply|apply)\b",
         text,
     ))
     section_markers = (
         "job description", "job details", "what to expect", "what you'll do",
         "what you’ll do", "what you will do", "what you'll bring", "what you’ll bring",
-        "what you will bring", "the role", "about the role", "your role",
-        "responsibilities", "key job responsibilities", "requirements",
+        "what you will bring", "the role", "about the role", "your role", "about the job",
+        "about us", "about the company", "role overview", "job overview", "position summary",
+        "responsibilities", "key job responsibilities", "key responsibilities", "requirements",
         "minimum qualifications", "basic qualifications", "preferred qualifications",
-        "qualifications", "required skills", "experience required",
+        "qualifications", "required skills", "preferred skills", "experience required",
+        "what you'll need", "what you need", "what we're looking for", "what we are looking for",
     )
     section_signals = [marker for marker in section_markers if marker in text]
     employment_signals = [
@@ -741,7 +754,7 @@ def _deterministic_classification(state: JDState) -> ClassificationDecision:
         if marker in text
     ]
     cards = len(re.findall(
-        r"\b(?:view job|view opening|job card|open position|search jobs|see job)\b",
+        r"\b(?:view job|view opening|job card|open position|open positions|search jobs|see job)\b",
         text,
     ))
     listing_signals = [
@@ -751,8 +764,16 @@ def _deterministic_classification(state: JDState) -> ClassificationDecision:
         )
         if marker in text
     ]
-    substantial = len(state.markdown) >= 500
-    title = (state.page_title or "").strip()
+    substantial = len(state.markdown) >= 150
+    markdown_title_match = re.search(r"^#+\s+(.+)$", state.markdown, flags=re.M)
+    title = (
+        state.page_title
+        or state.metadata.get("title")
+        or (markdown_title_match.group(1) if markdown_title_match else None)
+        or (state.metadata.get("headings") or [""])[0]
+        or (state.extension_evidence or {}).get("job_title_hint")
+        or ""
+    ).strip()
     has_specific_title = bool(
         title
         and len(title) >= 5
@@ -765,7 +786,7 @@ def _deterministic_classification(state: JDState) -> ClassificationDecision:
 
     logger.info(
         "%s Classifier signals request_id=%s apply=%s sections=%s "
-        "employment=%s listing=%s cards=%s markdown_length=%s specific_title=%s",
+        "employment=%s listing=%s cards=%s markdown_length=%s specific_title=%s selected_job_detected=%s",
         LOG_PREFIX,
         state.request_id,
         apply_signals,
@@ -775,9 +796,17 @@ def _deterministic_classification(state: JDState) -> ClassificationDecision:
         cards,
         len(state.markdown),
         has_specific_title,
+        state.selected_job_detected,
     )
 
-    if listing_signals and cards >= 2 and apply_signals == 0 and len(section_signals) < 2:
+    if (state.selected_job_detected or state.extraction_readiness == "READY" or state.selected_evidence_source == "extension_selected_panel") and has_specific_title and substantial:
+        return ClassificationDecision(
+            page_type="job_detail",
+            confidence=.96,
+            reasons=["Verified single job description panel extracted by browser extension"],
+        )
+
+    if listing_signals and (cards >= 1 or re.search(r"/(?:jobs?|careers?|positions?|openings?)(?:[/?#]|$)", url_text, re.I)) and apply_signals == 0 and len(section_signals) < 2:
         return ClassificationDecision(page_type="job_list", confidence=.88, reasons=["Repeated listing/search signals"])
     if substantial and apply_signals > 0 and section_signals and has_specific_title:
         return ClassificationDecision(
@@ -1155,6 +1184,30 @@ benefits are absent. List every genuinely incorrect field in repair_fields. If n
 is_valid must be false."""
 
 
+def _fallback_company_name(state: JDState, current_company: str | None) -> str | None:
+    if current_company and str(current_company).strip():
+        return str(current_company).strip()
+    hint = str(state.extension_evidence.get("company_hint") or "").strip()
+    if hint:
+        return hint
+    page_title = str(state.extension_evidence.get("title") or state.metadata.get("title") or state.backend_page_title or "").strip()
+    if page_title:
+        parts = [p.strip() for p in re.split(r"\s+[|\-–—]\s+|\s+at\s+", page_title, flags=re.I) if p.strip()]
+        candidates = [
+            p for p in parts[1:]
+            if p.lower() not in {"linkedin", "indeed", "glassdoor", "ziprecruiter", "jobs", "careers", "remote"}
+        ]
+        if candidates:
+            return candidates[0]
+    url = state.url or state.original_url
+    if url:
+        host = urlparse(url).hostname or ""
+        host_parts = host.lower().split(".")
+        if len(host_parts) >= 2 and host_parts[-2] not in {"linkedin", "indeed", "glassdoor", "greenhouse", "lever", "workday", "smartrecruiters"}:
+            return host_parts[-2].capitalize()
+    return None
+
+
 def reviewer_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     state = _state(value)
     job = ExtractedJob.model_validate(state.extracted_job or {})
@@ -1164,7 +1217,17 @@ def reviewer_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     if not job.job_title:
         field_issues["job_title"] = ["Missing job title."]
     if not job.company_name:
-        field_issues["company_name"] = ["Missing company name."]
+        fallback = _fallback_company_name(state, job.company_name)
+        if fallback:
+            job.company_name = fallback
+            if isinstance(state.extracted_job, dict):
+                state.extracted_job["company_name"] = fallback
+        elif state.repair_attempts >= 1 and job.job_title and (job.description or job.responsibilities):
+            job.company_name = "Not Specified"
+            if isinstance(state.extracted_job, dict):
+                state.extracted_job["company_name"] = "Not Specified"
+        else:
+            field_issues["company_name"] = ["Missing company name."]
     if not job.description and not job.responsibilities:
         field_issues["description"] = ["Missing both description and responsibilities."]
 
@@ -1217,6 +1280,7 @@ def reviewer_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         review_issues,
     )
     return {
+        "extracted_job": job.model_dump(mode="json"),
         "review_issues": review_issues,
         "field_issues": field_issues,
         "repair_fields": repair_fields,
@@ -1242,6 +1306,10 @@ def repair_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         }, ensure_ascii=False)),
     ])
     job = ExtractedJob.model_validate(repaired).model_dump(mode="json")
+    if not job.get("company_name"):
+        fallback = _fallback_company_name(state, job.get("company_name"))
+        if fallback:
+            job["company_name"] = fallback
     job["skills"] = _atomize_skill_labels(job.get("skills", []))
     explicit_keys = {skill.casefold() for skill in job["skills"]}
     job["suggested_skills"] = [

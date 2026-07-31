@@ -18,7 +18,7 @@ from app.schemas import (
     ResumePatch
 )
 from app.parser import extract_text
-from app.groq_service import parse_resume, analyze_job_description, generate_tailoring_patch, apply_tailoring_patch, generate_cover_letter, refine_section_with_ai, calculate_resume_job_match_score
+from app.gemini_service import parse_resume, analyze_job_description, generate_tailoring_patch, apply_tailoring_patch, generate_cover_letter, refine_section_with_ai, calculate_resume_job_match_score
 from api.v1.resume import router as resume_manager_router
 from api.dependencies import get_resume_repository, get_ats_repository
 from core.security import verify_supabase_jwt
