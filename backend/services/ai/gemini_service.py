@@ -13,7 +13,7 @@ from app.gemini_service import (
 
 class GeminiService(LLMService):
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or settings.GEMINI_API_KEY or settings.GROQ_API_KEY
+        self.api_key = api_key or settings.GEMINI_API_KEY
 
     def parse_resume(self, raw_text: str) -> ResumeStructure:
         res = legacy_parse(raw_text, api_key=self.api_key)

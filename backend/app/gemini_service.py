@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.schemas import (
@@ -33,21 +32,21 @@ logger = logging.getLogger("gemini_pipeline")
 _LLM_CACHE: Dict[str, Any] = {}
 _MAX_CACHE_SIZE = 1000
 
+from services.cache.redis_cache import redis_cache
+
 def _get_cache_key(prefix: str, content: str) -> str:
     return f"{prefix}:{hashlib.sha256(content.encode('utf-8')).hexdigest()}"
 
 def _get_from_cache(key: str) -> Optional[Any]:
-    if key in _LLM_CACHE:
+    cached = redis_cache.get(key)
+    if cached is not None:
         logger.info(f"[LLM_CACHE_HIT] key={key[:24]}...")
-        return _LLM_CACHE[key]
+        return cached
     logger.info(f"[LLM_CACHE_MISS] key={key[:24]}...")
     return None
 
-def _set_to_cache(key: str, val: Any) -> None:
-    if len(_LLM_CACHE) >= _MAX_CACHE_SIZE:
-        first_key = next(iter(_LLM_CACHE))
-        _LLM_CACHE.pop(first_key, None)
-    _LLM_CACHE[key] = val
+def _set_to_cache(key: str, val: Any, ttl_seconds: int = 86400) -> None:
+    redis_cache.set(key, val, ttl_seconds=ttl_seconds)
 
 _SINGLE_AI_REQUEST_LOCK = threading.Lock()
 _LAST_AI_COMPLETED_TIME = 0.0
@@ -67,7 +66,7 @@ throttle_groq_call = throttle_gemini_call
 from langchain_core.runnables import Runnable
 
 class ResilientLLMWrapper(Runnable):
-    """Wrapper enforcing strict 1-at-a-time LLM execution across all threads with automatic failover."""
+    """Wrapper enforcing strict 1-at-a-time Gemini LLM execution across all threads."""
     def __init__(self, primary_llm: Any, fallback_llm: Optional[Any] = None):
         super().__init__()
         self.primary_llm = primary_llm
@@ -87,7 +86,7 @@ class ResilientLLMWrapper(Runnable):
                 return result
             except Exception as err:
                 if self.fallback_llm:
-                    logger.warning(f"[LLM_FAILOVER] Primary LLM call failed ({err}), failing over to Groq Llama-3.3-70B...")
+                    logger.warning(f"[GEMINI_FAILOVER] Primary Gemini model failed ({err}), failing over to fallback Gemini model...")
                     try:
                         result = self.fallback_llm.invoke(input_data, config=config, **kwargs)
                         _LAST_AI_COMPLETED_TIME = time.time()
@@ -107,57 +106,37 @@ def get_llm(api_key: Optional[str] = None, temperature: float = 0.0, max_retries
     from core.config import settings
     req_key = (api_key or "").strip()
     gemini_key = (settings.GEMINI_API_KEY or "").strip() or os.environ.get("GEMINI_API_KEY", "").strip()
-    groq_key = (settings.GROQ_API_KEY or "").strip() or os.environ.get("GROQ_API_KEY", "").strip()
     
-    # 1. If explicitly given a Groq key (gsk_...) or only GROQ_API_KEY is present
-    if req_key.startswith("gsk_") or (not req_key and groq_key and not gemini_key.startswith("AIza")):
-        g_key = req_key if req_key.startswith("gsk_") else groq_key
-        groq_llm = ChatGroq(
+    active_key = req_key or gemini_key
+    if not active_key:
+        raise ValueError("Gemini API Key is missing. Please set GEMINI_API_KEY in backend/.env.")
+
+    model_name = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+    primary_model = model_name
+    fallback_model = "gemini-1.5-flash" if primary_model != "gemini-1.5-flash" else "gemini-2.0-flash"
+
+    try:
+        primary_llm = ChatGoogleGenerativeAI(
+            model=primary_model,
+            google_api_key=active_key,
             temperature=temperature,
-            groq_api_key=g_key,
-            model_name="llama-3.3-70b-versatile",
             max_retries=max_retries
         )
-        return ResilientLLMWrapper(groq_llm, None)
-
-    # 2. Try Gemini with candidate model fallbacks
-    active_gemini_key = req_key if (req_key and not req_key.startswith("gsk_")) else gemini_key
-    if active_gemini_key:
-        model_name = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
-        candidate_models = [model_name, "gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash"]
-        
-        groq_fallback = None
-        if groq_key or req_key.startswith("gsk_"):
-            groq_fallback = ChatGroq(
-                temperature=temperature,
-                groq_api_key=groq_key if groq_key else req_key,
-                model_name="llama-3.3-70b-versatile",
-                max_retries=max_retries
-            )
-
-        for m_name in dict.fromkeys(candidate_models):
-            try:
-                gemini_llm = ChatGoogleGenerativeAI(
-                    model=m_name,
-                    google_api_key=active_gemini_key,
-                    temperature=temperature,
-                    max_retries=max_retries
-                )
-                return ResilientLLMWrapper(gemini_llm, groq_fallback)
-            except Exception as e:
-                logger.warning(f"Failed to initialize ChatGoogleGenerativeAI with model={m_name}: {e}")
-
-    # 3. Fallback to Groq if present
-    if groq_key:
-        groq_llm = ChatGroq(
+        fallback_llm = ChatGoogleGenerativeAI(
+            model=fallback_model,
+            google_api_key=active_key,
             temperature=temperature,
-            groq_api_key=groq_key,
-            model_name="llama-3.3-70b-versatile",
             max_retries=max_retries
         )
-        return ResilientLLMWrapper(groq_llm, None)
-
-    raise ValueError("AI API Key is missing. Please set GEMINI_API_KEY (starts with AIza) or GROQ_API_KEY in backend/.env.")
+        return ResilientLLMWrapper(primary_llm, fallback_llm)
+    except Exception as e:
+        logger.warning(f"Failed to initialize ChatGoogleGenerativeAI with model={primary_model}: {e}")
+        return ChatGoogleGenerativeAI(
+            model="gemini-2.0-flash",
+            google_api_key=active_key,
+            temperature=temperature,
+            max_retries=max_retries
+        )
 
 def parse_resume(raw_text: str, api_key: Optional[str] = None) -> ResumeStructure:
     clean_text = raw_text.strip()

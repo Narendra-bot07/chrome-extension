@@ -1,7 +1,9 @@
+import os
 import html
 import logging
 import smtplib
 import ssl
+import requests
 from email.message import EmailMessage
 
 from core.config import settings
@@ -11,14 +13,49 @@ logger = logging.getLogger(__name__)
 
 class EmailService:
     def configured(self) -> bool:
+        resend_key = (settings.RESEND_API_KEY or os.getenv("RESEND_API_KEY", "")).strip()
+        if resend_key:
+            return True
         return bool(settings.SMTP_HOST and settings.SMTP_FROM_EMAIL)
 
     def send(self, recipient: str, subject: str, text_body: str, html_body: str) -> bool:
         if not self.configured():
-            logger.warning("Transactional email skipped: SMTP is not configured.")
+            logger.warning("Transactional email skipped: Neither Resend API Key nor SMTP is configured.")
             return False
+
+        resend_key = (settings.RESEND_API_KEY or os.getenv("RESEND_API_KEY", "")).strip()
+        from_email = settings.SMTP_FROM_EMAIL or "onboarding@resend.dev"
+        from_name = settings.SMTP_FROM_NAME or "tailr4u"
+
+        # 1. Primary Transport: Resend HTTP REST API
+        if resend_key:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {resend_key}",
+                    "Content-Type": "application/json",
+                }
+                payload = {
+                    "from": f"{from_name} <{from_email}>",
+                    "to": [recipient],
+                    "subject": subject,
+                    "html": html_body,
+                    "text": text_body,
+                }
+                response = requests.post("https://api.resend.com/emails", json=payload, headers=headers, timeout=10)
+                if response.status_code in [200, 201, 202]:
+                    logger.info("Transactional email successfully delivered via Resend API to %s (id=%s)", recipient, response.json().get("id"))
+                    return True
+                else:
+                    logger.warning("Resend API error status %s: %s. Attempting SMTP fallback...", response.status_code, response.text)
+            except Exception as e:
+                logger.warning("Resend API request exception (%s). Attempting SMTP fallback...", e)
+
+        # 2. Secondary Transport: Standard SMTP Relay
+        if not (settings.SMTP_HOST and settings.SMTP_FROM_EMAIL):
+            return False
+
         message = EmailMessage()
-        message["From"] = f"{settings.SMTP_FROM_NAME} <{settings.SMTP_FROM_EMAIL}>"
+        message["From"] = f"{from_name} <{settings.SMTP_FROM_EMAIL}>"
         message["To"] = recipient
         message["Subject"] = subject
         message.set_content(text_body)
@@ -42,7 +79,7 @@ class EmailService:
                     if settings.SMTP_USERNAME:
                         client.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
                     client.send_message(message)
-            logger.info("Transactional email successfully delivered to %s", recipient)
+            logger.info("Transactional email successfully delivered via SMTP to %s", recipient)
             return True
         except Exception:
             logger.exception("Transactional email delivery failed to %s", recipient)
