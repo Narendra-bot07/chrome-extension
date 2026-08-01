@@ -90,15 +90,61 @@ class UsageService:
         }
 
     def get_usage_summary(self, user_id):
-        return {
-            key: self.get_current_usage(user_id, key)
-            for key in (
-                "jd_extraction",
-                "resume_upload",
-                "resume_generation",
-                "cover_letter_generation",
-            )
-        }
+        sub = self.subscription_service.get_current_subscription(user_id)
+        keys = ["jd_extraction", "resume_upload", "resume_generation", "cover_letter_generation"]
+
+        feature_limits = {}
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT feature_key, limit_value, enabled
+                FROM public.plan_features
+                WHERE plan_id = %s AND feature_key = ANY(%s)
+            """, (sub["plan_id"], keys))
+            for row in cur.fetchall():
+                feature_limits[row["feature_key"]] = row
+
+        usage_counts = {}
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT feature_key, COALESCE(SUM(quantity), 0) AS used
+                FROM public.usage_events
+                WHERE user_id = %s
+                  AND feature_key = ANY(%s)
+                  AND created_at >= %s
+                  AND created_at < %s
+                GROUP BY feature_key
+            """, (user_id, keys, sub["current_period_start"], sub["current_period_end"]))
+            for row in cur.fetchall():
+                usage_counts[row["feature_key"]] = max(int(row["used"] or 0), 0)
+
+        summary = {}
+        for feature_key in keys:
+            if not QUOTAS_ENFORCED and feature_key in TESTING_UNLIMITED_FEATURES:
+                enabled, limit = True, None
+            else:
+                feat = feature_limits.get(feature_key)
+                if not feat or not feat["enabled"]:
+                    enabled, limit = False, 0
+                elif feat["limit_value"] is not None:
+                    enabled, limit = True, feat["limit_value"]
+                elif feature_key == "jd_extraction":
+                    enabled, limit = True, sub.get("monthly_jd_limit")
+                else:
+                    enabled, limit = True, None
+
+            used = usage_counts.get(feature_key, 0)
+            remaining = None if limit is None else max(limit - used, 0)
+            summary[feature_key] = {
+                "feature_key": feature_key,
+                "enabled": enabled,
+                "limit": limit,
+                "used": used,
+                "remaining": remaining,
+                "period_start": sub["current_period_start"],
+                "period_end": sub["current_period_end"],
+            }
+
+        return summary
 
     def require_available(self, user_id, feature_key, quantity=1):
         summary = self.get_current_usage(user_id, feature_key)

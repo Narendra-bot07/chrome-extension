@@ -71,7 +71,7 @@ const MiniPreview = ({ resume, templateId }) => {
         className="resume-document-light absolute top-0 left-1/2 -translate-x-1/2 w-[816px] h-[1056px] bg-white origin-top scale-[0.24] pointer-events-none select-none"
         style={{ width: '816px', height: '1056px' }}
       >
-        <TailorRender resume={resume} templateName={templateId} />
+        <TailorRender resume={resume} templateName={templateId} disablePhotoModal={true} />
       </div>
       <div className="absolute inset-0 bg-black/[0.02] group-hover:bg-black/[0.04] transition-colors pointer-events-none" />
     </div>
@@ -82,6 +82,8 @@ export default function TemplateSelectionView({ onBack }) {
   const navigate = useNavigate();
   const { 
     workflowResume,
+    tailoredResume,
+    parsedResume,
     selectedTemplate, 
     setSelectedTemplate,
     customFileName,
@@ -91,17 +93,25 @@ export default function TemplateSelectionView({ onBack }) {
     liveATS
   } = useApp();
 
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [filter, setFilter] = useState('all'); // 'all' | 'no-photo' | 'with-photo'
+  const [zoomModalTemplate, setZoomModalTemplate] = useState(null); // active zoomed template object
+  const [selectedTemplateId, setSelectedTemplateId] = useState(null);
+  const [editingFileName, setEditingFileName] = useState('');
+
   const baseATS = liveATS?.current_ats ?? comparison?.ats_score_after ?? comparison?.ats_score_before;
   const userATSScore = baseATS !== undefined && baseATS !== null ? Number(baseATS) : null;
 
+  const activeResume = React.useMemo(
+    () => workflowResume || tailoredResume || parsedResume,
+    [workflowResume, tailoredResume, parsedResume]
+  );
+
   const displayResume = React.useMemo(() => {
-    const rendered = toRenderableResume(workflowResume);
+    const rendered = toRenderableResume(activeResume);
     if (!rendered) return null;
     return {
       ...rendered,
-      // Template UI receives presentation content only. Parser provenance,
-      // numeric placeholders, and credential metadata stay outside the
-      // frontend rendering model.
       certifications: (rendered.certifications || [])
         .map(item => ({
           name: String(item?.name || item?.title || '').replace(/\s+/g, ' ').trim()
@@ -111,12 +121,7 @@ export default function TemplateSelectionView({ onBack }) {
           && !/^(?:0+\.?|null|none|undefined|n\/a|na)$/i.test(item.name)
         )
     };
-  }, [workflowResume]);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [filter, setFilter] = useState('all'); // 'all' | 'no-photo' | 'with-photo'
-  const [zoomModalTemplate, setZoomModalTemplate] = useState(null); // active zoomed template object
-  const [selectedTemplateId, setSelectedTemplateId] = useState(null);
-  const [editingFileName, setEditingFileName] = useState('');
+  }, [activeResume]);
 
   const activeTemplate = selectedTemplate || 'ExecutiveATS';
 
@@ -210,7 +215,7 @@ export default function TemplateSelectionView({ onBack }) {
                   : 'text-zinc-500 hover:text-zinc-800 bg-transparent'
               }`}
             >
-              Without Photo (2)
+              Without Photo ({TEMPLATES_LIST.filter(t => t.photo === 'No Photo').length})
             </button>
             <button 
               onClick={() => setFilter('with-photo')}
@@ -220,7 +225,7 @@ export default function TemplateSelectionView({ onBack }) {
                   : 'text-zinc-500 hover:text-zinc-800 bg-transparent'
               }`}
             >
-              With Photo (4)
+              With Photo ({TEMPLATES_LIST.filter(t => t.photo !== 'No Photo').length})
             </button>
           </div>
         </div>

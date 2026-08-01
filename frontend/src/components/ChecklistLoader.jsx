@@ -1,69 +1,84 @@
 import React from 'react';
-import { Check, Circle } from 'lucide-react';
-import { AnimatePresence, motion } from 'framer-motion';
-import {
-  AnimatedProgress, MotionList, useTailr4uReducedMotion
-} from '../motion/MotionSystem';
+import { Check, Loader2 } from 'lucide-react';
+import { motion } from 'framer-motion';
 
-function ChecklistLoader({ title, progress, message, checklistItems }) {
-  const reducedMotion = useTailr4uReducedMotion();
+function ChecklistLoader({ title, progress = 0, message, checklistItems = [] }) {
   return (
-    <div className="flex-1 flex flex-col items-center justify-center space-y-6 py-12 select-none font-sans max-w-sm mx-auto">
-      <div className="w-9 h-9 rounded-md bg-tf-surface border border-tf-border shadow-sm flex items-center justify-center">
-        <svg
-          className="tf-loader-spinner h-4 w-4 text-tf-accent shrink-0"
-          xmlns="http://www.w3.org/2000/svg"
-          fill="none"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-        >
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"></circle>
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
+    <div className="min-h-[calc(100vh-64px)] w-full bg-slate-50/50 dark:bg-slate-950 flex flex-col items-center justify-center p-6 select-none font-sans">
+      <div className="w-full max-w-sm bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 rounded-3xl p-6 sm:p-8 shadow-xl flex flex-col items-center text-center space-y-5">
+        
+        {/* Animated Brand Spinner Box */}
+        <div className="relative">
+          <div className="w-12 h-12 rounded-2xl bg-[#00bda5]/10 border border-[#00bda5]/20 flex items-center justify-center text-[#00bda5] shadow-sm">
+            <Loader2 className="w-6 h-6 animate-spin tf-loader-spinner" />
+          </div>
+        </div>
+
+        {/* Title & Message */}
+        <div className="space-y-1 w-full">
+          <h3 className="text-base font-extrabold tracking-tight text-zinc-900 dark:text-white">
+            {title}
+          </h3>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium min-h-[1.25rem] flex items-center justify-center">
+            {message || "Processing..."}
+          </p>
+        </div>
+
+        {/* Glowing Progress Bar */}
+        <div className="w-full h-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden relative shadow-inner">
+          <motion.div
+            className="h-full bg-[#00bda5] rounded-full shadow-[0_0_10px_#00bda5] transition-all duration-300"
+            initial={{ width: "5%" }}
+            animate={{ width: `${Math.max(5, Math.min(100, progress))}%` }}
+          />
+        </div>
+
+        {/* Stable Checklist Container */}
+        <div className="w-full bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200/70 dark:border-zinc-800 rounded-2xl p-4 flex flex-col gap-3 text-left">
+          {checklistItems.map((item, idx) => {
+            const isDone = progress >= item.progressThreshold;
+            const isPending = !isDone && (idx === 0 || progress >= (checklistItems[idx - 1]?.progressThreshold || 0));
+
+            return (
+              <div
+                key={item.label || idx}
+                className="flex items-center gap-3 py-0.5 min-h-[24px]"
+              >
+                {/* Status Indicator Icon */}
+                <div
+                  className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-all ${
+                    isDone
+                      ? 'bg-[#00bda5] text-white shadow-xs'
+                      : isPending
+                      ? 'bg-[#00bda5]/15 border-2 border-[#00bda5] text-[#00bda5]'
+                      : 'bg-zinc-100 dark:bg-zinc-800 border border-zinc-300/80 dark:border-zinc-700 text-transparent'
+                  }`}
+                >
+                  {isDone ? (
+                    <Check size={12} strokeWidth={3} />
+                  ) : isPending ? (
+                    <Loader2 size={11} className="animate-spin text-[#00bda5]" />
+                  ) : null}
+                </div>
+
+                {/* Item Label */}
+                <span
+                  className={`text-xs transition-colors ${
+                    isDone
+                      ? 'text-zinc-800 dark:text-zinc-200 font-semibold'
+                      : isPending
+                      ? 'text-[#00bda5] font-extrabold'
+                      : 'text-zinc-400 dark:text-zinc-500 font-medium'
+                  }`}
+                >
+                  {item.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
       </div>
-
-      <div className="text-center space-y-1">
-        <h3 className="text-sm font-semibold tracking-tight text-tf-text">{title}</h3>
-        <p className="text-xs text-tf-text-secondary font-normal h-4 leading-none">{message}</p>
-      </div>
-
-      <AnimatedProgress value={progress} className="w-48 h-1 bg-tf-surface-2 border border-tf-border rounded-full" barClassName="bg-tf-accent rounded-full" />
-
-      <MotionList className="w-full bg-tf-surface border border-tf-border rounded-lg p-4 space-y-2.5 text-xs text-tf-text-secondary shadow-sm">
-        {checklistItems.map((item, idx) => {
-          const isDone = progress >= item.progressThreshold;
-          const isPending = progress < item.progressThreshold && (idx === 0 || progress >= checklistItems[idx - 1].progressThreshold);
-          return (
-            <motion.div
-              layout
-              key={item.label || idx}
-              animate={isPending && !reducedMotion ? { x: [0, 2, 0] } : { x: 0 }}
-              transition={isPending && !reducedMotion
-                ? { duration: 1.1, repeat: Infinity, ease: 'easeInOut' }
-                : { duration: 0.2 }}
-              className="flex items-center gap-2.5 font-medium"
-            >
-              <motion.span
-                animate={isPending && !reducedMotion
-                  ? { scale: [1, 1.12, 1], boxShadow: ['0 0 0 0 rgba(59,130,246,0)', '0 0 0 5px rgba(59,130,246,.12)', '0 0 0 0 rgba(59,130,246,0)'] }
-                  : { scale: 1, boxShadow: '0 0 0 0 rgba(59,130,246,0)' }}
-                transition={isPending && !reducedMotion
-                  ? { duration: 1.1, repeat: Infinity, ease: 'easeInOut' }
-                  : { duration: 0.2 }}
-                className={`w-4 h-4 rounded-full flex items-center justify-center text-xs ${
-                isDone ? 'bg-tf-accent/15 text-tf-accent' : isPending ? 'bg-tf-surface-2 border border-tf-accent text-tf-accent' : 'bg-tf-surface-2 border border-tf-border text-tf-text-tertiary'
-              }`}>
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.span key={isDone ? 'done' : 'pending'} initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }}>
-                    {isDone ? <Check size={10} strokeWidth={2.5} /> : <Circle size={6} />}
-                  </motion.span>
-                </AnimatePresence>
-              </motion.span>
-              <span className={isDone ? 'line-through text-tf-text-tertiary' : isPending ? 'text-tf-text font-semibold' : 'text-tf-text-secondary'}>{item.label}</span>
-            </motion.div>
-          );
-        })}
-      </MotionList>
     </div>
   );
 }

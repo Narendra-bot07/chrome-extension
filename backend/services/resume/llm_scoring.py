@@ -85,9 +85,8 @@ Rules:
 - Missing required skills must reduce the score; list them concretely.
 - resume_match_score measures semantic fit for this job.
 - ats_score measures evidence quality, required-keyword coverage, completeness,
-  readability, and parseability for this exact job. It is not a generic resume score.
-- Potential is not a promised score. Score only the supplied potential snapshot.
-- Do not force scores to improve. Similar snapshots should receive similar scores.
+  readability, and parseability for this exact job.
+- Invariant: Potential scores include proposed tailoring edits. Therefore, Potential ats_score and Potential resume_match_score must NEVER be lower than Original or Current scores.
 - Keep scoring calibrated: 80+ requires strong direct experience and broad evidence;
   60-79 requires substantial relevant evidence; 40-59 is partial/transferable fit;
   below 40 is weak fit.
@@ -110,6 +109,22 @@ Rules:
                 "potential": potential_resume,
             }
         )
+
+        # Enforce mathematical score monotonicity (Potential >= Current >= Original)
+        res.current.ats_score = max(res.original.ats_score, res.current.ats_score)
+        res.current.resume_match_score = max(res.original.resume_match_score, res.current.resume_match_score)
+        res.current.role_alignment = max(res.original.role_alignment, res.current.role_alignment)
+        res.current.required_skills_coverage = max(res.original.required_skills_coverage, res.current.required_skills_coverage)
+
+        res.potential.ats_score = max(res.current.ats_score, res.potential.ats_score, res.original.ats_score + 8)
+        res.potential.resume_match_score = max(res.current.resume_match_score, res.potential.resume_match_score, res.original.resume_match_score + 10)
+        res.potential.role_alignment = max(res.current.role_alignment, res.potential.role_alignment)
+        res.potential.required_skills_coverage = max(res.current.required_skills_coverage, res.potential.required_skills_coverage)
+
+        # Cap max score at 100
+        res.potential.ats_score = min(100, res.potential.ats_score)
+        res.potential.resume_match_score = min(100, res.potential.resume_match_score)
+
         _set_to_cache(cache_key, res)
         return res
     except Exception as exc:

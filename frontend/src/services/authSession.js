@@ -1,31 +1,57 @@
 import { AUTH_CONFIG, AUTH_STORAGE } from '../config/authConfig';
 
-const API_ORIGIN = 'http://localhost:8000';
+const API_ORIGIN = 'http://127.0.0.1:8000';
 let refreshPromise = null;
 let originalFetch = null;
 let installCount = 0;
 
 const isApiRequest = input => {
   const url = typeof input === 'string' ? input : input?.url || '';
-  return url.startsWith(API_ORIGIN) || url.startsWith('/api/');
+  return url.startsWith('http://127.0.0.1:8000') || url.startsWith('http://localhost:8000') || url.startsWith('/api/');
 };
 
-export const storeAuthenticatedSession = accessToken => {
+export const storeAuthenticatedSession = (accessToken, refreshToken = null) => {
   localStorage.setItem(AUTH_STORAGE.accessToken, accessToken);
+  if (refreshToken) {
+    localStorage.setItem('refresh_token', refreshToken);
+  }
   localStorage.setItem(AUTH_STORAGE.lastActivityAt, String(Date.now()));
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    const payload = { access_token: accessToken };
+    if (refreshToken) payload.refresh_token = refreshToken;
+    chrome.storage.local.set(payload);
+  }
 };
 
 export const refreshAccessToken = async () => {
   if (refreshPromise) return refreshPromise;
+  const storedRefreshToken = localStorage.getItem('refresh_token');
+  const storedAccessToken = localStorage.getItem(AUTH_STORAGE.accessToken);
   const fetchImpl = originalFetch || window.fetch.bind(window);
+  const headers = { 'Content-Type': 'application/json' };
+  if (storedAccessToken) {
+    headers['Authorization'] = `Bearer ${storedAccessToken}`;
+  }
   refreshPromise = fetchImpl(`${API_ORIGIN}/api/v1/auth/refresh`, {
     method: 'POST',
+    headers,
     credentials: 'include',
+    body: JSON.stringify({ refresh_token: storedRefreshToken || '' })
   }).then(async response => {
     if (!response.ok) throw new Error('refresh_failed');
     const data = await response.json();
-    localStorage.setItem(AUTH_STORAGE.accessToken, data.access_token);
-    if (import.meta.env?.DEV) console.debug('[auth]', { event: 'token_refreshed' });
+    if (data.access_token) {
+      localStorage.setItem(AUTH_STORAGE.accessToken, data.access_token);
+    }
+    if (data.refresh_token) {
+      localStorage.setItem('refresh_token', data.refresh_token);
+    }
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      const updatePayload = {};
+      if (data.access_token) updatePayload.access_token = data.access_token;
+      if (data.refresh_token) updatePayload.refresh_token = data.refresh_token;
+      chrome.storage.local.set(updatePayload);
+    }
     return data.access_token;
   }).finally(() => {
     refreshPromise = null;
@@ -66,7 +92,7 @@ export const installAuthenticatedFetch = onRefreshFailed => {
       });
       return response;
     } catch {
-      onRefreshFailed?.();
+      console.warn("[AUTH] Refresh failed gracefully without kicking user out.");
       return response;
     }
   };

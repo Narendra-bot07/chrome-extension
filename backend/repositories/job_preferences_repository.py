@@ -35,19 +35,21 @@ class JobPreferencesRepository:
             return bool(row and row.get("table_name"))
 
     def get_by_user(self, user_id: str) -> Optional[Dict[str, Any]]:
-        if not self.table_exists():
-            self.ensure_table()
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                """
-                SELECT *
-                FROM public.job_preferences
-                WHERE user_id = %s
-                LIMIT 1
-                """,
-                (user_id,)
-            )
-            return cur.fetchone()
+            try:
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM public.job_preferences
+                    WHERE user_id = %s
+                    LIMIT 1
+                    """,
+                    (user_id,)
+                )
+                return cur.fetchone()
+            except Exception:
+                self.conn.rollback()
+                return None
 
     def has_completed(self, user_id: str) -> bool:
         prefs = self.get_by_user(user_id)

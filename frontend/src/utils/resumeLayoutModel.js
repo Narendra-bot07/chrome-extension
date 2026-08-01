@@ -17,17 +17,33 @@ export const SUPPORTED_LAYOUT_SECTIONS = Object.freeze([
 const MAIN_ONLY = new Set(['summary', 'objective', 'experience', 'internships', 'projects']);
 const IMPORTANT = new Set(['summary', 'experience', 'education', 'skills']);
 const DEFAULT_SIDEBAR = new Set(['skills', 'education', 'certifications', 'languages', 'interests']);
+
 const uniqueSupported = values => [...new Set(
   (Array.isArray(values) ? values : []).filter(value => SUPPORTED_LAYOUT_SECTIONS.includes(value))
 )];
+
 const meaningful = value => {
   if (Array.isArray(value)) return value.some(meaningful);
   if (value && typeof value === 'object') return Object.values(value).some(meaningful);
   return String(value ?? '').trim().length > 0;
 };
-const sectionValue = (resume, section) => section === 'volunteer'
-  ? resume?.volunteer_experience
-  : resume?.[section];
+
+const sectionValue = (resume, section) => {
+  if (section === 'skills') {
+    return (
+      (resume?.skills && (Array.isArray(resume.skills) ? resume.skills.length > 0 : String(resume.skills).trim() !== '')) ||
+      (resume?.skills_categories && typeof resume.skills_categories === 'object' && Object.keys(resume.skills_categories).length > 0) ||
+      (resume?.parsed_data?.skills && (Array.isArray(resume.parsed_data.skills) ? resume.parsed_data.skills.length > 0 : String(resume.parsed_data.skills).trim() !== '')) ||
+      (resume?.parsed_data?.skills_categories && typeof resume.parsed_data.skills_categories === 'object' && Object.keys(resume.parsed_data.skills_categories).length > 0) ||
+      (resume?.technical_skills)
+    ) ? (resume?.skills_categories || resume?.skills || resume?.parsed_data?.skills_categories || resume?.parsed_data?.skills || resume?.technical_skills) : null;
+  }
+  if (section === 'volunteer') {
+    return resume?.volunteer_experience || resume?.volunteer;
+  }
+  return resume?.[section];
+};
+
 export const sectionHasContent = (resume, section) => meaningful(sectionValue(resume, section));
 
 export function resolveLayoutAvailability(resume = {}, templateConfig = {}) {
@@ -67,8 +83,6 @@ export function resolveLayoutAvailability(resume = {}, templateConfig = {}) {
     body: Object.fromEntries(SUPPORTED_LAYOUT_SECTIONS.map(section => [
       section, sectionHasContent(resume, section)
     ])),
-    // TailorRender currently has no footer renderer; do not expose controls
-    // for components that cannot appear in preview/PDF.
     footer: Object.fromEntries(FOOTER_COMPONENTS.map(component => [component, false]))
   };
 }
@@ -93,7 +107,10 @@ export function createResumeLayoutModel(resume = {}, templateId = 'ExecutiveATS'
   const existing = resume.layout_model || {};
   const existingTree = existing.layout_tree || {};
   const availability = resolveLayoutAvailability(resume, templateConfig);
-  const sourceOrder = uniqueSupported(resume.section_order || SUPPORTED_LAYOUT_SECTIONS)
+  const baseOrder = resume.section_order && Array.isArray(resume.section_order) && resume.section_order.length > 0
+    ? [...new Set([...resume.section_order, ...SUPPORTED_LAYOUT_SECTIONS])]
+    : SUPPORTED_LAYOUT_SECTIONS;
+  const sourceOrder = uniqueSupported(baseOrder)
     .filter(section => availability.body[section]);
   const split = ['sidebar', 'two-column', 'marissa'].includes(templateConfig.layout);
   const treeColumns = existingTree.body?.rows?.flatMap(row => row.columns || []) || [];
@@ -116,7 +133,6 @@ export function createResumeLayoutModel(resume = {}, templateId = 'ExecutiveATS'
       : sourceOrder.filter(section => DEFAULT_SIDEBAR.has(section)))
     : [];
 
-  // Repair stale/invalid saved data deterministically at the single boundary.
   const repairedMain = [...main];
   const repairedSidebar = sidebar.filter(section => {
     if (!validateSectionPlacement(section, 'sidebar', resume).valid) {
@@ -125,9 +141,7 @@ export function createResumeLayoutModel(resume = {}, templateId = 'ExecutiveATS'
     }
     return true;
   });
-  // Resume content is immutable after review. Stale saved layout metadata must
-  // never silently remove populated sections from preview/PDF; explicit
-  // content removal belongs to the review workflow, not the layout model.
+
   const hidden = [];
   const visible = new Set([...repairedMain, ...repairedSidebar]);
   sourceOrder.forEach(section => {

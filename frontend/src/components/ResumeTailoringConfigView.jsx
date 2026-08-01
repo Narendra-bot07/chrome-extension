@@ -97,23 +97,68 @@ function ResumeTailoringConfigView({
     return () => clearInterval(interval);
   }, [loading]);
 
+  const previewCacheRef = React.useRef(new Map());
+  const [previewModalOpen, setPreviewModalOpen] = React.useState(false);
+  const [isPreviewLoading, setIsPreviewLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    let isMounted = true;
+    if (activeResume?.id && !previewCacheRef.current.has(activeResume.id)) {
+      const token = session?.access_token || localStorage.getItem('access_token');
+      if (token) {
+        fetch(`${apiUrl}/api/v1/resumes/${activeResume.id}/preview`, {
+          headers: { Authorization: `Bearer ${token}` }
+        }).then(res => res.ok ? res.blob() : null)
+          .then(blob => {
+            if (blob && isMounted) {
+              previewCacheRef.current.set(activeResume.id, URL.createObjectURL(blob));
+            }
+          }).catch(() => {});
+      }
+    }
+    return () => { isMounted = false; };
+  }, [activeResume?.id, session?.access_token, apiUrl]);
+
   React.useEffect(() => {
     return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewCacheRef.current.forEach(url => URL.revokeObjectURL(url));
+      previewCacheRef.current.clear();
     };
-  }, [previewUrl]);
+  }, []);
 
   const handlePreview = async (resume) => {
+    const targetResume = resume || activeResume;
+    if (!targetResume?.id) return;
+    setPreviewName(targetResume.file_name || 'Resume');
+    setPreviewModalOpen(true);
+
+    if (previewCacheRef.current.has(targetResume.id)) {
+      setPreviewUrl(previewCacheRef.current.get(targetResume.id));
+      setIsPreviewLoading(false);
+      return;
+    }
+
+    setIsPreviewLoading(true);
     const token = session?.access_token || localStorage.getItem('access_token');
-    if (!token || !resume?.id) return;
-    const res = await fetch(`${apiUrl}/api/v1/resumes/${resume.id}/preview`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) return;
-    const blob = await res.blob();
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewName(resume.file_name || 'Resume');
-    setPreviewUrl(URL.createObjectURL(blob));
+    if (!token) {
+      setIsPreviewLoading(false);
+      return;
+    }
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/resumes/${targetResume.id}/preview`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        previewCacheRef.current.set(targetResume.id, url);
+        setPreviewUrl(url);
+      }
+    } catch (e) {
+      console.warn('[PREVIEW] Failed to load resume preview', e);
+    } finally {
+      setIsPreviewLoading(false);
+    }
   };
 
   const handleSelectResume = async (resume) => {
@@ -364,20 +409,34 @@ function ResumeTailoringConfigView({
           </div>
         </div>
       )}
-
-      {previewUrl && (
-        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
+      {previewModalOpen && (
+        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6 select-none animate-fade-in">
           <div className="w-full max-w-5xl h-[88vh] bg-white dark:bg-zinc-950 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
             <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
               <div className="flex items-center gap-2 min-w-0">
-                <FileText size={16} className="text-zinc-400" />
-                <span className="text-sm font-black truncate">{previewName}</span>
+                <FileText size={16} className="text-[#00bda5]" />
+                <span className="text-sm font-black truncate text-zinc-900 dark:text-white">{previewName}</span>
               </div>
-              <button type="button" onClick={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(''); setPreviewName(''); }} className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-900">
+              <button
+                type="button"
+                onClick={() => setPreviewModalOpen(false)}
+                className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition"
+              >
                 <X size={18} />
               </button>
             </div>
-            <iframe title="Resume Preview" src={previewUrl} className="flex-1 w-full bg-white" />
+            <div className="flex-1 w-full bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center relative overflow-hidden">
+              {isPreviewLoading ? (
+                <div className="flex flex-col items-center justify-center space-y-3 p-6 text-center">
+                  <div className="w-10 h-10 border-3 border-[#00bda5] border-t-transparent rounded-full animate-spin" />
+                  <span className="text-xs font-black uppercase tracking-widest text-zinc-500">Preparing PDF Preview...</span>
+                </div>
+              ) : previewUrl ? (
+                <iframe title="Resume Preview" src={previewUrl} className="w-full h-full border-none bg-white" />
+              ) : (
+                <div className="text-sm font-bold text-zinc-400">Unable to load resume preview.</div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -385,4 +444,4 @@ function ResumeTailoringConfigView({
   );
 }
 
-export default ResumeTailoringConfigView;
+export default ResumeTailoringConfigView;;

@@ -66,6 +66,7 @@ function DownloadPage({ onClose }) {
     companyName,
     updateFinalizedWorkflowResume,
     parsedResume,
+    tailoredResume,
     workflowResume,
     selectedTemplate,
     handleDownloadFinalPDF,
@@ -78,13 +79,13 @@ function DownloadPage({ onClose }) {
   const [syncedApplication, setSyncedApplication] = useState(null);
   const sourceResume = useMemo(() => {
     try {
-      const raw = workflowResume;
+      const raw = tailoredResume || workflowResume || parsedResume;
       return raw ? toRenderableResume(raw) : null;
     } catch (err) {
       console.warn("Failed to convert to renderable resume:", err);
       return null;
     }
-  }, [workflowResume]);
+  }, [tailoredResume, workflowResume, parsedResume]);
 
   const composition = useMemo(() => {
     try {

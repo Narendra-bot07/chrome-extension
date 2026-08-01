@@ -1,12 +1,15 @@
 const CATEGORY_ORDER = [
   'Languages',
+  'Software Engineering',
+  'Frontend & Backend',
+  'AI & Generative AI',
   'Data Engineering',
   'Databases',
   'Cloud',
   'DevOps',
-  'AI & GenAI',
   'Machine Learning',
   'Visualization',
+  'Observability',
   'Computer Science Fundamentals',
   'Frameworks and Libraries',
   'Other'
@@ -39,21 +42,23 @@ const ALIASES = new Map(Object.entries({
 
 const CATEGORY_RULES = [
   ['Languages', /\b(python|java|javascript|typescript|c\+\+|c#|sql|go|rust|ruby|php|swift|kotlin|html|css)\b/i],
-  ['Data Engineering', /\b(pyspark|spark|kafka|databricks|delta lake|airflow|etl|data pipeline|medallion|unity catalog)\b/i],
+  ['Data Engineering', /\b(pyspark|spark|kafka|databricks|delta lake|airflow|etl|data pipeline|medallion|unity catalog|adls gen2)\b/i],
   ['Databases', /\b(postgresql|mysql|mongodb|redis|oracle|cassandra|dynamodb|dbms|snowflake|bigquery)\b/i],
-  ['Cloud', /\b(aws|amazon web services|microsoft azure|gcp|google cloud)\b/i],
+  ['Cloud', /\b(aws|amazon web services|microsoft azure|gcp|google cloud|azure)\b/i],
   ['DevOps', /\b(docker|kubernetes|jenkins|github actions|terraform|ci\/cd|linux|git)\b/i],
-  ['AI & GenAI', /\b(llms?|rag|langchain|langgraph|prompt engineering|vector search|embeddings?)\b/i],
+  ['AI & Generative AI', /\b(llms?|rag|langchain|langgraph|prompt engineering|vector search|embeddings?|hugging face|pytorch|tensorflow)\b/i],
   ['Machine Learning', /\b(machine learning|deep learning|tensorflow|pytorch|scikit-learn|regression|classification|clustering|model evaluation)\b/i],
   ['Visualization', /\b(power bi|tableau|matplotlib|seaborn|data visualization)\b/i],
-  ['Computer Science Fundamentals', /\b(data structures?|algorithms?|object-oriented|oop|operating systems?|computer networks?)\b/i],
-  ['Frameworks and Libraries', /\b(react|angular|vue|node|express|django|flask|fastapi|spring|next\.js|numpy|pandas)\b/i]
+  ['Observability', /\b(opentelemetry|prometheus|grafana|loki|tempo|monitoring|tracing)\b/i],
+  ['Computer Science Fundamentals', /\b(data structures?|algorithms?|object-oriented|oop|operating systems?|computer networks?|system design|design patterns|rest apis)\b/i],
+  ['Frameworks and Libraries', /\b(react|angular|vue|node|express|django|flask|fastapi|pydantic|vite|tailwind|spring|next\.js|numpy|pandas)\b/i]
 ];
 
 const inputItems = value => {
+  if (!value) return [];
   if (Array.isArray(value)) return value.flatMap(inputItems);
   if (typeof value === 'string') return value.split(',').map(item => item.trim()).filter(Boolean);
-  if (value && typeof value === 'object') return inputItems(value.name || value.skill || '');
+  if (value && typeof value === 'object') return inputItems(value.name || value.skill || value.title || '');
   return [];
 };
 
@@ -74,28 +79,47 @@ export function categorizeSkill(value) {
 }
 
 export function categorizeSkills(skillsArray = [], skillsCategories = {}) {
-  const result = Object.fromEntries(CATEGORY_ORDER.map(category => [category, []]));
+  const result = {};
   const seen = new Set();
+
   const add = (value, preferredCategory = null) => {
-    const skill = categorizeSkill(value);
-    if (!skill.name || seen.has(skill.normalizedName)) return;
-    seen.add(skill.normalizedName);
-    const category = CATEGORY_ORDER.includes(preferredCategory)
-      ? preferredCategory
-      : skill.category;
-    result[category].push(skill.name);
+    const cleanName = normalizeSkillName(value);
+    if (!cleanName) return;
+    const semKey = skillSemanticKey(cleanName);
+    if (seen.has(semKey)) return;
+    seen.add(semKey);
+
+    const category = (preferredCategory && String(preferredCategory).trim())
+      ? String(preferredCategory).trim()
+      : categorizeSkill(cleanName).category;
+
+    if (!result[category]) {
+      result[category] = [];
+    }
+    result[category].push(cleanName);
   };
 
-  if (skillsCategories && typeof skillsCategories === 'object') {
+  // 1. Preserve explicit source categories from resume parser/user
+  if (skillsCategories && typeof skillsCategories === 'object' && !Array.isArray(skillsCategories)) {
     Object.entries(skillsCategories).forEach(([category, values]) => {
-      inputItems(values).forEach(value => add(value, category));
+      const items = inputItems(values);
+      items.forEach(value => add(value, category));
+    });
+  } else if (Array.isArray(skillsCategories) && skillsCategories.length > 0) {
+    skillsCategories.forEach(catObj => {
+      if (typeof catObj === 'string') {
+        add(catObj);
+      } else if (catObj && typeof catObj === 'object') {
+        const catName = catObj.name || catObj.category || catObj.title;
+        const items = inputItems(catObj.skills || catObj.items || catObj.values || []);
+        items.forEach(val => add(val, catName));
+      }
     });
   }
-  inputItems(skillsArray).forEach(value => add(value));
 
-  return Object.fromEntries(
-    CATEGORY_ORDER
-      .filter(category => result[category].length)
-      .map(category => [category, result[category]])
-  );
+  // 2. Add any uncategorized skills array entries
+  const extraSkills = inputItems(skillsArray);
+  extraSkills.forEach(val => add(val, null));
+
+  return result;
 }

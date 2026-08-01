@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { AppProvider, useApp } from './context/AppContext';
 import Layout from './components/Layout';
 // Page Imports
@@ -36,6 +37,61 @@ import ExtensionSetupPage from './pages/ExtensionSetupPage';
 import { ReducedMotionProvider, MotionPage } from './motion/MotionSystem';
 import { loginPathFor } from './utils/authRedirect';
 import GlobalCursor from './components/GlobalCursor';
+import BrandLogo from './components/BrandLogo';
+
+function StartupLoader({ label = "Restoring session" }) {
+  return (
+    <div className="min-h-screen w-full bg-[#f6f9fc] dark:bg-[#0b0e14] text-zinc-900 dark:text-zinc-100 flex flex-col items-center justify-center p-4 relative overflow-hidden transition-colors duration-300 select-none">
+      {/* Ambient Glows */}
+      <div className="absolute w-96 h-96 bg-[#00bda5]/15 rounded-full blur-3xl -top-20 -left-20 pointer-events-none animate-pulse" />
+      <div className="absolute w-96 h-96 bg-blue-500/10 rounded-full blur-3xl -bottom-20 -right-20 pointer-events-none animate-pulse" />
+
+      <motion.div
+        initial={{ opacity: 0, scale: 0.92, y: 8 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+        className="w-full max-w-xs text-center flex flex-col items-center relative z-10"
+        role="status"
+        aria-live="polite"
+        aria-label={label}
+      >
+        {/* Official Brand Logo */}
+        <div className="relative mb-5">
+          <motion.div
+            animate={{ scale: [1, 1.12, 1], opacity: [0.3, 0.75, 0.3] }}
+            transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
+            className="absolute -inset-3 bg-gradient-to-r from-[#00bda5] via-blue-500 to-orange-500 rounded-3xl blur-md opacity-40"
+          />
+          <div className="relative p-2 rounded-2xl bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/80 dark:border-zinc-800 shadow-xl">
+            <BrandLogo size={48} />
+          </div>
+        </div>
+
+        {/* Animated Shimmer Progress Track */}
+        <div className="w-56 mt-5 h-1.5 bg-zinc-200/80 dark:bg-zinc-800/80 rounded-full overflow-hidden relative shadow-inner">
+          <motion.div
+            initial={{ x: "-100%" }}
+            animate={{ x: "100%" }}
+            transition={{
+              repeat: Infinity,
+              duration: 1.3,
+              ease: "easeInOut"
+            }}
+            className="h-full w-1/2 bg-gradient-to-r from-transparent via-[#00bda5] to-transparent rounded-full shadow-[0_0_12px_#00bda5]"
+          />
+        </div>
+
+        {/* Status Label */}
+        <div className="mt-4 flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#00bda5] animate-ping" />
+          <p className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
+            {label}
+          </p>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
 
 function ProtectedRoute({ children }) {
   const { user, loadingAuth, parsedResume, resumesList, loadingResume } = useApp();
@@ -44,16 +100,7 @@ function ProtectedRoute({ children }) {
   const hasAnyResume = Boolean(parsedResume) || (Array.isArray(resumesList) && resumesList.length > 0);
   
   if (loadingAuth || (isExtension && loadingResume)) {
-    return (
-      <div className="min-h-screen bg-[#FAFAFB] dark:bg-[#15171c] text-zinc-900 dark:text-zinc-100 flex flex-col items-center justify-center transition-colors">
-        <div className="w-72 space-y-3" role="status" aria-label="Verifying your session">
-          <div className="h-8 w-32 rounded-lg bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
-          <div className="h-3 w-full rounded bg-zinc-100 dark:bg-zinc-900 animate-pulse" />
-          <div className="h-3 w-4/5 rounded bg-zinc-100 dark:bg-zinc-900 animate-pulse" />
-          <span className="sr-only">Verifying session</span>
-        </div>
-      </div>
-    );
+    return <StartupLoader label="Verifying session" />;
   }
   
   if (!user) {
@@ -72,25 +119,6 @@ function ProtectedRoute({ children }) {
   }
   
   return children;
-}
-
-function StartupLoader() {
-  return (
-    <div className="min-h-screen bg-[#edf7ff] dark:bg-[#0b1220] text-zinc-900 dark:text-white flex items-center justify-center">
-      <div className="w-72 text-center" role="status" aria-live="polite" aria-label="Restoring your tailr4u session">
-        <div className="mx-auto mb-5 h-14 w-14 overflow-hidden rounded-2xl bg-white/80 p-2 shadow-lg dark:bg-white/10">
-          <img src={`${import.meta.env.BASE_URL || '/'}application-logo.png`} alt="" className="h-full w-full object-contain" />
-        </div>
-        <div className="text-xl font-black tracking-tight">Tailr4U</div>
-        <div className="mt-4 h-1 overflow-hidden rounded-full bg-blue-950/10 dark:bg-white/10">
-          <div className="h-full w-2/3 rounded-full bg-gradient-to-r from-blue-500 to-teal-400 motion-safe:animate-pulse" />
-        </div>
-        <p className="mt-3 font-mono text-[9px] font-bold uppercase tracking-[.18em] text-zinc-500 dark:text-zinc-400">
-          Restoring session
-        </p>
-      </div>
-    </div>
-  );
 }
 
 function AppRoutes() {
@@ -129,21 +157,12 @@ function AppRoutes() {
         }
       }
     } else {
-      if (!loadingPreferences && user) {
-        const isOnboardingRoute = location.pathname === '/onboarding/job-preferences';
-        const isPublicOrAuthRoute = ['/', '/login', '/register', '/forgot-password', '/reset-password', '/verify-email', '/email-sent'].includes(location.pathname);
-
-        if (!hasCompletedPreferences && !isOnboardingRoute && !isPublicOrAuthRoute) {
-          navigate('/onboarding/job-preferences', { replace: true });
+      if (user) {
+        if (!hasAnyResume && location.pathname === '/tailor') {
+          navigate('/extension-setup', { replace: true });
           return;
         }
-
-        if (!parsedResume && location.pathname === '/tailor') {
-          navigate('/resume-detect', { replace: true });
-          return;
-        }
-
-        if (!hasRedirectedOnStartup && !isPublicOrAuthRoute) setHasRedirectedOnStartup(true);
+        if (!hasRedirectedOnStartup) setHasRedirectedOnStartup(true);
       }
     }
   }, [

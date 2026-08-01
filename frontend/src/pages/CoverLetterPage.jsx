@@ -65,12 +65,12 @@ function CoverLetterVectorRender({ coverLetter, context, templateKey = 'classic_
   const candidate = context?.candidate || {};
   const job = context?.job || {};
 
-  const name = candidate.name || coverLetter.applicant_name || 'Candidate Name';
-  const email = candidate.email || coverLetter.email || '';
+  const name = candidate.name || coverLetter.applicant_name || context?.user?.user_metadata?.full_name || (context?.user?.email ? context.user.email.split('@')[0] : '');
+  const email = candidate.email || coverLetter.email || context?.user?.email || '';
   const phone = candidate.phone || coverLetter.phone || '';
   const location = candidate.location || coverLetter.location || '';
 
-  const company = job.company || coverLetter.company_name || 'Hiring Company';
+  const company = job.company || coverLetter.company_name || context?.companyName || '';
   const recipient = coverLetter.recipient_name || 'Hiring Manager';
   const salutation = coverLetter.salutation || 'Dear Hiring Manager,';
   const date = coverLetter.date || new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });

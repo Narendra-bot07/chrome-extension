@@ -57,8 +57,8 @@ class AuthService:
                     error_payload.get("error", {}).get("message")
                     or f"People API returned HTTP {response.status_code}"
                 )
-                logger.warning(
-                    "Google People API enrichment failed: status=%s reason=%s",
+                logger.info(
+                    "Google People API optional enrichment skipped: status=%s reason=%s",
                     response.status_code,
                     error_message,
                 )
@@ -129,7 +129,7 @@ class AuthService:
             logger.info("Google People API enrichment populated fields: %s", populated)
             return enriched
         except Exception as exc:
-            logger.warning("Google People API enrichment error: %s", exc)
+            logger.info("Google People API enrichment skipped: %s", exc)
             return {
                 "_import_status": "failed",
                 "_import_error": str(exc),
@@ -230,9 +230,9 @@ class AuthService:
                         phone_country_code, phone_number, country, state, city,
                         current_title, linkedin_url, github_url, website_url
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'google', %s, %s,
-                            NULLIF(%s, '')::date, %s, %s, %s, %s, %s, %s, %s,
-                            %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'google', NULLIF(%s, ''), NULLIF(%s, ''),
+                            NULLIF(%s, '')::date, NULLIF(%s, ''), NULLIF(%s, ''), NULLIF(%s, ''), NULLIF(%s, ''), NULLIF(%s, ''), NULLIF(%s, ''), NULLIF(%s, ''),
+                            NULLIF(%s, ''), NULLIF(%s, ''), NULLIF(%s, ''))
                     """,
                     (
                         user["id"], user["email"], full_name,
@@ -277,20 +277,20 @@ class AuthService:
                             WHEN profile_confirmed_at IS NULL
                                  AND COALESCE(preferred_language, '') = ''
                             THEN %s ELSE preferred_language END,
-                        preferred_name = COALESCE(NULLIF(preferred_name, ''), %s),
+                        preferred_name = COALESCE(NULLIF(preferred_name, ''), NULLIF(%s, '')),
                         date_of_birth = COALESCE(
                             date_of_birth, NULLIF(%s, '')::date
                         ),
-                        gender = COALESCE(NULLIF(gender, ''), %s),
-                        phone_country_code = COALESCE(NULLIF(phone_country_code, ''), %s),
-                        phone_number = COALESCE(NULLIF(phone_number, ''), %s),
-                        country = COALESCE(NULLIF(country, ''), %s),
-                        state = COALESCE(NULLIF(state, ''), %s),
-                        city = COALESCE(NULLIF(city, ''), %s),
-                        current_title = COALESCE(NULLIF(current_title, ''), %s),
-                        linkedin_url = COALESCE(NULLIF(linkedin_url, ''), %s),
-                        github_url = COALESCE(NULLIF(github_url, ''), %s),
-                        website_url = COALESCE(NULLIF(website_url, ''), %s),
+                        gender = COALESCE(NULLIF(gender, ''), NULLIF(%s, '')),
+                        phone_country_code = COALESCE(NULLIF(phone_country_code, ''), NULLIF(%s, '')),
+                        phone_number = COALESCE(NULLIF(phone_number, ''), NULLIF(%s, '')),
+                        country = COALESCE(NULLIF(country, ''), NULLIF(%s, '')),
+                        state = COALESCE(NULLIF(state, ''), NULLIF(%s, '')),
+                        city = COALESCE(NULLIF(city, ''), NULLIF(%s, '')),
+                        current_title = COALESCE(NULLIF(current_title, ''), NULLIF(%s, '')),
+                        linkedin_url = COALESCE(NULLIF(linkedin_url, ''), NULLIF(%s, '')),
+                        github_url = COALESCE(NULLIF(github_url, ''), NULLIF(%s, '')),
+                        website_url = COALESCE(NULLIF(website_url, ''), NULLIF(%s, '')),
                         updated_at = NOW()
                     WHERE id = %s
                     """,

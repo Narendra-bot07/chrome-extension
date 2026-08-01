@@ -50,8 +50,18 @@ class ApplicationRepository:
             cur.execute(query, (app_id, user_id))
             return cur.fetchone()
 
-    def list_by_user(self, user_id: str) -> List[Dict[str, Any]]:
-        query = "SELECT * FROM public.applications WHERE user_id = %s ORDER BY created_at DESC"
+    def list_by_user(self, user_id: str, include_details: bool = False) -> List[Dict[str, Any]]:
+        if include_details:
+            query = "SELECT * FROM public.applications WHERE user_id = %s ORDER BY created_at DESC"
+        else:
+            query = """
+                SELECT id, user_id, company_name, company_domain, job_title, location, job_url,
+                       resume_version, cover_letter_version, ats_score, resume_match_score,
+                       resume_id, current_stage, notes, last_activity, created_at, updated_at
+                FROM public.applications
+                WHERE user_id = %s
+                ORDER BY created_at DESC
+            """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (user_id,))
             return cur.fetchall()

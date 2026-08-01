@@ -83,8 +83,45 @@ class CompareRequest(BaseModel):
     selected_sections: List[str] = []
 
 def normalize_resume_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    from services.resume.renderable import project_renderable_resume
-    return project_renderable_resume(payload)
+    if not isinstance(payload, dict):
+        return {}
+
+    parsed_content = payload.get("parsed_content")
+    if isinstance(parsed_content, str):
+        try:
+            parsed_content = json.loads(parsed_content)
+        except Exception:
+            parsed_content = {}
+    if not isinstance(parsed_content, dict):
+        parsed_content = {}
+
+    parsed_data = payload.get("parsed_data")
+    if isinstance(parsed_data, str):
+        try:
+            parsed_data = json.loads(parsed_data)
+        except Exception:
+            parsed_data = {}
+    if not isinstance(parsed_data, dict):
+        parsed_data = {}
+
+    sections_obj = payload.get("sections") if isinstance(payload.get("sections"), dict) else {}
+
+    merged = {
+        **payload,
+        **sections_obj,
+        **parsed_data,
+        **parsed_content
+    }
+
+    try:
+        from services.resume.renderable import project_renderable_resume
+        projected = project_renderable_resume(merged)
+        if isinstance(projected, dict) and (projected.get("experience") or projected.get("summary") or projected.get("skills")):
+            return projected
+    except Exception as exc:
+        pass
+
+    return merged
 
 def normalize_job_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     normalized = payload.get("normalized_content")
@@ -247,7 +284,15 @@ async def api_compare(
         resume_id = request.resume_id
         jd_id = request.job.get("id")
 
-        resume = ResumeStructure(**normalize_resume_payload(request.resume))
+        resume_data = normalize_resume_payload(request.resume)
+        if not resume_data.get("experience") and not resume_data.get("education"):
+            db_record = repo.get_by_id(resume_id, user["id"]) if resume_id else repo.get_active(user["id"])
+            if not db_record and resume_id:
+                db_record = repo.get_active(user["id"])
+            if db_record:
+                resume_data = normalize_resume_payload(db_record)
+
+        resume = ResumeStructure(**resume_data)
         job = JobAnalysis(**normalize_job_payload(request.job))
         from services.resume.tailoring_cache import (
             TAILORING_ENGINE_VERSION,

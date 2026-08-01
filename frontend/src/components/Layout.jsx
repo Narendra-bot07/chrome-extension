@@ -424,7 +424,7 @@ function Layout() {
 
             {/* User Profile Dropdown Glass Pill */}
             {(() => {
-              const displayName = profile?.full_name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Narendra';
+              const displayName = profile?.full_name || user?.user_metadata?.full_name || (user?.email ? user.email.split('@')[0] : 'User');
               return (
                 <div className="relative border-l border-tf-border/60 pl-2.5" ref={profileMenuRef}>
                   <button
@@ -446,7 +446,7 @@ function Layout() {
                             {(profile?.subscription_plan || subscription?.plan_type || 'FREE').toUpperCase()}
                           </span>
                         </div>
-                        <div className="text-[11px] text-tf-text-tertiary truncate mt-0.5">{user?.email || 'user@example.com'}</div>
+                        {user?.email && <div className="text-[11px] text-tf-text-tertiary truncate mt-0.5">{user.email}</div>}
                       </div>
 
                       {/* Menu Items */}

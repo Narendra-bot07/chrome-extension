@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-TAILORING_ENGINE_VERSION = "stable-patch-v8-factual-guards"
+TAILORING_ENGINE_VERSION = "v1.3.0-fresh-full-pipeline-v9"
 PATCHABLE_SELECTIONS = frozenset({"summary", "experience", "projects", "skills"})
 
 
@@ -30,6 +30,11 @@ def tailoring_cache_matches(
     has_edits = isinstance(patch, dict) and any(
         bool(v) for v in patch.values() if v is not None
     )
+    # Reject stale cached analysis that lacks full breakdown dictionary
+    breakdown_before = payload.get("breakdown_before") or {}
+    if not isinstance(breakdown_before, dict) or len(breakdown_before) < 3:
+        return False
+
     return (
         payload.get("tailoring_engine_version") == TAILORING_ENGINE_VERSION
         and payload.get("tailoring_generation_status") == "completed"

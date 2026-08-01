@@ -135,14 +135,7 @@ export default function PublicAuthPanel() {
   };
 
   useEffect(() => {
-    const reason = new URLSearchParams(location.search).get('reason');
-    setError(
-      reason === 'inactivity'
-        ? 'You were signed out after 30 minutes of inactivity.'
-        : reason === 'refresh_failed'
-          ? 'Your secure session expired. Please sign in again.'
-          : ''
-    );
+    // Clear out automatic session timeout banners as requested
     if (!success) requestAnimationFrame(() => emailRef.current?.focus());
   }, [location.search, routeMode, success]);
 

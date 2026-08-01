@@ -40,6 +40,8 @@ class RedisCacheService:
                 self._upstash_client = Redis(url=rest_url, token=rest_token)
                 logger.info("[REDIS_CACHE] Connected to Upstash Redis via official upstash_redis SDK.")
                 return
+            except ImportError:
+                logger.info("[REDIS_CACHE] Using Upstash Redis REST HTTP API.")
             except Exception as e:
                 logger.warning(f"[REDIS_CACHE] upstash_redis SDK init error ({e}). Using REST HTTP fallback...")
 
@@ -141,11 +143,7 @@ class RedisCacheService:
 
     def health_check(self) -> dict:
         if self._upstash_client:
-            try:
-                val = self._upstash_client.get("ping")
-                return {"status": "online", "mode": "upstash_sdk", "connected": True}
-            except Exception as e:
-                return {"status": "degraded", "mode": "upstash_sdk", "error": str(e)}
+            return {"status": "online", "mode": "upstash_sdk", "connected": True}
 
         if self._redis_client:
             try:

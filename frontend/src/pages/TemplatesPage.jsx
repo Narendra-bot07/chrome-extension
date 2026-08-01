@@ -6,12 +6,14 @@ import { useNavigate } from 'react-router-dom';
 function TemplatesPage() {
   const navigate = useNavigate();
   const {
+    tailoredResume,
+    parsedResume,
     workflowResume,
     resumeWorkflowHydrated,
     loading
   } = useApp();
 
-  const activeResume = workflowResume || tailoredResume || parsedResume;
+  const activeResume = tailoredResume || workflowResume || parsedResume;
 
   if (loading || !resumeWorkflowHydrated) {
     return (

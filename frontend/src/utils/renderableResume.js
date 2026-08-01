@@ -178,24 +178,65 @@ const sanitizeAchievementEvidence = values => {
   });
 };
 
-const safeArray = val => Array.isArray(val) ? val : (val && typeof val === 'object' ? [val] : (typeof val === 'string' && val.trim() ? [val.trim()] : []));
+const safeArray = val => {
+  if (!val) return [];
+  if (Array.isArray(val)) return val;
+  if (typeof val === 'object' && val !== null) {
+    const keys = Object.keys(val);
+    const isNumericDict = keys.length > 0 && keys.every(k => /^\d+$/.test(k));
+    if (isNumericDict) {
+      return keys.sort((a, b) => Number(a) - Number(b)).map(k => val[k]);
+    }
+    return [val];
+  }
+  if (typeof val === 'string' && val.trim()) return [val.trim()];
+  return [];
+};
 
 export function toRenderableResume(record) {
   if (!record || typeof record !== 'object') return null;
-  const source = record?.parsed_content && typeof record.parsed_content === 'object'
-    ? record.parsed_content
-    : record;
+
+  let parsedContentObj = {};
+  if (record?.parsed_content) {
+    if (typeof record.parsed_content === 'object') {
+      parsedContentObj = record.parsed_content;
+    } else if (typeof record.parsed_content === 'string') {
+      try {
+        parsedContentObj = JSON.parse(record.parsed_content);
+      } catch (e) {}
+    }
+  }
+
+  let parsedDataObj = {};
+  if (record?.parsed_data) {
+    if (typeof record.parsed_data === 'object') {
+      parsedDataObj = record.parsed_data;
+    } else if (typeof record.parsed_data === 'string') {
+      try {
+        parsedDataObj = JSON.parse(record.parsed_data);
+      } catch (e) {}
+    }
+  }
+
+  const source = {
+    ...record,
+    ...(record?.sections && typeof record.sections === 'object' ? record.sections : {}),
+    ...parsedDataObj,
+    ...parsedContentObj
+  };
   const output = {};
 
   TOP_LEVEL_FIELDS.forEach(field => {
-    if (source[field] !== undefined && source[field] !== null) {
-      output[field] = structuredClone(source[field]);
+    const val = source[field] ?? parsedContentObj[field] ?? parsedDataObj[field];
+    if (val !== undefined && val !== null) {
+      output[field] = structuredClone(val);
     }
   });
 
   // Older parser versions and imported resume providers use equivalent names.
   output.summary = structuredClone(
-    source.summary
+    (source.summary && String(source.summary).trim() ? source.summary : null)
+    || (parsedContentObj.summary && String(parsedContentObj.summary).trim() ? parsedContentObj.summary : null)
     || source.professional_summary
     || source.career_summary
     || source.profile_summary
@@ -203,9 +244,14 @@ export function toRenderableResume(record) {
     || ''
   );
   output.objective = structuredClone(
-    source.objective || source.career_objective || ''
+    source.objective || parsedContentObj.objective || source.career_objective || ''
   );
-  output.experience = safeArray(source.experience || source.work_experience).map(item => {
+  const rawExperience = (safeArray(source.experience).length > 0 ? source.experience : null)
+    || (safeArray(parsedContentObj.experience).length > 0 ? parsedContentObj.experience : null)
+    || (safeArray(parsedDataObj.experience).length > 0 ? parsedDataObj.experience : null)
+    || source.work_experience || source.employment_history || source.professional_experience;
+
+  output.experience = safeArray(rawExperience).map(item => {
     const normalized = typeof item === 'string' ? { description: [item] } : { ...item };
     const descriptions = normalized.description
       ?? normalized.responsibilities
@@ -217,7 +263,13 @@ export function toRenderableResume(record) {
       : String(descriptions || '').split(/\r?\n/).map(cleanText).filter(Boolean);
     return normalized;
   });
-  output.projects = safeArray(source.projects || source.project_experience).map(item => {
+
+  const rawProjects = (safeArray(source.projects).length > 0 ? source.projects : null)
+    || (safeArray(parsedContentObj.projects).length > 0 ? parsedContentObj.projects : null)
+    || (safeArray(parsedDataObj.projects).length > 0 ? parsedDataObj.projects : null)
+    || source.project_experience || source.key_projects;
+
+  output.projects = safeArray(rawProjects).map(item => {
     const normalized = typeof item === 'string' ? { name: item, description: [item] } : { ...item };
     const descriptions = normalized.description
       ?? normalized.responsibilities
@@ -231,6 +283,15 @@ export function toRenderableResume(record) {
       ? normalized.technology_stack.map(cleanText).filter(Boolean)
       : String(normalized.technology_stack || '').split(',').map(cleanText).filter(Boolean);
     return normalized;
+  });
+
+  const rawEducation = (safeArray(source.education).length > 0 ? source.education : null)
+    || (safeArray(parsedContentObj.education).length > 0 ? parsedContentObj.education : null)
+    || (safeArray(parsedDataObj.education).length > 0 ? parsedDataObj.education : null)
+    || source.academic_background || source.education_history;
+
+  output.education = safeArray(rawEducation).map(item => {
+    return typeof item === 'string' ? { degree: cleanText(item) } : { ...item };
   });
 
   const personal = {
@@ -276,9 +337,15 @@ export function toRenderableResume(record) {
     output.personal_info.name = resolvedName;
   }
 
-  if (personal.photo_url || source.photo_url) {
-    output.photo_url = personal.photo_url || source.photo_url;
-    output.personal_info.photo_url = output.photo_url;
+  const extractedPhotoUrl = personal.photo_url
+    || source.photo_url
+    || source.personal_info?.photo_url
+    || source.parsed_content?.personal_info?.photo_url
+    || source.parsed_data?.personal_info?.photo_url;
+
+  if (extractedPhotoUrl) {
+    output.photo_url = extractedPhotoUrl;
+    output.personal_info.photo_url = extractedPhotoUrl;
   }
   if (personal.photo_position_y !== undefined || source.photo_position_y !== undefined) {
     output.photo_position_y = personal.photo_position_y ?? source.photo_position_y ?? 50;

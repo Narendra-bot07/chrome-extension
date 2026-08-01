@@ -21,6 +21,7 @@ class ResumeRepository:
                 parsed_content = json.loads(parsed_content)
             except Exception:
                 parsed_content = {}
+        normalized["parsed_content"] = parsed_content
 
         times_used = normalized.get("times_used")
         tailor_count = normalized.get("tailor_count")
@@ -107,6 +108,65 @@ class ResumeRepository:
 
         return record
 
+    def _enrich_resume_records_batch(self, records: List[Dict[str, Any]], cur) -> List[Dict[str, Any]]:
+        """Batch-enrich multiple resume records in 3 query roundtrips instead of N+1 loops."""
+        if not records:
+            return []
+
+        resume_ids = [r["id"] for r in records if r.get("id")]
+        if not resume_ids:
+            return records
+
+        cur.execute("""
+            SELECT resume_id, COUNT(*) AS v_count
+            FROM public.resume_versions
+            WHERE resume_id = ANY(%s::uuid[]) AND deleted_at IS NULL
+            GROUP BY resume_id
+        """, (resume_ids,))
+        counts = {str(row["resume_id"]): row["v_count"] for row in cur.fetchall()}
+
+        cur.execute("""
+            SELECT DISTINCT ON (resume_id) *
+            FROM public.resume_versions
+            WHERE resume_id = ANY(%s::uuid[]) AND deleted_at IS NULL
+            ORDER BY resume_id, is_current DESC, version_number DESC
+        """, (resume_ids,))
+        current_versions = {str(row["resume_id"]): dict(row) for row in cur.fetchall()}
+
+        cur.execute("""
+            SELECT DISTINCT ON (resume_id) resume_id, ats_score, resume_match_score
+            FROM public.resume_usage_events
+            WHERE resume_id = ANY(%s::uuid[]) AND (ats_score IS NOT NULL OR resume_match_score IS NOT NULL)
+            ORDER BY resume_id, created_at DESC
+        """, (resume_ids,))
+        usage_scores = {str(row["resume_id"]): row for row in cur.fetchall()}
+
+        for record in records:
+            rid = record.get("id")
+            if not rid:
+                continue
+            record["versions_count"] = counts.get(rid, 1)
+            current_ver = current_versions.get(rid)
+            if current_ver:
+                record["current_version"] = current_ver
+                record["active_version_id"] = current_ver.get("id")
+                record["latest_ats_score"] = current_ver.get("ats_score")
+                record["latest_match_score"] = current_ver.get("resume_match_score")
+            else:
+                record["current_version"] = None
+                record["latest_ats_score"] = None
+                record["latest_match_score"] = None
+
+            if record["latest_ats_score"] is None or record["latest_match_score"] is None:
+                u_score = usage_scores.get(rid)
+                if u_score:
+                    if record["latest_ats_score"] is None:
+                        record["latest_ats_score"] = u_score.get("ats_score")
+                    if record["latest_match_score"] is None:
+                        record["latest_match_score"] = u_score.get("resume_match_score")
+
+        return records
+
     def create(
         self,
         user_id: str,
@@ -118,17 +178,25 @@ class ResumeRepository:
         source_fingerprint: str | None = None,
     ) -> Dict[str, Any]:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                "UPDATE public.resumes SET is_active = FALSE WHERE user_id = %s AND deleted_at IS NULL",
-                (user_id,)
-            )
+            from app.routers.api import normalize_resume_payload
+            from services.resume.tailoring_engine import StrictTailoringEngine
+            norm = normalize_resume_payload({"parsed_content": parsed_content})
+            counts = StrictTailoringEngine.get_section_counts(norm)
+            is_complete = counts["experience"] > 0 or counts["education"] > 0 or counts["projects"] > 0
+
+            if is_complete:
+                cur.execute(
+                    "UPDATE public.resumes SET is_active = FALSE WHERE user_id = %s AND deleted_at IS NULL",
+                    (user_id,)
+                )
+
             query = """
                 INSERT INTO public.resumes (
                     user_id, file_path, file_name, file_size, file_type,
                     parsed_content, is_active, resume_version,
                     source_fingerprint, fingerprint_algorithm, fingerprinted_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, TRUE, 1, %s, 'sha256',
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 1, %s, 'sha256',
                         CASE WHEN %s IS NULL THEN NULL ELSE NOW() END)
                 RETURNING *
             """
@@ -141,6 +209,7 @@ class ResumeRepository:
                     file_size,
                     file_type,
                     json.dumps(parsed_content),
+                    is_complete,
                     source_fingerprint,
                     source_fingerprint,
                 ),
@@ -178,11 +247,85 @@ class ResumeRepository:
                     created = self._enrich_resume_record(created, cur2)
             return created
 
+    def get_active(self, user_id: str) -> Optional[Dict[str, Any]]:
+        query = """
+            SELECT *
+            FROM public.resumes
+            WHERE user_id = %s AND is_active = TRUE AND deleted_at IS NULL
+            ORDER BY updated_at DESC
+            LIMIT 1
+        """
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query, (user_id,))
+            record = self._with_metadata_defaults(cur.fetchone())
+            if not record:
+                cur.execute("""
+                    SELECT *
+                    FROM public.resumes
+                    WHERE user_id = %s AND deleted_at IS NULL
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                """, (user_id,))
+                record = self._with_metadata_defaults(cur.fetchone())
+
+            if record:
+                try:
+                    from app.routers.api import normalize_resume_payload
+                    from services.resume.tailoring_engine import StrictTailoringEngine
+                    norm = normalize_resume_payload(record)
+                    counts = StrictTailoringEngine.get_section_counts(norm)
+                    if counts["experience"] == 0 and counts["education"] == 0:
+                        cur.execute("""
+                            SELECT *
+                            FROM public.resumes
+                            WHERE user_id = %s AND deleted_at IS NULL AND id != %s
+                            ORDER BY created_at ASC
+                        """, (user_id, record.get("id")))
+                        candidates = cur.fetchall()
+                        for cand in candidates:
+                            cand_dict = self._with_metadata_defaults(cand)
+                            c_norm = normalize_resume_payload(cand_dict)
+                            c_counts = StrictTailoringEngine.get_section_counts(c_norm)
+                            if c_counts["experience"] > 0 or c_counts["education"] > 0:
+                                record = cand_dict
+                                break
+                except Exception as exc:
+                    pass
+
+            if record:
+                record = self._enrich_resume_record(record, cur)
+            return record
+
     def get_by_id(self, resume_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         query = "SELECT * FROM public.resumes WHERE id = %s AND user_id = %s AND deleted_at IS NULL"
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (resume_id, user_id))
             record = self._with_metadata_defaults(cur.fetchone())
+
+            if record:
+                try:
+                    from app.routers.api import normalize_resume_payload
+                    from services.resume.tailoring_engine import StrictTailoringEngine
+                    norm = normalize_resume_payload(record)
+                    counts = StrictTailoringEngine.get_section_counts(norm)
+                    if counts["experience"] == 0 and counts["education"] == 0:
+                        cur.execute("""
+                            SELECT *
+                            FROM public.resumes
+                            WHERE user_id = %s AND deleted_at IS NULL AND id != %s
+                            ORDER BY created_at ASC
+                        """, (user_id, resume_id))
+                        candidates = cur.fetchall()
+                        for cand in candidates:
+                            cand_dict = self._with_metadata_defaults(cand)
+                            c_norm = normalize_resume_payload(cand_dict)
+                            c_counts = StrictTailoringEngine.get_section_counts(c_norm)
+                            if c_counts["experience"] > 0 or c_counts["education"] > 0:
+                                record = cand_dict
+                                break
+                except Exception as exc:
+                    pass
+
             if record:
                 record = self._enrich_resume_record(record, cur)
             return record
@@ -241,10 +384,7 @@ class ResumeRepository:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (user_id,))
             records = [self._with_metadata_defaults(record) for record in cur.fetchall()]
-            enriched = []
-            for r in records:
-                enriched.append(self._enrich_resume_record(r, cur))
-            return enriched
+            return self._enrich_resume_records_batch(records, cur)
 
     def all_file_paths(self, user_id: str) -> set[str]:
         with self.conn.cursor() as cur:

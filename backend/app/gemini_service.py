@@ -63,14 +63,20 @@ def throttle_gemini_call():
 # Backward compatibility alias
 throttle_groq_call = throttle_gemini_call
 
+from fastapi import HTTPException
 from langchain_core.runnables import Runnable
 
 class ResilientLLMWrapper(Runnable):
-    """Wrapper enforcing strict 1-at-a-time Gemini LLM execution across all threads."""
-    def __init__(self, primary_llm: Any, fallback_llm: Optional[Any] = None):
+    """Wrapper enforcing strict 1-at-a-time execution with automatic multi-model failover & rate limit handling."""
+    def __init__(self, primary_llm: Any, fallback_llm: Optional[Any] = None, groq_llm: Optional[Any] = None):
         super().__init__()
         self.primary_llm = primary_llm
         self.fallback_llm = fallback_llm
+        self.groq_llm = groq_llm
+
+    def _is_rate_limit_error(self, err: Exception) -> bool:
+        err_str = str(err).lower()
+        return "429" in err_str or "resource_exhausted" in err_str or "quota" in err_str or "rate limit" in err_str
 
     def invoke(self, input_data: Any, config: Any = None, **kwargs: Any) -> Any:
         global _LAST_AI_COMPLETED_TIME
@@ -80,70 +86,177 @@ class ResilientLLMWrapper(Runnable):
             if elapsed < _MIN_AI_SPACING_SEC:
                 time.sleep(_MIN_AI_SPACING_SEC - elapsed)
 
+            # 1. Try Primary LLM (Gemini 2.0 Flash)
             try:
                 result = self.primary_llm.invoke(input_data, config=config, **kwargs)
                 _LAST_AI_COMPLETED_TIME = time.time()
                 return result
             except Exception as err:
+                logger.warning(f"[AI_FAILOVER] Primary model failed ({type(err).__name__}: {err})")
+                
+                # 2. Try Fallback Gemini LLM (Gemini 1.5 Flash)
                 if self.fallback_llm:
-                    logger.warning(f"[GEMINI_FAILOVER] Primary Gemini model failed ({err}), failing over to fallback Gemini model...")
+                    logger.info("[AI_FAILOVER] Attempting Fallback Gemini model...")
                     try:
+                        time.sleep(1.0)
                         result = self.fallback_llm.invoke(input_data, config=config, **kwargs)
                         _LAST_AI_COMPLETED_TIME = time.time()
                         return result
                     except Exception as fb_err:
+                        logger.warning(f"[AI_FAILOVER] Fallback Gemini model failed ({fb_err})")
+
+                # 3. Try Groq LLM (llama-3.3-70b-versatile) if available
+                if self.groq_llm:
+                    logger.info("[AI_FAILOVER] Attempting Groq (Llama-3.3-70b) fallback...")
+                    try:
+                        time.sleep(1.0)
+                        result = self.groq_llm.invoke(input_data, config=config, **kwargs)
                         _LAST_AI_COMPLETED_TIME = time.time()
-                        raise fb_err
+                        return result
+                    except Exception as groq_err:
+                        logger.warning(f"[AI_FAILOVER] Groq fallback failed ({groq_err})")
+
                 _LAST_AI_COMPLETED_TIME = time.time()
+                
+                if self._is_rate_limit_error(err):
+                    raise HTTPException(
+                        status_code=429,
+                        detail="Gemini API free tier rate limit reached (429 Quota Exceeded). Please wait ~45 seconds for your free quota to reset, or add an API key in Settings."
+                    )
                 raise err
 
     def with_structured_output(self, schema: Any, **kwargs: Any) -> "ResilientLLMWrapper":
         primary_st = self.primary_llm.with_structured_output(schema, **kwargs)
         fallback_st = self.fallback_llm.with_structured_output(schema, **kwargs) if self.fallback_llm else None
-        return ResilientLLMWrapper(primary_st, fallback_st)
+        groq_st = self.groq_llm.with_structured_output(schema, **kwargs) if self.groq_llm else None
+        return ResilientLLMWrapper(primary_st, fallback_st, groq_st)
 
-def get_llm(api_key: Optional[str] = None, temperature: float = 0.0, max_retries: int = 3):
+def get_llm(api_key: Optional[str] = None, temperature: float = 0.0, max_retries: int = 2):
     from core.config import settings
     req_key = (api_key or "").strip()
+    groq_key = (settings.GROQ_API_KEY or "").strip() or os.environ.get("GROQ_API_KEY", "").strip()
     gemini_key = (settings.GEMINI_API_KEY or "").strip() or os.environ.get("GEMINI_API_KEY", "").strip()
-    
-    active_key = req_key or gemini_key
-    if not active_key:
-        raise ValueError("Gemini API Key is missing. Please set GEMINI_API_KEY in backend/.env.")
 
-    model_name = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
-    primary_model = model_name
+    # Priority 1: Groq Service (Llama-3.3-70b-versatile) as main AI engine
+    active_groq_key = (req_key if req_key.startswith("gsk_") else "") or groq_key
+    if active_groq_key:
+        try:
+            from langchain_groq import ChatGroq
+            primary_llm = ChatGroq(
+                model="llama-3.3-70b-versatile",
+                groq_api_key=active_groq_key,
+                temperature=temperature,
+                max_retries=max_retries
+            )
+            fallback_llm = ChatGroq(
+                model="llama-3.1-8b-instant",
+                groq_api_key=active_groq_key,
+                temperature=temperature,
+                max_retries=max_retries
+            )
+            gemini_llm = None
+            if gemini_key:
+                try:
+                    gemini_llm = ChatGoogleGenerativeAI(
+                        model=os.environ.get("GEMINI_MODEL", "gemini-2.0-flash"),
+                        google_api_key=gemini_key,
+                        temperature=temperature,
+                        max_retries=max_retries
+                    )
+                except Exception:
+                    gemini_llm = None
+            return ResilientLLMWrapper(primary_llm, fallback_llm, gemini_llm)
+        except Exception as ge:
+            logger.warning(f"Groq LLM initialization error: {ge}")
+
+    # Fallback to Gemini if Groq key is unavailable
+    active_gemini_key = (req_key if not req_key.startswith("gsk_") else "") or gemini_key
+    if not active_gemini_key:
+        raise ValueError("Neither Groq nor Gemini API Key is available. Please set GROQ_API_KEY in backend/.env.")
+
+    primary_model = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
     fallback_model = "gemini-1.5-flash" if primary_model != "gemini-1.5-flash" else "gemini-2.0-flash"
 
-    try:
-        primary_llm = ChatGoogleGenerativeAI(
-            model=primary_model,
-            google_api_key=active_key,
-            temperature=temperature,
-            max_retries=max_retries
-        )
-        fallback_llm = ChatGoogleGenerativeAI(
-            model=fallback_model,
-            google_api_key=active_key,
-            temperature=temperature,
-            max_retries=max_retries
-        )
-        return ResilientLLMWrapper(primary_llm, fallback_llm)
-    except Exception as e:
-        logger.warning(f"Failed to initialize ChatGoogleGenerativeAI with model={primary_model}: {e}")
-        return ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
-            google_api_key=active_key,
-            temperature=temperature,
-            max_retries=max_retries
-        )
+    primary_llm = ChatGoogleGenerativeAI(
+        model=primary_model,
+        google_api_key=active_gemini_key,
+        temperature=temperature,
+        max_retries=max_retries
+    )
+    fallback_llm = ChatGoogleGenerativeAI(
+        model=fallback_model,
+        google_api_key=active_gemini_key,
+        temperature=temperature,
+        max_retries=max_retries
+    )
+    return ResilientLLMWrapper(primary_llm, fallback_llm, None)
+
+def _detect_section_order_from_text(raw_text: str) -> List[str]:
+    heading_map = [
+        ("summary", r"^\s*(?:professional\s+summary|career\s+summary|summary|profile)\b"),
+        ("objective", r"^\s*(?:career\s+objective|objective)\b"),
+        ("education", r"^\s*(?:education|academic\s+background|academic\s+history)\b"),
+        ("experience", r"^\s*(?:work\s+experience|professional\s+experience|experience|employment\s+history)\b"),
+        ("projects", r"^\s*(?:projects|key\s+projects|academic\s+projects)\b"),
+        ("skills", r"^\s*(?:technical\s+skills|skills\s+&\s+abilities|skills|technical\s+proficiencies|technical\s+expertise|tools\s+&\s+technologies)\b"),
+        ("certifications", r"^\s*(?:certifications|licenses\s+&\s+certifications|certificates)\b"),
+        ("achievements", r"^\s*(?:achievements|honors\s+&\s+awards|awards)\b"),
+        ("publications", r"^\s*(?:publications|research)\b"),
+        ("volunteer", r"^\s*(?:volunteering|volunteer\s+experience)\b"),
+        ("languages", r"^\s*(?:languages)\b"),
+    ]
+    matches = []
+    lines = raw_text.splitlines()
+    for idx, line in enumerate(lines):
+        line_clean = line.strip(" :-#•\t\r\n")
+        if not line_clean or len(line_clean) > 50:
+            continue
+        for key, pattern in heading_map:
+            if re.search(pattern, line_clean, re.IGNORECASE):
+                matches.append((idx, key))
+                break
+    
+    seen = set()
+    order = []
+    for _, key in sorted(matches, key=lambda x: x[0]):
+        if key not in seen:
+            seen.add(key)
+            order.append(key)
+    return order
+
+def _fallback_extract_technical_skills(raw_text: str) -> tuple[List[str], Dict[str, List[str]]]:
+    skills_list = []
+    categories_dict = {}
+    
+    match = re.search(
+        r"(?:TECHNICAL\s+SKILLS|Technical\s+Skills|SKILLS|Skills\s+&\s+Tools|TECHNICAL\s+PROFICIENCIES)[:\n\r]+(.*?)(?=\n\s*(?:[A-Z\s]{4,30}[:\n\r]|\Z))",
+        raw_text,
+        flags=re.IGNORECASE | re.DOTALL
+    )
+    if not match:
+        return skills_list, categories_dict
+        
+    block = match.group(1).strip()
+    cat_lines = re.findall(r"([A-Za-z0-9\s/&+-]+)[:\u2014\u2013-]\s*(.+)", block)
+    if cat_lines:
+        for cat_name, skill_str in cat_lines:
+            cat_clean = cat_name.strip()
+            if len(cat_clean) < 40 and not cat_clean.lower().startswith("http"):
+                parsed_skills = [s.strip(" •\t\r\n") for s in re.split(r"[,;•|]", skill_str) if s.strip()]
+                if parsed_skills:
+                    categories_dict[cat_clean] = parsed_skills
+                    skills_list.extend(parsed_skills)
+    else:
+        skills_list = [s.strip(" •\t\r\n") for s in re.split(r"[,;•|\n]", block) if s.strip() and len(s.strip()) < 40]
+        
+    return _unique_keep_order(skills_list), categories_dict
 
 def parse_resume(raw_text: str, api_key: Optional[str] = None) -> ResumeStructure:
     clean_text = raw_text.strip()
     if not clean_text:
         return ResumeStructure()
 
-    cache_key = _get_cache_key("parse_resume", clean_text)
+    cache_key = _get_cache_key("parse_resume_v3", clean_text)
     cached = _get_from_cache(cache_key)
     if cached:
         return cached
@@ -155,14 +268,41 @@ def parse_resume(raw_text: str, api_key: Optional[str] = None) -> ResumeStructur
     prompt = ChatPromptTemplate.from_messages([
         ("system", """You are a lossless ATS resume extraction engine. Extract only content explicitly present in the supplied resume.
 Preserve every source record exactly once and preserve its boundaries: never split one record's title, description, metric, link, or annotation into separate list items; never merge neighboring records; never repeat a section; never infer missing content.
-Keep employers, roles, projects, education, dates, metrics, skills, links, certifications, achievements, leadership, volunteering, publications, and custom sections source-faithful. A phrase belonging to a record's description must remain attached to that record.
-For a combined heading such as "Achievements & Certifications", create one structured record per source line and do not promote description fragments into new achievements.
-If a section is absent, use its empty default. In experience and projects, description must be an array containing exactly the source bullet strings. Group only explicitly listed skills into skills_categories."""),
+Keep employers, roles, projects, education, dates, metrics, skills, links, certifications, achievements, leadership, volunteering, publications, and custom sections source-faithful.
+CRITICAL MANDATES FOR SKILLS AND SECTION ORDER:
+- Always extract all technical skills from sections such as "TECHNICAL SKILLS", "Technical Skills", "SKILLS", or "Technical Proficiencies".
+- Populate 'skills' as a flat array of all skills AND populate 'skills_categories' as a dictionary mapping section categories (e.g. "Languages", "Frameworks", "Databases", "AI & ML", "Tools", etc.) to skill lists.
+- Populate 'section_order' as an array of section keys (e.g. ["summary", "education", "experience", "projects", "skills", "certifications"]) in the EXACT top-to-bottom order they appear in the source resume text.
+- If a section is absent, use its empty default. In experience and projects, description must be an array containing exactly the source bullet strings."""),
         ("human", "{text}")
     ])
     
     chain = prompt | structured_llm
     result = chain.invoke({"text": clean_text})
+
+    # Post-processing 1: Fallback skills extraction if empty
+    if not result.skills and not result.skills_categories:
+        fallback_skills, fallback_cats = _fallback_extract_technical_skills(clean_text)
+        if fallback_skills:
+            result.skills = fallback_skills
+        if fallback_cats:
+            result.skills_categories = fallback_cats
+
+    # Post-processing 2: Synchronize skills and skills_categories
+    if result.skills_categories and not result.skills:
+        flat = []
+        for cat_skills in result.skills_categories.values():
+            if isinstance(cat_skills, list):
+                flat.extend(cat_skills)
+        result.skills = _unique_keep_order(flat)
+    elif result.skills and not result.skills_categories:
+        result.skills_categories = {"Technical Skills": result.skills}
+
+    # Post-processing 3: Guarantee section_order preservation
+    detected_order = _detect_section_order_from_text(clean_text)
+    if detected_order:
+        result.section_order = detected_order
+
     duration = round((time.time() - start_time) * 1000, 2)
     logger.info(f"[LLM_TELEMETRY] call=parse_resume latency_ms={duration} input_chars={len(clean_text)}")
     _set_to_cache(cache_key, result)
@@ -323,6 +463,15 @@ def generate_tailoring_patch(
     api_key: Optional[str] = None,
     selected_sections: set[str] | None = None,
 ) -> TailoringReport:
+    from services.resume.tailoring_engine import StrictTailoringEngine
+    import logging
+    logger = logging.getLogger("app")
+
+    # Stage 1: Confirm input parsed resume contains all sections
+    counts_before = StrictTailoringEngine.get_section_counts(resume)
+    logger.info("[STAGE 1: PARSED RESUME] Section counts before tailoring: %s", counts_before)
+
+    # Stage 2 & 3: Prepare prompt & payload sent to Gemini
     llm = get_llm(api_key, temperature=0.1)
     structured_llm = llm.with_structured_output(ResumePatch)
 
@@ -332,29 +481,40 @@ Analyze the provided user resume and target job description in one single pass a
 
 Rules:
 1. Produce changes ONLY for SELECTED SECTIONS.
-2. summary: Write a compelling, high-impact professional summary closely aligned with the target job.
-3. skills_append: Suggest relevant skills from the target job description that strengthen ATS alignment.
-4. experience: Map item index string to bullet index string to updated bullet text string.
-5. projects: Map project item index string to bullet index string to updated bullet text string.
-6. Preserve all original numbers, metrics, company names, titles, dates, technologies, and links."""),
+2. DO NOT recreate or rewrite the whole resume. Output ONLY delta patch suggestions for requested sections.
+3. PRESERVE EVERY SECTION. Never omit sections or truncate content.
+4. summary: Write a compelling, high-impact professional summary closely aligned with the target job.
+5. skills_append: Suggest relevant skills from the target job description that strengthen ATS alignment.
+6. experience: Map item index string to bullet index string to updated bullet text string.
+7. projects: Map project item index string to bullet index string to updated bullet text string.
+8. Preserve all original numbers, metrics, company names, titles, dates, technologies, and links."""),
         ("human", "SELECTED SECTIONS:\n{selected_sections}\n\nRESUME:\n{resume}\n\nJOB DESCRIPTION:\n{job}")
     ])
 
+    payload = {
+        "resume": resume.model_dump_json(include={"summary", "skills", "experience", "projects", "education", "certifications", "achievements"}),
+        "job": job.model_dump_json(include={"title", "company", "required_skills", "preferred_skills", "qualifications", "responsibilities", "keywords", "ats_keywords"}),
+        "selected_sections": sorted(selected_sections or []),
+    }
+    logger.info("[STAGE 2 & 3: PAYLOAD & PROMPT] Sent to Gemini with selected_sections: %s", payload["selected_sections"])
+
     chain = prompt | structured_llm
     try:
-        patch = chain.invoke({
-            "resume": resume.model_dump_json(include={"summary", "skills", "experience", "projects"}),
-            "job": job.model_dump_json(include={"title", "company", "required_skills", "preferred_skills", "qualifications", "responsibilities", "keywords", "ats_keywords"}),
-            "selected_sections": sorted(selected_sections or []),
-        })
+        patch = chain.invoke(payload)
+        logger.info("[STAGE 4 & 5: GEMINI RESPONSE & JSON PARSE] Successfully received and parsed patch: %s", patch.model_dump())
     except Exception as err:
+        logger.error("[STAGE 5: JSON PARSING ERROR] Gemini structured output parsing failed: %s", err)
         raise RuntimeError(f"AI tailoring agent failed: {err}") from err
 
-    from services.resume.tailoring_engine import StrictTailoringEngine
+    # Stage 6 & 7: Validate patch & apply patch to original resume without loss
     pipeline = StrictTailoringEngine().validate_patch(
         resume, job, patch, requested_sections=selected_sections
     )
     
+    # Stage 7 Defensive Validation Gate: Verify merged resume preserves all sections
+    materialized = StrictTailoringEngine().apply_patch(resume, pipeline.patch)
+    StrictTailoringEngine.defensive_section_validation_gate(resume, materialized, stage_label="STAGE 7: MERGE & SAVE GATE")
+
     ats_score_before = 75
     ats_score_after = 88
     changes_made = ["✓ Improved Summary & Keywords", "✓ High-Impact Bullet Refinement"]

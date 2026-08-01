@@ -15,6 +15,8 @@ import { TEMPLATE_CONFIGS, TemplateConfig } from '../../templates/templates_conf
 import { createResumeLayoutModel } from '../../utils/resumeLayoutModel';
 import { AcademicATSTemplate } from './templates/AcademicATSTemplate';
 import { JohnsonsATSTemplate } from './templates/JohnsonsATSTemplate';
+import { useApp } from '../../context/AppContext';
+import { selectProfileImage } from '../../services/profilePolicy';
 
 const sectionLabel = (value: string) => {
   const overrides: Record<string, string> = {
@@ -145,9 +147,11 @@ interface TailorRenderProps {
   sectionOrder?: string[];
   layoutLevel?: number;
   isExporting?: boolean;
+  disablePhotoModal?: boolean;
 }
 
-export default function TailorRender({ resume, templateName, sectionOrder, layoutLevel = 5, isExporting = false }: TailorRenderProps) {
+export default function TailorRender({ resume, templateName, sectionOrder, layoutLevel = 5, isExporting = false, disablePhotoModal = false }: TailorRenderProps) {
+  const { user, profile } = useApp();
   const resolvedTemplateKey = TEMPLATE_CONFIGS[templateName] ? templateName : 'ExecutiveATS';
   const config: TemplateConfig = TEMPLATE_CONFIGS[resolvedTemplateKey];
   const params = getParamsForLevel(layoutLevel);
@@ -187,6 +191,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
   const [, setTick] = useState(0);
 
   useEffect(() => {
+    if (disablePhotoModal) return;
     const handlePhotoUpdate = (e: any) => {
       const { photo_url } = e.detail || {};
       if (photo_url !== undefined) {
@@ -197,7 +202,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     };
     window.addEventListener('resume_photo_updated', handlePhotoUpdate);
     return () => window.removeEventListener('resume_photo_updated', handlePhotoUpdate);
-  }, [resume]);
+  }, [resume, disablePhotoModal]);
 
   const {
     personal_info,
@@ -216,7 +221,9 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     interests
   } = resume;
 
-  const categorizedSkills = categorizeSkills(skills, skills_categories);
+  const rawSkills = skills || resume.parsed_data?.skills || resume.technical_skills || [];
+  const rawSkillCategories = skills_categories || resume.parsed_data?.skills_categories || resume.technical_skills_by_category || {};
+  const categorizedSkills = categorizeSkills(rawSkills, rawSkillCategories);
   const rawCandidateName = personal_info?.name || personal_info?.full_name || personal_info?.candidate_name || resume?.name || resume?.full_name || (personal_info?.email ? personal_info.email.split('@')[0].replace(/[0-9_.]+/g, ' ') : '');
   const candidateName = normalizePersonName(rawCandidateName);
   const achievementRecords = normalizeDetailedRecords(achievements, 'achievement');
@@ -242,8 +249,10 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     'extracurricular_activities',
     'custom_sections'
   ];
-
-  const requestedOrder = resume.section_order || sectionOrder || defaultOrder;
+  const rawOrder = resume.section_order || resume.parsed_data?.section_order || sectionOrder;
+  const requestedOrder = rawOrder && Array.isArray(rawOrder) && rawOrder.length > 0
+    ? [...new Set([...rawOrder, ...defaultOrder])]
+    : defaultOrder;
   const layoutModel = createResumeLayoutModel(
     { ...resume, section_order: requestedOrder },
     resolvedTemplateKey,
@@ -364,47 +373,19 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
 
   // Helper to render optional photo for photo-enabled templates (or Interactive Upload Frame if photo is empty)
   const renderProfilePhoto = (sizeClass = 'w-20 h-20', extraClass = '') => {
-    if (!config.profilePhoto || layoutModel.hidden_components?.includes('photo')) return null;
+    const isPhotoSupported = Boolean(config.profilePhoto) || /photo/i.test(resolvedTemplateKey);
+    if (!isPhotoSupported || layoutModel.hidden_components?.includes('photo')) return null;
 
-    const photoUrl = personal_info?.photo_url || resume?.photo_url;
+    const photoUrl = personal_info?.photo_url
+      || resume?.photo_url
+      || resume?.parsed_data?.personal_info?.photo_url
+      || selectProfileImage(profile, user);
     const photoPositionY = personal_info?.photo_position_y ?? resume?.photo_position_y ?? 50;
-
-    const handlePhotoChange = (file: File | undefined) => {
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const dataUrl = event.target?.result;
-        if (dataUrl && typeof dataUrl === 'string') {
-          if (personal_info) {
-            personal_info.photo_url = dataUrl;
-            personal_info.photo_position_y = photoPositionY;
-          }
-          resume.photo_url = dataUrl;
-          resume.photo_position_y = photoPositionY;
-          window.dispatchEvent(new CustomEvent('resume_photo_updated', { 
-            detail: { photo_url: dataUrl, photo_position_y: photoPositionY } 
-          }));
-        }
-      };
-      reader.readAsDataURL(file);
-    };
-
-    const handlePositionChange = (newPosY: number) => {
-      if (personal_info) personal_info.photo_position_y = newPosY;
-      resume.photo_position_y = newPosY;
-      window.dispatchEvent(new CustomEvent('resume_photo_updated', {
-        detail: { photo_url: photoUrl, photo_position_y: newPosY }
-      }));
-    };
-
-    const handleRemovePhoto = () => {
-      if (personal_info) personal_info.photo_url = '';
-      resume.photo_url = '';
-      window.dispatchEvent(new CustomEvent('resume_photo_updated', { detail: { photo_url: '' } }));
-    };
 
     const circleSizeClass = sizeClass.includes('24')
       ? 'w-24 h-24 min-w-[96px] min-h-[96px] max-w-[96px] max-h-[96px] aspect-square rounded-full shrink-0 overflow-hidden'
+      : sizeClass.includes('22')
+      ? 'w-22 h-22 min-w-[88px] min-h-[88px] max-w-[88px] max-h-[88px] aspect-square rounded-full shrink-0 overflow-hidden'
       : 'w-20 h-20 min-w-[80px] min-h-[80px] max-w-[80px] max-h-[80px] aspect-square rounded-full shrink-0 overflow-hidden';
 
     if (photoUrl) {
@@ -421,17 +402,39 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
             style={{ objectPosition: `center ${photoPositionY}%` }}
           />
           {/* Hover Overlay Badge for Adjusting Photo */}
-          <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white z-20">
-            <Camera size={18} />
-            <span className="text-[7.5px] font-black uppercase mt-0.5 tracking-tight">Adjust</span>
-          </div>
+          {!isExporting && (
+            <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white z-20">
+              <Camera size={18} />
+              <span className="text-[7.5px] font-black uppercase mt-0.5 tracking-tight">Adjust</span>
+            </div>
+          )}
         </div>
       );
     }
 
-    if (!photoUrl) {
-      return null;
+    if (!isExporting) {
+      return (
+        <div
+          className={`relative group ${circleSizeClass} cursor-pointer border-2 border-dashed border-[#00bda5]/40 bg-[#00bda5]/5 hover:border-[#00bda5] hover:bg-[#00bda5]/15 transition-all flex flex-col items-center justify-center text-[#00bda5] ${extraClass}`}
+          title="Click to upload profile photo"
+          onClick={() => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.onchange = (e: any) => {
+              const file = e.target?.files?.[0];
+              if (file) openCropModalForFile(file);
+            };
+            input.click();
+          }}
+        >
+          <Camera size={18} />
+          <span className="text-[7.5px] font-extrabold uppercase mt-0.5 tracking-tight">Add Photo</span>
+        </div>
+      );
     }
+
+    return null;
   };
 
   // Generic section renderer for common section structures across templates
@@ -1479,26 +1482,28 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
   return (
     <>
       {renderedLayoutContent}
-      <ProfilePhotoCropModal
-        isOpen={isCropModalOpen}
-        imageSrc={cropModalImage}
-        onClose={() => setIsCropModalOpen(false)}
-        onApply={(croppedUrl) => {
-          if (personal_info) personal_info.photo_url = croppedUrl;
-          resume.photo_url = croppedUrl;
-          window.dispatchEvent(new CustomEvent('resume_photo_updated', { 
-            detail: { photo_url: croppedUrl, photo_position_y: 50 } 
-          }));
-          setIsCropModalOpen(false);
-        }}
-        onDelete={() => {
-          if (personal_info) personal_info.photo_url = '';
-          resume.photo_url = '';
-          window.dispatchEvent(new CustomEvent('resume_photo_updated', { detail: { photo_url: '' } }));
-          setIsCropModalOpen(false);
-        }}
-        onChangePhoto={(file) => openCropModalForFile(file)}
-      />
+      {!disablePhotoModal && (
+        <ProfilePhotoCropModal
+          isOpen={isCropModalOpen}
+          imageSrc={cropModalImage}
+          onClose={() => setIsCropModalOpen(false)}
+          onApply={(croppedUrl) => {
+            if (personal_info) personal_info.photo_url = croppedUrl;
+            resume.photo_url = croppedUrl;
+            window.dispatchEvent(new CustomEvent('resume_photo_updated', { 
+              detail: { photo_url: croppedUrl, photo_position_y: 50 } 
+            }));
+            setIsCropModalOpen(false);
+          }}
+          onDelete={() => {
+            if (personal_info) personal_info.photo_url = '';
+            resume.photo_url = '';
+            window.dispatchEvent(new CustomEvent('resume_photo_updated', { detail: { photo_url: '' } }));
+            setIsCropModalOpen(false);
+          }}
+          onChangePhoto={(file) => openCropModalForFile(file)}
+        />
+      )}
     </>
   );
 }

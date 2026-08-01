@@ -2,6 +2,7 @@ import React from 'react';
 import { useApp } from '../context/AppContext';
 import ResumeTailoringConfigView from '../components/ResumeTailoringConfigView';
 import { useNavigate } from 'react-router-dom';
+import { calculateJDMatchScore } from '../utils/matchScore';
 
 function TailorConfigPage() {
   const navigate = useNavigate();
@@ -32,10 +33,12 @@ function TailorConfigPage() {
     const requestKey = `${resumeId}|${jobAnalysis.id || jobAnalysis.jd_id || jobAnalysis.title || jobAnalysis.job_title || ''}`;
     if (comparisonRequestRef.current === requestKey) return;
     comparisonRequestRef.current = requestKey;
-    handleCompareActiveResumeToJob().catch(error => {
-      console.warn('[TAILOR-CONFIG] Match score refresh failed', error);
-      comparisonRequestRef.current = '';
-    });
+    if (typeof handleCompareActiveResumeToJob === 'function') {
+      handleCompareActiveResumeToJob().catch(error => {
+        console.warn('[TAILOR-CONFIG] Match score refresh failed', error);
+        comparisonRequestRef.current = '';
+      });
+    }
   }, [
     parsedResume?.id,
     parsedResume?.resume_id,
@@ -64,6 +67,16 @@ function TailorConfigPage() {
     }
   };
 
+  const matchResult = React.useMemo(() => calculateJDMatchScore(parsedResume, jobAnalysis), [parsedResume, jobAnalysis]);
+  const isComparisonValid = Boolean(
+    comparison && 
+    (parsedResume?.id || parsedResume?.resume_id) && 
+    comparison._baseline_resume_id === (parsedResume?.id || parsedResume?.resume_id)
+  );
+  const matchScore = isComparisonValid && comparison?.resume_match_before != null
+    ? Math.round(Number(comparison.resume_match_before))
+    : matchResult.score;
+
   return (
     <ResumeTailoringConfigView
       selectedSections={selectedSections}
@@ -79,7 +92,7 @@ function TailorConfigPage() {
       onChooseResume={() => navigate('/resume-detect')}
       onUploadResume={() => navigate('/resume-detect')}
       validationMessage={selectedSections.length === 0 ? "Select at least one resume section to continue." : ""}
-      matchScore={comparison?.resume_match_before ?? comparison?.resume_match_score ?? null}
+      matchScore={matchScore}
     />
   );
 }

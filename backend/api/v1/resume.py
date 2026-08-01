@@ -345,9 +345,41 @@ async def reconcile_local_resumes(
 @router.get("/active")
 async def get_active_resume(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
-    repo: ResumeRepository = Depends(get_resume_repository)
+    repo: ResumeRepository = Depends(get_resume_repository),
+    storage: FileService = Depends(get_storage_service)
 ):
-    return repo.get_active(user["id"]) or None
+    record = repo.get_active(user["id"])
+    if not record:
+        return None
+
+    parsed_content = record.get("parsed_content") or {}
+    has_experience = isinstance(parsed_content, dict) and bool(parsed_content.get("experience"))
+    file_path = record.get("file_path")
+
+    if not has_experience and file_path:
+        try:
+            logger.info("[RESUME][BUCKET] Active resume parsed_content incomplete. Loading file from storage bucket path=%s", file_path)
+            file_bytes = storage.download_file("original-resumes", file_path)
+            file_name = record.get("file_name") or "resume.pdf"
+            raw_text = ResumeParser.extract_text(file_bytes, file_name)
+            source_links = ResumeParser.extract_links(file_bytes, file_name)
+
+            if raw_text:
+                api_key = settings.GEMINI_API_KEY or settings.GROQ_API_KEY
+                if api_key:
+                    ai = GeminiService(api_key=api_key)
+                    parsed_res = ai.parse_resume(raw_text)
+                    updated_content = parsed_res.dict()
+                    updated_content = restore_source_evidence(updated_content, raw_text, source_links)
+                    updated_content["raw_text"] = raw_text
+                    updated_content["parse_status"] = "parsed"
+                    repo.update_parsed_content(record["id"], user["id"], updated_content)
+                    record["parsed_content"] = updated_content
+                    record = repo._with_metadata_defaults(record)
+        except Exception as exc:
+            logger.warning("[RESUME][BUCKET] Failed to auto-recover resume from storage bucket: %s", exc)
+
+    return record
 
 
 @router.get("/{resume_id}/file")
@@ -489,10 +521,23 @@ async def parse_existing_resume(
     
     parsed_content = record.get("parsed_content") or {}
     raw_text = parsed_content.get("raw_text")
+
+    if not raw_text and record.get("file_path"):
+        try:
+            logger.info("[RESUME][BUCKET] Downloading resume file from storage bucket path=%s", record["file_path"])
+            file_bytes = storage.download_file("original-resumes", record["file_path"])
+            file_name = record.get("file_name") or "resume.pdf"
+            raw_text = ResumeParser.extract_text(file_bytes, file_name)
+            source_links = ResumeParser.extract_links(file_bytes, file_name)
+            parsed_content["raw_text"] = raw_text
+            parsed_content["links"] = source_links
+        except Exception as exc:
+            logger.error("[RESUME][BUCKET] Failed to download resume from storage bucket path=%s error=%s", record.get("file_path"), exc)
+
     if not raw_text:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No raw text found in this resume to parse."
+            detail="No raw text could be extracted from resume file in storage bucket."
         )
         
     api_key = x_gemini_key or x_groq_key or settings.GEMINI_API_KEY or settings.GROQ_API_KEY

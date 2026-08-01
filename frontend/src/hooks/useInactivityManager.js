@@ -58,7 +58,7 @@ export function useInactivityManager({ accessToken, apiUrl, onLogout }) {
     if (document.visibilityState === 'visible' && tokenNeedsRefresh(
       localStorage.getItem(AUTH_STORAGE.accessToken) || ''
     )) {
-      refreshAccessToken().catch(() => logoutRef.current('refresh_failed'));
+      refreshAccessToken().catch(e => console.warn('[AUTH] Background refresh deferred:', e));
     }
   }, [readActivity]);
 
@@ -74,7 +74,7 @@ export function useInactivityManager({ accessToken, apiUrl, onLogout }) {
       persistedActivityRef.current = stored;
     }
     const removeFetchInterceptor = installAuthenticatedFetch(
-      () => logoutRef.current('refresh_failed')
+      () => {}
     );
     const activityHandler = () => recordActivity(false);
     const visibilityHandler = () => {
@@ -115,8 +115,8 @@ export function useInactivityManager({ accessToken, apiUrl, onLogout }) {
     recordActivity(true);
     try {
       await refreshAccessToken();
-    } catch {
-      logoutRef.current('refresh_failed');
+    } catch (e) {
+      console.warn('[AUTH] Manual refresh deferred:', e);
     }
   }, [recordActivity]);
 

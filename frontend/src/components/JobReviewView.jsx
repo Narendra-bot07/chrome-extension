@@ -20,6 +20,7 @@ import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { fingerprintJD } from '../utils/jobPipelineSession';
 import './JobReviewView.css';
+import { calculateJDMatchScore } from '../utils/matchScore';
 
 const isNotAvailable = (val) => {
   if (!val) return true;
@@ -128,7 +129,7 @@ const calculateMatchScore = ({ resume, requiredSkills, preferredSkills, qualific
       matchedCount: 0,
       reason: !resume ? 'No active resume selected.' : 'No JD skills detected.'
     };
-  }  const skillScore = Math.round((matchedSkills.length / jdSkills.length) * 75);
+  }  const skillScore = Math.round((matchedSkills.length / jdSkills.length) * 75);
   const experienceScore = hasExperienceSignal ? 15 : 5;
   const structureScore = resume ? 10 : 0;
   const score = Math.max(0, Math.min(100, skillScore + experienceScore + structureScore));
@@ -150,6 +151,7 @@ function JobReviewView({
   const navigate = useNavigate();
   const {
     user,
+    session,
     parsedResume,
     isExtension,
     jobTitle,
@@ -178,10 +180,17 @@ function JobReviewView({
   };
 
   const openWorkflowRoute = (path, panelPath = null) => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    const canonicalJD = currentJobAnalysis || jobAnalysis;
+    const jdFingerprint = canonicalJD ? fingerprintJD(canonicalJD) : '';
+
+    if (token) localStorage.setItem('access_token', token);
+    if (parsedResume) localStorage.setItem('parsed_resume', JSON.stringify(parsedResume));
+
     if (isExtension && typeof chrome !== 'undefined' && chrome.storage?.local) {
-      const canonicalJD = currentJobAnalysis || jobAnalysis;
-      const jdFingerprint = canonicalJD ? fingerprintJD(canonicalJD) : '';
       const snapshot = {
+        access_token: token,
+        parsedResume: parsedResume,
         jobAnalysis: canonicalJD,
         jobText,
         companyName,
@@ -304,47 +313,23 @@ function JobReviewView({
 
   const atsKeywordsList = !isNotAvailable(jobAnalysis?.ats_keywords) ? (Array.isArray(jobAnalysis.ats_keywords) ? jobAnalysis.ats_keywords : [jobAnalysis.ats_keywords]) : (!isNotAvailable(details.ats_keywords) ? (Array.isArray(details.ats_keywords) ? details.ats_keywords : [details.ats_keywords]) : []);
 
-  const localMatchScore = useMemo(() => calculateMatchScore({
-    resume: parsedResume,
-    requiredSkills,
-    preferredSkills,
-    qualificationsList,
-    responsibilitiesList
-  }), [parsedResume, requiredSkills, preferredSkills, qualificationsList, responsibilitiesList]);
+  const matchResult = useMemo(() => calculateJDMatchScore(parsedResume, jobAnalysis), [parsedResume, jobAnalysis]);
 
-  // "Match" always means the deterministic active-resume vs current-JD
-  // score. ATS friendliness is a separate metric and must never be substituted.
-  const backendScore = comparison?.resume_match_before
-    ?? comparison?.resume_match_score
-    ?? comparison?.match_score
-    ?? null;
-  const hasBackendScore = backendScore !== null && backendScore !== undefined && Number.isFinite(Number(backendScore));
-  const matchPairKey = [
-    parsedResume?.id || parsedResume?.resume_id || parsedResume?.file_name || 'resume',
-    jobAnalysis?.id || jobAnalysis?.jd_id || '',
-    title || '',
-    company || '',
-    location || ''
-  ].join('|').toLowerCase();
-  if (matchBaselineRef.current.pairKey !== matchPairKey) {
-    matchBaselineRef.current = { pairKey: matchPairKey, score: null };
-  }
-  if (hasBackendScore && matchBaselineRef.current.score === null) {
-    matchBaselineRef.current.score = Math.round(Number(backendScore));
-  }
-  const stableBackendScore = matchBaselineRef.current.score;
-  const matchStatus = parsedResume && stableBackendScore !== null
-    ? 'backend'
-    : (parsedResume ? 'calculating' : 'idle');
-  const matchScore = {
-    ...localMatchScore,
-    // Do not flash a local approximation and later replace it with the backend
-    // baseline. Show a calculating state until the authoritative score arrives.
-    score: stableBackendScore,
-    source: stableBackendScore !== null ? 'backend' : matchStatus
-  };
+  const isComparisonValid = Boolean(
+    comparison && 
+    (parsedResume?.id || parsedResume?.resume_id) && 
+    comparison._baseline_resume_id === (parsedResume?.id || parsedResume?.resume_id)
+  );
 
-  const displayScore = matchScore.score;
+  const displayScore = isComparisonValid && comparison?.resume_match_before != null
+    ? Math.round(Number(comparison.resume_match_before))
+    : matchResult.score;
+
+  const matchScore = useMemo(() => ({
+    score: displayScore,
+    matchedSkills: matchResult.matchedSkills,
+    missingSkills: matchResult.missingSkills
+  }), [displayScore, matchResult]);
 
   useEffect(() => {
     if (displayScore !== null && displayScore !== undefined) {

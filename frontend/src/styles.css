@@ -725,9 +725,15 @@ html.dark #root .dashboard-kpi-card:hover {
   50% { opacity: 1; transform: scale(1); }
 }
 
-/* Legacy loading affordances inherit the system motion without rotation. */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .animate-spin {
-  animation: tf-loading-pulse 900ms var(--tf-spring) infinite !important;
+  display: inline-block;
+  transform-origin: 50% 50%;
+  animation: spin 1s linear infinite !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

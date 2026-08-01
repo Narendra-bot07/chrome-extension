@@ -230,49 +230,29 @@ async def get_dashboard_metrics(
             )
             metrics["resumes_tailored"] = cur.fetchone()["count"]
 
-            # 3. Count applications actually tracked
-            cur.execute(
-                "SELECT COUNT(*) as count FROM public.applications WHERE user_id = %s",
-                (user["id"],)
-            )
-            metrics["applications_tracked"] = cur.fetchone()["count"]
-
-            # 4. Success rates and conversions from current application stages
+            # 3. Aggregated application tracking stats in 1 single query
             cur.execute(
                 """
-                SELECT COUNT(*) as count
+                SELECT 
+                    COUNT(*)::int AS applications_tracked,
+                    COUNT(*) FILTER (WHERE current_stage IN ('Interview', 'Final Round'))::int AS interviews,
+                    COUNT(*) FILTER (WHERE current_stage = 'Accepted')::int AS accepted,
+                    COUNT(*) FILTER (WHERE current_stage = 'Rejected')::int AS rejected
                 FROM public.applications
-                WHERE user_id = %s AND current_stage IN ('Interview', 'Final Round')
+                WHERE user_id = %s
                 """,
                 (user["id"],)
             )
-            interviews_count = cur.fetchone()["count"]
-            
-            cur.execute(
-                """
-                SELECT COUNT(*) as count
-                FROM public.applications
-                WHERE user_id = %s AND current_stage = 'Accepted'
-                """,
-                (user["id"],)
+            app_stats = cur.fetchone() or {}
+            metrics["applications_tracked"] = app_stats.get("applications_tracked", 0)
+            metrics["interviews"] = app_stats.get("interviews", 0)
+            metrics["rejected"] = app_stats.get("rejected", 0)
+            accepted_count = app_stats.get("accepted", 0)
+            metrics["success_rate"] = (
+                round((accepted_count / metrics["applications_tracked"]) * 100)
+                if metrics["applications_tracked"] > 0
+                else 0
             )
-            accepted_count = cur.fetchone()["count"]
-            
-            metrics["success_rate"] = 0
-            if metrics["applications_tracked"] > 0:
-                metrics["success_rate"] = round((accepted_count / metrics["applications_tracked"]) * 100)
-            
-            metrics["interviews"] = interviews_count
-            
-            cur.execute(
-                """
-                SELECT COUNT(*) as count
-                FROM public.applications
-                WHERE user_id = %s AND current_stage = 'Rejected'
-                """,
-                (user["id"],)
-            )
-            metrics["rejected"] = cur.fetchone()["count"]
 
             # 5. Average ATS score from persisted application/tailoring records only
             cur.execute(

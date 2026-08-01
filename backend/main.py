@@ -10,6 +10,9 @@ import asyncio
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
+import logging
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 from core.observability import configure_langsmith
 
 # Must run before importing routers/services that construct LangChain models.
@@ -22,14 +25,25 @@ import os
 from core.config import settings
 from core.exceptions import global_exception_handler
 from core.middleware import RequestLoggingMiddleware
+from contextlib import asynccontextmanager
 from core.observability import langsmith_status
+from core.database import get_db_pool, close_db_pool
 from api.router import api_router
+from api.v1.health import router as health_router, start_health_ticker
 from app.routers.api import router as legacy_api_router
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    get_db_pool()
+    start_health_ticker()
+    yield
+    close_db_pool()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version="3.0.0",
-    description="Enterprise production-grade clean architecture for AI Resume Tailoring engine."
+    description="Enterprise production-grade clean architecture for AI Resume Tailoring engine.",
+    lifespan=lifespan
 )
 
 # Custom exception handler
@@ -49,6 +63,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register root health routes (/live, /ready, /health)
+app.include_router(health_router)
 
 # Register v1 routes
 app.include_router(api_router, prefix=settings.API_V1_STR)

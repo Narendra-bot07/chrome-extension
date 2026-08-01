@@ -8,6 +8,14 @@ function JobSummaryCard({
   companyName,
   setStep,
   handleGenerateCoverLetter,
+import { Heart, RefreshCw, Wand2, FileText } from 'lucide-react';
+
+function JobSummaryCard({
+  jobAnalysis,
+  jobTitle,
+  companyName,
+  setStep,
+  handleGenerateCoverLetter,
   handleScanPage
 }) {
   const INVALID_TITLE_NOISE = /^(?:people you can reach out to|about the job|about the company|job description|responsibilities|qualifications|requirements|minimum qualifications|preferred qualifications|similar jobs|recommended jobs|explore options|meet the hiring team|your profile and resume|privacy policy|terms of use|apply|easy apply|save|share|follow|show more|see more|search results|jobs for you|0 notifications|skip navigation|sign in|log in|target company)$/i;
@@ -15,16 +23,14 @@ function JobSummaryCard({
   const details = jobAnalysis?.analysis || jobAnalysis?.normalized_content || jobAnalysis || {};
 
   const displayTitle = [details?.title, details?.job_title, jobAnalysis?.title, jobAnalysis?.job_title, jobTitle]
-    .find((str) => str && typeof str === 'string' && !INVALID_TITLE_NOISE.test(str.trim())) || 'Job Title';
+    .find((str) => str && typeof str === 'string' && !INVALID_TITLE_NOISE.test(str.trim())) || (jobAnalysis?.raw_text ? 'Analyzed Job' : '');
 
   const displayCompany = [details?.company, details?.company_name, jobAnalysis?.company, jobAnalysis?.company_name, companyName]
-    .find((str) => str && typeof str === 'string' && !INVALID_TITLE_NOISE.test(str.trim()) && str.trim().toLowerCase() !== displayTitle.toLowerCase()) || 'Company';
+    .find((str) => str && typeof str === 'string' && !INVALID_TITLE_NOISE.test(str.trim()) && str.trim().toLowerCase() !== displayTitle.toLowerCase()) || '';
   const displaySkills = collectJobSkills(details).explicit;
 
   React.useEffect(() => {
     console.log('[tailr4u:Trace 08] Final JobSummaryCard render values', {
-      title: displayTitle,
-      company: displayCompany,
       location: jobAnalysis?.location,
       jobType: jobAnalysis?.job_type,
       salary: jobAnalysis?.salary,

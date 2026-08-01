@@ -25,10 +25,13 @@ export const fingerprintJD = jd => {
 export const createJDPipelineSession = (jd, context = {}) => {
   if (!jd || typeof jd !== 'object') return null;
   const canonicalJD = clone(jd);
+  const canonicalResume = context.resume ? clone(context.resume) : null;
   return {
-    version: 1,
+    version: 2,
     canonicalJD,
+    canonicalResume,
     fingerprint: fingerprintJD(canonicalJD),
+    resumeId: context.resumeId || canonicalResume?.id || '',
     jobText: context.jobText || '',
     companyName: context.companyName || '',
     jobTitle: context.jobTitle || '',

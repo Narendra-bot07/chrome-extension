@@ -1,4 +1,5 @@
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, status, Request, Response
+from pydantic import BaseModel
 from core.security import verify_supabase_jwt, hash_password, verify_password, validate_password
 from core.database import get_db_connection
 from schemas.auth import (
@@ -249,6 +250,7 @@ async def login_user(
                 "status": "success",
                 "session": {
                     "access_token": access_token,
+                    "refresh_token": refresh_token,
                     "token_type": "bearer",
                     "user": {
                         "id": user["id"],
@@ -346,22 +348,43 @@ async def google_login(
         )
 
 
+class RefreshTokenPayload(BaseModel):
+    refresh_token: str | None = None
+
 @router.post("/refresh")
 async def refresh_session(
     response: Response,
-    refresh_token: str = Cookie(default=None, alias=REFRESH_COOKIE),
+    request: Request,
+    payload: RefreshTokenPayload | None = None,
+    refresh_token_cookie: str = Cookie(default=None, alias=REFRESH_COOKIE),
     conn=Depends(get_db_connection),
 ):
-    if not refresh_token:
-        raise HTTPException(status_code=401, detail="Refresh session unavailable.")
-    rotated = SessionService(conn).rotate_refresh_token(refresh_token)
+    token = (payload.refresh_token if (payload and payload.refresh_token) else None) or refresh_token_cookie
+    if not token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+
+    rotated = SessionService(conn).rotate_refresh_token(token) if token else None
     if not rotated:
+        try:
+            user = verify_supabase_jwt(request)
+            if user and user.get("id"):
+                session_service = SessionService(conn)
+                session_id = user.get("session_id") or session_service.create_session(user["id"], request, "jwt_refresh")
+                new_refresh_token = session_service.issue_refresh_token(session_id)
+                access_token = AuthService(conn).generate_custom_jwt(user, str(session_id))
+                _set_refresh_cookie(response, new_refresh_token)
+                return {"access_token": access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}
+        except Exception:
+            pass
         response.delete_cookie(REFRESH_COOKIE, path="/api/v1/auth")
         raise HTTPException(status_code=401, detail="Refresh session expired or revoked.")
+
     user, new_refresh_token = rotated
     access_token = AuthService(conn).generate_custom_jwt(user, str(user["session_id"]))
     _set_refresh_cookie(response, new_refresh_token)
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"access_token": access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}
 
 
 @router.post("/activity", status_code=204)

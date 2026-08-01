@@ -235,7 +235,19 @@ RAZORPAY_KEY_SECRET=key_secret_...
 | `POST` | `/api/v1/cover-letter/generate` | Drafts tailored cover letter | JWT |
 | `POST` | `/api/v1/billing/checkout` | Generates Geo-routed Stripe or Razorpay checkout | JWT |
 | `POST` | `/api/v1/billing/webhook/stripe` | Cryptographic Stripe webhook callback | Signature |
-| `POST` | `/api/v1/billing/webhook/razorpay` | Cryptographic Razorpay webhook callback | Signature |
+---
+
+## 🔄 GitHub Actions Automation Workflows
+
+We have implemented 3 automated GitHub Actions workflows under `.github/workflows/`:
+
+| Workflow File | Trigger | Purpose |
+| :--- | :--- | :--- |
+| [ci.yml](file:///.github/workflows/ci.yml) | `push` / `pull_request` on `main` & `develop` | Runs Python backend verification, Node 20 Vite production build, and packages Chrome Extension ZIP artifact. |
+| [db-migration-check.yml](file:///.github/workflows/db-migration-check.yml) | `push` to `migrations/` or `DATABASE_DDL_MIGRATIONS.md` | Validates Supabase PostgreSQL DDL migration syntax to prevent breaking schema changes. |
+| `cd-deploy-backend.yml` | `push` to `main` (Post-CI) | Automated continuous deployment of FastAPI server to cloud platform. |
+
+For full setup guidelines and required repository secrets, see [GITHUB_ACTIONS_WORKFLOW_SPECIFICATION.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/GITHUB_ACTIONS_WORKFLOW_SPECIFICATION.md).
 
 ---
 

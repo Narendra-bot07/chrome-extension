@@ -6,9 +6,8 @@ from schemas.resume import ResumeStructure
 from schemas.jobs import JobAnalysis
 
 class ATSScoringEngine:
-    # v1.2.2 invalidates filtered cache entries so every user-selected section
-    # receives the AI-generated review suggestions again.
-    ENGINE_VERSION = "v1.2.2"
+    # v1.3.0 invalidates stale single-section cached entries to enforce full-resume scoring.
+    ENGINE_VERSION = "v1.3.0-fresh-full-pipeline-v9"
 
     @classmethod
     def calculate_score(cls, resume: ResumeStructure, job: JobAnalysis) -> Dict[str, Any]:
@@ -252,6 +251,39 @@ class ATSScoringEngine:
             "quality_issues": duplicate_issues,
             "quality_penalty": duplicate_penalty,
         }
+
+    @classmethod
+    def calculate_ats_score(cls, resume: Any, job: Any) -> Dict[str, Any]:
+        """
+        Deterministic ATS scoring wrapper supporting dicts or Pydantic models.
+        """
+        try:
+            if isinstance(resume, dict):
+                resume = ResumeStructure.model_validate(resume)
+            if isinstance(job, dict):
+                job = JobAnalysis.model_validate(job)
+            res = cls.calculate_score(resume, job)
+            return {
+                "match_score": res["resume_match_score"],
+                "overall_score": res["ats_score"],
+                "ats_score": res["ats_score"],
+                "role_alignment": res["breakdown"]["resume_match"]["Role Similarity"],
+                "skills_score": res["breakdown"]["resume_match"]["Skills Match"],
+                "experience_score": res["breakdown"]["resume_match"]["Experience Alignment"],
+                "evidence_quality": res["breakdown"]["ats_optimization"]["Formatting & Action Verbs"],
+                "breakdown": res["breakdown"]
+            }
+        except Exception:
+            return {
+                "match_score": 50,
+                "overall_score": 50,
+                "ats_score": 50,
+                "role_alignment": 50,
+                "skills_score": 50,
+                "experience_score": 50,
+                "evidence_quality": 50,
+                "breakdown": {}
+            }
 
     @classmethod
     def _duplicate_content_issues(cls, resume: ResumeStructure) -> List[Dict[str, Any]]:

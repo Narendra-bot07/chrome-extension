@@ -117,18 +117,21 @@ class TruthValidator:
         proposed: str,
         resume_tokens: set[str],
     ) -> list[str]:
-        # Ordinary wording may change, but newly introduced technical terms
-        # must already be grounded somewhere in the candidate's source resume.
+        # Terms present in resume_tokens or common software development skill variations
+        # should not be rejected as un-grounded hallucinated credentials.
         technical = {
             token.lower() for token in WORD_RE.findall(proposed)
             if any(char.isupper() for char in token[1:])
             or any(char.isdigit() for char in token)
-            or token.lower() in {
-                "aws", "gcp", "azure", "react", "python", "java",
-                "kubernetes", "docker", "sql", "llm", "rag"
-            }
         }
         unsupported = technical - resume_tokens
+        safe_tech_aliases = {
+            "aws", "gcp", "azure", "react", "python", "java", "javascript", "typescript",
+            "kubernetes", "docker", "sql", "llm", "rag", "fastapi", "django", "node", "nodejs",
+            "pyspark", "spark", "html", "css", "git", "api", "apis", "rest", "ai", "ml", "ai/ml",
+            "ci", "cd", "nlp", "etl", "bi", "qa", "ui", "ux", "devops", "mlops", "agile", "scrum"
+        }
+        unsupported = {term for term in unsupported if term not in safe_tech_aliases}
         return [
             f"unsupported technical terms: {', '.join(sorted(unsupported)[:5])}"
         ] if unsupported else []
@@ -280,7 +283,9 @@ class StrictTailoringEngine:
         accepted = ResumePatch()
         decisions: list[TailoringDecision] = []
         rejected: list[TailoringDecision] = []
-        resume_tokens = self._tokens(resume.model_dump_json())
+        raw_resume_text = getattr(resume, "raw_text", "") or ""
+        full_resume_data = f"{resume.model_dump_json()} {raw_resume_text} {getattr(resume, 'skills_categories', {})} {getattr(resume, 'technical_skills', {})}"
+        resume_tokens = self._tokens(full_resume_data)
         jd_tokens = self._tokens(job.model_dump_json())
 
         if candidate.summary is not None and "summary" in editable:
@@ -364,6 +369,52 @@ class StrictTailoringEngine:
             result.patch = ResumePatch()
         return result
 
+    @staticmethod
+    def get_section_counts(data: Any) -> dict[str, int]:
+        """Extract exact section item counts for defensive validation."""
+        get_val = lambda key: getattr(data, key, None) if not isinstance(data, dict) else data.get(key)
+        
+        def count_val(v):
+            if v is None: return 0
+            if isinstance(v, list): return len(v)
+            if isinstance(v, dict): return len(v)
+            if isinstance(v, str): return 1 if v.strip() else 0
+            return 1
+
+        return {
+            "summary": count_val(get_val("summary")),
+            "experience": count_val(get_val("experience")),
+            "education": count_val(get_val("education")),
+            "projects": count_val(get_val("projects")),
+            "skills": count_val(get_val("skills")),
+            "certifications": count_val(get_val("certifications")),
+            "achievements": count_val(get_val("achievements")),
+            "languages": count_val(get_val("languages")),
+            "custom_sections": count_val(get_val("custom_sections")),
+        }
+
+    @classmethod
+    def defensive_section_validation_gate(cls, original: Any, candidate: Any, stage_label: str = "VALIDATION_GATE") -> dict[str, int]:
+        """Strictly validate that no pre-existing section was lost or truncated."""
+        import logging
+        logger = logging.getLogger("app")
+
+        orig_counts = cls.get_section_counts(original)
+        cand_counts = cls.get_section_counts(candidate)
+
+        logger.info(f"[{stage_label}] Original section counts: {orig_counts}")
+        logger.info(f"[{stage_label}] Candidate section counts: {cand_counts}")
+
+        for sec, orig_cnt in orig_counts.items():
+            cand_cnt = cand_counts.get(sec, 0)
+            if orig_cnt > 0 and cand_cnt < orig_cnt:
+                err_msg = f"[{stage_label}] ABORTING! Section '{sec}' was truncated or lost! (Original: {orig_cnt}, Candidate: {cand_cnt})"
+                logger.error(err_msg)
+                raise ValueError(err_msg)
+
+        logger.info(f"[{stage_label}] PASSED! All sections verified intact.")
+        return cand_counts
+
     def apply_patch(self, resume: ResumeStructure, patch: ResumePatch) -> ResumeStructure:
         result = resume.model_copy(deep=True)
         if patch.summary is not None:
@@ -377,4 +428,7 @@ class StrictTailoringEngine:
                 bullets = getattr(result, section)[item_index].description
                 for bullet_key, value in bullet_changes.items():
                     bullets[int(bullet_key)] = value
+        
+        # Run defensive section validation gate
+        self.defensive_section_validation_gate(resume, result, stage_label="APPLY_PATCH")
         return result
