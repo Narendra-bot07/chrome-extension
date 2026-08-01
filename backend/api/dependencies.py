@@ -7,7 +7,7 @@ from repositories.tailoring_repository import TailoringRepository
 from repositories.audit_repository import AuditRepository
 from repositories.application_repository import ApplicationRepository
 from repositories.ats_repository import ATSRepository
-from services.ai.gemini_service import GeminiService, GroqService
+from services.ai.ai_service import AIService, GeminiService, GroqService
 from services.storage.file_service import FileService
 from services.resume.tailoring_service import TailoringService
 from core.security import verify_supabase_jwt

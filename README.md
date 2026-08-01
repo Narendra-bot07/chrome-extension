@@ -6,14 +6,14 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-18.3-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
-[![Gemini](https://img.shields.io/badge/Google_Gemini-2.5_Flash-8E44AD?style=for-the-badge&logo=googlegemini&logoColor=white)](https://ai.google.dev/)
+[![DeepSeek](https://img.shields.io/badge/DeepSeek-v4_Flash-0066FF?style=for-the-badge&logo=openai&logoColor=white)](https://api.deepseek.com)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL_&_Storage-3FCF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com/)
 [![Upstash](https://img.shields.io/badge/Upstash-Redis_Cloud-00E599?style=for-the-badge&logo=redis&logoColor=white)](https://upstash.com/)
 [![Stripe](https://img.shields.io/badge/Stripe-Payments-635BFF?style=for-the-badge&logo=stripe&logoColor=white)](https://stripe.com/)
 [![Razorpay](https://img.shields.io/badge/Razorpay-UPI_&_Cards-0C2340?style=for-the-badge&logo=razorpay&logoColor=white)](https://razorpay.com/)
 [![Resend](https://img.shields.io/badge/Resend-Email_API-000000?style=for-the-badge&logo=resend&logoColor=white)](https://resend.com/)
 
-**TailorFlow AI** is a production-grade, high-availability resume tailoring system delivered via a **Chrome Extension (Manifest V3)** and a **Web Dashboard**. It enables job seekers to extract active Job Descriptions (JDs) in 1-Click, optimize resumes against ATS filters using Google Gemini 2.5 Flash, render dynamic templates with authentic social handles, and export ATS-ready PDFs.
+**TailorFlow AI** is a production-grade, high-availability resume tailoring system delivered via a **Chrome Extension (Manifest V3)** and a **Web Dashboard**. It enables job seekers to extract active Job Descriptions (JDs) in 1-Click, optimize resumes against ATS filters using **DeepSeek** (`deepseek-v4-flash` / `deepseek-v4-pro`), render dynamic vector templates, and export ATS-ready PDFs.
 
 </div>
 
@@ -26,6 +26,12 @@ All technical specifications, architecture diagrams, API contracts, database sch
 | Document | Description |
 | :--- | :--- |
 | **[`PROJECT_CONTEXT.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/PROJECT_CONTEXT.md)** | Single source of truth, vision, stack, folder structure & standards |
+| **[`FRONTEND.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/FRONTEND.md)** | Detailed frontend architecture, design tokens, color palette, glassmorphism & micro-animations |
+| **[`BACKEND.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/BACKEND.md)** | Detailed backend architecture, Clean 4-Layer design, DB connection pool, Resilient LLM failover & Playwright PDF engine |
+| **[`CACHING.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/CACHING.md)** | Upstash Redis TLS & REST API caching, SHA-256 content key hashing, TTL policies & fallbacks |
+| **[`CLOUDFLARE_R2.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/CLOUDFLARE_R2.md)** | Cloudflare R2 / S3 blob storage, bucket visibility, presigned URLs & asset path mappings |
+| **[`EMAIL_RESEND.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/EMAIL_RESEND.md)** | Resend REST API email engine, SMTP relay failover, HTML shell templates & transactional security flows |
+| **[`AUTH_OAUTH.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/AUTH_OAUTH.md)** | Supabase Auth, Google OAuth 2.0 PKCE flow, Bearer JWT session validation & Chrome Extension SSO sync |
 | **[`ARCHITECTURE.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/ARCHITECTURE.md)** | Technical architecture, data flow diagrams & sub-system breakdowns |
 | **[`DATABASE.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/DATABASE.md)** | PostgreSQL DDL schemas, ERD, indexes, constraints & storage links |
 | **[`API_CONTRACTS.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/API_CONTRACTS.md)** | Complete REST API endpoint contracts, schemas, headers & error payloads |
@@ -56,7 +62,7 @@ All technical specifications, architecture diagrams, API contracts, database sch
 | :--- | :--- | :--- |
 | **FastAPI** | ![FastAPI](https://img.shields.io/badge/-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white) | High-performance asynchronous Python REST server |
 | **Pydantic V2** | ![Pydantic](https://img.shields.io/badge/-Pydantic_V2-E92063?style=flat-square&logo=pydantic&logoColor=white) | Strict schema validation for request/response payloads |
-| **Google Gemini** | ![Gemini](https://img.shields.io/badge/-Gemini_2.5_Flash-8E44AD?style=flat-square&logo=googlegemini&logoColor=white) | Primary AI LLM for parsing, scoring, and tailoring |
+| **DeepSeek** | ![DeepSeek](https://img.shields.io/badge/-DeepSeek_v4-0066FF?style=flat-square&logo=openai&logoColor=white) | Primary AI LLM for parsing, scoring, and tailoring (`deepseek-v4-flash` / `pro`) |
 | **LangChain** | ![LangChain](https://img.shields.io/badge/-LangChain-1C3C3C?style=flat-square&logo=langchain&logoColor=white) | Structured output parsing and prompt orchestration |
 
 ### **Database, Cloud Storage & Caching**
@@ -78,7 +84,7 @@ All technical specifications, architecture diagrams, API contracts, database sch
 ## ✨ Key System Features
 
 - ⚡ **1-Click Active Tab JD Extraction**: Instantly scrapes and normalizes job descriptions from **LinkedIn**, **Indeed**, **Greenhouse**, and **Lever**.
-- 🧠 **Resilient Gemini AI Engine**: 100% Google Gemini API pipeline (`gemini-2.5-flash`, `gemini-2.0-flash`, `gemini-1.5-flash`) with automatic model failover.
+- 🧠 **Resilient DeepSeek AI Engine**: 100% OpenAI-compatible DeepSeek pipeline (`deepseek-v4-flash` / `deepseek-v4-pro`) with automatic schema escalation.
 - 🔒 **Single-Request Concurrency Lock**: Custom `_SINGLE_AI_REQUEST_LOCK` with 1.5s cooling intervals eliminates 429 quota exhaustion errors.
 - 🔗 **Social Handle Hyperlink Embedding**: Automatically extracts candidate usernames (e.g. `@Narendra-bot07`) and embeds clickable links across all resume templates.
 - 🖼️ **Intelligent Profile Photo Engine**: Seamless 100% gapless cover-scale photo cropping math with automatic visibility control (zero photo UI bloat for resumes without photos).

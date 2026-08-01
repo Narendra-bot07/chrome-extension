@@ -1,6 +1,6 @@
 """
-Legacy GroqService alias module. All AI capabilities use Gemini 2.5 Flash via GeminiService.
+Unified AIService Module Alias for backward compatibility.
 """
-from services.ai.gemini_service import GeminiService, GroqService
+from services.ai.ai_service import AIService, GeminiService, GroqService
 
-__all__ = ["GeminiService", "GroqService"]
+__all__ = ["AIService", "GeminiService", "GroqService"]

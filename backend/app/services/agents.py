@@ -4,7 +4,7 @@ import re
 from typing import List, Optional, Dict, Any, TypedDict
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
-from app.gemini_service import get_llm, parse_resume, analyze_job_description, analyze_gaps
+from app.ai_service import get_llm, parse_resume, analyze_job_description, analyze_gaps
 from app.schemas import (
     ResumeStructure,
     JobAnalysis,

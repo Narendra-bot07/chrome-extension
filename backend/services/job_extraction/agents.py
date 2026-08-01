@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 from langchain_core.messages import HumanMessage, SystemMessage
 from markdownify import markdownify
 
-from app.gemini_service import get_llm
+from app.ai_service import get_llm
 from core.logging import logger
 from services.job_extraction.schemas import (
     ClassificationDecision, EvidenceSource, ExtractedJob, JDState, ReviewDecision,

@@ -60,8 +60,8 @@ Tailr4U is composed of three interconnected sub-systems:
 | **Object / Blob Storage** | Supabase Storage / S3-compatible | Secure file storage (`original-resumes`, `generated-resumes`) |
 | **Caching Layer** | Redis / In-Memory Fallback Cache | Fast result caching for LLM responses & sessions |
 | **PDF Renderer** | Playwright (Headless Chromium) + React Static | HTML/CSS to PDF vector compilation |
-| **Primary AI Engine** | Groq (`llama-3.3-70b-versatile`) | Rapid structured JSON generation & tailoring |
-| **Secondary AI Engine**| Google Gemini (`gemini-2.0-flash` & `1.5-flash`) | Fallback LLM engine & complex semantic reasoning |
+| **Primary AI Engine** | DeepSeek (`deepseek-v4-flash`) | Rapid structured JSON generation, JD parsing & tailoring |
+| **Escalation AI Engine**| DeepSeek (`deepseek-v4-pro`) | Escalation model for schema recovery & complex reasoning |
 | **Observability** | LangSmith & Sentry | LLM prompt tracing, execution monitoring & error tracking |
 
 ---
@@ -85,8 +85,9 @@ tailr4u/
 ├── backend/                              # FastAPI Clean Architecture Engine
 │   ├── api/                             # Router endpoints (v1 routes & legacy adapters)
 │   │   └── v1/                          # Versioned modular routers (auth, resume, jobs, etc.)
-│   ├── app/                             # Legacy app logic, templates & AI services
-│   │   ├── gemini_service.py            # Primary AI orchestration & ResilientLLMWrapper
+│   ├── app/                             # Core AI logic, templates & AI services
+│   │   ├── ai_service.py                # Primary AI orchestration & DeepSeekProvider
+│   │   ├── llm/                         # Provider-neutral LLM client abstractions
 │   │   ├── playwright_pdf.py            # Chromium PDF rendering pipeline
 │   │   └── schemas.py                   # Pydantic data schemas
 │   ├── core/                            # System config, security, database pool, observability
@@ -128,6 +129,12 @@ tailr4u/
 ## 8. Cross-Reference Index
 
 - For System Architecture & Flow: see [ARCHITECTURE.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/ARCHITECTURE.md)
+- For Frontend Architecture & Design System: see [FRONTEND.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/FRONTEND.md)
+- For Backend Architecture & Engine Specification: see [BACKEND.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/BACKEND.md)
+- For Redis Caching System: see [CACHING.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/CACHING.md)
+- For Cloudflare R2 / Object Storage: see [CLOUDFLARE_R2.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/CLOUDFLARE_R2.md)
+- For Resend Email Integration: see [EMAIL_RESEND.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/EMAIL_RESEND.md)
+- For Auth & Google OAuth: see [AUTH_OAUTH.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/AUTH_OAUTH.md)
 - For Database Schemas & Storage: see [DATABASE.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/DATABASE.md)
 - For REST API Endpoint Specifications: see [API_CONTRACTS.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/API_CONTRACTS.md)
 - For Security & Authentication: see [SECURITY.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/SECURITY.md)

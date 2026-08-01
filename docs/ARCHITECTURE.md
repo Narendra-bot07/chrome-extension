@@ -30,10 +30,9 @@ graph TD
     end
 
     subgraph AI Intelligence Layer
-        RESILIENT_LLM["ResilientLLMWrapper<br/>(Multi-Model Orchestrator)"]
-        GROQ["Primary: Groq API<br/>(Llama-3.3-70b-versatile)"]
-        GEMINI_FLASH["Secondary: Gemini 2.0 Flash<br/>(Google GenAI)"]
-        GEMINI_15["Fallback: Gemini 1.5 Flash"]
+        DEEPSEEK_PROVIDER["DeepSeekProvider / ResilientLLMWrapper<br/>(app/ai_service.py)"]
+        DEEPSEEK_FLASH["Primary: DeepSeek Flash<br/>(deepseek-v4-flash)"]
+        DEEPSEEK_PRO["Escalation: DeepSeek Pro<br/>(deepseek-v4-pro)"]
     end
 
     subgraph Observability Stack
@@ -56,11 +55,10 @@ graph TD
     FASTAPI -->|"Get / Set Cached Hashes"| REDIS
 
     %% AI Pipeline
-    FASTAPI --> RESILIENT_LLM
-    RESILIENT_LLM -->|"1. Primary Request"| GROQ
-    RESILIENT_LLM -.->|"2. Failover on 429/Error"| GEMINI_FLASH
-    RESILIENT_LLM -.->|"3. Final Fallback"| GEMINI_15
-    RESILIENT_LLM -->|"Trace Call Traces"| LANGSMITH
+    FASTAPI --> DEEPSEEK_PROVIDER
+    DEEPSEEK_PROVIDER -->|"1. Primary Request"| DEEPSEEK_FLASH
+    DEEPSEEK_PROVIDER -.->|"2. Escalation on Schema Error"| DEEPSEEK_PRO
+    DEEPSEEK_PROVIDER -->|"Trace Call Traces"| LANGSMITH
 
     %% PDF Generation Pipeline
     FASTAPI -->|"Render HTML/CSS to Vector PDF"| PLAYWRIGHT

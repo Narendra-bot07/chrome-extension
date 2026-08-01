@@ -16,7 +16,7 @@ This document archives all active production system prompts, structured output J
 
 ### 2.1 Master Resume Tailoring & ATS Optimization Prompt
 
-- **Model Target**: Groq (`llama-3.3-70b-versatile`) / Gemini 2.0 Flash (`gemini-2.0-flash`)
+- **Model Target**: DeepSeek (`deepseek-v4-flash` / `deepseek-v4-pro`)
 - **Pydantic Schema**: `ResumePatch` / `TailoringReport`
 
 ```text
@@ -47,7 +47,7 @@ Return a valid JSON object adhering strictly to the ResumePatch schema.
 
 ### 2.2 Job Description Parser & Keyword Extraction Prompt
 
-- **Model Target**: Groq / Gemini 2.0 Flash
+- **Model Target**: DeepSeek (`deepseek-v4-flash` / `deepseek-v4-pro`)
 - **Pydantic Schema**: `JobAnalysis`
 
 ```text
@@ -81,7 +81,7 @@ Return JSON:
 
 ### 2.3 Targeted Cover Letter Generation Prompt
 
-- **Model Target**: Groq / Gemini 2.0 Flash
+- **Model Target**: DeepSeek (`deepseek-v4-flash` / `deepseek-v4-pro`)
 - **Pydantic Schema**: `CoverLetterResult`
 
 ```text

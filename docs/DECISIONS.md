@@ -11,6 +11,7 @@ This document tracks all critical architectural, structural, and infrastructure 
 - [ADR-003: Multi-Model Resilient LLM Wrapper (Groq + Gemini Failover)](#adr-003-multi-model-resilient-llm-wrapper-groq--gemini-failover)
 - [ADR-004: Supabase PostgreSQL with Native Row-Level Security (RLS)](#adr-004-supabase-postgresql-with-native-row-level-security-rls)
 - [ADR-005: Chrome Manifest V3 Content Script & Shadow DOM Injection](#adr-005-chrome-manifest-v3-content-script--shadow-dom-injection)
+- [ADR-006: Controlled Migration to DeepSeek as Sole LLM Provider](#adr-006-controlled-migration-to-deepseek-as-sole-llm-provider)
 
 ---
 
@@ -82,3 +83,17 @@ This document tracks all critical architectural, structural, and infrastructure 
 - **Alternatives Considered**: Web scraping background server workers. (Rejected: IP blocking and CAPTCHA restrictions on target job portals).
 - **Reasoning**: Scraping client-side within the user's active browser session bypasses CAPTCHAs effortlessly. Shadow DOM prevents host website CSS styles from distorting the extension UI.
 - **Consequences**: Content scripts must be maintained whenever major job boards alter their DOM HTML class names.
+
+---
+
+## ADR-006: Controlled Migration to DeepSeek as Sole LLM Provider & `ai_service.py` Consolidation
+
+- **Date**: 2026-08-01
+- **Status**: Approved & Implemented (`v3.1.0`)
+- **Context**: Tailr4U previously utilized a multi-model failover chain between Groq (`llama-3.3-70b-versatile`) and Google Gemini (`gemini-2.0-flash`). To streamline AI infrastructure, improve reasoning capabilities, and reduce vendor fragmentation, the LLM provider layer required consolidation.
+- **Decision**: Perform a controlled provider migration to **DeepSeek** (`deepseek-v4-flash` as primary, `deepseek-v4-pro` as escalation) via OpenAI-compatible SDK integration (`https://api.deepseek.com`), while consolidating `gemini_service.py` and `groq_service.py` into a unified, provider-neutral **`backend/app/ai_service.py`** module.
+- **Alternatives Considered**:
+  - *Option A*: Retain Groq + Gemini multi-provider complexity. (Rejected: Vendor fragmentation and separate quota management).
+  - *Option B*: Redesign tailoring prompts for DeepSeek. (Rejected: Violates non-negotiable zero-prompt-rewrite rule).
+- **Reasoning**: DeepSeek provides state-of-the-art structured JSON generation (`response_format={"type": "json_object"}`) and strong reasoning at lower cost. The provider abstraction layer (`DeepSeekProvider`) adapts DeepSeek directly to Tailr4U's existing Pydantic schemas without modifying any business logic or API contracts.
+- **Consequences**: `DEEPSEEK_API_KEY` is the single backend secret. All legacy `gemini_service` and `groq_service` imports forward seamlessly to `app.ai_service`.

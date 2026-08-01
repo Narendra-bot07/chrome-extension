@@ -19,7 +19,7 @@ from services.resume.source_preservation import (
     restore_source_evidence,
 )
 from services.resume.recovery_engine import ResumeRecoveryAgent
-from services.ai.gemini_service import GeminiService, GroqService
+from services.ai.ai_service import AIService, GeminiService, GroqService
 from app.analytics.events.tracking.analytics_service import AnalyticsService
 from core.database import get_db_connection
 from core.logging import logger

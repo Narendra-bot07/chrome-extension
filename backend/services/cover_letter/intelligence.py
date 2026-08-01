@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
-from app.gemini_service import get_llm
+from app.ai_service import get_llm
 from schemas.cover_letter_generation import GeneratedCoverLetter
 from schemas.cover_letter_intelligence import (
     CoverLetterEditRequest,

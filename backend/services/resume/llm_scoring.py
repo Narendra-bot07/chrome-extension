@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field, field_validator
 
-from app.gemini_service import get_llm, _get_from_cache, _set_to_cache, _get_cache_key
+from app.ai_service import get_llm, _get_from_cache, _set_to_cache, _get_cache_key
 
 logger = logging.getLogger(__name__)
 

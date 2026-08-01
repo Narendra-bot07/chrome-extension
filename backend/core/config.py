@@ -2,6 +2,10 @@ import os
 from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings
+import os
+from pathlib import Path
+from pydantic import Field
+from pydantic_settings import BaseSettings
 from typing import Optional
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -10,7 +14,14 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = Field(default="", env="GEMINI_API_KEY")
     GROQ_API_KEY: str = Field(default="", env="GROQ_API_KEY")
     DEEPSEEK_API_KEY: str = Field(default="", env="DEEPSEEK_API_KEY")
-    AI_PROVIDER: str = Field(default="auto", env="AI_PROVIDER")
+    DEEPSEEK_BASE_URL: str = Field(default="https://api.deepseek.com", env="DEEPSEEK_BASE_URL")
+    DEEPSEEK_MODEL_FLASH: str = Field(default="deepseek-v4-flash", env="DEEPSEEK_MODEL_FLASH")
+    DEEPSEEK_MODEL_PRO: str = Field(default="deepseek-v4-pro", env="DEEPSEEK_MODEL_PRO")
+    DEEPSEEK_TIMEOUT_SECONDS: float = Field(default=60.0, env="DEEPSEEK_TIMEOUT_SECONDS")
+    DEEPSEEK_MAX_RETRIES: int = Field(default=2, env="DEEPSEEK_MAX_RETRIES")
+    DEEPSEEK_ENABLE_THINKING: bool = Field(default=False, env="DEEPSEEK_ENABLE_THINKING")
+    LLM_PROVIDER: str = Field(default="deepseek", env="LLM_PROVIDER")
+    AI_PROVIDER: str = Field(default="deepseek", env="AI_PROVIDER")
     ASTRA_MODEL: str = Field(default="", env="ASTRA_MODEL")
     JWT_SECRET: str = Field(default="super-secret-jwt-key", env="JWT_SECRET")
     JWT_ALGORITHM: str = Field(default="HS256", env="JWT_ALGORITHM")

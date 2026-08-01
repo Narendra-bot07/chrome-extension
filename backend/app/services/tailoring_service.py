@@ -54,7 +54,7 @@ class TailoringService:
 
         # AI Tailoring Process
         start_time = time.time()
-        from app.gemini_service import apply_tailoring_patch
+        from app.ai_service import apply_tailoring_patch
         tailored_resume_obj = apply_tailoring_patch(
             resume=resume_obj,
             patch=patch
@@ -63,7 +63,7 @@ class TailoringService:
 
         # Strictly score the materialized tailored resume against the stored JD.
         # Invalid/missing comparison evidence produces 0, never a fabricated 85.
-        from app.gemini_service import calculate_resume_job_match_score
+        from app.ai_service import calculate_resume_job_match_score
         try:
             job_payload = job.get("normalized_content") or job.get("parsed_content") or {}
             job_obj = JobAnalysis(**job_payload)
