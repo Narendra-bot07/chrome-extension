@@ -20,6 +20,10 @@ from app.services.account_security_service import AccountSecurityService, normal
 from app.services.email_service import EmailService
 from core.config import settings
 from services.notifications import NotificationService
+from app.services.device_abuse_service import DeviceAbuseService, AbuseDecision
+from app.services.rate_limiter_service import RateLimiterService
+from app.services.turnstile_service import verify_turnstile_token
+from schemas.auth import TurnstileVerifyRequest
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 RESET_CONFIRMATION = "If an account exists for this email, a reset link has been sent."
@@ -80,13 +84,26 @@ async def validate_reset_token(payload: TokenRequest, conn=Depends(get_db_connec
         valid = cur.fetchone() is not None
     return {"valid": valid}
 
+@router.post("/verify-turnstile")
+async def verify_turnstile(payload: TurnstileVerifyRequest, request: Request):
+    ip = request.client.host if request.client else "unknown"
+    valid = verify_turnstile_token(payload.token, ip)
+    if not valid:
+        raise HTTPException(status_code=400, detail="Turnstile challenge verification failed.")
+    return {"status": "success", "valid": True}
+
 @router.post("/verify-email")
 async def verify_email(payload: TokenRequest, conn=Depends(get_db_connection)):
     try:
-        AccountSecurityService(conn).verify_email(payload.token)
+        user_id, email = AccountSecurityService(conn).verify_email(payload.token)
+        trial_granted = DeviceAbuseService(conn).grant_trial_if_eligible(user_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="This verification link is invalid or has expired.")
-    return {"status": "success", "message": "Your email has been verified."}
+    return {
+        "status": "success",
+        "message": "Your email has been verified.",
+        "trial_granted": trial_granted
+    }
 
 @router.post("/resend-verification")
 async def resend_verification(payload: ResendVerificationRequest, request: Request, background_tasks: BackgroundTasks, user: Dict[str, Any] = Depends(verify_supabase_jwt), conn=Depends(get_db_connection)):
@@ -127,9 +144,41 @@ async def change_password(payload: ChangePasswordRequest, request: Request, back
 @router.post("/register")
 async def register_user(
     payload: RegisterRequest,
+    request: Request,
     background_tasks: BackgroundTasks,
     conn = Depends(get_db_connection)
 ):
+    ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent", "")
+    installation_id = payload.installation_id or request.headers.get("x-installation-id")
+
+    # 1. Rate Limiting (Upstash / DB)
+    rate_limiter = RateLimiterService(conn)
+    if rate_limiter.is_rate_limited("signup_ip", ip, max_requests=10, window_seconds=3600):
+        raise HTTPException(status_code=429, detail="Too many account signups from this network. Please try again later.")
+    if installation_id and rate_limiter.is_rate_limited("signup_device", installation_id, max_requests=5, window_seconds=3600):
+        raise HTTPException(status_code=429, detail="Too many account signups from this device. Please try again later.")
+
+    # 2. Device Abuse Policy Evaluation
+    abuse_service = DeviceAbuseService(conn)
+    abuse_eval = abuse_service.evaluate_signup_attempt(
+        installation_id=installation_id,
+        ip=ip,
+        user_agent=user_agent,
+        email=payload.email,
+        turnstile_token=payload.turnstile_token
+    )
+
+    if abuse_eval["decision"] == AbuseDecision.TEMPORARILY_BLOCK:
+        raise HTTPException(status_code=403, detail=abuse_eval["reason"])
+
+    if abuse_eval["decision"] == AbuseDecision.REQUIRE_CHALLENGE:
+        if not payload.turnstile_token or not verify_turnstile_token(payload.turnstile_token, ip):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "REQUIRE_CHALLENGE", "message": abuse_eval["reason"]}
+            )
+
     try:
         validate_password(payload.password)
     except ValueError as exc:
@@ -156,7 +205,17 @@ async def register_user(
             cur.execute(query, (payload.email, pw_hash))
             user = cur.fetchone()
 
-            # Seed public.profiles for compatibility
+            # Record device registration
+            abuse_service.record_device_registration(
+                user_id=str(user[0]),
+                device_hash=abuse_eval["device_hash"],
+                signup_ip_hash=abuse_eval["signup_ip_hash"],
+                user_agent_hash=abuse_eval["user_agent_hash"],
+                risk_score=abuse_eval["risk_score"],
+                grant_trial_now=False  # Requirement #7: Email verification required first
+            )
+
+            # Seed public.profiles
             cur.execute(
                 "INSERT INTO public.profiles (id, email, full_name) VALUES (%s, %s, %s)",
                 (user[0], user[1], "")
@@ -169,15 +228,15 @@ async def register_user(
             AccountSecurityService(conn).audit("verification_email_sent", user[0])
             conn.commit()
             background_tasks.add_task(EmailService().send_verification, user[1], verification_token)
-            
+
             # Emit Analytics Event
             analytics_service = AnalyticsService(conn)
             analytics_service.emit_event(
                 user_id=user[0],
                 event_type="USER_REGISTERED",
-                metadata={"provider": "email"}
+                metadata={"provider": "email", "decision": abuse_eval["decision"], "trial_eligible": abuse_eval["trial_eligible"]}
             )
-            
+
             return {
                 "status": "success",
                 "message": "User registered successfully.",
@@ -185,7 +244,9 @@ async def register_user(
                     "id": user[0],
                     "email": user[1],
                     "full_name": user[2]
-                }
+                },
+                "abuse_decision": abuse_eval["decision"],
+                "trial_eligible": abuse_eval["trial_eligible"]
             }
     except HTTPException:
         raise

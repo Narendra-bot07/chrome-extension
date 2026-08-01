@@ -34,8 +34,20 @@ async def create_checkout(
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
         
-    checkout_url, provider = billing_svc.create_checkout(user, plan, req.country)
-    return CheckoutResponse(checkout_url=checkout_url, provider=provider)
+    checkout_res = billing_svc.create_checkout(
+        user=user,
+        plan=plan,
+        country=req.country,
+        currency=req.currency,
+        provider_override=req.provider
+    )
+    return CheckoutResponse(
+        checkout_url=checkout_res["checkout_url"],
+        provider=checkout_res["provider"],
+        subscription_id=checkout_res.get("subscription_id"),
+        razorpay_order_id=checkout_res.get("razorpay_order_id"),
+        key_id=checkout_res.get("key_id")
+    )
 
 @router.get("/history", response_model=BillingHistoryResponse)
 async def get_history(

@@ -4,11 +4,16 @@ from datetime import datetime
 
 class CheckoutRequest(BaseModel):
     plan_id: str
-    country: str = "US" # Used for determining provider
+    country: Optional[str] = "US"
+    currency: Optional[str] = "USD"
+    provider: Optional[str] = None
 
 class CheckoutResponse(BaseModel):
     checkout_url: str
     provider: str
+    subscription_id: Optional[str] = None
+    razorpay_order_id: Optional[str] = None
+    key_id: Optional[str] = None
 
 class PlanSchema(BaseModel):
     id: str

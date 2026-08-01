@@ -29,3 +29,24 @@ export async function reactivateSubscription(apiUrl, token) {
   if (!res.ok) throw new Error("Failed to reactivate subscription.");
   return res.json();
 }
+
+export async function createCheckoutSession(apiUrl, token, { planId, country = 'US', currency = 'USD', provider = null }) {
+  const res = await fetch(`${apiUrl}/api/v1/billing/create-checkout`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      plan_id: planId,
+      country,
+      currency,
+      provider
+    })
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || "Failed to create checkout session.");
+  }
+  return res.json();
+}

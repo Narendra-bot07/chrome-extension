@@ -315,15 +315,7 @@ function JobReviewView({
 
   const matchResult = useMemo(() => calculateJDMatchScore(parsedResume, jobAnalysis), [parsedResume, jobAnalysis]);
 
-  const isComparisonValid = Boolean(
-    comparison && 
-    (parsedResume?.id || parsedResume?.resume_id) && 
-    comparison._baseline_resume_id === (parsedResume?.id || parsedResume?.resume_id)
-  );
-
-  const displayScore = isComparisonValid && comparison?.resume_match_before != null
-    ? Math.round(Number(comparison.resume_match_before))
-    : matchResult.score;
+  const displayScore = matchResult.score;
 
   const matchScore = useMemo(() => ({
     score: displayScore,

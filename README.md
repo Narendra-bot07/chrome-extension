@@ -19,6 +19,28 @@
 
 ---
 
+## 📚 Repository Knowledge Base (`/docs`)
+
+All technical specifications, architecture diagrams, API contracts, database schemas, security threat models, prompts, deployment guides, and changelogs are documented in the central **[`/docs`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs)** directory:
+
+| Document | Description |
+| :--- | :--- |
+| **[`PROJECT_CONTEXT.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/PROJECT_CONTEXT.md)** | Single source of truth, vision, stack, folder structure & standards |
+| **[`ARCHITECTURE.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/ARCHITECTURE.md)** | Technical architecture, data flow diagrams & sub-system breakdowns |
+| **[`DATABASE.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/DATABASE.md)** | PostgreSQL DDL schemas, ERD, indexes, constraints & storage links |
+| **[`API_CONTRACTS.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/API_CONTRACTS.md)** | Complete REST API endpoint contracts, schemas, headers & error payloads |
+| **[`SECURITY.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/SECURITY.md)** | Auth flows, JWT, RLS policies, rate-limiting & threat model |
+| **[`OBSERVABILITY.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/OBSERVABILITY.md)** | LangSmith prompt tracing, health probes (`/live`, `/ready`) & Sentry |
+| **[`DEPLOYMENT.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/DEPLOYMENT.md)** | Environments, `.env` schema, Docker, Render, Vercel & CI/CD workflows |
+| **[`DECISIONS.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/DECISIONS.md)** | Architecture Decision Records (ADRs) tracking core design choices |
+| **[`ROADMAP.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/ROADMAP.md)** | Milestone features, release history & future version roadmap |
+| **[`PROMPTS.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/PROMPTS.md)** | Archive of production LLM prompts & structured JSON output schemas |
+| **[`KNOWN_ISSUES.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/KNOWN_ISSUES.md)** | Active bug register, root cause analyses & remediation status |
+| **[`TODOS.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/TODOS.md)** | Prioritized task backlog (P0 Critical through P4 Long-Term) |
+| **[`CHANGELOG.md`](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/CHANGELOG.md)** | Semantic version release history and security updates |
+
+---
+
 ## 🛠️ Technology Stack & Badges
 
 ### **Frontend & Extension Layer**

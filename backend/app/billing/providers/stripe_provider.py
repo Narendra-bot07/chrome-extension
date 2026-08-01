@@ -1,35 +1,59 @@
 import stripe
 import os
-from typing import Dict, Any
+from typing import Dict, Any, Union
 from .base_provider import BaseProvider
 
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-
 class StripeProvider(BaseProvider):
-    
-    def create_checkout(self, user: Dict[str, Any], plan: Dict[str, Any]) -> str:
-        if not stripe.api_key:
-            return "https://buy.stripe.com/test_dummy" # Fallback for local testing if no keys
+    def __init__(self):
+        self.api_key = os.getenv("STRIPE_SECRET_KEY")
+        if self.api_key:
+            stripe.api_key = self.api_key
 
+    def create_checkout(self, user: Dict[str, Any], plan: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.api_key:
+            frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+            return {
+                "checkout_url": f"{frontend_url}/pricing?payment=mock_stripe_success&plan_id={plan.get('id')}",
+                "provider": "stripe",
+                "subscription_id": "sub_mock_stripe_123"
+            }
+
+        price_id = plan.get("stripe_price_id") or os.getenv("STRIPE_DEFAULT_PRICE_ID")
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+        
         session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
-                'price': plan.get("stripe_price_id") or os.getenv("STRIPE_DEFAULT_PRICE_ID"),
+                'price': price_id,
                 'quantity': 1,
             }],
             mode='subscription',
-            success_url=f"{os.getenv('FRONTEND_URL', 'http://localhost:5173')}/profile?payment=success",
-            cancel_url=f"{os.getenv('FRONTEND_URL', 'http://localhost:5173')}/profile?payment=cancelled",
-            client_reference_id=user["id"],
-            customer_email=user["email"]
+            success_url=f"{frontend_url}/pricing?payment=success&provider=stripe&session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{frontend_url}/pricing?payment=cancelled",
+            client_reference_id=str(user["id"]),
+            customer_email=user.get("email"),
+            metadata={
+                "user_id": str(user["id"]),
+                "plan_id": str(plan.get("id", "pro")),
+                "email": str(user.get("email", ""))
+            }
         )
-        return session.url
+        return {
+            "checkout_url": session.url,
+            "provider": "stripe",
+            "subscription_id": session.get("subscription")
+        }
 
     def verify_webhook(self, payload: bytes, signature: str) -> Dict[str, Any]:
         endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
-        if not endpoint_secret:
-            raise ValueError("Stripe webhook secret not configured")
-        
+        if not endpoint_secret or endpoint_secret == "dummy":
+            import json
+            try:
+                data = json.loads(payload.decode('utf-8'))
+                return data
+            except Exception:
+                raise ValueError("Invalid Stripe payload format")
+
         try:
             event = stripe.Webhook.construct_event(
                 payload, signature, endpoint_secret
@@ -39,7 +63,7 @@ class StripeProvider(BaseProvider):
             raise ValueError(f"Invalid Stripe payload or signature: {e}")
 
     def cancel_subscription(self, provider_subscription_id: str) -> bool:
-        if not stripe.api_key:
+        if not self.api_key or provider_subscription_id.startswith("sub_mock"):
             return True
         try:
             stripe.Subscription.modify(

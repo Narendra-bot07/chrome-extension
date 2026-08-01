@@ -68,14 +68,7 @@ function TailorConfigPage() {
   };
 
   const matchResult = React.useMemo(() => calculateJDMatchScore(parsedResume, jobAnalysis), [parsedResume, jobAnalysis]);
-  const isComparisonValid = Boolean(
-    comparison && 
-    (parsedResume?.id || parsedResume?.resume_id) && 
-    comparison._baseline_resume_id === (parsedResume?.id || parsedResume?.resume_id)
-  );
-  const matchScore = isComparisonValid && comparison?.resume_match_before != null
-    ? Math.round(Number(comparison.resume_match_before))
-    : matchResult.score;
+  const matchScore = matchResult.score;
 
   return (
     <ResumeTailoringConfigView

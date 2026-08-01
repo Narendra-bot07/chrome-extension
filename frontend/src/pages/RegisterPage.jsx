@@ -8,6 +8,8 @@ import BrandLogo from '../components/BrandLogo';
 import { authDestinationFromSearch } from '../utils/authRedirect';
 import { storeAuthenticatedSession } from '../services/authSession';
 
+import { getOrCreateInstallationId } from '../utils/installationId';
+
 const isExtension = typeof chrome !== 'undefined' && chrome.identity;
 const BASIC_GOOGLE_SCOPES = ['openid', 'email', 'profile'];
 const EXTENDED_GOOGLE_SCOPES = [
@@ -83,12 +85,17 @@ export default function RegisterPage() {
     }
 
     try {
+      const installationId = getOrCreateInstallationId();
       const res = await fetch('http://localhost:8000/api/v1/auth/register', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Installation-Id': installationId
+        },
         body: JSON.stringify({
           email: regEmail,
-          password: regPassword
+          password: regPassword,
+          installation_id: installationId
         })
       });
 

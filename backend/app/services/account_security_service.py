@@ -123,7 +123,7 @@ class AccountSecurityService:
             cur.execute("UPDATE public.email_verification_tokens SET used_at=NOW() WHERE user_id=%s AND used_at IS NULL", (row["user_id"],))
             self.audit("email_verified", row["user_id"])
         self.conn.commit()
-        return row["email"]
+        return str(row["user_id"]), str(row["email"])
 
     def change_password(self, user_id: str, current: str, new: str, current_session_id=None) -> str:
         validate_password(new)
