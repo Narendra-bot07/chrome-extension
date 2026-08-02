@@ -240,15 +240,10 @@ class DeviceAbuseService:
                 (now, reg["id"])
             )
             
-            # Upsert trial plan and subscription into public.subscriptions table
-            cur.execute(
-                """INSERT INTO public.plans (id, code, name, description)
-                   VALUES ('trial', 'trial', 'Free Trial', '14-day free trial')
-                   ON CONFLICT (id) DO NOTHING"""
-            )
+            # Upsert free demo subscription into public.subscriptions table
             cur.execute(
                 """INSERT INTO public.subscriptions (user_id, plan_id, status)
-                   VALUES (%s, 'trial', 'active')
+                   VALUES (%s, 'free', 'active')
                    ON CONFLICT DO NOTHING""",
                 (user_id,)
             )

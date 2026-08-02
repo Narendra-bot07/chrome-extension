@@ -1,44 +1,57 @@
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useTailr4uReducedMotion } from '../motion/MotionSystem';
 
 export default function GlobalCursor() {
-  const reduced = useTailr4uReducedMotion();
   const cursorRef = useRef(null);
 
   useEffect(() => {
-    const coarsePointer = window.matchMedia('(pointer: coarse)').matches;
-    if (reduced || coarsePointer) return undefined;
+    // Only disable custom cursor on touch/mobile devices
+    const isTouchDevice = window.matchMedia('(pointer: coarse)').matches;
+    if (isTouchDevice) return undefined;
 
     document.body.classList.add('tf-global-cursor-active');
-    const move = event => {
+
+    const updateCursorPosition = (clientX, clientY) => {
       if (cursorRef.current) {
-        cursorRef.current.style.transform = `translate3d(${event.clientX}px,${event.clientY}px,0)`;
+        cursorRef.current.style.transform = `translate3d(${clientX}px,${clientY}px,0)`;
         cursorRef.current.style.opacity = '1';
       }
     };
-    const hover = event => {
-      const interactive = event.target.closest(
-        'button,a,input,textarea,select,[role="button"],[role="tab"],[data-cursor="interactive"]'
-      );
-      cursorRef.current?.classList.toggle('interactive', Boolean(interactive));
-    };
-    const leave = () => {
-      if (cursorRef.current) cursorRef.current.style.opacity = '0';
+
+    const handlePointerMove = (event) => {
+      updateCursorPosition(event.clientX, event.clientY);
     };
 
-    document.addEventListener('pointermove', move, { passive: true });
-    document.addEventListener('pointerover', hover);
-    document.documentElement.addEventListener('mouseleave', leave);
+    const handlePointerOver = (event) => {
+      if (!cursorRef.current || !event.target) return;
+      const interactive = event.target.closest(
+        'button, a, input, textarea, select, [role="button"], [role="tab"], [data-cursor="interactive"], .cursor-pointer'
+      );
+      cursorRef.current.classList.toggle('interactive', Boolean(interactive));
+    };
+
+    const handleMouseLeave = () => {
+      if (cursorRef.current) {
+        cursorRef.current.style.opacity = '0';
+      }
+    };
+
+    window.addEventListener('mousemove', handlePointerMove, { passive: true });
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    document.addEventListener('pointerover', handlePointerOver, { passive: true });
+    document.documentElement.addEventListener('mouseleave', handleMouseLeave);
+
     return () => {
       document.body.classList.remove('tf-global-cursor-active');
-      document.removeEventListener('pointermove', move);
-      document.removeEventListener('pointerover', hover);
-      document.documentElement.removeEventListener('mouseleave', leave);
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('pointermove', handlePointerMove);
+      document.removeEventListener('pointerover', handlePointerOver);
+      document.documentElement.removeEventListener('mouseleave', handleMouseLeave);
     };
-  }, [reduced]);
+  }, []);
 
-  if (reduced || typeof document === 'undefined') return null;
+  if (typeof document === 'undefined') return null;
+
   return createPortal(
     <div className="lp-custom-cursor" aria-hidden="true">
       <i ref={cursorRef} style={{ opacity: 0 }}>

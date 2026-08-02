@@ -5,6 +5,7 @@ import { useSubscription } from '../hooks/useSubscription';
 import { useApp } from '../context/AppContext';
 import { createCheckoutSession } from '../services/subscriptionApi';
 import { PaymentModal } from '../components/PaymentModal';
+import { PaymentStatusModal } from '../components/modals/PaymentStatusModal';
 import { useTailr4uReducedMotion } from '../motion/MotionSystem';
 import './SubscriptionPage.css';
 
@@ -45,6 +46,11 @@ export default function SubscriptionPage() {
   const [checkoutModalPlan, setCheckoutModalPlan] = useState(null);
   const [checkoutError, setCheckoutError] = useState(null);
   const [paymentBanner, setPaymentBanner] = useState(null);
+  const [paymentStatusModal, setPaymentStatusModal] = useState({
+    isOpen: false,
+    status: 'pending', // 'pending' | 'success' | 'failed' | 'cancelled'
+    targetPlanName: ''
+  });
 
   const jdUsage = subscription?.usage?.jd_extraction;
   const limit = jdUsage?.limit;
@@ -54,7 +60,11 @@ export default function SubscriptionPage() {
   const currentPlanCode = subscription?.plan?.code || subscription?.plan_code || 'free';
   const currentPlan = plans.find((plan) => plan.code === currentPlanCode);
   const currentSortOrder = currentPlan?.sort_order ?? 0;
-  const availablePlans = plans.filter((plan) => plan.code !== 'free');
+  const availablePlans = plans.filter((plan) => {
+    const code = (plan.code || '').toLowerCase();
+    const price = typeof plan.price_amount === 'number' ? plan.price_amount : (plan.price || 0);
+    return code !== 'free' && code !== 'trial' && price > 0;
+  });
   const usageItems = [
     ['JD extractions', subscription?.usage?.jd_extraction],
     ['Tailored resumes', subscription?.usage?.resume_generation],
@@ -67,18 +77,61 @@ export default function SubscriptionPage() {
     const params = new URLSearchParams(window.location.search);
     const paymentStatus = params.get('payment');
     if (paymentStatus === 'success' || paymentStatus?.includes('success')) {
+      setPaymentStatusModal({
+        isOpen: true,
+        status: 'success',
+        targetPlanName: subscription?.plan?.name || 'Pro'
+      });
       setPaymentBanner({
         type: 'success',
         message: 'Payment completed successfully! Your subscription features and credits are now active.'
       });
       refresh();
     } else if (paymentStatus === 'cancelled') {
+      setPaymentStatusModal({
+        isOpen: true,
+        status: 'cancelled',
+        targetPlanName: ''
+      });
       setPaymentBanner({
         type: 'info',
         message: 'Payment was cancelled. You can retry upgrading anytime.'
       });
     }
-  }, [refresh]);
+  }, [refresh, subscription?.plan?.name]);
+
+  // Periodic polling & tab focus status check while payment status modal is pending
+  useEffect(() => {
+    if (!paymentStatusModal.isOpen || paymentStatusModal.status !== 'pending') return undefined;
+
+    const interval = setInterval(() => {
+      refresh();
+    }, 3000);
+
+    const handleFocus = () => {
+      refresh();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [paymentStatusModal.isOpen, paymentStatusModal.status, refresh]);
+
+  // Auto-detect plan upgrade completion while status modal is pending
+  useEffect(() => {
+    if (paymentStatusModal.isOpen && paymentStatusModal.status === 'pending') {
+      const code = subscription?.plan?.code;
+      if (code && code !== 'free' && code !== 'trial') {
+        setPaymentStatusModal(prev => ({
+          ...prev,
+          status: 'success',
+          targetPlanName: subscription?.plan?.name || prev.targetPlanName
+        }));
+      }
+    }
+  }, [subscription, paymentStatusModal.isOpen, paymentStatusModal.status]);
 
   useEffect(() => {
     if (reducedMotion) {
@@ -98,14 +151,26 @@ export default function SubscriptionPage() {
     setCheckoutModalPlan(plan);
   };
 
-  const handleExecutePayment = async ({ planId, country, currency, provider }) => {
+  const handleExecutePayment = async ({ planId, country, currency, provider, checkoutTab }) => {
     const token = session?.access_token || localStorage.getItem('access_token');
     if (!token) {
+      if (checkoutTab && !checkoutTab.closed) checkoutTab.close();
       setCheckoutError('Please sign in to upgrade your subscription.');
       return;
     }
 
+    const targetPlan = checkoutModalPlan;
     try {
+      // 1. Close payment gateway selection modal on current page
+      setCheckoutModalPlan(null);
+
+      // 2. Immediately open Payment Status Modal on current active page
+      setPaymentStatusModal({
+        isOpen: true,
+        status: 'pending',
+        targetPlanName: targetPlan?.name || 'Pro'
+      });
+
       const res = await createCheckoutSession(apiUrl, token, {
         planId,
         country,
@@ -113,13 +178,11 @@ export default function SubscriptionPage() {
         provider
       });
 
-      setCheckoutModalPlan(null);
-
       // Handle Razorpay Inline SDK Checkout
       if (res.provider === 'razorpay' && res.subscription_id && !res.checkout_url.startsWith('http')) {
+        if (checkoutTab && !checkoutTab.closed) checkoutTab.close();
         const rzpKey = res.key_id || 'rzp_test_mock123';
         
-        // Dynamically load Razorpay SDK if not present
         if (!window.Razorpay) {
           const script = document.createElement('script');
           script.src = 'https://checkout.razorpay.com/v1/checkout.js';
@@ -133,13 +196,27 @@ export default function SubscriptionPage() {
             key: rzpKey,
             subscription_id: res.subscription_id,
             name: 'Tailr4U Subscriptions',
-            description: `Upgrade to ${checkoutModalPlan?.name || 'Pro'}`,
+            description: `Upgrade to ${targetPlan?.name || 'Pro'}`,
             handler: function (response) {
+              setPaymentStatusModal({
+                isOpen: true,
+                status: 'success',
+                targetPlanName: targetPlan?.name || 'Pro'
+              });
               setPaymentBanner({
                 type: 'success',
                 message: 'Razorpay payment authorized! Refreshing subscription status...'
               });
               setTimeout(refresh, 1500);
+            },
+            modal: {
+              ondismiss: function () {
+                setPaymentStatusModal({
+                  isOpen: true,
+                  status: 'cancelled',
+                  targetPlanName: targetPlan?.name || ''
+                });
+              }
             },
             prefill: {
               email: session?.user?.email || ''
@@ -153,11 +230,25 @@ export default function SubscriptionPage() {
         }
       }
 
-      // Redirect for Stripe or Hosted Payment URL
+      // Handle Stripe Checkout in separate new tab:
       if (res.checkout_url) {
-        window.location.href = res.checkout_url;
+        if (checkoutTab && !checkoutTab.closed) {
+          checkoutTab.location.href = res.checkout_url;
+        } else {
+          const stripeWindow = window.open(res.checkout_url, '_blank');
+          if (!stripeWindow || stripeWindow.closed || typeof stripeWindow.closed === 'undefined') {
+            window.location.href = res.checkout_url;
+          }
+        }
       }
     } catch (err) {
+      if (checkoutTab && !checkoutTab.closed) checkoutTab.close();
+      setCheckoutModalPlan(null);
+      setPaymentStatusModal({
+        isOpen: true,
+        status: 'failed',
+        targetPlanName: targetPlan?.name || ''
+      });
       setCheckoutError(err.message || 'Payment initialization failed. Please try again.');
     }
   };
@@ -307,6 +398,19 @@ export default function SubscriptionPage() {
         onClose={() => setCheckoutModalPlan(null)}
         plan={checkoutModalPlan}
         onSelectPayment={handleExecutePayment}
+      />
+
+      {/* Real-time Payment Status Modal */}
+      <PaymentStatusModal
+        isOpen={paymentStatusModal.isOpen}
+        status={paymentStatusModal.status}
+        planName={paymentStatusModal.targetPlanName || checkoutModalPlan?.name || 'Pro'}
+        onClose={() => setPaymentStatusModal(prev => ({ ...prev, isOpen: false }))}
+        onRetry={() => {
+          if (availablePlans.length > 0) {
+            setCheckoutModalPlan(availablePlans[0]);
+          }
+        }}
       />
     </div>
   );

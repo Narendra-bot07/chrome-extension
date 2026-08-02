@@ -47,6 +47,15 @@ export function AppProvider({ children }) {
     }
   }, [darkMode]);
 
+  // Quota Exceeded Modal state
+  const [showQuotaModal, setShowQuotaModal] = useState(false);
+  const [quotaModalMessage, setQuotaModalMessage] = useState('');
+
+  const openQuotaModal = (msg) => {
+    setQuotaModalMessage(msg || "You have reached your free demo limit (5 JD extractions, 1 Resume generation, 1 Cover letter generation). Upgrade to a paid plan to continue.");
+    setShowQuotaModal(true);
+  };
+
   // Supabase Authentication states
   const [user, setUserState] = useState(() => {
     try {
@@ -1893,6 +1902,7 @@ export function AppProvider({ children }) {
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         if (body?.detail?.code === 'QUOTA_EXCEEDED') {
+          openQuotaModal(body?.detail?.message);
           throw new Error(body.detail.message || 'Your JD extraction limit has been reached. View plans to continue.');
         }
         const failure = body?.detail?.error || body?.error || {};
@@ -2264,6 +2274,9 @@ export function AppProvider({ children }) {
           const errData = await jobRes.json().catch(() => ({ detail: jobRes.statusText }));
           if (["QUOTA_EXCEEDED", "FEATURE_NOT_AVAILABLE", "SUBSCRIPTION_INACTIVE", "SUBSCRIPTION_SUSPENDED"].includes(errData?.detail?.code)) {
             await fetchSubscription();
+            if (errData?.detail?.code === "QUOTA_EXCEEDED") {
+              openQuotaModal(errData?.detail?.message);
+            }
             const subError = new Error(errData.detail.message || "Subscription does not allow this extraction.");
             subError.skipLegacyFallback = true;
             throw subError;
@@ -3835,7 +3848,10 @@ export function AppProvider({ children }) {
       handleEditCoverLetter,
       handleUndoCoverLetterEdit,
       handleRestoreCoverLetterEdit,
-      handleCopyToClipboard
+      handleCopyToClipboard,
+      showQuotaModal, setShowQuotaModal,
+      quotaModalMessage, setQuotaModalMessage,
+      openQuotaModal
     }}>
       {children}
       {showInactivityWarning && (

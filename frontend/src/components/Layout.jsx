@@ -13,6 +13,7 @@ import InvalidJdWarningModal from './InvalidJdWarningModal';
 import HowItWorksModal from './modals/HowItWorksModal';
 import FeedbackModal from './modals/FeedbackModal';
 import SupportModal from './modals/SupportModal';
+import { QuotaExceededModal } from './modals/QuotaExceededModal';
 import RouteTransition from '../motion/RouteTransition';
 import { FlowStepper } from './FlowStepper';
 import { classifyBrowserPageUrl } from '../services/jdExtractionFlow';
@@ -56,7 +57,10 @@ function Layout() {
     jobDetectionStatus,
     loadingAuth,
     loadingResume,
-    loadingPreferences
+    loadingPreferences,
+    showQuotaModal,
+    setShowQuotaModal,
+    quotaModalMessage
   } = useApp();
 
   const [profile, setProfile] = useState({
@@ -650,6 +654,12 @@ function Layout() {
       <HowItWorksModal isOpen={isHowItWorksOpen} onClose={() => setIsHowItWorksOpen(false)} />
       <FeedbackModal isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />
       <SupportModal isOpen={isSupportOpen} onClose={() => setIsSupportOpen(false)} />
+      <QuotaExceededModal
+        isOpen={showQuotaModal}
+        onClose={() => setShowQuotaModal(false)}
+        message={quotaModalMessage}
+        onUpgrade={() => navigate('/subscription')}
+      />
     </div>
   );
 }

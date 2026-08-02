@@ -21,27 +21,59 @@ class StripeProvider(BaseProvider):
         price_id = plan.get("stripe_price_id") or os.getenv("STRIPE_DEFAULT_PRICE_ID")
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
         
-        session = stripe.checkout.Session.create(
-            payment_method_types=['card'],
-            line_items=[{
-                'price': price_id,
-                'quantity': 1,
-            }],
-            mode='subscription',
-            success_url=f"{frontend_url}/pricing?payment=success&provider=stripe&session_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=f"{frontend_url}/pricing?payment=cancelled",
-            client_reference_id=str(user["id"]),
-            customer_email=user.get("email"),
-            metadata={
-                "user_id": str(user["id"]),
-                "plan_id": str(plan.get("id", "pro")),
-                "email": str(user.get("email", ""))
-            }
-        )
+        session = None
+        if price_id:
+            try:
+                session = stripe.checkout.Session.create(
+                    payment_method_types=['card'],
+                    line_items=[{'price': price_id, 'quantity': 1}],
+                    mode='subscription',
+                    success_url=f"{frontend_url}/#/subscription?payment=success&provider=stripe&session_id={{CHECKOUT_SESSION_ID}}",
+                    cancel_url=f"{frontend_url}/#/subscription?payment=cancelled",
+                    client_reference_id=str(user["id"]),
+                    customer_email=user.get("email"),
+                    metadata={
+                        "user_id": str(user["id"]),
+                        "plan_id": str(plan.get("id", "pro")),
+                        "email": str(user.get("email", ""))
+                    }
+                )
+            except stripe.error.InvalidRequestError:
+                session = None
+
+        if not session:
+            amount = int(plan.get("price_amount", 19.99) * 100)
+            currency = plan.get("currency", "usd").lower()
+            session = stripe.checkout.Session.create(
+                payment_method_types=['card'],
+                line_items=[{
+                    'price_data': {
+                        'currency': currency,
+                        'product_data': {
+                            'name': plan.get("name", "TailorFlow Subscription"),
+                        },
+                        'unit_amount': amount,
+                        'recurring': {'interval': 'month'}
+                    },
+                    'quantity': 1,
+                }],
+                mode='subscription',
+                success_url=f"{frontend_url}/#/subscription?payment=success&provider=stripe&session_id={{CHECKOUT_SESSION_ID}}",
+                cancel_url=f"{frontend_url}/#/subscription?payment=cancelled",
+                client_reference_id=str(user["id"]),
+                customer_email=user.get("email"),
+                metadata={
+                    "user_id": str(user["id"]),
+                    "plan_id": str(plan.get("id", "pro")),
+                    "email": str(user.get("email", ""))
+                }
+            )
+        sub_id = getattr(session, "subscription", None) or (session.get("subscription") if hasattr(session, "get") else None)
+        checkout_url = getattr(session, "url", "") or (session.get("url") if hasattr(session, "get") else "")
         return {
-            "checkout_url": session.url,
+            "checkout_url": checkout_url,
             "provider": "stripe",
-            "subscription_id": session.get("subscription")
+            "subscription_id": sub_id
         }
 
     def verify_webhook(self, payload: bytes, signature: str) -> Dict[str, Any]:
