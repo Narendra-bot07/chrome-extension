@@ -7,7 +7,7 @@ from repositories.tailoring_repository import TailoringRepository
 from repositories.audit_repository import AuditRepository
 from repositories.application_repository import ApplicationRepository
 from repositories.ats_repository import ATSRepository
-from services.ai.ai_service import AIService, GeminiService, GroqService
+from services.ai.ai_service import AIService
 from services.storage.file_service import FileService
 from services.resume.tailoring_service import TailoringService
 from core.security import verify_supabase_jwt
@@ -42,8 +42,8 @@ def get_ats_repository(db = Depends(get_user_db_connection)) -> ATSRepository:
     return ATSRepository(db)
 
 
-def get_ai_service() -> GeminiService:
-    return GeminiService()
+def get_ai_service() -> AIService:
+    return AIService()
 
 def get_storage_service() -> FileService:
     from core.config import BASE_DIR
@@ -56,7 +56,7 @@ def get_tailoring_service(
     job_repo: JobRepository = Depends(get_job_repository),
     profile_repo: ProfileRepository = Depends(get_profile_repository),
     audit_repo: AuditRepository = Depends(get_audit_repository),
-    ai_service: GroqService = Depends(get_ai_service)
+    ai_service: AIService = Depends(get_ai_service)
 ) -> TailoringService:
     return TailoringService(
         tailor_repo=tailor_repo,

@@ -1,26 +1,92 @@
-// Enable opening the side panel on extension action click safely
-const setupSidePanel = () => {
-  if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
-    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((error) => {
-      console.warn("[Background] sidePanel behavior warning (safe to ignore):", error.message || error);
-    });
+const SENTRY_EXTENSION_DSN = ""; // Extension Sentry DSN (will be read from build or injected)
+const EXTENSION_VERSION = "1.0.0";
+const APP_RELEASE = `tailr4u-extension@${EXTENSION_VERSION}`;
+
+// Asynchronous lightweight Sentry reporter avoiding external dependencies in Extension worker
+const reportErrorToSentry = (error, contextName) => {
+  if (!SENTRY_EXTENSION_DSN) return;
+  try {
+    const url = new URL(SENTRY_EXTENSION_DSN);
+    const publicKey = url.username;
+    const host = url.host;
+    const projectId = url.pathname.replace("/", "");
+    const sentryUrl = `https://${host}/api/${projectId}/store/`;
+    const eventId = typeof crypto !== 'undefined' && crypto.randomUUID 
+      ? crypto.randomUUID().replace(/-/g, "") 
+      : Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+    
+    const payload = {
+      event_id: eventId,
+      timestamp: new Date().toISOString().split(".")[0],
+      logger: "chrome-extension",
+      platform: "javascript",
+      release: APP_RELEASE,
+      environment: "production",
+      exception: {
+        values: [{
+          type: error.name || "Error",
+          value: (error.message || String(error)).slice(0, 1000),
+          stacktrace: error.stack ? {
+            frames: error.stack.split("\n").map(line => ({ filename: line.trim() })).reverse()
+          } : undefined
+        }]
+      },
+      tags: {
+        extension_version: EXTENSION_VERSION,
+        execution_context: contextName,
+        browser_family: "chrome"
+      }
+    };
+
+    fetch(sentryUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Sentry-Auth": `Sentry sentry_version=7, sentry_client=tailr4u-extension/1.0, sentry_key=${publicKey}`
+      },
+      body: JSON.stringify(payload)
+    }).catch(() => {});
+  } catch (err) {
+    console.warn("[Background] Sentry send error:", err);
   }
 };
 
-chrome.runtime.onInstalled.addListener(setupSidePanel);
-chrome.runtime.onStartup.addListener(setupSidePanel);
-setupSidePanel();
+// Enable opening the side panel on extension action click safely
+const setupSidePanel = () => {
+  try {
+    if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
+      chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((error) => {
+        console.warn("[Background] sidePanel behavior warning (safe to ignore):", error.message || error);
+      });
+    }
+  } catch (e) {
+    reportErrorToSentry(e, "setup_side_panel");
+  }
+};
+
+try {
+  chrome.runtime.onInstalled.addListener(setupSidePanel);
+  chrome.runtime.onStartup.addListener(setupSidePanel);
+  setupSidePanel();
+} catch (e) {
+  reportErrorToSentry(e, "initial_load");
+}
 
 // Listener for background messages (non-extraction events)
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === "APPLICATION_SUBMITTED") {
-    console.log("[Background] Application submission event intercepted:", message.data);
-    try {
-      chrome.runtime.sendMessage(message);
-    } catch (e) {
-      // Ignore if no listeners exist
+  try {
+    if (message.type === "APPLICATION_SUBMITTED") {
+      console.log("[Background] Application submission event intercepted:", message.data);
+      try {
+        chrome.runtime.sendMessage(message);
+      } catch (e) {
+        // Ignore if no listeners exist
+      }
+      sendResponse({ status: "success" });
     }
-    sendResponse({ status: "success" });
+  } catch (e) {
+    reportErrorToSentry(e, "message_listener");
+    sendResponse({ status: "error", error: e.message });
   }
   return true;
 });

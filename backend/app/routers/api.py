@@ -147,6 +147,8 @@ def normalize_job_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             job[target] = value
 
     salary = job.get("salary")
+    if hasattr(salary, "model_dump"):
+        salary = salary.model_dump()
     if isinstance(salary, dict):
         raw = salary.get("raw")
         if raw:
@@ -171,6 +173,8 @@ def normalize_job_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             )
     elif salary is None:
         job["salary"] = ""
+    else:
+        job["salary"] = str(salary)
 
     # ExtractedJob intentionally represents absent facts as null. The existing
     # tailoring model predates that contract and requires concrete strings.
@@ -216,14 +220,12 @@ def normalize_job_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.post("/parse-resume", response_model=ResumeStructure)
 async def api_parse_resume(
-    file: UploadFile = File(...),
-    x_groq_key: Optional[str] = Header(None)
+    file: UploadFile = File(...)
 ):
     try:
         content = await file.read()
         raw_text = extract_text(content, file.filename)
-        # Parse using Groq (or fallback heuristically)
-        parsed_resume = parse_resume(raw_text, api_key=x_groq_key)
+        parsed_resume = parse_resume(raw_text)
         return parsed_resume
     except Exception as e:
         raise HTTPException(
@@ -234,12 +236,11 @@ async def api_parse_resume(
 @router.post("/analyze-job", response_model=JobAnalysis)
 async def api_analyze_job(
     request: JobAnalysisRequest,
-    x_groq_key: Optional[str] = Header(None)
 ):
     try:
         analysis = analyze_job_description(
             request.jd_text, 
-            api_key=x_groq_key,
+            api_key=None,
             url=request.url,
             page_title=request.page_title,
             page_company=request.page_company
@@ -268,7 +269,6 @@ async def api_analyze_job(
 @router.post("/compare", response_model=TailoringReport)
 async def api_compare(
     request: CompareRequest,
-    x_groq_key: Optional[str] = Header(None),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository),
     ats_repo: ATSRepository = Depends(get_ats_repository),
@@ -278,7 +278,7 @@ async def api_compare(
         usage = UsageService(conn)
         usage.require_available(user["id"], "resume_generation")
         from services.resume.scoring import ATSScoringEngine
-        from app.groq_service import generate_tailoring_patch, apply_tailoring_patch
+        from app.ai_service import generate_tailoring_patch, apply_tailoring_patch
         import re
 
         resume_id = request.resume_id
@@ -355,7 +355,7 @@ async def api_compare(
             comparison = generate_tailoring_patch(
                 resume,
                 job,
-                api_key=x_groq_key,
+                api_key=None,
                 selected_sections=set(selected_sections),
             )
         except Exception as exc:
@@ -550,7 +550,6 @@ class LiveScoreRequest(BaseModel):
 async def api_ats_live_score(
     request: LiveScoreRequest,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
-    x_groq_key: Optional[str] = Header(None),
 ):
     from fastapi.concurrency import run_in_threadpool
     from services.resume.llm_scoring import calculate_llm_live_scores
@@ -586,7 +585,6 @@ async def api_ats_live_score(
             current_resume.model_dump(mode="json"),
             estimated_resume.model_dump(mode="json"),
             job.model_dump(mode="json"),
-            x_groq_key,
         )
         original = scores.original
         current = scores.current
@@ -895,7 +893,6 @@ async def api_build_cover_letter_strategy(request: CoverLetterStrategyRequest):
 @router.post("/cover-letter/generate", response_model=GeneratedCoverLetter)
 async def api_generate_cover_letter_draft(
     request: CoverLetterGenerationRequest,
-    x_groq_key: Optional[str] = Header(None),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn = Depends(get_db_connection),
 ):
@@ -905,7 +902,7 @@ async def api_generate_cover_letter_draft(
         usage = UsageService(conn)
         usage.require_available(user["id"], "cover_letter_generation")
         result = await run_in_threadpool(
-            generate_cover_letter_draft, request, x_groq_key
+            generate_cover_letter_draft, request
         )
         usage.consume_usage(user["id"], "cover_letter_generation", metadata={"source": "cover-letter/generate"})
         return result
@@ -919,9 +916,8 @@ async def api_generate_cover_letter_draft(
 @router.post("/cover-letter/review", response_model=CoverLetterReviewResult)
 async def api_review_cover_letter(
     request: CoverLetterReviewRequest,
-    x_groq_key: Optional[str] = Header(None),
 ):
-    """Review locally by default; use Groq only for an explicit AI deep review."""
+    """Review locally by default; use DeepSeek AI for explicit deep review."""
     from fastapi.concurrency import run_in_threadpool
     try:
         reviewer = (
@@ -930,7 +926,7 @@ async def api_review_cover_letter(
             else review_cover_letter_deterministically
         )
         if request.review_mode == "ai":
-            return await run_in_threadpool(reviewer, request, x_groq_key)
+            return await run_in_threadpool(reviewer, request)
         return await run_in_threadpool(reviewer, request)
     except ValueError as exc:
         raise HTTPException(
@@ -942,12 +938,11 @@ async def api_review_cover_letter(
 @router.post("/cover-letter/edit/stream")
 async def api_edit_cover_letter_stream(
     request: CoverLetterEditRequest,
-    x_groq_key: Optional[str] = Header(None),
 ):
     """Patch only requested paragraphs and stream the resulting current letter."""
     from fastapi.concurrency import run_in_threadpool
     try:
-        result = await run_in_threadpool(edit_cover_letter, request, x_groq_key)
+        result = await run_in_threadpool(edit_cover_letter, request)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -1130,14 +1125,13 @@ async def api_render_cover_letter(request: CoverLetterRenderRequest):
 @router.post("/cover-letter", response_model=CoverLetterResult)
 async def api_cover_letter(
     request: CoverLetterRequest,
-    x_groq_key: Optional[str] = Header(None),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn = Depends(get_db_connection),
 ):
     try:
         usage = UsageService(conn)
         usage.require_available(user["id"], "cover_letter_generation")
-        letter = generate_cover_letter(request.resume, request.job, api_key=x_groq_key)
+        letter = generate_cover_letter(request.resume, request.job, api_key=None)
         usage.consume_usage(user["id"], "cover_letter_generation", metadata={"source": "cover-letter"})
         return letter
     except HTTPException:
@@ -1194,7 +1188,6 @@ class RefineSectionRequest(BaseModel):
 @router.post("/refine-section")
 async def api_refine_section(
     request: RefineSectionRequest,
-    x_groq_key: Optional[str] = Header(None)
 ):
     try:
         refined_content = refine_section_with_ai(
@@ -1202,7 +1195,7 @@ async def api_refine_section(
             section_data=request.section_data,
             prompt=request.prompt,
             job=request.job,
-            api_key=x_groq_key,
+            api_key=None,
             resume_id=request.resume_id,
             intelligence_model=request.intelligence_model,
             working_resume=request.working_resume,
@@ -1228,7 +1221,6 @@ async def api_refine_section(
 @router.post("/refine-section/stream")
 async def api_refine_section_stream(
     request: RefineSectionRequest,
-    x_groq_key: Optional[str] = Header(None),
     authorization: Optional[str] = Header(None),
     conn = Depends(get_db_connection)
 ):
@@ -1240,14 +1232,13 @@ async def api_refine_section_stream(
         except Exception:
             pass
 
-    from app.groq_service import refine_section_stream_generator
+    from app.ai_service import refine_section_stream_generator
     return StreamingResponse(
         refine_section_stream_generator(
             section_type=request.section_type,
             section_data=request.section_data,
             prompt=request.prompt,
             job=request.job,
-            api_key=x_groq_key,
             resume_id=request.resume_id,
             intelligence_model=request.intelligence_model,
             working_resume=request.working_resume,
@@ -1306,7 +1297,6 @@ class RefineSectionRequest(BaseModel):
 @router.post("/refine-section")
 async def api_refine_section(
     request: RefineSectionRequest,
-    x_groq_key: Optional[str] = Header(None)
 ):
     try:
         refined_content = refine_section_with_ai(
@@ -1314,7 +1304,7 @@ async def api_refine_section(
             section_data=request.section_data,
             prompt=request.prompt,
             job=request.job,
-            api_key=x_groq_key,
+            api_key=None,
             resume_id=request.resume_id,
             intelligence_model=request.intelligence_model,
             working_resume=request.working_resume,
@@ -1336,44 +1326,6 @@ async def api_refine_section(
             detail=f"Refinement failed: {str(e)}"
         )
 
-
-@router.post("/refine-section/stream")
-async def api_refine_section_stream(
-    request: RefineSectionRequest,
-    x_groq_key: Optional[str] = Header(None),
-    authorization: Optional[str] = Header(None),
-    conn = Depends(get_db_connection)
-):
-    user_id = "00000000-0000-0000-0000-000000000000"
-    if authorization:
-        try:
-            user_data = await verify_supabase_jwt(authorization, conn)
-            user_id = user_data.get("id", user_id)
-        except Exception:
-            pass
-
-    from app.groq_service import refine_section_stream_generator
-    return StreamingResponse(
-        refine_section_stream_generator(
-            section_type=request.section_type,
-            section_data=request.section_data,
-            prompt=request.prompt,
-            job=request.job,
-            api_key=x_groq_key,
-            resume_id=request.resume_id,
-            intelligence_model=request.intelligence_model,
-            working_resume=request.working_resume,
-            source_resume=request.source_resume,
-            resume_match_analysis=request.resume_match_analysis,
-            ats_analysis=request.ats_analysis,
-            accepted_changes=request.accepted_changes,
-            pending_changes=request.pending_changes,
-            user_id=user_id,
-            conn=conn
-        ),
-        media_type="text/event-stream"
-    )
-
 class SupportTicketRequest(BaseModel):
     subject: str
     priority: str = "NORMAL"
@@ -1394,3 +1346,4 @@ async def api_submit_support_ticket(
         "message": f"Support ticket {ticket_id} created successfully.",
         "created_at": datetime.datetime.utcnow().isoformat()
     }
+

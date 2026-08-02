@@ -246,10 +246,6 @@ function ResumeReviewView({
     }
 
     const headers = {};
-    if (apiKey) {
-      headers["x-gemini-key"] = apiKey;
-      headers["x-groq-key"] = apiKey;
-    }
     const token = localStorage.getItem('access_token');
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
@@ -388,10 +384,6 @@ function ResumeReviewView({
     setStreamingSection(sectionType);
     try {
       const headers = { 'Content-Type': 'application/json' };
-      if (apiKey) {
-        headers['x-gemini-key'] = apiKey;
-        headers['x-groq-key'] = apiKey;
-      }
       const token = localStorage.getItem('access_token');
       if (token) headers.Authorization = `Bearer ${token}`;
       const sectionData = records.map(item => (

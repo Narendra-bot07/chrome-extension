@@ -1,7 +1,7 @@
-# TailorFlow AI — End-to-End System Architecture & Design Specification
+# Tailr4U — End-to-End System Architecture & Design Specification
 
-> **System Name**: TailorFlow AI (Chrome Extension & Web Platform)  
-> **Core Stack**: FastAPI, React + Vite, Gemini 2.5 Flash, Groq Llama-3.3-70B, Supabase PostgreSQL & Storage, Upstash Redis, Resend Mail  
+> **System Name**: Tailr4U (Chrome Extension & Web Platform)  
+> **Core Stack**: FastAPI, React + Vite, DeepSeek v4, Supabase PostgreSQL & Storage, Upstash Redis, Resend Mail  
 
 ---
 
@@ -15,10 +15,10 @@ Modern Applicant Tracking Systems (ATS) automatically screen out over 75% of job
 3. **Loss of Candidate Authenticity & Bad Rendering**: Existing tools produce generic templates, obscure candidate social usernames (e.g. rendering static "GitHub" labels instead of exact handles like `@username`), mangle cropped profile photos, or fail to handle resumes without profile photos intelligently.
 
 ### Solution Overview
-**TailorFlow AI** is an intelligent, high-availability resume tailoring system delivered via a Chrome Extension and Web Dashboard. Key features include:
+**Tailr4U** is an intelligent, high-availability resume tailoring system delivered via a Chrome Extension and Web Dashboard. Key features include:
 
 * **1-Click Active Tab JD Extraction**: Scrapes and normalizes JDs directly from LinkedIn, Indeed, Greenhouse, and Lever pages.
-* **Resilient Dual-Provider LLM Engine**: Powered by **Gemini 2.5 Flash** with zero-downtime failover to **Groq Llama-3.3-70B**.
+* **Resilient DeepSeek LLM Engine**: Powered by **DeepSeek V4 Flash** (primary) with automatic escalation to **DeepSeek V4 Pro** on validation failure — zero external provider dependencies.
 * **Strict Single-Request Concurrency Lock**: Eliminates 429 quota exhaustion errors by enforcing 1-at-a-time LLM execution with 1.5s cooling intervals.
 * **Intelligent Profile Photo Engine**: Seamless 100% gapless cover-scale photo cropping math with automatic visibility control (zero photo UI bloat for resumes without photos).
 * **Handle Hyperlink Embedding**: Automatically extracts candidate usernames (e.g. `@Narendra-bot07`) and embeds clickable links across all resume templates.
@@ -45,8 +45,8 @@ graph TD
 
     subgraph AI Engine & Resilience Layer
         WRAP["ResilientLLMWrapper"]
-        GEMINI["Primary: Gemini 2.5 Flash"]
-        GROQ["Failover: Groq Llama-3.3-70B"]
+        FLASH["Primary: DeepSeek V4 Flash"]
+        PRO["Escalation: DeepSeek V4 Pro"]
     end
 
     subgraph Data & Cloud Storage Layer
@@ -61,8 +61,8 @@ graph TD
     API --> AUTH
     API --> LOCK
     LOCK --> WRAP
-    WRAP -->|1st Choice| GEMINI
-    WRAP -->|429 / 404 Failover| GROQ
+    WRAP -->|Default| FLASH
+    WRAP -->|Validation Failure Escalation| PRO
     API --> REDIS
     API --> SUPA_DB
     API --> SUPA_STORE
@@ -73,25 +73,22 @@ graph TD
 
 ## 3. Low-Level Architecture (LLD)
 
-### 3.1 Resilient Dual-Provider AI Pipeline (`ResilientLLMWrapper`)
-To guarantee 99.99% availability against LLM rate limits and model deprecations, all AI requests route through `ResilientLLMWrapper` inheriting from `langchain_core.runnables.Runnable`:
+### 3.1 Resilient DeepSeek AI Pipeline (`ResilientLLMWrapper`)
+All AI requests route through `ResilientLLMWrapper` using a single provider — DeepSeek:
 
-* **Candidate Model Sequence**: `gemini-2.0-flash` → `gemini-1.5-flash` → `gemini-2.5-flash`.
-* **Single-Request Lock (`_SINGLE_AI_REQUEST_LOCK`)**: A global `threading.Lock()` ensures that across all concurrent requests, exactly one LLM invocation runs at a time with a 1.5-second spacing delay.
-* **Automatic Failover**: If Gemini returns `429 RESOURCE_EXHAUSTED` or `404 NOT_FOUND`, execution instantly fails over to **Groq (`llama-3.3-70b-versatile`)**.
+* **Default Model**: `deepseek-v4-flash` — used for all standard tasks (tailoring, cover letters, JD extraction, scoring).
+* **Escalation Model**: `deepseek-v4-pro` — automatically engaged when Flash output fails schema validation after bounded retries.
+* **Single-Request Lock**: A global `threading.Lock()` ensures one LLM invocation runs at a time with configurable spacing.
+* **No External Fallback**: DeepSeek Flash → bounded retry → optional DeepSeek Pro → normalized failure. No Gemini or Groq fallback path exists.
 
 ```python
 class ResilientLLMWrapper(Runnable):
     def invoke(self, input_data: Any, config: Any = None, **kwargs: Any) -> Any:
         with _SINGLE_AI_REQUEST_LOCK:
-            now = time.time()
-            if (now - _LAST_AI_COMPLETED_TIME) < 1.5:
-                time.sleep(1.5 - (now - _LAST_AI_COMPLETED_TIME))
             try:
-                res = self.primary_llm.invoke(input_data, config=config, **kwargs)
-                return res
+                return self.primary_llm.invoke(input_data, config=config, **kwargs)
             except Exception as err:
-                if self.fallback_llm:
+                if self.fallback_llm:  # DeepSeek Pro escalation
                     return self.fallback_llm.invoke(input_data, config=config, **kwargs)
                 raise err
 ```
@@ -178,9 +175,9 @@ CREATE TABLE IF NOT EXISTS public.job_descriptions (
 * **Tradeoff**: Artificial request queuing vs. Instant 429 Rate Limit Failures.
 * **Decision**: We implemented `_SINGLE_AI_REQUEST_LOCK` with a 1.5s cooling delay. While multi-user concurrent requests queue slightly longer (~1-2 seconds), system reliability increases to **100%**, completely eliminating 429 quota exhaustion crashes on free/tiered LLM keys.
 
-### 2. Dual LLM Provider Failover (Gemini + Groq)
-* **Tradeoff**: Additional backend abstraction complexity vs. Vendor Lock-in / Single Point of Failure.
-* **Decision**: We built `ResilientLLMWrapper` to try Gemini 2.5 Flash first, with automatic fallback to Groq Llama-3.3-70B. If Google API Studio or Groq experiences an outage, the application seamlessly switches providers without user interaction.
+### 2. Single-Provider DeepSeek with Flash → Pro Escalation
+* **Tradeoff**: Vendor dependency on DeepSeek vs. Multi-provider complexity and inconsistent output quality.
+* **Decision**: After the Gemini + Groq migration, we standardized on DeepSeek as the sole LLM provider. `ResilientLLMWrapper` uses `deepseek-v4-flash` by default with automatic escalation to `deepseek-v4-pro` only when Flash output fails validation after bounded retries. This eliminates cross-provider schema drift.
 
 ### 3. Upstash Redis REST Caching + In-Memory Fallback
 * **Tradeoff**: Network round-trip to Redis vs. Local RAM usage.
@@ -198,7 +195,7 @@ CREATE TABLE IF NOT EXISTS public.job_descriptions (
 | :--- | :--- | :--- | :--- |
 | **Frontend UI** | React 18 + Vite | `npm run build` (Production Bundle) | Verified Clean (0 Errors) |
 | **Backend API** | FastAPI / Uvicorn | `python -c "import main"` | Verified Clean (0 Errors) |
-| **AI Resiliency** | Gemini 2.5 Flash + Groq | `ResilientLLMWrapper` Failover Test | Verified Active |
+| **AI Resiliency** | DeepSeek V4 Flash + Pro | `ResilientLLMWrapper` Flash → Pro Escalation | Verified Active |
 | **Cache Layer** | Upstash Redis REST | `redis_cache.health_check()` | Verified Online (`topical-katydid-92319.upstash.io`) |
 | **Database** | Supabase Postgres | `psycopg2` Connection | Verified Connected |
 | **Email Relay** | Resend REST API | `EmailService().configured()` | Verified Configured |

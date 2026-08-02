@@ -21,7 +21,7 @@ graph TD
 
     subgraph Layer 2: Business Service Layer (services/ & app/)
         SERVICES["Business Logic & Workflow Services<br/>(TailoringService, JobService)"]
-        AI_WRAPPER["ResilientLLMWrapper<br/>(Groq Llama-3.3-70b ↔ Gemini 2.0 Failover)"]
+        AI_WRAPPER["ResilientLLMWrapper<br/>(DeepSeek Flash → Pro Escalation)"]
         PLAYWRIGHT_ENGINE["Playwright PDF Rendering Engine<br/>(Headless Chromium Vector PDF Pipeline)"]
     end
 

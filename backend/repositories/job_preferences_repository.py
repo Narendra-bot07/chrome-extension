@@ -35,6 +35,17 @@ class JobPreferencesRepository:
             return bool(row and row.get("table_name"))
 
     def get_by_user(self, user_id: str) -> Optional[Dict[str, Any]]:
+        from services.cache.redis_cache import redis_cache
+        import json
+
+        cache_key = f"job_prefs:{user_id}"
+        cached = redis_cache.get(cache_key)
+        if cached:
+            try:
+                return json.loads(cached) if isinstance(cached, str) else cached
+            except Exception:
+                pass
+
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             try:
                 cur.execute(
@@ -46,7 +57,10 @@ class JobPreferencesRepository:
                     """,
                     (user_id,)
                 )
-                return cur.fetchone()
+                row = cur.fetchone()
+                if row:
+                    redis_cache.set(cache_key, row, ttl_seconds=300)
+                return row
             except Exception:
                 self.conn.rollback()
                 return None
@@ -99,6 +113,11 @@ class JobPreferencesRepository:
                     Json(payload.get("priority_skills") or []),
                 )
             )
-            record = cur.fetchone()
+            row = cur.fetchone() or {}
             self.conn.commit()
-            return record or {}
+            try:
+                from services.cache.redis_cache import redis_cache
+                redis_cache.delete(f"job_prefs:{user_id}")
+            except Exception:
+                pass
+            return row

@@ -241,6 +241,11 @@ class ResumeRepository:
                     cur.execute("UPDATE public.resumes SET active_version_id = %s WHERE id = %s", (ver_row["id"], record["id"]))
 
             self.conn.commit()
+            try:
+                from services.cache.redis_cache import redis_cache
+                redis_cache.delete(f"resumes_list:{user_id}")
+            except Exception:
+                pass
             created = self._with_metadata_defaults(record) or {}
             if created.get("id"):
                 with self.conn.cursor(cursor_factory=RealDictCursor) as cur2:

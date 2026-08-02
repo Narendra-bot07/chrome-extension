@@ -150,7 +150,7 @@ export function AppProvider({ children }) {
         try {
           let activeToken = storedToken;
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 1500);
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
           let res = null;
 
           try {
@@ -180,7 +180,25 @@ export function AppProvider({ children }) {
               }
             }).catch(() => {});
           } else if (res && res.status === 401) {
+            try {
+              const newToken = await refreshAccessToken();
+              if (newToken) {
+                setSession({ access_token: newToken });
+                const retryRes = await fetch('http://127.0.0.1:8000/api/v1/auth/session', {
+                  headers: { 'Authorization': `Bearer ${newToken}` }
+                });
+                if (retryRes.ok) {
+                  const retryData = await retryRes.json();
+                  setUser(retryData.user);
+                  setHasCompletedPreferences(!!retryData.has_completed_preferences);
+                  return;
+                }
+              }
+            } catch (refErr) {
+              console.warn("[AUTH] Refresh on 401 session check failed:", refErr);
+            }
             localStorage.removeItem('access_token');
+            localStorage.removeItem('refresh_token');
             setUser(null);
             setSession(null);
             setParsedResume(null);
@@ -199,7 +217,7 @@ export function AppProvider({ children }) {
   const logout = (reason = 'manual_logout', options = {}) => {
     const token = localStorage.getItem(AUTH_STORAGE.accessToken);
     if (token) {
-      fetch('http://localhost:8000/api/v1/auth/logout', {
+      fetch(`${apiUrl}/api/v1/auth/logout`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         credentials: 'include',
@@ -311,7 +329,7 @@ export function AppProvider({ children }) {
     setJobAnalysisState(canonical);
   };
   const adoptAuthenticatedSession = async (accessToken) => {
-    const res = await fetch('http://localhost:8000/api/v1/auth/session', {
+    const res = await fetch(`${apiUrl}/api/v1/auth/session`, {
       headers: { 'Authorization': `Bearer ${accessToken}` }
     });
     if (!res.ok) throw new Error('Your session could not be restored.');
@@ -461,8 +479,7 @@ export function AppProvider({ children }) {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(token ? { "Authorization": `Bearer ${token}` } : {}),
-            ...(apiKey ? { "x-gemini-key": apiKey, "x-groq-key": apiKey } : {})
+            ...(token ? { "Authorization": `Bearer ${token}` } : {})
           },
           body: requestKey,
           signal: controller.signal
@@ -1610,12 +1627,15 @@ export function AppProvider({ children }) {
     const token = session?.access_token || localStorage.getItem('access_token');
     const hasResume = Boolean(parsedResume) || (Array.isArray(resumesList) && resumesList.length > 0);
 
+    const isExtension = (typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id)) || window.location.protocol === 'chrome-extension:';
+
     if (!token || !user) {
       setLoading(false);
       setLoadingProgress(0);
       setJobDetectionStatus("login-required");
       setApiError(null);
-      navigate('/extension-setup');
+      if (isExtension) navigate('/extension-setup');
+      else navigate('/login');
       return false;
     }
 
@@ -1624,7 +1644,8 @@ export function AppProvider({ children }) {
       setLoadingProgress(0);
       setJobDetectionStatus("profile-incomplete");
       setApiError(null);
-      navigate('/extension-setup');
+      if (isExtension) navigate('/extension-setup');
+      else navigate('/resumes');
       return false;
     }
 
@@ -1743,11 +1764,7 @@ export function AppProvider({ children }) {
               : 'Browser security prevents extensions from reading this internal page.',
             extractionMethod: 'client_page_gate'
           });
-          setApiError(
-            browserPageType === 'browser-new-tab'
-              ? null
-              : 'This browser-internal page cannot be read by extensions.'
-          );
+          setApiError(null);
         }
         return;
       }
@@ -2061,9 +2078,7 @@ export function AppProvider({ children }) {
       });
       const inaccessible = /Cannot access|chrome:\/\/|edge:\/\/|permission|The extensions gallery cannot be scripted/i.test(err.message || '');
       setJobDetectionStatus(inaccessible ? 'page-inaccessible' : 'extraction-failed');
-      setApiError(inaccessible
-        ? 'This browser page cannot be read by extensions. Open an individual job listing in a regular tab.'
-        : (err.message || 'Page extraction failed. Retry the scan.'));
+      setApiError(inaccessible ? null : (err.message || 'Page extraction failed. Retry the scan.'));
     } finally {
       if (extractionProgressInterval) {
         window.clearInterval(extractionProgressInterval);

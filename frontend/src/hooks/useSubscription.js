@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext';
 
 const FALLBACK_PLANS = [
   {
-    id: 'pro', code: 'pro', name: 'Pro', description: 'For active job hunting.',
+    id: 'basic', code: 'basic', name: 'Basic', description: 'For active job hunting.',
     price_amount: 9.99, currency: 'USD', price_display: '$9.99', sort_order: 2,
     features: {
       jd_extraction: { enabled: true, limit: 100 },
@@ -14,7 +14,7 @@ const FALLBACK_PLANS = [
     }
   },
   {
-    id: 'elite', code: 'elite', name: 'Elite', description: 'For serious job hunters.',
+    id: 'pro', code: 'pro', name: 'Pro', description: 'For serious job hunters.',
     price_amount: 19.99, currency: 'USD', price_display: '$19.99', sort_order: 3,
     features: {
       jd_extraction: { enabled: true, limit: 500 },
@@ -24,7 +24,7 @@ const FALLBACK_PLANS = [
     }
   },
   {
-    id: 'advanced', code: 'advanced', name: 'Advanced', description: 'For power users and teams.',
+    id: 'elite', code: 'elite', name: 'Elite', description: 'For power users and teams.',
     price_amount: 39.99, currency: 'USD', price_display: '$39.99', sort_order: 4,
     features: {
       jd_extraction: { enabled: true, limit: 1200 },

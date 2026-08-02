@@ -1,4 +1,4 @@
-# TailorFlow AI — Production Database Audit Report & Strict Checklist Assessment
+# Tailr4U — Production Database Audit Report & Strict Checklist Assessment
 
 > **Audit Date**: July 31, 2026  
 > **Target Database**: Supabase PostgreSQL (Managed Transaction Pooler)  
@@ -9,7 +9,7 @@
 
 ## 1. Executive Summary & Audit Scorecard
 
-We performed a strict line-by-line audit of the **TailorFlow AI** backend codebase (`backend/`), database DDLs (`DATABASE_DDL_MIGRATIONS.md`), migration runner scripts (`backend/migrate_*.py`), database configuration (`backend/core/database.py`), and environment configuration (`backend/.env`).
+We performed a strict line-by-line audit of the **Tailr4U** backend codebase (`backend/`), database DDLs (`DATABASE_DDL_MIGRATIONS.md`), migration runner scripts (`backend/migrate_*.py`), database configuration (`backend/core/database.py`), and environment configuration (`backend/.env`).
 
 ### Strict Compliance Scorecard
 
@@ -48,7 +48,7 @@ We performed a strict line-by-line audit of the **TailorFlow AI** backend codeba
 ---
 
 ### Section 2: Security (8 / 10 Following)
-* [ ] **Never use `root`, `admin`, or `postgres` as the application user**: Not Following (Connection URI uses `postgres` default administrative role `postgresql://postgres.[ref]:...`. Action Item: Create a restricted `tailorflow_app` role).
+* [ ] **Never use `root`, `admin`, or `postgres` as the application user**: Not Following (Connection URI uses `postgres` default administrative role `postgresql://postgres.[ref]:...`. Action Item: Create a restricted `tailr4u_app` role).
 * [x] **Create a dedicated least-privilege application user**: Partial (Supabase RLS handles row access, but DB user is `postgres`).
 * [x] **Store credentials in environment variables or a secrets manager**: Following (`backend/.env` + `core/config.py`).
 * [x] **Enable TLS for database connections**: Following (`sslmode=require` / Supabase pooler TLS).
@@ -224,7 +224,7 @@ We performed a strict line-by-line audit of the **TailorFlow AI** backend codeba
 
 To reach **100% Production Readiness**, address these 4 items:
 
-1. **Restricted Application DB User**: Replace the default `postgres` superuser connection in `DATABASE_URL` with a restricted app role (`tailorflow_app`).
-2. **Staging Environment**: Create a separate staging database project on Supabase (`tailorflow-staging`).
+1. **Restricted Application DB User**: Replace the default `postgres` superuser connection in `DATABASE_URL` with a restricted app role (`tailr4u_app`).
+2. **Staging Environment**: Create a separate staging database project on Supabase (`tailr4u-staging`).
 3. **Automated Backup Restore Test**: Schedule a quarterly restoration test of Supabase database dumps.
 4. **Sentry Error Tracking**: Add `SENTRY_DSN` to `backend/core/config.py` and `backend/.env` for real-time error alerts.

@@ -18,13 +18,19 @@ from core.observability import configure_langsmith
 # Must run before importing routers/services that construct LangChain models.
 configure_langsmith()
 
-from fastapi import FastAPI
+# Initialize Observability (Logging, Sentry, Tracing)
+from observability import setup_observability_logging, setup_sentry
+from observability.tracing import setup_tracing
+setup_observability_logging()
+setup_sentry()
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 from core.config import settings
 from core.exceptions import global_exception_handler
-from core.middleware import RequestLoggingMiddleware
+from observability import CorrelationAndLoggingMiddleware
 from contextlib import asynccontextmanager
 from core.observability import langsmith_status
 from core.database import get_db_pool, close_db_pool
@@ -46,11 +52,14 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Wire OTEL tracing — must happen after the app object is created
+setup_tracing(app)
+
 # Custom exception handler
 app.add_exception_handler(Exception, global_exception_handler)
 
 # Middlewares
-app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(CorrelationAndLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -98,6 +107,53 @@ async def root():
 async def observability_status():
     """Expose configuration health without returning credentials."""
     return langsmith_status()
+
+@app.get(settings.METRICS_PATH)
+async def metrics_endpoint(request: Request):
+    """Expose Prometheus/OpenMetrics formatted endpoint protected by Bearer Token."""
+    import hmac
+    from fastapi import Response, status
+    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+    from observability.metrics import registry
+
+    if not settings.METRICS_ENABLED:
+        return Response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content="Metrics are disabled.",
+            media_type="text/plain"
+        )
+
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return Response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content="Missing or invalid credentials.",
+            media_type="text/plain"
+        )
+
+    token = auth_header.split(" ")[1].strip()
+    expected_token = (settings.METRICS_BEARER_TOKEN or "").strip()
+
+    # Constant-time token verification to secure metrics from timing attacks
+    if not expected_token or not hmac.compare_digest(token, expected_token):
+        return Response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content="Missing or invalid credentials.",
+            media_type="text/plain"
+        )
+
+    try:
+        metrics_data = generate_latest(registry)
+        return Response(
+            content=metrics_data,
+            media_type=CONTENT_TYPE_LATEST
+        )
+    except Exception as gather_err:
+        return Response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=f"Error collecting metrics: {gather_err}",
+            media_type="text/plain"
+        )
 
 if __name__ == "__main__":
     import uvicorn

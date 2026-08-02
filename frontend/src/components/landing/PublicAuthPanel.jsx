@@ -63,8 +63,8 @@ export default function PublicAuthPanel() {
   const strongPassword = passwordRules.every(Boolean);
 
   const go = path => navigate(`${path}?redirect=${encodeURIComponent(destination)}`);
-  const finishAuthentication = async accessToken => {
-    storeAuthenticatedSession(accessToken);
+  const finishAuthentication = async (accessToken, refreshToken = null) => {
+    storeAuthenticatedSession(accessToken, refreshToken);
     await adoptAuthenticatedSession(accessToken);
     setSuccess(true);
     window.setTimeout(() => navigate(destination, { replace: true }), reduced ? 80 : 520);
@@ -79,8 +79,8 @@ export default function PublicAuthPanel() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Google authentication failed.');
-      if (data.google_profile_import) localStorage.setItem('tailorflow.google-profile-import-debug', JSON.stringify(data.google_profile_import));
-      await finishAuthentication(data.session.access_token);
+      if (data.google_profile_import) localStorage.setItem('tailr4u.google-profile-import-debug', JSON.stringify(data.google_profile_import));
+      await finishAuthentication(data.session?.access_token, data.session?.refresh_token);
     } catch (reason) {
       setError(reason.message || 'Google authentication failed.');
     } finally { setLoading(false); }
@@ -126,9 +126,7 @@ export default function PublicAuthPanel() {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || 'Login failed. Check your credentials.');
-      await finishAuthentication(data.session.access_token);
+      await finishAuthentication(data.session?.access_token, data.session?.refresh_token);
     } catch (reason) {
       setError(reason.message || 'Authentication failed.');
     } finally { setLoading(false); }

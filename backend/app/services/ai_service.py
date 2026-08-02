@@ -1,9 +1,8 @@
 from typing import List, Optional, Dict, Any
-from app.gemini_service import (
+from app.ai_service import (
     parse_resume,
     analyze_job_description,
     compare_resume_and_job,
-    apply_tailoring,
     generate_cover_letter
 )
 from app.schemas import ResumeStructure, JobAnalysis, ComparisonResult, CoverLetterResult

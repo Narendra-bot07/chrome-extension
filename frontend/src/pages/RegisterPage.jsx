@@ -133,12 +133,12 @@ export default function RegisterPage() {
       const data = await res.json();
       if (data.google_profile_import) {
         localStorage.setItem(
-          'tailorflow.google-profile-import-debug',
+          'tailr4u.google-profile-import-debug',
           JSON.stringify(data.google_profile_import)
         );
         console.info('[tailr4u] Google profile import', data.google_profile_import);
       }
-      storeAuthenticatedSession(data.session.access_token);
+      storeAuthenticatedSession(data.session?.access_token, data.session?.refresh_token);
       window.location.hash = `#${postAuthDestination}`;
       window.location.reload();
     } catch (err) {

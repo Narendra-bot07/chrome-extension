@@ -1,12 +1,11 @@
-"""Single-call semantic enrichment with a deterministic no-op fallback."""
+"""Single-call semantic enrichment backed by DeepSeek with a deterministic no-op fallback."""
 
 from __future__ import annotations
 
 from typing import Protocol
 
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_groq import ChatGroq
 from pydantic import BaseModel, Field
+
 
 class SemanticCapability(BaseModel):
     name: str
@@ -34,35 +33,46 @@ class SemanticAnalyzer(Protocol):
         pass
 
 
-class GroqSemanticAnalyzer:
-    """One bounded structured call; never receives another resume or a JD."""
+class DeepSeekSemanticAnalyzer:
+    """
+    One bounded structured call to DeepSeek; never receives another resume or a JD.
+    Replaces the former GroqSemanticAnalyzer — same interface, same contract.
+    """
 
-    def __init__(self, api_key: str, model: str = "llama-3.3-70b-versatile"):
-        self.llm = ChatGroq(
-            api_key=api_key,
-            model=model,
-            temperature=0,
-            timeout=45,
-            max_retries=0,
-        )
+    SYSTEM_PROMPT = (
+        "You analyze exactly one selected resume.\n"
+        "Return only evidence-grounded semantic insights.\n"
+        "Never add dates, employers, titles, metrics, technologies, responsibilities,\n"
+        "mastery levels, personal attributes, or facts absent from the resume.\n"
+        "Inferred capabilities must remain inferred and include an exact supporting\n"
+        "quote, reason, limitations, and conservative confidence.\n"
+        "Domains require an exact supporting quote. Do not use outside knowledge about\n"
+        "an employer. Report ambiguities; do not repair or rewrite the resume."
+    )
+
+    def __init__(self, api_key: str | None = None):
+        from app.llm.deepseek_provider import DeepSeekProvider
+        self._provider = DeepSeekProvider(api_key=api_key)
 
     def analyze(self, normalized_resume: str) -> SemanticInsights:
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    """You analyze exactly one selected resume.
-Return only evidence-grounded semantic insights.
-Never add dates, employers, titles, metrics, technologies, responsibilities,
-mastery levels, personal attributes, or facts absent from the resume.
-Inferred capabilities must remain inferred and include an exact supporting
-quote, reason, limitations, and conservative confidence.
-Domains require an exact supporting quote. Do not use outside knowledge about
-an employer. Report ambiguities; do not repair or rewrite the resume.""",
-                ),
-                ("human", "SELECTED RESUME ONLY:\n{resume}"),
-            ]
+        from services.cache.llm_cache import llm_cache
+        prompt = f"SELECTED RESUME ONLY:\n{normalized_resume}"
+
+        def _call_llm():
+            return self._provider.invoke_structured(
+                prompt=prompt,
+                schema_cls=SemanticInsights,
+                system_instruction=self.SYSTEM_PROMPT,
+                temperature=0.0,
+            )
+
+        return llm_cache.execute_with_cache(
+            task="semantic_insights",
+            payload_to_fingerprint=normalized_resume,
+            llm_callable=_call_llm,
+            expected_schema=SemanticInsights,
+            prompt_version="semantic-insights-v1"
         )
-        return (prompt | self.llm.with_structured_output(SemanticInsights)).invoke(
-            {"resume": normalized_resume}
-        )
+
+
+

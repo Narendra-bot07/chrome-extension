@@ -19,7 +19,7 @@ from services.resume.source_preservation import (
     restore_source_evidence,
 )
 from services.resume.recovery_engine import ResumeRecoveryAgent
-from services.ai.ai_service import AIService, GeminiService, GroqService
+from services.ai.ai_service import AIService
 from app.analytics.events.tracking.analytics_service import AnalyticsService
 from core.database import get_db_connection
 from core.logging import logger
@@ -34,7 +34,7 @@ from schemas.layout_intelligence import (
 )
 from services.layout_intelligence import LayoutIntelligenceService
 from services.resume_intelligence.models import Phase2Output
-from services.resume_intelligence.semantic import GroqSemanticAnalyzer
+from services.resume_intelligence.semantic import DeepSeekSemanticAnalyzer
 from services.resume_intelligence.service import SelectedResumeIntelligenceService
 from services.subscriptions.usage_service import UsageService
 from services.workflow.checkpoints import PostgresCheckpointStore
@@ -82,15 +82,15 @@ def _resume_intelligence_service(
     repo: ResumeRepository,
     storage: FileService,
     conn,
-    api_key: str | None,
+    api_key: str | None = None,
 ) -> SelectedResumeIntelligenceService:
-    parser_service = GeminiService(api_key=api_key) if api_key else None
-    semantic_analyzer = GroqSemanticAnalyzer(api_key) if api_key else None
+    parser_service = AIService()
+    semantic_analyzer = DeepSeekSemanticAnalyzer()
     return SelectedResumeIntelligenceService(
         repository=repo,
         storage=storage,
         checkpoint_store=PostgresCheckpointStore(conn, owner_id=user_id),
-        structured_parser=parser_service.parse_resume if parser_service else None,
+        structured_parser=parser_service.parse_resume,
         semantic_analyzer=semantic_analyzer,
     )
 
@@ -99,14 +99,11 @@ def _resume_intelligence_service(
 def build_selected_resume_intelligence(
     resume_id: str,
     payload: SelectedResumeIntelligenceRequest,
-    x_gemini_key: str = Header(None),
-    x_groq_key: str = Header(None),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository),
     storage: FileService = Depends(get_storage_service),
     conn=Depends(get_db_connection),
 ):
-    api_key = x_gemini_key or x_groq_key or settings.GEMINI_API_KEY or settings.GROQ_API_KEY
     service = _resume_intelligence_service(
         user_id=user["id"],
         repo=repo,
@@ -132,8 +129,6 @@ def confirm_selected_resume_intelligence(
     resume_id: str,
     workflow_id: str,
     payload: SelectedResumeConfirmationRequest,
-    x_gemini_key: str = Header(None),
-    x_groq_key: str = Header(None),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository),
     storage: FileService = Depends(get_storage_service),
@@ -144,7 +139,6 @@ def confirm_selected_resume_intelligence(
         repo=repo,
         storage=storage,
         conn=conn,
-        api_key=x_gemini_key or x_groq_key or settings.GEMINI_API_KEY or settings.GROQ_API_KEY,
     )
     return service.confirm(
         workflow_id=workflow_id,
@@ -156,8 +150,6 @@ def confirm_selected_resume_intelligence(
 @router.post("/upload")
 async def upload_and_parse(
     file: UploadFile = File(...),
-    x_gemini_key: str = Header(None),
-    x_groq_key: str = Header(None),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     resume_repo: ResumeRepository = Depends(get_resume_repository),
     storage: FileService = Depends(get_storage_service),
@@ -240,7 +232,20 @@ async def list_resumes(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository)
 ):
-    return repo.list_by_user(user["id"])
+    from services.cache.redis_cache import redis_cache
+    import json
+
+    cache_key = f"resumes_list:{user['id']}"
+    cached = redis_cache.get(cache_key)
+    if cached:
+        try:
+            return json.loads(cached) if isinstance(cached, str) else cached
+        except Exception:
+            pass
+
+    resumes = repo.list_by_user(user["id"])
+    redis_cache.set(cache_key, resumes, ttl_seconds=300)
+    return resumes
 
 
 @router.post("/reconcile-local")
@@ -365,17 +370,15 @@ async def get_active_resume(
             source_links = ResumeParser.extract_links(file_bytes, file_name)
 
             if raw_text:
-                api_key = settings.GEMINI_API_KEY or settings.GROQ_API_KEY
-                if api_key:
-                    ai = GeminiService(api_key=api_key)
-                    parsed_res = ai.parse_resume(raw_text)
-                    updated_content = parsed_res.dict()
-                    updated_content = restore_source_evidence(updated_content, raw_text, source_links)
-                    updated_content["raw_text"] = raw_text
-                    updated_content["parse_status"] = "parsed"
-                    repo.update_parsed_content(record["id"], user["id"], updated_content)
-                    record["parsed_content"] = updated_content
-                    record = repo._with_metadata_defaults(record)
+                ai = AIService()
+                parsed_res = ai.parse_resume(raw_text)
+                updated_content = parsed_res.dict()
+                updated_content = restore_source_evidence(updated_content, raw_text, source_links)
+                updated_content["raw_text"] = raw_text
+                updated_content["parse_status"] = "parsed"
+                repo.update_parsed_content(record["id"], user["id"], updated_content)
+                record["parsed_content"] = updated_content
+                record = repo._with_metadata_defaults(record)
         except Exception as exc:
             logger.warning("[RESUME][BUCKET] Failed to auto-recover resume from storage bucket: %s", exc)
 
@@ -505,8 +508,6 @@ async def rename_resume(
 @router.post("/{resume_id}/parse")
 async def parse_existing_resume(
     resume_id: str,
-    x_gemini_key: str = Header(None),
-    x_groq_key: str = Header(None),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository),
     conn = Depends(get_db_connection),
@@ -540,8 +541,7 @@ async def parse_existing_resume(
             detail="No raw text could be extracted from resume file in storage bucket."
         )
         
-    api_key = x_gemini_key or x_groq_key or settings.GEMINI_API_KEY or settings.GROQ_API_KEY
-    ai = GeminiService(api_key=api_key)
+    ai = AIService()
     parsed_res = ai.parse_resume(raw_text)
     
     updated_content = parsed_res.dict()
@@ -581,8 +581,6 @@ async def parse_existing_resume(
 @router.post("/{resume_id}/recover-source")
 async def recover_resume_source_details(
     resume_id: str,
-    x_gemini_key: str = Header(None),
-    x_groq_key: str = Header(None),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository),
     storage: FileService = Depends(get_storage_service),

@@ -114,7 +114,7 @@ export default function ReviewChangesPage() {
           onClick={() => navigate('/tailor-config')}
           className="px-4 py-2.5 bg-[#00bda5] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl hover:bg-[#00a894] transition cursor-pointer shadow-sm font-sans"
         >
-          Configure & Run TailorFlow
+          Configure & Run Tailr4U
         </button>
       </div>
     );

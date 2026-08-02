@@ -17,14 +17,14 @@ This document tracks all currently identified technical issues, edge-case bugs, 
 
 ---
 
-### ISSUE-002: Upstream Free-Tier Gemini API Quota Exceeded (HTTP 429)
+### ISSUE-002: Upstream Free-Tier Gemini API Quota Exceeded (HTTP 429) — HISTORICAL
 - **Date Discovered**: 2026-07-22
-- **Severity**: Medium
-- **Component**: AI Service Pipeline (`app/gemini_service.py`)
-- **Description**: Rapid sequential tailoring requests on free-tier accounts occasionally encounter 429 rate-limit exceptions from Google Gemini API.
-- **Root Cause**: Gemini free-tier imposes a strict `15 Requests Per Minute (RPM)` limit.
-- **Current Status**: Resolved via `ResilientLLMWrapper` failover to Groq (`llama-3.3-70b-versatile`) and Redis response caching.
-- **Assigned Fix**: Complete. Monitored via LangSmith tracing.
+- **Date Closed**: 2026-08-02
+- **Severity**: Medium (Resolved)
+- **Component**: ~~AI Service Pipeline (`app/gemini_service.py`)~~ — _file deleted_
+- **Description**: Rapid sequential tailoring requests on free-tier accounts occasionally encountered 429 rate-limit exceptions from Google Gemini API.
+- **Root Cause**: Gemini free-tier imposed a strict `15 Requests Per Minute (RPM)` limit.
+- **Current Status**: **FULLY RESOLVED** — Gemini removed. Application migrated to **DeepSeek** (sole LLM provider). Redis caching and single-flight lock prevent redundant API calls.
 
 ---
 

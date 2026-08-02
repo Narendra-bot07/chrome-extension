@@ -5,6 +5,11 @@ import './styles.css'
 import './dark-theme.css'
 
 import { GoogleOAuthProvider } from '@react-oauth/google';
+import { initSentry } from './observability/sentry';
+import { RootErrorBoundary } from './observability/ErrorBoundary';
+
+// Start Sentry tracking
+initSentry();
 
 try {
   const theme = localStorage.getItem('theme');
@@ -19,12 +24,14 @@ const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || "984139464223-rb9kbtqj
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    {isExtension ? (
-      <App />
-    ) : (
-      <GoogleOAuthProvider clientId={clientId}>
+    <RootErrorBoundary>
+      {isExtension ? (
         <App />
-      </GoogleOAuthProvider>
-    )}
+      ) : (
+        <GoogleOAuthProvider clientId={clientId}>
+          <App />
+        </GoogleOAuthProvider>
+      )}
+    </RootErrorBoundary>
   </React.StrictMode>,
 )

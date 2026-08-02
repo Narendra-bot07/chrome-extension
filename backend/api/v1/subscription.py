@@ -5,6 +5,8 @@ from core.security import verify_supabase_jwt
 from services.subscriptions.subscription_service import SubscriptionService
 from services.subscriptions.feature_gate_service import FeatureGateService
 from services.subscriptions.usage_service import UsageService
+from services.cache.redis_cache import redis_cache
+import json
 
 router = APIRouter(prefix="/subscription", tags=["subscription"])
 
@@ -14,6 +16,14 @@ async def get_my_subscription(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn = Depends(get_db_connection)
 ):
+    cache_key = f"subscription:{user['id']}"
+    cached = redis_cache.get(cache_key)
+    if cached:
+        try:
+            return json.loads(cached) if isinstance(cached, str) else cached
+        except Exception:
+            pass
+
     sub_svc = SubscriptionService(conn)
     sub = sub_svc.get_current_subscription(user["id"])
     features = FeatureGateService(conn).get_plan_features(user["id"])
@@ -21,7 +31,7 @@ async def get_my_subscription(
     trial = None
     if sub.get("trial_start") or sub.get("trial_end"):
         trial = {"start": sub.get("trial_start"), "end": sub.get("trial_end")}
-    return {
+    result = {
         "plan": {
             "id": sub["plan_id"],
             "code": sub["plan_code"],
@@ -41,6 +51,8 @@ async def get_my_subscription(
         "usage": usage,
         "features": features,
     }
+    redis_cache.set(cache_key, result, ttl_seconds=300)
+    return result
 
 
 @router.post("/cancel")
@@ -48,6 +60,7 @@ async def cancel_my_subscription(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn = Depends(get_db_connection)
 ):
+    redis_cache.delete(f"subscription:{user['id']}")
     SubscriptionService(conn).cancel(user["id"], at_period_end=True, changed_by=user["id"])
     return {"success": True}
 
@@ -57,5 +70,6 @@ async def reactivate_my_subscription(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn = Depends(get_db_connection)
 ):
+    redis_cache.delete(f"subscription:{user['id']}")
     SubscriptionService(conn).reactivate(user["id"], changed_by=user["id"])
     return {"success": True}

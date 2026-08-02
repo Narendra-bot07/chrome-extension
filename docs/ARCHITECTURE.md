@@ -82,7 +82,7 @@ sequenceDiagram
     participant Frontend as React Dashboard
     participant API as FastAPI Backend
     participant Redis as Redis Cache
-    participant LLM as ResilientLLMWrapper (Groq/Gemini)
+    participant LLM as ResilientLLMWrapper (DeepSeek)
     participant Playwright as Headless Chromium
     participant Storage as Supabase Storage
 
@@ -99,7 +99,7 @@ sequenceDiagram
         Redis-->>API: Return Cached Tailoring Result
     else Cache Miss
         API->>LLM: Invoke Structured Tailoring Chain
-        LLM->>LLM: Try Groq (Llama-3.3-70b) -> Failover to Gemini 2.0
+        LLM->>LLM: Try DeepSeek Flash → Escalate to DeepSeek Pro on schema error
         LLM-->>API: Return Structured ResumePatch & ATS Score
         API->>Redis: Store Result in Redis (TTL: 24 Hours)
     end
@@ -131,12 +131,12 @@ The backend follows a 4-layer Clean Architecture pattern:
 4. **Core Layer (`core/`)**: System configuration (`Pydantic BaseSettings`), security middleware, database pool management, and observability tracing setup.
 
 ### 3.3 Multi-Model Resilient AI Pipeline (`ResilientLLMWrapper`)
-To guarantee 99.9% uptime and bypass strict free-tier rate limits:
+To guarantee 99.9% uptime and handle transient API errors:
 - **Thread Safety**: Single-request execution lock (`_SINGLE_AI_REQUEST_LOCK`) enforcing a mandatory minimum spacing (`1.5s`) between consecutive model invocations.
+- **Provider**: DeepSeek via OpenAI-compatible SDK (`https://api.deepseek.com`).
 - **Failover Hierarchy**:
-  1. **Groq Engine (`llama-3.3-70b-versatile`)**: Ultra-fast primary engine for JSON structured outputs.
-  2. **Gemini Primary (`gemini-2.0-flash`)**: High-intelligence secondary model triggered automatically on Groq error/rate limit.
-  3. **Gemini Fallback (`gemini-1.5-flash`)**: Tertiary fallback model ensuring complete request completion.
+  1. **DeepSeek Flash (`deepseek-v4-flash`)**: Ultra-fast primary model for JSON structured outputs.
+  2. **DeepSeek Pro (`deepseek-v4-pro`)**: High-intelligence escalation model triggered automatically on Flash schema validation failure.
 
 ### 3.4 Headless Chromium Playwright PDF Engine
 - PDF generation does not rely on fragile client-side html2pdf libraries.

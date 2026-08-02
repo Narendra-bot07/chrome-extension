@@ -119,30 +119,15 @@ async def get_activity_trend(
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
             """
-            WITH requested_settings AS (
-              SELECT
-                COALESCE(NULLIF(timezone, ''), 'UTC') AS requested_timezone
+            WITH profile_tz AS (
+              SELECT COALESCE(NULLIF(timezone, ''), 'UTC') AS timezone
               FROM public.profiles WHERE id=%s
-            ),
-            profile_settings AS (
-              SELECT COALESCE(
-                       (
-                         SELECT name
-                         FROM pg_timezone_names
-                         WHERE name = (
-                           SELECT requested_timezone FROM requested_settings
-                         )
-                         LIMIT 1
-                       ),
-                       'UTC'
-                     ) AS timezone
             ),
             date_range AS (
               SELECT
-                timezone,
-                (NOW() AT TIME ZONE timezone)::date AS end_date,
-                (NOW() AT TIME ZONE timezone)::date - (%s - 1) AS start_date
-              FROM profile_settings
+                COALESCE((SELECT timezone FROM profile_tz), 'UTC') AS timezone,
+                (NOW() AT TIME ZONE COALESCE((SELECT timezone FROM profile_tz), 'UTC'))::date AS end_date,
+                (NOW() AT TIME ZONE COALESCE((SELECT timezone FROM profile_tz), 'UTC'))::date - (%s - 1) AS start_date
             ),
             dates AS (
               SELECT generate_series(

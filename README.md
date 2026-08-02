@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🚀 TailorFlow AI — Intelligent Resume Tailoring & ATS Optimization Platform
+# 🚀 Tailr4U — Intelligent Resume Tailoring & ATS Optimization Platform
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -13,7 +13,7 @@
 [![Razorpay](https://img.shields.io/badge/Razorpay-UPI_&_Cards-0C2340?style=for-the-badge&logo=razorpay&logoColor=white)](https://razorpay.com/)
 [![Resend](https://img.shields.io/badge/Resend-Email_API-000000?style=for-the-badge&logo=resend&logoColor=white)](https://resend.com/)
 
-**TailorFlow AI** is a production-grade, high-availability resume tailoring system delivered via a **Chrome Extension (Manifest V3)** and a **Web Dashboard**. It enables job seekers to extract active Job Descriptions (JDs) in 1-Click, optimize resumes against ATS filters using **DeepSeek** (`deepseek-v4-flash` / `deepseek-v4-pro`), render dynamic vector templates, and export ATS-ready PDFs.
+**Tailr4U** is a production-grade, high-availability resume tailoring system delivered via a **Chrome Extension (Manifest V3)** and a **Web Dashboard**. It enables job seekers to extract active Job Descriptions (JDs) in 1-Click, optimize resumes against ATS filters using **DeepSeek** (`deepseek-v4-flash` / `deepseek-v4-pro`), render dynamic vector templates, and export ATS-ready PDFs.
 
 </div>
 
@@ -282,4 +282,4 @@ For full setup guidelines and required repository secrets, see [GITHUB_ACTIONS_W
 ## 📄 License & Attribution
 
 Distributed under the **MIT License**. See `LICENSE` for more information.  
-Built with ❤️ by **TailorFlow AI Team**.
+Built with ❤️ by **Tailr4U Team**.

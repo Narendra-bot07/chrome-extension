@@ -5,7 +5,7 @@ from main import app
 
 client = TestClient(app)
 
-@patch("app.groq_service.get_llm")
+@patch("app.ai_service.get_llm")
 def test_streaming_endpoint_success(mock_get_llm):
     mock_llm = MagicMock()
     async def async_stream(*args, **kwargs):
@@ -27,14 +27,14 @@ def test_streaming_endpoint_success(mock_get_llm):
         }
     }
     
-    with patch("app.groq_service.is_prompt_out_of_scope", return_value=None):
+    with patch("app.ai_service.is_prompt_out_of_scope", return_value=None):
         response = client.post("/api/refine-section/stream", json=payload)
         assert response.status_code == 200
         lines = [line if isinstance(line, str) else line.decode("utf-8") for line in response.iter_lines()]
         assert "data: Developed end-to-end " in lines
         assert "data: retail sales analytics." in lines
 
-@patch("app.groq_service.get_llm")
+@patch("app.ai_service.get_llm")
 def test_streaming_endpoint_out_of_scope(mock_get_llm):
     mock_llm = MagicMock()
     mock_get_llm.return_value = mock_llm
@@ -53,7 +53,7 @@ def test_streaming_endpoint_out_of_scope(mock_get_llm):
     }
     
     # Simulate guard detecting out of scope
-    with patch("app.groq_service.is_prompt_out_of_scope", return_value="This AI assistant is dedicated to improving the currently selected resume."):
+    with patch("app.ai_service.is_prompt_out_of_scope", return_value="This AI assistant is dedicated to improving the currently selected resume."):
         response = client.post("/api/refine-section/stream", json=payload)
         assert response.status_code == 200
         lines = [line if isinstance(line, str) else line.decode("utf-8") for line in response.iter_lines()]

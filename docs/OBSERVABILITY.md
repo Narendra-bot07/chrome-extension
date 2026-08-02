@@ -1,112 +1,403 @@
-# Tailr4U - Observability, Metrics & Telemetry Specification
+# Tailr4U — Observability, Monitoring & Alerting Runbook
 
-This document details the observability architecture, health probe endpoints, structured logging protocols, LLM prompt tracing with LangSmith, error telemetry with Sentry, and monitoring/alerting strategies for **Tailr4U**.
+> **Stack**: FastAPI (Render) · React/Vite (Vercel) · Chrome Extension · Supabase PostgreSQL · Upstash Redis · Cloudflare R2 · DeepSeek API · Resend · GitHub Actions
+>
+> **Tools**: Sentry Cloud · Prometheus client · Grafana Cloud · OpenTelemetry · UptimeRobot · Structured JSON logs
 
 ---
 
-## 1. Observability Architecture Overview
+## 1. Architecture Overview
 
-```mermaid
-graph LR
-    subgraph Application Stack
-        FASTAPI["FastAPI Backend"]
-        LLM_WRAPPER["ResilientLLMWrapper"]
-        PLAYWRIGHT["Playwright PDF Engine"]
-    end
-
-    subgraph Monitoring & Tracing Services
-        LANGSMITH["LangSmith Tracing Platform<br/>(Prompt Logs, Latency & Token Usage)"]
-        SENTRY["Sentry Error Telemetry<br/>(Unhandled Runtime Exceptions)"]
-        PROMETHEUS["Prometheus Metrics Endpoint<br/>(HTTP Latency, Request Counters)"]
-    end
-
-    subgraph Log Aggregation
-        CONSOLE_LOGS["Structured JSON Console Logs<br/>(RequestLoggingMiddleware)"]
-    end
-
-    FASTAPI --> CONSOLE_LOGS
-    FASTAPI --> PROMETHEUS
-    FASTAPI --> SENTRY
-    LLM_WRAPPER --> LANGSMITH
+```
+┌────────────────────────────────────────────────────────────┐
+│                      Tailr4U Components                    │
+│  FastAPI Backend  ·  React Frontend  ·  Chrome Extension   │
+└──────┬────────────────────┬──────────────────────┬─────────┘
+       │                    │                      │
+       ▼                    ▼                      ▼
+┌──────────────┐  ┌──────────────────┐  ┌──────────────────────┐
+│ Sentry Cloud │  │ Grafana Cloud    │  │ UptimeRobot          │
+│ (Errors +    │  │ ├─ Prometheus    │  │ (External uptime     │
+│  Perf traces)│  │ ├─ Loki logs     │  │  checks every 5 min) │
+└──────────────┘  │ ├─ Tempo traces  │  └──────────────────────┘
+                  │ └─ Dashboards +  │
+                  │    Alerting      │
+                  └──────────────────┘
+                         ▲
+              /internal/metrics  (Bearer-protected)
+              scraped by Grafana Cloud Agent every 15s
 ```
 
 ---
 
-## 2. Health & Readiness Probe Endpoints
+## 2. Environment Variables Reference
 
-Tailr4U exposes dedicated health verification endpoints used by container orchestrators (Kubernetes, Render, Docker Compose) to monitor application liveness and dependency readiness.
+All observability variables must be set in the backend `.env` (Render dashboard in production) and in the frontend Vercel project environment variables.
 
-### 2.1 Endpoint Summary
+### 2.1 Backend (Render)
 
-| Route | HTTP Method | Auth | Purpose | Response Payload |
-| :--- | :--- | :--- | :--- | :--- |
-| `/live` | `GET` | Public | Liveness probe (verifies Uvicorn event loop) | `{"status": "alive"}` |
-| `/ready` | `GET` | Public | Readiness probe (verifies DB connection pool) | `{"status": "ready", "database": "connected"}` |
-| `/health` | `GET` | Public | Full system status & version audit | `{"status": "healthy", "version": "3.0.0"}` |
-| `/api/observability/status` | `GET` | Public | LangSmith configuration health | `{"enabled": true, "project": "tailr4u-prod"}` |
+| Variable | Required | Purpose |
+|---|---|---|
+| `OBSERVABILITY_ENABLED` | Yes | Master switch — set `true` in all non-local envs |
+| `APP_ENV` | Yes | `local` / `staging` / `production` |
+| `APP_RELEASE` | Yes | `tailr4u-api@1.2.3` — set in CI via git tag |
+| `SERVICE_NAME` | No | `tailr4u-api` (default) |
+| `SENTRY_BACKEND_DSN` | Yes | From Sentry project settings (Python FastAPI project) |
+| `SENTRY_TRACES_SAMPLE_RATE` | No | `0.05` (5 %) for prod |
+| `SENTRY_PROFILES_SAMPLE_RATE` | No | `0` for prod until needed |
+| `METRICS_ENABLED` | Yes | `true` |
+| `METRICS_PATH` | No | `/internal/metrics` (default) |
+| `METRICS_BEARER_TOKEN` | Yes | Random 32-char secret, shared with Grafana Cloud Agent |
+| `OTEL_ENABLED` | No | `false` until Grafana Tempo is wired up |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | Grafana Cloud OTLP endpoint when enabled |
+| `OTEL_EXPORTER_OTLP_HEADERS` | No | `Authorization=Basic <base64-creds>` |
+| `LOG_LEVEL` | No | `INFO` for prod |
+| `LOG_FORMAT` | No | `json` for prod |
+
+### 2.2 Frontend (Vercel)
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `VITE_SENTRY_FRONTEND_DSN` | Yes | From Sentry project (React project) |
+| `VITE_APP_ENV` | Yes | `production` |
+| `VITE_APP_RELEASE` | Yes | Set by GitHub Actions on deploy |
+
+### 2.3 Chrome Extension
+
+The extension DSN constants are currently hardcoded strings at the top of `background.js` and `content_snapshot.js` (empty by default). Set `SENTRY_EXTENSION_DSN` before publishing a Chrome Web Store build.
 
 ---
 
-## 3. Structured Request Logging Middleware
+## 3. Health Probe Endpoints
 
-The backend uses `RequestLoggingMiddleware` (`core/middleware.py`) to intercept every incoming HTTP request and emit structured JSON log entries.
+| Endpoint | Purpose | Auth | Expected Response |
+|---|---|---|---|
+| `GET /live` | Liveness — process alive | None | `200 Process is running.` |
+| `GET /ready` | Readiness — DB + Redis + Storage reachable | None | `200` or `503` |
+| `GET /health` | High-level component status for dashboards | None | `200 {"status":"healthy",...}` |
+| `GET /api/observability/status` | LangSmith config status | None | `200 {...}` |
+| `GET /internal/metrics` | Prometheus metrics scrape | Bearer token | `200 text/plain; version=0.0.4` |
 
-### Log Format Output
-```json
-{
-  "timestamp": "2026-08-01T21:55:12.345Z",
-  "level": "INFO",
-  "method": "POST",
-  "path": "/api/v1/tailor/resume",
-  "status_code": 200,
-  "duration_ms": 1420.85,
-  "client_ip": "203.0.113.195",
-  "user_id": "a1b2c3d4-e5f6-7890-abcd-1234567890ab"
+### 3.1 Render Health Check Configuration
+
+In Render dashboard → Service → Health & Alerts:
+
+```
+Health Check Path:  /ready
+Initial Delay:      30s
+Period:             10s
+Failure Threshold:  3
+```
+
+---
+
+## 4. Prometheus Metrics Catalogue
+
+All metrics are exported at `GET /internal/metrics` (requires `Authorization: Bearer <METRICS_BEARER_TOKEN>`).
+
+### 4.1 HTTP Metrics
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `http_requests_total` | Counter | `method, route, status_class` | Total HTTP requests |
+| `http_request_duration_seconds` | Histogram | `method, route` | Request latency buckets |
+| `http_requests_in_progress` | Gauge | `method, route` | Concurrent active requests |
+
+### 4.2 Business / Workflow Metrics
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `resume_tailoring_requests_total` | Counter | `status` | Resume tailoring lifecycle |
+| `resume_tailoring_duration_seconds` | Histogram | `status` | End-to-end tailoring latency |
+| `resume_generation_total` | Counter | `status, template` | Rendered resume documents |
+| `cover_letter_generation_total` | Counter | `status` | Cover letter completions |
+| `jd_extraction_total` | Counter | `status, source_type` | JD extraction from URL/text |
+| `pdf_render_total` | Counter | `status` | PDF render outcomes |
+| `pdf_render_duration_seconds` | Histogram | `status` | Playwright PDF render latency |
+| `notification_delivery_total` | Counter | `channel, status` | Email sends via Resend |
+
+### 4.3 LLM Metrics
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `llm_requests_total` | Counter | `provider, model, task, status` | DeepSeek API calls |
+| `llm_request_duration_seconds` | Histogram | `provider, model, task` | LLM API latency |
+| `llm_input_tokens_total` | Counter | `provider, model, task` | Input token consumption |
+| `llm_output_tokens_total` | Counter | `provider, model, task` | Output token count |
+| `llm_retries_total` | Counter | `provider, reason` | LLM retry events |
+| `llm_validation_failures_total` | Counter | `provider, task, reason` | Response schema failures |
+| `llm_cache_hits_total` | Counter | `task` | Cache-bypassed LLM calls |
+| `llm_escalations_total` | Counter | `from_model, to_model, reason` | Flash→Pro escalations |
+
+### 4.4 Dependency Metrics
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `supabase_request_duration_seconds` | Histogram | `operation, status` | DB query latency |
+| `supabase_errors_total` | Counter | `operation, error_category` | DB errors |
+| `redis_operations_total` | Counter | `operation, status` | Cache commands |
+| `redis_operation_duration_seconds` | Histogram | `operation` | Cache latency |
+| `r2_operations_total` | Counter | `operation, status` | Object storage operations |
+| `resend_requests_total` | Counter | `template, status` | Email delivery outcomes |
+
+---
+
+## 5. Grafana Cloud Setup Guide
+
+### 5.1 Install Grafana Agent (Alloy)
+
+On Render, Grafana Agent cannot be deployed as a sidecar. Use **Grafana Cloud hosted Prometheus remote-write** with the Prometheus `remote_write` endpoint instead:
+
+**Option A — Grafana Alloy on a separate VPS / Docker instance (recommended for V1.5)**
+
+```yaml
+# alloy.river
+prometheus.scrape "tailr4u_backend" {
+  targets = [{ __address__ = "https://your-render-url.onrender.com" }]
+  metrics_path = "/internal/metrics"
+  scheme       = "https"
+  authorization {
+    type        = "Bearer"
+    credentials = env("METRICS_BEARER_TOKEN")
+  }
+  scrape_interval = "15s"
+}
+
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    url = env("GRAFANA_CLOUD_PROM_ENDPOINT")
+    basic_auth {
+      username = env("GRAFANA_CLOUD_USER_ID")
+      password = env("GRAFANA_CLOUD_API_KEY")
+    }
+  }
 }
 ```
 
+**Option B — Grafana Cloud Hosted Prometheus Scraper (V1 — easiest)**
+
+1. Grafana Cloud → Connections → Add new connection → Prometheus
+2. Use **"Push metrics from my Prometheus"** flow
+3. Copy the `remote_write` config block
+4. Add `GRAFANA_CLOUD_*` secrets to Render → add a lightweight metrics forwarder script
+
+### 5.2 Recommended Dashboard Panels
+
+Import the following PromQL-based panels into a new Grafana dashboard named **`Tailr4U — Production Overview`**:
+
+```promql
+# Request Rate (per minute)
+rate(http_requests_total[1m]) * 60
+
+# Error Rate % (5xx)
+sum(rate(http_requests_total{status_class="5xx"}[5m])) /
+sum(rate(http_requests_total[5m])) * 100
+
+# P95 Request Latency
+histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+
+# LLM API P95 Latency
+histogram_quantile(0.95, rate(llm_request_duration_seconds_bucket[5m]))
+
+# DeepSeek Token Burn Rate (per minute)
+rate(llm_input_tokens_total[1m]) * 60
+
+# Resume Tailoring Success Rate
+rate(resume_tailoring_requests_total{status="success"}[5m]) /
+rate(resume_tailoring_requests_total[5m]) * 100
+
+# PDF Render P95 Latency
+histogram_quantile(0.95, rate(pdf_render_duration_seconds_bucket[5m]))
+
+# Redis Cache Hit Rate
+rate(cache_hits_total[5m]) /
+(rate(cache_hits_total[5m]) + rate(cache_misses_total[5m])) * 100
+```
+
 ---
 
-## 4. LLM Prompt & Chain Tracing (LangSmith Integration)
+## 6. Alerting Rules
 
-All AI invocations routed through `gemini_service.py` (`ResilientLLMWrapper`) integrate natively with **LangSmith** via `core/observability.py`.
+Configure the following alerts in Grafana Cloud → Alerting → Alert rules.
 
-### 4.1 Environment Configuration
-- `LANGSMITH_TRACING=true`
-- `LANGSMITH_API_KEY=<secret_key>`
-- `LANGSMITH_PROJECT=tailr4u-production`
-- `LANGSMITH_ENDPOINT=https://api.smith.langchain.com`
+### 6.1 Critical Alerts (PagerDuty / Slack #incidents)
 
-### 4.2 Tracked Metrics in LangSmith
-1. **Prompt Versioning**: Complete record of input prompt templates and output structured JSON payloads.
-2. **Token Consumption**: Input/output token counts for Groq and Gemini invocations.
-3. **Execution Latency**: Time spent during model invocation vs. post-processing schema parsing.
-4. **Failover Audit**: Logs every failover event when the primary model (Groq) triggers the fallback (Gemini 2.0 Flash).
+| Alert | Condition | Window | Severity |
+|---|---|---|---|
+| `HighErrorRate` | `5xx rate > 2%` | 5m | Critical |
+| `BackendDown` | `up == 0` (scrape fails) | 1m | Critical |
+| `LLMAPIFailureSpike` | `llm_requests_total{status="error"} > 10` | 2m | Critical |
+| `DatabaseErrorSpike` | `supabase_errors_total > 5` | 2m | Critical |
+
+### 6.2 Warning Alerts (Slack #ops)
+
+| Alert | Condition | Window | Severity |
+|---|---|---|---|
+| `HighP95Latency` | `P95 latency > 5s` | 5m | Warning |
+| `PDFRenderSlow` | `pdf_render P95 > 15s` | 5m | Warning |
+| `LLMLatencyDegraded` | `llm P95 > 20s` | 5m | Warning |
+| `RedisCacheHitRateLow` | `cache hit rate < 60%` | 10m | Warning |
+| `HighTokenBurnRate` | `llm input tokens > 50k/min` | 5m | Warning |
+
+### 6.3 Alert Contact Points
+
+In Grafana Cloud → Alerting → Contact points:
+
+```yaml
+# Slack contact point
+name: slack-ops
+type: slack
+settings:
+  url: <SLACK_WEBHOOK_URL>
+  channel: "#tailr4u-ops"
+  title: "{{ .GroupLabels.alertname }}"
+  text: "{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}"
+
+# Email contact point
+name: email-oncall
+type: email
+settings:
+  addresses: "oncall@tailr4u.com"
+```
 
 ---
 
-## 5. Error Telemetry (Sentry Integration)
+## 7. UptimeRobot Configuration
 
-- **SDK Configuration**: `sentry-sdk[fastapi]` initialized during startup in `main.py`.
-- **Captured Events**:
-  - `500 Internal Server Errors`
-  - Unhandled database connection timeouts (`asyncpg.Exceptions`)
-  - Playwright browser launch failures
-  - Storage bucket upload failures
-- **PII Scrubbing**: Authorization headers, passwords, and candidate resume raw texts are stripped prior to transmission to Sentry servers.
+UptimeRobot provides external black-box availability checks independent of all internal monitoring.
+
+### 7.1 Monitors to Create
+
+Log into [uptimerobot.com](https://uptimerobot.com) and create the following monitors:
+
+| Monitor Name | URL | Type | Interval | Expected |
+|---|---|---|---|---|
+| `Tailr4U API — Live` | `https://api.tailr4u.com/live` | HTTPS | 5 min | Status 200 |
+| `Tailr4U API — Ready` | `https://api.tailr4u.com/ready` | HTTPS | 5 min | Status 200 |
+| `Tailr4U Frontend` | `https://app.tailr4u.com` | HTTPS | 5 min | Status 200 |
+| `Tailr4U API Root` | `https://api.tailr4u.com/` | HTTPS | 5 min | Status 200, body contains `healthy` |
+
+### 7.2 Alert Contact
+
+In UptimeRobot → My Settings → Alert Contacts: add a Slack alert contact or email on each monitor.
+
+### 7.3 Status Page
+
+Create a **public status page** at `status.tailr4u.com` inside UptimeRobot by adding all monitors to a Public Status Page group.
 
 ---
 
-## 6. Prometheus & Grafana Monitoring Roadmap
+## 8. Structured JSON Log Format
 
-- **Prometheus Scrape Endpoint**: `/metrics`
-- **Key Metrics Tracked**:
-  - `http_requests_total{method, endpoint, status}`
-  - `http_request_duration_seconds_bucket`
-  - `llm_token_usage_total{model, type}`
-  - `pdf_generation_duration_seconds`
-  - `db_pool_active_connections`
-- **Alerting Thresholds**:
-  - Alert if HTTP 5xx error rate exceeds `2%` over 5 minutes.
-  - Alert if PDF compilation latency exceeds `8 seconds` (`P95`).
-  - Alert if Redis connection drops or database pool is exhausted.
+All backend logs are emitted as single-line JSON to stdout, collected by Render's log aggregator, and can be forwarded to Grafana Loki via the Grafana Alloy Loki `loki.source.api` receiver.
+
+```json
+{
+  "timestamp": "2026-08-02T08:00:00.000Z",
+  "level": "INFO",
+  "service": "tailr4u-api",
+  "environment": "production",
+  "release": "tailr4u-api@1.2.3",
+  "request_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "trace_id": "",
+  "message": "http_request_completed",
+  "extra_info": {
+    "method": "POST",
+    "route": "/api/v1/tailor/resume",
+    "status_code": 200,
+    "duration_ms": 1420.85
+  }
+}
+```
+
+**Sensitive fields that are always redacted**: `password`, `access_token`, `refresh_token`, `authorization`, `email`, `phone`, `resume`, `job_description`, `prompt`, `response`, `api_key`, `bearer_token`, `client_secret`.
+
+---
+
+## 9. OpenTelemetry Distributed Tracing
+
+OpenTelemetry is configured in `backend/observability/tracing.py` and is **disabled by default** (`OTEL_ENABLED=false`). Enable it once a Grafana Tempo endpoint is provisioned.
+
+### 9.1 Activation
+
+Set in Render environment:
+
+```bash
+OTEL_ENABLED=true
+OTEL_EXPORTER_OTLP_ENDPOINT=https://tempo-prod-xx-prod-xx.grafana.net/otlp
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic <base64(userid:grafana_api_key)>
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+OTEL_TRACES_SAMPLER_ARG=0.05
+```
+
+### 9.2 Instrumented Components
+
+| Component | Auto-instrumented | Manual span |
+|---|---|---|
+| FastAPI HTTP handlers | ✅ `FastAPIInstrumentor` | — |
+| Outbound HTTPX calls | ✅ `HTTPXClientInstrumentor` | — |
+| DeepSeek LLM calls | — | ✅ `@trace_llm_call` decorator |
+| Supabase DB queries | — | ✅ `@trace_db_operation` decorator |
+| Redis operations | — | ✅ `@trace_cache_operation` decorator |
+
+### 9.3 Correlation with Logs and Metrics
+
+The `request_id` in JSON logs maps to the Sentry `event_id` tag and the OTLP `trace_id` via the `CorrelationAndLoggingMiddleware`.
+
+---
+
+## 10. Release Tagging in CI (GitHub Actions)
+
+Add the following step to `.github/workflows/deploy.yml` to propagate release metadata:
+
+```yaml
+- name: Set release version
+  run: |
+    RELEASE="tailr4u-api@$(git describe --tags --always)"
+    echo "APP_RELEASE=$RELEASE" >> $GITHUB_ENV
+
+- name: Deploy to Render
+  env:
+    APP_RELEASE: ${{ env.APP_RELEASE }}
+  run: |
+    curl -X POST "https://api.render.com/deploy/srv-XXXX?key=YOUR_DEPLOY_KEY"
+```
+
+Set `APP_RELEASE` as a Render environment variable override per-deploy, or use Render's native deploy hooks.
+
+---
+
+## 11. Sentry Projects Reference
+
+| Project | Platform | DSN env var |
+|---|---|---|
+| `tailr4u-api` | Python/FastAPI | `SENTRY_BACKEND_DSN` |
+| `tailr4u-frontend` | JavaScript/React | `VITE_SENTRY_FRONTEND_DSN` |
+| `tailr4u-extension` | JavaScript/Browser | Hardcoded in `background.js` |
+
+Create each project at [sentry.io](https://sentry.io) → New Project, then paste the DSN into the appropriate environment.
+
+---
+
+## 12. Runbook: Responding to Alerts
+
+### `HighErrorRate` firing
+
+1. Check Sentry → Issues → Latest unresolved issues
+2. Check Render → Logs → filter for `"level":"ERROR"`
+3. Check `GET /health` response for degraded components
+4. If database issue: check Supabase dashboard → Database → Connections
+5. If LLM issue: check DeepSeek API status page
+
+### `BackendDown` firing
+
+1. Check UptimeRobot status page for confirmation
+2. Check Render → Service → Events for crash/restart logs
+3. SSH or exec into dyno if available
+4. Re-deploy last known-good commit
+
+### `LLMLatencyDegraded` firing
+
+1. Check `llm_request_duration_seconds_bucket` in Grafana — which `model` label is slow
+2. Check DeepSeek API latency from their status page
+3. Consider reducing `DEEPSEEK_TIMEOUT_SECONDS` to fail fast and surface errors in Sentry sooner

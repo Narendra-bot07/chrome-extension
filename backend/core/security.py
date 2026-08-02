@@ -88,6 +88,6 @@ def validate_password(password: str) -> None:
         raise ValueError("Password must be 128 characters or fewer.")
     if password.lower() in {
         "password123", "password123!", "qwerty12345", "letmein1234",
-        "1234567890", "tailorflow"
+        "1234567890", "tailr4u"
     }:
         raise ValueError("Choose a less common password.")

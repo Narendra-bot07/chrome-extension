@@ -159,7 +159,7 @@ function AppRoutes() {
     } else {
       if (user) {
         if (!hasAnyResume && location.pathname === '/tailor') {
-          navigate('/extension-setup', { replace: true });
+          navigate('/resumes', { replace: true });
           return;
         }
         if (!hasRedirectedOnStartup) setHasRedirectedOnStartup(true);

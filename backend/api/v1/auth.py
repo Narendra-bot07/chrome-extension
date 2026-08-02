@@ -27,7 +27,7 @@ from schemas.auth import TurnstileVerifyRequest
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 RESET_CONFIRMATION = "If an account exists for this email, a reset link has been sent."
-REFRESH_COOKIE = "tailorflow_refresh"
+REFRESH_COOKIE = "tailr4u_refresh"
 
 
 def _set_refresh_cookie(response: Response, token: str) -> None:
@@ -356,7 +356,7 @@ async def google_login(
             first_name=idinfo.get("given_name", ""),
             last_name=idinfo.get("family_name", ""),
             locale=idinfo.get("locale", ""),
-            profile_details=idinfo.get("tailorflow_profile") or {}
+            profile_details=idinfo.get("tailr4u_profile") or {}
         )
         
         session_service = SessionService(conn)
@@ -366,7 +366,7 @@ async def google_login(
         
         access_token = auth_service.generate_custom_jwt(user, session_id)
         has_completed_preferences = JobPreferencesRepository(conn).has_completed(user["id"])
-        profile_import = idinfo.get("tailorflow_profile") or {}
+        profile_import = idinfo.get("tailr4u_profile") or {}
         
         # Emit Analytics Event
         analytics_service = AnalyticsService(conn)
@@ -387,19 +387,19 @@ async def google_login(
                     "email": user["email"],
                     "full_name": user.get("full_name", ""),
                     "provider": user.get("provider", "google"),
-                        "avatar_url": user.get("avatar_url", ""),
-                        "created_at": user.get("created_at", datetime.datetime.utcnow()).isoformat() if isinstance(user.get("created_at"), datetime.datetime) else str(user.get("created_at", "")),
-                        "has_completed_preferences": has_completed_preferences
-                    },
+                    "avatar_url": user.get("avatar_url", ""),
+                    "created_at": user.get("created_at", datetime.datetime.utcnow()).isoformat() if isinstance(user.get("created_at"), datetime.datetime) else str(user.get("created_at", "")),
                     "has_completed_preferences": has_completed_preferences
                 },
-                "google_profile_import": {
-                    "status": profile_import.get("_import_status", "basic_profile_only"),
-                    "http_status": profile_import.get("_import_http_status"),
-                    "error": profile_import.get("_import_error"),
-                    "populated_fields": profile_import.get("_populated_fields", [])
-                }
+                "has_completed_preferences": has_completed_preferences
+            },
+            "google_profile_import": {
+                "status": profile_import.get("_import_status", "basic_profile_only"),
+                "http_status": profile_import.get("_import_http_status"),
+                "error": profile_import.get("_import_error"),
+                "populated_fields": profile_import.get("_populated_fields", [])
             }
+        }
     except ValueError as ve:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(ve))
     except Exception as e:

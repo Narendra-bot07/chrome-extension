@@ -16,7 +16,7 @@ To empower job seekers with real-time browser intelligence, AI-assisted resume c
 
 ### Core Principles
 1. **Zero-Hallucination Tailoring**: Preserve real candidate accomplishments while reframing language to match Job Description (JD) keywords.
-2. **Sub-Second Responsiveness**: Leverage Redis caching, asynchronous processing, and multi-model failover (Groq + Gemini) for instant feedback.
+2. **Sub-Second Responsiveness**: Leverage production-grade Redis caching (`LLMCacheService`), single-flight distributed SET NX locks, and asynchronous processing for sub-50ms responses on duplicate requests.
 3. **Deterministic PDF Compilation**: Utilize a custom Chromium Playwright rendering engine over React components for pixel-perfect, single-page, ATS-scannable PDFs.
 4. **Privacy & Security First**: Strict Row-Level Security (RLS) on PostgreSQL, sandboxed file uploads in Supabase Storage, and zero exposure of internal environment keys.
 5. **Clean Architecture & Maintainability**: Modular backend layers (Routers → Services → Repositories → Core) ensuring high testability and seamless maintenance.
@@ -28,12 +28,13 @@ To empower job seekers with real-time browser intelligence, AI-assisted resume c
 Tailr4U is composed of three interconnected sub-systems:
 1. **Chrome Extension (Browser Intelligence Engine)**: DOM scraper & floating overlay injected into major job platforms (LinkedIn, Indeed, Glassdoor, Lever, Greenhouse, Workday) to capture raw Job Descriptions and trigger instant tailoring.
 2. **Web Application (Vite + React Frontend)**: Premium dark-mode dashboard providing resume management, real-time tailoring editors, template customization, cover letter generator, application status tracking, and account management.
-3. **Backend API (FastAPI Enterprise Engine)**: Asynchronous REST API providing multi-LLM orchestration (Groq Llama-3.3-70b & Gemini 2.0 Flash), Playwright PDF compilation, ATS scoring, account security, usage analytics, and Supabase integration.
+3. **Backend API (FastAPI Enterprise Engine)**: Asynchronous REST API providing DeepSeek LLM orchestration (`deepseek-v4-flash` -> `deepseek-v4-pro`), production Redis caching, Playwright PDF compilation, ATS scoring, account security, usage analytics, and Supabase integration.
 
 ### Core Feature Matrix
 - **Instant JD Extraction**: Scrapes active job listings with single-click DOM parsing.
 - **ATS Match Score & Gap Analysis**: Evaluates resume-JD compatibility (0-100%) and provides missing keyword breakdowns.
 - **Smart Section Tailoring**: Modular AI editing for Work Experience, Professional Summary, Skills, and Projects.
+- **Production Redis Caching**: Sub-50ms cache hits for repeated job extractions and tailoring with single-flight stampede protection.
 - **Deterministic PDF Generation**: Uses headless Chromium to compile tailored JSON resume models directly into HTML/CSS and output vector-sharp PDFs.
 - **Cover Letter Engine**: Generates customized, role-specific cover letters tailored to employer domain and candidate background.
 - **Application Workflow Tracker**: KanBan and list views for managing job applications, interview schedules, and follow-up reminders.
@@ -43,8 +44,8 @@ Tailr4U is composed of three interconnected sub-systems:
 
 ## 3. Current Development Stage & Versioning
 
-- **Current Version**: `v3.2.0`
-- **Architecture State**: Enterprise Clean Architecture with decoupled API routers, repository abstraction layers, resilient DeepSeek LLM orchestration via LangChain, multi-tab Stripe billing workflow, global custom cursor engine, and real-time payment signal tracking.
+- **Current Version**: `v3.6.0`
+- **Architecture State**: Enterprise Clean Architecture with decoupled API routers, repository abstraction layers, production-grade Redis LLM caching layer (`LLMCacheService`), single-provider DeepSeek adapter, dual payment gateway routing (Stripe + Razorpay), Phase 6 subscription tier standard (Basic $9.99, Pro $19.99, Elite $39.99), and headless Playwright PDF compilation.
 - **Status**: Production Ready / Active Enhancement Phase.
 
 ---

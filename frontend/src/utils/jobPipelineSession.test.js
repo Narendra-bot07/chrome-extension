@@ -38,9 +38,9 @@ test('tampered JD session is rejected by its fingerprint', () => {
   const storage = memoryStorage();
   const session = createJDPipelineSession({ title: 'Engineer' });
   writeJDPipelineSession(storage, session);
-  const raw = JSON.parse(storage.getItem('tailorflow.jd_pipeline_session.v1'));
+  const raw = JSON.parse(storage.getItem('tailr4u.jd_pipeline_session.v1'));
   raw.canonicalJD.title = 'Different job';
-  storage.setItem('tailorflow.jd_pipeline_session.v1', JSON.stringify(raw));
+  storage.setItem('tailr4u.jd_pipeline_session.v1', JSON.stringify(raw));
 
   assert.equal(readJDPipelineSession(storage), null);
 });

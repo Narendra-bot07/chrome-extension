@@ -28,11 +28,11 @@ from app.llm.deepseek_provider import (
     DeepSeekProvider,
     ResilientLLMWrapper,
     throttle_ai_call,
-    throttle_gemini_call,
-    throttle_groq_call
 )
 
 from services.cache.redis_cache import redis_cache
+from services.cache.llm_cache import llm_cache
+from services.cache.llm_fingerprint import LLMFingerprintBuilder
 
 logger = logging.getLogger("ai_service")
 
@@ -135,59 +135,62 @@ def parse_resume(raw_text: str, api_key: Optional[str] = None) -> ResumeStructur
     if not clean_text:
         return ResumeStructure()
 
-    cache_key = _get_cache_key("parse_resume_v3", clean_text)
-    cached = _get_from_cache(cache_key)
-    if cached:
-        return cached
+    def _call_llm():
+        start_time = time.time()
+        provider = get_provider(api_key)
 
-    start_time = time.time()
-    provider = get_provider(api_key)
+        sys_msg = (
+            "You are a lossless ATS resume extraction engine. Extract only content explicitly present in the supplied resume.\n"
+            "Preserve every source record exactly once and preserve its boundaries: never split one record's title, description, metric, link, or annotation into separate list items; never merge neighboring records; never repeat a section; never infer missing content.\n"
+            "Keep employers, roles, projects, education, dates, metrics, skills, links, certifications, achievements, leadership, volunteering, publications, and custom sections source-faithful.\n"
+            "CRITICAL MANDATES FOR SKILLS AND SECTION ORDER:\n"
+            "- Always extract all technical skills from sections such as 'TECHNICAL SKILLS', 'Technical Skills', 'SKILLS', or 'Technical Proficiencies'.\n"
+            "- Populate 'skills' as a flat array of all skills AND populate 'skills_categories' as a dictionary mapping section categories (e.g. 'Languages', 'Frameworks', 'Databases', 'AI & ML', 'Tools', etc.) to skill lists.\n"
+            "- Populate 'section_order' as an array of section keys (e.g. ['summary', 'education', 'experience', 'projects', 'skills', 'certifications']) in the EXACT top-to-bottom order they appear in the source resume text.\n"
+            "- If a section is absent, use its empty default. In experience and projects, description must be an array containing exactly the source bullet strings."
+        )
 
-    sys_msg = (
-        "You are a lossless ATS resume extraction engine. Extract only content explicitly present in the supplied resume.\n"
-        "Preserve every source record exactly once and preserve its boundaries: never split one record's title, description, metric, link, or annotation into separate list items; never merge neighboring records; never repeat a section; never infer missing content.\n"
-        "Keep employers, roles, projects, education, dates, metrics, skills, links, certifications, achievements, leadership, volunteering, publications, and custom sections source-faithful.\n"
-        "CRITICAL MANDATES FOR SKILLS AND SECTION ORDER:\n"
-        "- Always extract all technical skills from sections such as 'TECHNICAL SKILLS', 'Technical Skills', 'SKILLS', or 'Technical Proficiencies'.\n"
-        "- Populate 'skills' as a flat array of all skills AND populate 'skills_categories' as a dictionary mapping section categories (e.g. 'Languages', 'Frameworks', 'Databases', 'AI & ML', 'Tools', etc.) to skill lists.\n"
-        "- Populate 'section_order' as an array of section keys (e.g. ['summary', 'education', 'experience', 'projects', 'skills', 'certifications']) in the EXACT top-to-bottom order they appear in the source resume text.\n"
-        "- If a section is absent, use its empty default. In experience and projects, description must be an array containing exactly the source bullet strings."
+        result = provider.invoke_structured(
+            prompt=clean_text,
+            schema_cls=ResumeStructure,
+            system_instruction=sys_msg,
+            temperature=0.0
+        )
+
+        # Post-processing 1: Fallback skills extraction if empty
+        if not result.skills and not result.skills_categories:
+            fallback_skills, fallback_cats = _fallback_extract_technical_skills(clean_text)
+            if fallback_skills:
+                result.skills = fallback_skills
+            if fallback_cats:
+                result.skills_categories = fallback_cats
+
+        # Post-processing 2: Synchronize skills and skills_categories
+        if result.skills_categories and not result.skills:
+            flat = []
+            for cat_skills in result.skills_categories.values():
+                if isinstance(cat_skills, list):
+                    flat.extend(cat_skills)
+            result.skills = _unique_keep_order(flat)
+        elif result.skills and not result.skills_categories:
+            result.skills_categories = {"Technical Skills": result.skills}
+
+        # Post-processing 3: Guarantee section_order preservation
+        detected_order = _detect_section_order_from_text(clean_text)
+        if detected_order:
+            result.section_order = detected_order
+
+        duration = round((time.time() - start_time) * 1000, 2)
+        logger.info(f"[LLM_TELEMETRY] call=parse_resume latency_ms={duration} input_chars={len(clean_text)}")
+        return result
+
+    return llm_cache.execute_with_cache(
+        task="resume_structure_recovery",
+        payload_to_fingerprint=clean_text,
+        llm_callable=_call_llm,
+        expected_schema=ResumeStructure,
+        prompt_version="parse-resume-v3"
     )
-
-    result = provider.invoke_structured(
-        prompt=clean_text,
-        schema_cls=ResumeStructure,
-        system_instruction=sys_msg,
-        temperature=0.0
-    )
-
-    # Post-processing 1: Fallback skills extraction if empty
-    if not result.skills and not result.skills_categories:
-        fallback_skills, fallback_cats = _fallback_extract_technical_skills(clean_text)
-        if fallback_skills:
-            result.skills = fallback_skills
-        if fallback_cats:
-            result.skills_categories = fallback_cats
-
-    # Post-processing 2: Synchronize skills and skills_categories
-    if result.skills_categories and not result.skills:
-        flat = []
-        for cat_skills in result.skills_categories.values():
-            if isinstance(cat_skills, list):
-                flat.extend(cat_skills)
-        result.skills = _unique_keep_order(flat)
-    elif result.skills and not result.skills_categories:
-        result.skills_categories = {"Technical Skills": result.skills}
-
-    # Post-processing 3: Guarantee section_order preservation
-    detected_order = _detect_section_order_from_text(clean_text)
-    if detected_order:
-        result.section_order = detected_order
-
-    duration = round((time.time() - start_time) * 1000, 2)
-    logger.info(f"[LLM_TELEMETRY] call=parse_resume latency_ms={duration} input_chars={len(clean_text)}")
-    _set_to_cache(cache_key, result)
-    return result
 
 def _extract_section_items(text: str, heading: str) -> List[str]:
     pattern = rf"{re.escape(heading)}:?\s*(.*?)(?=\n\s*(?:Minimum qualifications|Preferred qualifications|About the job|Responsibilities|Requirements|Qualifications|Benefits|Google is proud|Apply)\b|$)"
@@ -261,47 +264,74 @@ def _enrich_job_analysis(result: JobAnalysis, jd_text: str) -> JobAnalysis:
 
 def analyze_job_description(jd_text: str, api_key: Optional[str] = None, url: Optional[str] = "", page_title: Optional[str] = "", page_company: Optional[str] = "") -> JobAnalysis:
     clean_jd = jd_text.strip()
-    cache_key = _get_cache_key("analyze_jd", f"{clean_jd}:{url}:{page_title}:{page_company}")
-    cached = _get_from_cache(cache_key)
-    if cached:
-        return cached
+    if not clean_jd:
+        return JobAnalysis()
 
-    start_time = time.time()
-    provider = get_provider(api_key)
+    payload_fingerprint = {
+        "clean_jd": clean_jd,
+        "url": url or "",
+        "page_title": page_title or "",
+        "page_company": page_company or ""
+    }
 
-    sys_msg = (
-        "You are an expert Job Description Structured Extraction Engine.\n"
-        "Your responsibility is to extract exact structured fields from the provided single job posting text.\n\n"
-        "The input text is the pre-validated, high-scoring main job container from the DOM.\n"
-        "Always set is_job_related = true and extract these exact schema fields:\n"
-        "- title, company, location, work_mode, job_type, experience_required, seniority, highlights, responsibilities, qualifications, required_skills, preferred_skills, skills_categories, salary, keywords, ats_keywords.\n"
-        "RULES:\n"
-        "- Build the structured job object using ONLY information that actually exists in the provided text.\n"
-        "- Never invent or fabricate missing fields.\n"
-        "- Extract required_skills from programming languages, frameworks, platforms, tools, cloud, AI/ML, security, infrastructure, and domain skills.\n"
-        "- Return valid JSON matching the exact schema only."
+    def _call_llm():
+        start_time = time.time()
+        provider = get_provider(api_key)
+
+        sys_msg = (
+            "You are an expert Job Description Structured Extraction Engine.\n"
+            "Your responsibility is to extract exact structured fields from the provided single job posting text.\n\n"
+            "The input text is the pre-validated, high-scoring main job container from the DOM.\n"
+            "Always set is_job_related = true and extract these exact schema fields:\n"
+            "- title, company, location, work_mode, job_type, experience_required, seniority, highlights, responsibilities, qualifications, required_skills, preferred_skills, skills_categories, salary, keywords, ats_keywords.\n"
+            "RULES:\n"
+            "- Build the structured job object using ONLY information that actually exists in the provided text.\n"
+            "- Never invent or fabricate missing fields.\n"
+            "- Extract required_skills from programming languages, frameworks, platforms, tools, cloud, AI/ML, security, infrastructure, and domain skills.\n"
+            "- Return valid JSON matching the exact schema only."
+        )
+
+        user_prompt = f"Page Title: {page_title or ''}\nDetected Company: {page_company or ''}\nURL: {url or ''}\n\nMain Job Container Text:\n{clean_jd}"
+
+        result = provider.invoke_structured(
+            prompt=user_prompt,
+            schema_cls=JobAnalysis,
+            system_instruction=sys_msg,
+            temperature=0.0
+        )
+
+        enriched = _enrich_job_analysis(result, clean_jd)
+        duration = round((time.time() - start_time) * 1000, 2)
+        logger.info(f"[LLM_TELEMETRY] call=analyze_job_description latency_ms={duration} input_chars={len(clean_jd)}")
+        return enriched
+
+    return llm_cache.execute_with_cache(
+        task="jd_structured_analysis",
+        payload_to_fingerprint=payload_fingerprint,
+        llm_callable=_call_llm,
+        expected_schema=JobAnalysis,
+        prompt_version="analyze-jd-v3"
     )
-
-    user_prompt = f"Page Title: {page_title or ''}\nDetected Company: {page_company or ''}\nURL: {url or ''}\n\nMain Job Container Text:\n{clean_jd}"
-
-    result = provider.invoke_structured(
-        prompt=user_prompt,
-        schema_cls=JobAnalysis,
-        system_instruction=sys_msg,
-        temperature=0.0
-    )
-
-    enriched = _enrich_job_analysis(result, clean_jd)
-    duration = round((time.time() - start_time) * 1000, 2)
-    logger.info(f"[LLM_TELEMETRY] call=analyze_job_description latency_ms={duration} input_chars={len(clean_jd)}")
-    _set_to_cache(cache_key, enriched)
-    return enriched
 
 def analyze_gaps(resume: ResumeStructure, job: JobAnalysis, api_key: Optional[str] = None) -> GapsAnalysis:
-    provider = get_provider(api_key)
-    sys_msg = "Extract a list of missing technical skills and keywords from the Job Description that are NOT present in the Resume."
-    user_prompt = f"Resume:\n{resume.model_dump_json(include={'skills', 'experience', 'projects'})}\n\nJob:\n{job.model_dump_json(include={'required_skills', 'keywords', 'ats_keywords'})}"
-    return provider.invoke_structured(prompt=user_prompt, schema_cls=GapsAnalysis, system_instruction=sys_msg, temperature=0.0)
+    payload_fingerprint = {
+        "resume": resume.model_dump(include={"skills", "experience", "projects"}),
+        "job": job.model_dump(include={"required_skills", "keywords", "ats_keywords"})
+    }
+
+    def _call_llm():
+        provider = get_provider(api_key)
+        sys_msg = "Extract a list of missing technical skills and keywords from the Job Description that are NOT present in the Resume."
+        user_prompt = f"Resume:\n{resume.model_dump_json(include={'skills', 'experience', 'projects'})}\n\nJob:\n{job.model_dump_json(include={'required_skills', 'keywords', 'ats_keywords'})}"
+        return provider.invoke_structured(prompt=user_prompt, schema_cls=GapsAnalysis, system_instruction=sys_msg, temperature=0.0)
+
+    return llm_cache.execute_with_cache(
+        task="analyze_gaps",
+        payload_to_fingerprint=payload_fingerprint,
+        llm_callable=_call_llm,
+        expected_schema=GapsAnalysis,
+        prompt_version="gaps-v1"
+    )
 
 def generate_tailoring_patch(
     resume: ResumeStructure,
@@ -313,8 +343,6 @@ def generate_tailoring_patch(
 
     counts_before = StrictTailoringEngine.get_section_counts(resume)
     logger.info("[STAGE 1: PARSED RESUME] Section counts before tailoring: %s", counts_before)
-
-    provider = get_provider(api_key)
 
     sys_msg = (
         "You are an expert ATS Resume Tailoring AI.\n"
@@ -330,25 +358,36 @@ def generate_tailoring_patch(
         "8. Preserve all original numbers, metrics, company names, titles, dates, technologies, and links."
     )
 
-    payload_str = json.dumps({
+    payload_dict = {
         "resume": resume.model_dump(include={"summary", "skills", "experience", "projects", "education", "certifications", "achievements"}),
         "job": job.model_dump(include={"title", "company", "required_skills", "preferred_skills", "qualifications", "responsibilities", "keywords", "ats_keywords"}),
         "selected_sections": sorted(selected_sections or []),
-    }, indent=2)
+    }
+    payload_str = json.dumps(payload_dict, indent=2)
 
-    logger.info("[STAGE 2 & 3: PAYLOAD & PROMPT] Sent to DeepSeek with selected_sections: %s", sorted(selected_sections or []))
+    def _call_llm():
+        provider = get_provider(api_key)
+        logger.info("[STAGE 2 & 3: PAYLOAD & PROMPT] Sent to DeepSeek with selected_sections: %s", sorted(selected_sections or []))
+        try:
+            patch = provider.invoke_structured(
+                prompt=payload_str,
+                schema_cls=ResumePatch,
+                system_instruction=sys_msg,
+                temperature=0.1
+            )
+            logger.info("[STAGE 4 & 5: AI RESPONSE & JSON PARSE] Successfully received and parsed patch: %s", patch.model_dump())
+            return patch
+        except Exception as err:
+            logger.error("[STAGE 5: JSON PARSING ERROR] Structured output parsing failed: %s", err)
+            raise RuntimeError(f"AI tailoring agent failed: {err}") from err
 
-    try:
-        patch = provider.invoke_structured(
-            prompt=payload_str,
-            schema_cls=ResumePatch,
-            system_instruction=sys_msg,
-            temperature=0.1
-        )
-        logger.info("[STAGE 4 & 5: AI RESPONSE & JSON PARSE] Successfully received and parsed patch: %s", patch.model_dump())
-    except Exception as err:
-        logger.error("[STAGE 5: JSON PARSING ERROR] Structured output parsing failed: %s", err)
-        raise RuntimeError(f"AI tailoring agent failed: {err}") from err
+    patch = llm_cache.execute_with_cache(
+        task="resume_patch_tailoring",
+        payload_to_fingerprint=payload_dict,
+        llm_callable=_call_llm,
+        expected_schema=ResumePatch,
+        prompt_version="tailor-patch-v3"
+    )
 
     pipeline = StrictTailoringEngine().validate_patch(
         resume, job, patch, requested_sections=selected_sections
@@ -376,26 +415,37 @@ def apply_tailoring_patch(resume: ResumeStructure, patch: ResumePatch) -> Resume
     return engine.apply_patch(resume, validated.patch)
 
 def generate_cover_letter(resume: ResumeStructure, job: JobAnalysis, api_key: Optional[str] = None) -> CoverLetterResult:
-    provider = get_provider(api_key)
-    sys_msg = "You are an expert career counselor and professional cover letter writer using Tailr4U AI."
-    user_prompt = f"Candidate Resume:\n{json.dumps(resume.model_dump(), indent=2)}\n\nTarget Job:\n{json.dumps(job.model_dump(), indent=2)}"
+    payload_dict = {
+        "resume": resume.model_dump(include={"summary", "experience", "projects", "education", "skills"}),
+        "job": job.model_dump(include={"title", "company", "required_skills", "responsibilities", "qualifications"})
+    }
 
-    return provider.invoke_structured(
-        prompt=user_prompt,
-        schema_cls=CoverLetterResult,
-        system_instruction=sys_msg,
-        temperature=0.3
+    def _call_llm():
+        provider = get_provider(api_key)
+        sys_msg = "You are an expert career counselor and professional cover letter writer using Tailr4U AI."
+        user_prompt = f"Candidate Resume:\n{json.dumps(resume.model_dump(), indent=2)}\n\nTarget Job:\n{json.dumps(job.model_dump(), indent=2)}"
+
+        return provider.invoke_structured(
+            prompt=user_prompt,
+            schema_cls=CoverLetterResult,
+            system_instruction=sys_msg,
+            temperature=0.3
+        )
+
+    return llm_cache.execute_with_cache(
+        task="cover_letter_generation",
+        payload_to_fingerprint=payload_dict,
+        llm_callable=_call_llm,
+        expected_schema=CoverLetterResult,
+        prompt_version="cover-letter-v2"
     )
 
 def is_prompt_out_of_scope(prompt: str, api_key: Optional[str] = None) -> Optional[str]:
-    provider = get_provider(api_key)
-    sys_msg = "Classify if the prompt is related to resume tailoring. Output 'IN_SCOPE' or polite rejection."
-    res = provider.invoke_structured(
-        prompt=f"User request: {prompt}",
-        schema_cls=BaseModel,
-        system_instruction=sys_msg,
-        temperature=0.0
-    )
+    llm = get_llm(api_key)
+    res = llm.invoke(prompt)
+    content = str(getattr(res, "content", res)).strip()
+    if content and "IN_SCOPE" not in content.upper():
+        return content
     return None
 
 def refine_section_with_ai(
@@ -406,26 +456,71 @@ def refine_section_with_ai(
     api_key: Optional[str] = None,
     **kwargs
 ) -> str:
-    provider = get_provider(api_key)
-    sys_msg = f"Refine resume section {section_type} for job {job.title} based on instruction: {prompt}"
-    user_prompt = f"Section content: {json.dumps(section_data, default=str)}"
+    out_of_scope = is_prompt_out_of_scope(prompt, api_key=api_key)
+    if out_of_scope:
+        raise ValueError(out_of_scope)
 
-    if section_type.lower() == "summary":
-        res = provider.invoke_structured(prompt=user_prompt, schema_cls=SummaryEditorOutput, system_instruction=sys_msg, temperature=0.2)
+    stype = section_type.lower()
+    schema_cls = SummaryEditorOutput
+    if stype == "skills":
+        schema_cls = SkillsEditorOutput
+    elif stype == "experience":
+        schema_cls = ExperienceEditorOutput
+    elif stype == "projects":
+        schema_cls = ProjectEditorOutput
+
+    payload_dict = {
+        "section_type": stype,
+        "section_data": section_data,
+        "instruction_prompt": prompt,
+        "job": job.model_dump(include={"title", "company", "required_skills"})
+    }
+
+    def _call_llm():
+        provider = get_provider(api_key)
+        sys_msg = f"Refine resume section {section_type} for job {job.title} based on instruction: {prompt}"
+        user_prompt = f"Section content: {json.dumps(section_data, default=str)}"
+        return provider.invoke_structured(prompt=user_prompt, schema_cls=schema_cls, system_instruction=sys_msg, temperature=0.2)
+
+    res = llm_cache.execute_with_cache(
+        task=f"refine_{stype}",
+        payload_to_fingerprint=payload_dict,
+        llm_callable=_call_llm,
+        expected_schema=schema_cls,
+        prompt_version="refine-v1"
+    )
+
+    if stype == "summary":
         return res.summary
-    elif section_type.lower() == "skills":
-        res = provider.invoke_structured(prompt=user_prompt, schema_cls=SkillsEditorOutput, system_instruction=sys_msg, temperature=0.2)
+    elif stype == "skills":
         return ", ".join(res.skills)
-    elif section_type.lower() == "experience":
-        res = provider.invoke_structured(prompt=user_prompt, schema_cls=ExperienceEditorOutput, system_instruction=sys_msg, temperature=0.2)
-        return "\n".join(res.updated_bullets)
-    elif section_type.lower() == "projects":
-        res = provider.invoke_structured(prompt=user_prompt, schema_cls=ProjectEditorOutput, system_instruction=sys_msg, temperature=0.2)
+    elif stype in ("experience", "projects"):
         return "\n".join(res.updated_bullets)
 
-    # Generic string fallback
-    res = provider.invoke_structured(prompt=user_prompt, schema_cls=SummaryEditorOutput, system_instruction=sys_msg, temperature=0.2)
-    return res.summary
+    return getattr(res, "summary", str(res))
+
+async def refine_section_stream_generator(
+    section_type: str,
+    section_data: Any,
+    prompt: str,
+    job: JobAnalysis,
+    api_key: Optional[str] = None,
+    **kwargs
+):
+    out_of_scope = is_prompt_out_of_scope(prompt, api_key=api_key)
+    if out_of_scope:
+        yield f"data: [ERROR] {out_of_scope}\n\n"
+        return
+
+    llm = get_llm(api_key=api_key)
+    if hasattr(llm, "astream"):
+        async for chunk in llm.astream(prompt):
+            content = getattr(chunk, "content", str(chunk))
+            if content:
+                yield f"data: {content}\n\n"
+    else:
+        res = refine_section_with_ai(section_type, section_data, prompt, job, api_key=api_key)
+        yield f"data: {res}\n\n"
 
 def _match_norm(value: Any) -> str:
     return re.sub(r"[^a-z0-9+#.]+", " ", str(value or "").lower()).strip()

@@ -8,8 +8,9 @@ from .base_provider import BaseProvider
 
 class RazorpayProvider(BaseProvider):
     def __init__(self):
-        self.key_id = os.getenv("RAZORPAY_KEY_ID")
-        self.key_secret = os.getenv("RAZORPAY_KEY_SECRET")
+        raw_key = os.getenv("RAZORPAY_KEY_ID") or ""
+        self.key_id = raw_key.strip().rstrip(",")
+        self.key_secret = (os.getenv("RAZORPAY_KEY_SECRET") or "").strip()
         if self.key_id and self.key_secret:
             self.client = razorpay.Client(auth=(self.key_id, self.key_secret))
         else:
@@ -25,7 +26,18 @@ class RazorpayProvider(BaseProvider):
                 "key_id": "rzp_test_mock123"
             }
 
-        plan_id = plan.get("razorpay_plan_id") or os.getenv("RAZORPAY_DEFAULT_PLAN_ID")
+        plan_key = str(plan.get("id") or "").lower()
+        plan_id = plan.get("razorpay_plan_id")
+        if not plan_id:
+            if "basic" in plan_key or "free" in plan_key:
+                plan_id = os.getenv("RAZORPAY_PLAN_BASIC_MONTHLY")
+            elif "elite" in plan_key or "premium" in plan_key:
+                plan_id = os.getenv("RAZORPAY_PLAN_ELITE_MONTHLY")
+            else:
+                plan_id = os.getenv("RAZORPAY_PLAN_PRO_MONTHLY")
+        if not plan_id:
+            plan_id = os.getenv("RAZORPAY_DEFAULT_PLAN_ID") or "plan_TKvwof7YNDV9kh"
+
         try:
             subscription = self.client.subscription.create({
                 "plan_id": plan_id,
@@ -38,8 +50,10 @@ class RazorpayProvider(BaseProvider):
                 }
             })
             sub_id = subscription["id"]
+            short_url = subscription.get("short_url")
+            checkout_url = short_url if (short_url and str(short_url).startswith("http")) else f"razorpay://{sub_id}"
             return {
-                "checkout_url": f"razorpay://{sub_id}",
+                "checkout_url": checkout_url,
                 "provider": "razorpay",
                 "subscription_id": sub_id,
                 "key_id": self.key_id

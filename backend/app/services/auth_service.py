@@ -32,7 +32,7 @@ class AuthService:
             resp = req.get('https://www.googleapis.com/oauth2/v3/userinfo', headers={'Authorization': f'Bearer {credential}'})
             if resp.status_code == 200:
                 identity = resp.json()
-                identity["tailorflow_profile"] = self._fetch_google_people_profile(credential)
+                identity["tailr4u_profile"] = self._fetch_google_people_profile(credential)
                 return identity
             raise ValueError("Invalid Google credential (neither ID token nor access token).")
 

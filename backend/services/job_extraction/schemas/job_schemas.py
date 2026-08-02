@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
+import re
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -14,6 +15,33 @@ class SalaryInfo(BaseModel):
     currency: Optional[str] = None
     period: Optional[str] = None
     raw: Optional[str] = None
+
+    @field_validator("minimum", "maximum", mode="before")
+    @classmethod
+    def normalize_salary_number(cls, value: Any) -> Optional[float]:
+        if value is None or value == "":
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            cleaned = re.sub(r"[^\d.]", "", value)
+            if cleaned:
+                try:
+                    return float(cleaned)
+                except ValueError:
+                    return None
+        return None
+
+    @field_validator("currency", "period", "raw", mode="before")
+    @classmethod
+    def normalize_salary_str(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            val = value.strip()
+            return val if val else None
+        val = str(value).strip()
+        return val if val else None
 
 
 class ExtractedJob(BaseModel):
@@ -39,13 +67,6 @@ class ExtractedJob(BaseModel):
     location: Optional[str] = Field(
         None, description="Evidence-supported job location, without unrelated locations."
     )
-    # Keep the LLM tool boundary permissive: source pages commonly use labels
-    # such as "Full Time, Permanent". Validators below immediately convert
-    # those labels into the application's stable canonical values.
-    # These are nullable at the provider/tool boundary because the extraction
-    # prompt correctly asks the model to emit null when the source is silent.
-    # The validators below immediately restore the application's non-null,
-    # canonical string contract.
     workplace_type: Optional[str] = "unknown"
     employment_type: Optional[str] = "unknown"
     seniority: Optional[str] = None
@@ -81,15 +102,39 @@ class ExtractedJob(BaseModel):
             "duplicate or mix these into skills."
         ),
     )
-    # Some providers emit null for an absent optional collection. Keep null in
-    # the generated tool schema so the provider accepts that output, then
-    # normalize it back to the list contract used by the application.
     benefits: Optional[list[str]] = Field(default_factory=list)
     salary: Optional[SalaryInfo] = None
     application_url: Optional[str] = None
     date_posted: Optional[str] = None
     valid_through: Optional[str] = None
     source_url: Optional[str] = None
+
+    @field_validator(
+        "job_title",
+        "company_name",
+        "company_domain",
+        "location",
+        "seniority",
+        "department",
+        "description",
+        "application_url",
+        "date_posted",
+        "valid_through",
+        "source_url",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_strings(cls, value: Any) -> Optional[str]:
+        if value is None or value == "":
+            return None
+        if isinstance(value, str):
+            val = value.strip()
+            return val if val else None
+        if isinstance(value, (list, tuple, set)):
+            val = ", ".join(str(x).strip() for x in value if x is not None and str(x).strip())
+            return val if val else None
+        val = str(value).strip()
+        return val if val else None
 
     @field_validator(
         "responsibilities",
@@ -102,7 +147,40 @@ class ExtractedJob(BaseModel):
     )
     @classmethod
     def normalize_optional_lists(cls, value: Any) -> list[str]:
-        return [] if value is None else value
+        if value is None:
+            return []
+        if isinstance(value, str):
+            val = value.strip()
+            if not val:
+                return []
+            if "\n" in val:
+                return [line.strip("- •*").strip() for line in val.split("\n") if line.strip()]
+            return [val]
+        if isinstance(value, (list, tuple, set)):
+            res = []
+            for item in value:
+                if item is None:
+                    continue
+                s = str(item).strip()
+                if s:
+                    res.append(s)
+            return res
+        if isinstance(value, dict):
+            return [str(v).strip() for v in value.values() if v is not None and str(v).strip()]
+        s = str(value).strip()
+        return [s] if s else []
+
+    @field_validator("salary", mode="before")
+    @classmethod
+    def normalize_salary(cls, value: Any) -> Optional[SalaryInfo | dict[str, Any]]:
+        if value is None or value == "":
+            return None
+        if isinstance(value, (SalaryInfo, dict)):
+            return value
+        if isinstance(value, str):
+            val = value.strip()
+            return {"raw": val} if val else None
+        return {"raw": str(value)}
 
     @field_validator("workplace_type", mode="before")
     @classmethod

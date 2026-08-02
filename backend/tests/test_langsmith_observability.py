@@ -16,10 +16,10 @@ def test_langsmith_configuration_never_exposes_key(monkeypatch):
     monkeypatch.setattr(
         observability.settings,
         "LANGSMITH_PROJECT",
-        "tailorflow-test",
+        "tailr4u-test",
     )
     assert observability.configure_langsmith() is True
     status = observability.langsmith_status()
     assert status["enabled"] is True
-    assert status["project"] == "tailorflow-test"
+    assert status["project"] == "tailr4u-test"
     assert "secret-key" not in repr(status)

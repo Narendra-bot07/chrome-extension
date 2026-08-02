@@ -32,11 +32,12 @@ DATABASE_URL="postgresql://postgres:password@db.your-project.supabase.co:5432/po
 # --- Redis Caching ---
 REDIS_URL="redis://default:password@redis-host.com:6379"
 
-# --- Primary AI Provider (Groq) ---
-GROQ_API_KEY="gsk_..."
-
-# --- Fallback AI Provider (Google Gemini) ---
-GEMINI_API_KEY="AIzaSy..."
+# --- AI Provider (DeepSeek — sole LLM provider) ---
+DEEPSEEK_API_KEY="sk-..."
+DEEPSEEK_BASE_URL="https://api.deepseek.com"
+DEEPSEEK_MODEL_FLASH="deepseek-v4-flash"
+DEEPSEEK_MODEL_PRO="deepseek-v4-pro"
+LLM_PROVIDER="deepseek"
 
 # --- Observability (LangSmith) ---
 LANGSMITH_TRACING=true
@@ -120,3 +121,46 @@ graph TD
 - **Backend (Render)**: Revert to previous image tag instantly via Render Deployment History dashboard or CLI (`render deploys rollback`).
 - **Frontend (Vercel)**: Instant rollback to previous deployment commit hash via Vercel CLI (`vercel rollback`).
 - **Database Schema**: Every DDL migration includes a corresponding `down` migration SQL script to reverse schema alterations without data loss.
+
+---
+
+## 6. Post-DeepSeek Migration — Manual Secret Removal Checklist
+
+> ⚠️ **IMPORTANT**: Obsolete Gemini and Groq secrets must be removed **manually** from all platforms. Do NOT automate secret deletion.
+
+After confirming DeepSeek is fully operational in production:
+
+### 6.1 Render Dashboard
+1. Navigate to **Render → Service → Environment**.
+2. Delete the following variables if present:
+   - `GEMINI_API_KEY`
+   - `GOOGLE_GENERATIVE_AI_API_KEY`
+   - `GROQ_API_KEY`
+   - `GEMINI_MODEL`
+   - `GROQ_MODEL`
+   - `LLM_FALLBACK_PROVIDER`
+
+### 6.2 GitHub Actions Secrets
+1. Navigate to **Settings → Secrets and Variables → Actions**.
+2. Delete:
+   - `GEMINI_API_KEY`
+   - `GROQ_API_KEY`
+
+### 6.3 Local `.env` Files
+Remove from all `.env` files:
+```bash
+# DELETE THESE:
+# GEMINI_API_KEY=...
+# GROQ_API_KEY=...
+# GEMINI_MODEL=...
+# GROQ_MODEL=...
+```
+
+### 6.4 Revocation
+- Revoke the old Gemini API key in [Google AI Studio](https://aistudio.google.com/app/apikey).
+- Revoke the old Groq API key in [Groq Console](https://console.groq.com/keys).
+
+### 6.5 Verification
+- Monitor Render logs for 24 hours to confirm zero Gemini/Groq traffic.
+- Verify DeepSeek billing activity in [DeepSeek Platform](https://platform.deepseek.com/).
+- Confirm no old provider errors appear in Sentry.

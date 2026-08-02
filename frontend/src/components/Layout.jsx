@@ -208,7 +208,7 @@ function Layout() {
       try {
         const token = session?.access_token;
         if (!token) return;
-        const res = await fetch('http://localhost:8000/api/v1/profile/', {
+        const res = await fetch(`${apiUrl}/api/v1/profile/`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (res.ok) {

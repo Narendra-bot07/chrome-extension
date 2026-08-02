@@ -28,10 +28,10 @@ export default function MinimalATS({ resume }) {
         )}
         <div className="text-xs mt-2 flex flex-col gap-1">
           {personal_info.phone && <span>P: {personal_info.phone}</span>}
-          {personal_info.email && <span>E: {personal_info.email}</span>}
-          {personal_info.linkedin && <span>In: {personal_info.linkedin}</span>}
-          {personal_info.github && <span>Git: {personal_info.github}</span>}
-          {personal_info.website && <span>W: {personal_info.website}</span>}
+          {personal_info.email && <a href={`mailto:${personal_info.email}`} className="hover:underline">E: {personal_info.email}</a>}
+          {personal_info.linkedin && <a href={personal_info.linkedin.startsWith('http') ? personal_info.linkedin : `https://${personal_info.linkedin}`} target="_blank" rel="noreferrer" className="hover:underline">In: {personal_info.linkedin.replace(/^(https?:\/\/)?(www\.)?/, '')}</a>}
+          {personal_info.github && <a href={personal_info.github.startsWith('http') ? personal_info.github : `https://${personal_info.github}`} target="_blank" rel="noreferrer" className="hover:underline">Git: {personal_info.github.replace(/^(https?:\/\/)?(www\.)?/, '')}</a>}
+          {personal_info.website && <a href={personal_info.website.startsWith('http') ? personal_info.website : `https://${personal_info.website}`} target="_blank" rel="noreferrer" className="hover:underline">W: {personal_info.website.replace(/^(https?:\/\/)?(www\.)?/, '')}</a>}
           {personal_info.location && <span>L: {personal_info.location}</span>}
         </div>
       </header>
@@ -85,42 +85,48 @@ export default function MinimalATS({ resume }) {
           </div>
         </section>
       )}
-      
-      {categorizedSkills && Object.keys(categorizedSkills).length > 0 && (
-        <section className="mb-6" data-section="skills">
-          <h2 className="text-sm font-bold uppercase mb-2">Skills</h2>
-          <div className="text-sm space-y-1">
-            {Object.entries(categorizedSkills)
-              .filter(([_, items]: any) => {
-                if (Array.isArray(items)) return items.filter(i => i && String(i).trim() !== '').length > 0;
-                if (typeof items === 'string') return items.trim() !== '';
-                return false;
-              })
-              .map(([cat, items]: any, i) => (
-                <div key={i}>
-                  <span className="font-bold">{cat}:</span> {Array.isArray(items) ? items.filter(i => i && String(i).trim() !== '').join(', ') : items}
-                </div>
-              ))}
-          </div>
-        </section>
-      )}
 
       {projects && projects.length > 0 && (
         <section className="mb-6" data-section="projects">
           <h2 className="text-sm font-bold uppercase mb-4">Projects</h2>
-          <div className="space-y-6">
+          <div className="space-y-4">
             {projects.map((proj, i) => (
               <div key={i}>
-                <div className="text-sm mb-2">
-                  <span className="font-bold">{proj.name}</span> {proj.role && <span>- {proj.role}</span>}
+                <div className="text-sm font-bold flex items-center justify-between">
+                  <span>{proj.title}</span>
+                  {proj.link && (
+                    <a href={proj.link.startsWith('http') ? proj.link : `https://${proj.link}`} target="_blank" rel="noreferrer" className="text-xs font-normal underline">
+                      {proj.link}
+                    </a>
+                  )}
                 </div>
-                {proj.description && proj.description.length > 0 && (
-                  <ul className="list-[square] list-inside text-sm space-y-1 ml-2">
-                    {proj.description.map((bp, j) => (
+                {proj.description && <p className="text-xs mt-1 text-gray-700">{proj.description}</p>}
+                {proj.bullet_points && proj.bullet_points.length > 0 && (
+                  <ul className="list-[square] list-inside text-xs space-y-1 mt-1 ml-2 text-gray-800">
+                    {proj.bullet_points.map((bp, j) => (
                       <li key={j}>{bp}</li>
                     ))}
                   </ul>
                 )}
+                {proj.technologies && proj.technologies.length > 0 && (
+                  <div className="text-xs text-gray-600 mt-1">
+                    Tech: {proj.technologies.join(', ')}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {Object.keys(categorizedSkills).length > 0 && (
+        <section className="mb-6" data-section="skills">
+          <h2 className="text-sm font-bold uppercase mb-4">Skills</h2>
+          <div className="space-y-2 text-sm">
+            {Object.entries(categorizedSkills).map(([cat, skillList]) => (
+              <div key={cat} className="flex gap-2">
+                <span className="font-bold min-w-[140px]">{cat}:</span>
+                <span>{skillList.join(', ')}</span>
               </div>
             ))}
           </div>
@@ -130,50 +136,57 @@ export default function MinimalATS({ resume }) {
       {certifications && certifications.length > 0 && (
         <section className="mb-6" data-section="certifications">
           <h2 className="text-sm font-bold uppercase mb-4">Certifications</h2>
-          <div className="space-y-2">
+          <ul className="list-[square] list-inside text-sm space-y-1">
             {certifications.map((cert, i) => (
-              <div key={i} className="text-sm">
+              <li key={i}>
                 <span className="font-bold">{cert.name}</span>
-              </div>
+                {cert.issuer && ` - ${cert.issuer}`}
+                {cert.date && ` (${cert.date})`}
+              </li>
             ))}
-          </div>
+          </ul>
         </section>
       )}
 
       {achievements && achievements.length > 0 && (
         <section className="mb-6" data-section="achievements">
-          <h2 className="text-sm font-bold uppercase mb-4">Achievements / Awards</h2>
-          <ul className="list-[square] list-inside text-sm space-y-1 ml-2">
+          <h2 className="text-sm font-bold uppercase mb-4">Achievements</h2>
+          <ul className="list-[square] list-inside text-sm space-y-1">
             {achievements.map((ach, i) => (
-              <li key={i}>{ach}</li>
+              <li key={i}>{typeof ach === 'string' ? ach : ach.description || ach.title}</li>
             ))}
           </ul>
-          {awards && awards.length > 0 && (
-            <div className="space-y-2 mt-2">
-              {awards.map((award, i) => (
-                <div key={i} className="text-sm ml-2">
-                  <span className="font-bold">{award.title}</span> {award.issuer && <span>- {award.issuer}</span>} {award.date && <span>({award.date})</span>}
-                </div>
-              ))}
-            </div>
-          )}
+        </section>
+      )}
+
+      {languages && languages.length > 0 && (
+        <section className="mb-6" data-section="languages">
+          <h2 className="text-sm font-bold uppercase mb-4">Languages</h2>
+          <div className="text-sm">
+            {languages.map(l => typeof l === 'string' ? l : `${l.language}${l.proficiency ? ` (${l.proficiency})` : ''}`).join(', ')}
+          </div>
+        </section>
+      )}
+
+      {awards && awards.length > 0 && (
+        <section className="mb-6" data-section="awards">
+          <h2 className="text-sm font-bold uppercase mb-4">Awards</h2>
+          <ul className="list-[square] list-inside text-sm space-y-1">
+            {awards.map((awd, i) => (
+              <li key={i}>{typeof awd === 'string' ? awd : awd.title}</li>
+            ))}
+          </ul>
         </section>
       )}
 
       {volunteer_experience && volunteer_experience.length > 0 && (
         <section className="mb-6" data-section="volunteer">
-          <h2 className="text-sm font-bold uppercase mb-4">Leadership / Volunteering</h2>
+          <h2 className="text-sm font-bold uppercase mb-4">Volunteer Experience</h2>
           <div className="space-y-4">
             {volunteer_experience.map((vol, i) => (
               <div key={i} className="text-sm">
-                <span className="font-bold">{vol.role}</span> @ {vol.organization}
-                {vol.description && vol.description.length > 0 && (
-                  <ul className="list-[square] list-inside text-sm space-y-1 ml-2 mt-1">
-                    {vol.description.map((bp, j) => (
-                      <li key={j}>{bp}</li>
-                    ))}
-                  </ul>
-                )}
+                <div className="font-bold">{vol.role} - {vol.organization}</div>
+                {vol.description && <p className="mt-1 text-gray-700">{vol.description}</p>}
               </div>
             ))}
           </div>
@@ -182,27 +195,18 @@ export default function MinimalATS({ resume }) {
 
       {publications && publications.length > 0 && (
         <section className="mb-6" data-section="publications">
-          <h2 className="text-sm font-bold uppercase mb-4">Publications / Research</h2>
-          <div className="space-y-4">
+          <h2 className="text-sm font-bold uppercase mb-4">Publications</h2>
+          <ul className="list-[square] list-inside text-sm space-y-1">
             {publications.map((pub, i) => (
-              <div key={i} className="text-sm ml-2">
-                <span className="font-bold">{pub.title}</span> {pub.date && <span>({pub.date})</span>}
-                {pub.publisher && <span className="text-gray-500 block">Published in {pub.publisher}</span>}
-              </div>
+              <li key={i}>
+                <span className="font-bold">{pub.title}</span>
+                {pub.publisher && ` - ${pub.publisher}`}
+                {pub.date && ` (${pub.date})`}
+              </li>
             ))}
-          </div>
+          </ul>
         </section>
       )}
-
-      {languages && languages.length > 0 && (
-        <section className="mb-6" data-section="languages">
-          <h2 className="text-sm font-bold uppercase mb-4">Languages</h2>
-          <div className="text-sm ml-2">
-            {languages.map(l => `${l.name}${l.proficiency ? ` (${l.proficiency})` : ''}`).join(', ')}
-          </div>
-        </section>
-      )}
-
     </div>
   );
 }

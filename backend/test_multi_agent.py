@@ -64,9 +64,9 @@ def main():
     print("--- Starting Multi-Agent Resume Tailoring Test ---")
     
     # Check if API key is present
-    api_key = os.environ.get("GROQ_API_KEY")
+    api_key = os.environ.get("DEEPSEEK_API_KEY")
     if not api_key:
-        print("[Warning] GROQ_API_KEY env var not found. Pipeline execution requires a valid key.")
+        print("[Warning] DEEPSEEK_API_KEY env var not found. Pipeline execution requires a valid key.")
         return
         
     try:

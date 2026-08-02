@@ -1,4 +1,4 @@
-# TailorFlow AI — Suggested GitHub Actions Workflow Specification
+# Tailr4U — Suggested GitHub Actions Workflow Specification
 
 ---
 
@@ -55,7 +55,7 @@ To enable these workflows, set the following secrets under **Repository Settings
 
 | Secret Name | Description | Example / Format |
 | :--- | :--- | :--- |
-| `GEMINI_API_KEY` | Google Gemini API Key | `AIzaSy...` |
+| `DEEPSEEK_API_KEY` | DeepSeek API Key (sole LLM provider) | `sk-...` |
 | `SUPABASE_URL` | Supabase Project REST Endpoint | `https://[ref].supabase.co` |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase Administrative Key | `eyJhbGci...` |
 | `UPSTASH_REDIS_REST_URL` | Upstash Redis Cloud Endpoint | `https://topical-katydid-92319.upstash.io` |
@@ -63,3 +63,5 @@ To enable these workflows, set the following secrets under **Repository Settings
 | `RESEND_API_KEY` | Resend Email API Key | `re_123456789...` |
 | `STRIPE_SECRET_KEY` | Stripe Secret API Key | `sk_live_...` |
 | `RAZORPAY_KEY_ID` | Razorpay Key ID | `rzp_live_...` |
+
+> **Migration Note**: `GEMINI_API_KEY` and `GROQ_API_KEY` are obsolete and must be manually deleted from GitHub Secrets. See `docs/DEPLOYMENT.md` §6 for the full manual secret-removal checklist.

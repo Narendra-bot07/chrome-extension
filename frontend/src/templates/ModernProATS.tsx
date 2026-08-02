@@ -40,22 +40,22 @@ export default function ModernProATS({ resume }) {
               </div>
             )}
             {personal_info.linkedin && (
-              <div className="flex items-center gap-3">
+              <a href={personal_info.linkedin.startsWith('http') ? personal_info.linkedin : `https://${personal_info.linkedin}`} target="_blank" rel="noreferrer" className="flex items-center gap-3 hover:underline">
                 <span className="text-indigo-900"><Linkedin size={14} /></span>
-                <span>{personal_info.linkedin.replace(/^(https?:\/\/)?(www\.)?/, '')}</span>
-              </div>
+                <span>{personal_info.linkedin.replace(/^(https?:\\/\\/)?(www\.)?/, '')}</span>
+              </a>
             )}
             {personal_info.github && (
-              <div className="flex items-center gap-3">
+              <a href={personal_info.github.startsWith('http') ? personal_info.github : `https://${personal_info.github}`} target="_blank" rel="noreferrer" className="flex items-center gap-3 hover:underline">
                 <span className="text-indigo-900"><Github size={14} /></span>
-                <span>{personal_info.github.replace(/^(https?:\/\/)?(www\.)?/, '')}</span>
-              </div>
+                <span>{personal_info.github.replace(/^(https?:\\/\\/)?(www\.)?/, '')}</span>
+              </a>
             )}
             {personal_info.website && (
-              <div className="flex items-center gap-3">
+              <a href={personal_info.website.startsWith('http') ? personal_info.website : `https://${personal_info.website}`} target="_blank" rel="noreferrer" className="flex items-center gap-3 hover:underline">
                 <span className="text-indigo-900"><Globe size={14} /></span>
-                <span>{personal_info.website.replace(/^(https?:\/\/)?(www\.)?/, '')}</span>
-              </div>
+                <span>{personal_info.website.replace(/^(https?:\\/\\/)?(www\.)?/, '')}</span>
+              </a>
             )}
             {personal_info.location && (
               <div className="flex items-center gap-3">

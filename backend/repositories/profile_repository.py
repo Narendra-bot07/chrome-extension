@@ -1,12 +1,22 @@
 from psycopg2.extras import RealDictCursor
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
+from services.cache.redis_cache import redis_cache
+import json
 
 class ProfileRepository:
     def __init__(self, conn):
         self.conn = conn
 
     def get_by_id(self, profile_id: str) -> Optional[Dict[str, Any]]:
+        cache_key = f"profile:{profile_id}"
+        cached = redis_cache.get(cache_key)
+        if cached:
+            try:
+                return json.loads(cached) if isinstance(cached, str) else cached
+            except Exception:
+                pass
+
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
@@ -34,12 +44,16 @@ class ProfileRepository:
                 except Exception:
                     pass
                     
+                redis_cache.set(cache_key, profile, ttl_seconds=300)
+                    
             return profile
+
     def create(self, profile_id: str, email: str, full_name: str) -> Dict[str, Any]:
         query = "INSERT INTO public.profiles (id, email, full_name) VALUES (%s, %s, %s) RETURNING *"
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (profile_id, email, full_name))
             self.conn.commit()
+            redis_cache.delete(f"profile:{profile_id}")
             return cur.fetchone() or {}
 
     def username_available(self, username: str, profile_id: str) -> bool:
@@ -54,6 +68,8 @@ class ProfileRepository:
     def update(self, profile_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         if not updates:
             return {}
+
+        redis_cache.delete(f"profile:{profile_id}")
 
         required = ("first_name", "last_name", "username", "phone_number", "country", "timezone")
         current = self.get_by_id(profile_id) or {}

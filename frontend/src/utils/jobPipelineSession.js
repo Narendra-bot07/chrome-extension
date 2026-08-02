@@ -1,4 +1,4 @@
-export const JD_PIPELINE_SESSION_KEY = 'tailorflow.jd_pipeline_session.v1';
+export const JD_PIPELINE_SESSION_KEY = 'tailr4u.jd_pipeline_session.v1';
 
 const clone = value => value == null ? null : structuredClone(value);
 

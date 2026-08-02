@@ -2,17 +2,11 @@ import os
 from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings
-import os
-from pathlib import Path
-from pydantic import Field
-from pydantic_settings import BaseSettings
 from typing import Optional
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 class Settings(BaseSettings):
-    GEMINI_API_KEY: str = Field(default="", env="GEMINI_API_KEY")
-    GROQ_API_KEY: str = Field(default="", env="GROQ_API_KEY")
     DEEPSEEK_API_KEY: str = Field(default="", env="DEEPSEEK_API_KEY")
     DEEPSEEK_BASE_URL: str = Field(default="https://api.deepseek.com", env="DEEPSEEK_BASE_URL")
     DEEPSEEK_MODEL_FLASH: str = Field(default="deepseek-v4-flash", env="DEEPSEEK_MODEL_FLASH")
@@ -48,22 +42,68 @@ class Settings(BaseSettings):
     PASSWORD_RESET_MINUTES: int = Field(default=45, env="PASSWORD_RESET_MINUTES")
     EMAIL_VERIFICATION_HOURS: int = Field(default=24, env="EMAIL_VERIFICATION_HOURS")
     REVOKE_SESSIONS_ON_PASSWORD_RESET: bool = Field(default=True, env="REVOKE_SESSIONS_ON_PASSWORD_RESET")
+    
     LANGSMITH_API_KEY: str = Field(default="", env="LANGSMITH_API_KEY")
-    LANGSMITH_PROJECT: str = Field(
-        default="tailorflow-ai",
-        env="LANGSMITH_PROJECT",
-    )
-    LANGSMITH_ENDPOINT: str = Field(
-        default="https://api.smith.langchain.com",
-        env="LANGSMITH_ENDPOINT",
-    )
-    LANGSMITH_WORKSPACE_ID: str = Field(
-        default="",
-        env="LANGSMITH_WORKSPACE_ID",
-    )
+    LANGSMITH_PROJECT: str = Field(default="tailr4u-ai", env="LANGSMITH_PROJECT")
+    LANGSMITH_ENDPOINT: str = Field(default="https://api.smith.langchain.com", env="LANGSMITH_ENDPOINT")
+    LANGSMITH_WORKSPACE_ID: str = Field(default="", env="LANGSMITH_WORKSPACE_ID")
     LANGSMITH_TRACING: bool = Field(default=False, env="LANGSMITH_TRACING")
+
+    # Observability & Monitoring Settings
+    OBSERVABILITY_ENABLED: bool = Field(default=True, env="OBSERVABILITY_ENABLED")
+    APP_ENV: str = Field(default="local", env="APP_ENV")
+    APP_RELEASE: str = Field(default="", env="APP_RELEASE")
+    SERVICE_NAME: str = Field(default="tailr4u-api", env="SERVICE_NAME")
+    
+    SENTRY_BACKEND_DSN: str = Field(default="", env="SENTRY_BACKEND_DSN")
+    SENTRY_FRONTEND_DSN: str = Field(default="", env="SENTRY_FRONTEND_DSN")
+    SENTRY_EXTENSION_DSN: str = Field(default="", env="SENTRY_EXTENSION_DSN")
+    SENTRY_TRACES_SAMPLE_RATE: float = Field(default=0.05, env="SENTRY_TRACES_SAMPLE_RATE")
+    SENTRY_PROFILES_SAMPLE_RATE: float = Field(default=0.0, env="SENTRY_PROFILES_SAMPLE_RATE")
+    
+    METRICS_ENABLED: bool = Field(default=True, env="METRICS_ENABLED")
+    METRICS_PATH: str = Field(default="/internal/metrics", env="METRICS_PATH")
+    METRICS_BEARER_TOKEN: str = Field(default="", env="METRICS_BEARER_TOKEN")
+    
+    OTEL_ENABLED: bool = Field(default=False, env="OTEL_ENABLED")
+    OTEL_SERVICE_NAME: str = Field(default="tailr4u-api", env="OTEL_SERVICE_NAME")
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = Field(default="", env="OTEL_EXPORTER_OTLP_ENDPOINT")
+    OTEL_EXPORTER_OTLP_HEADERS: str = Field(default="", env="OTEL_EXPORTER_OTLP_HEADERS")
+    OTEL_EXPORTER_OTLP_PROTOCOL: str = Field(default="http/protobuf", env="OTEL_EXPORTER_OTLP_PROTOCOL")
+    OTEL_TRACES_SAMPLER: str = Field(default="parentbased_traceidratio", env="OTEL_TRACES_SAMPLER")
+    OTEL_TRACES_SAMPLER_ARG: float = Field(default=0.05, env="OTEL_TRACES_SAMPLER_ARG")
+    
+    LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
+    LOG_FORMAT: str = Field(default="json", env="LOG_FORMAT")
+
+    # LLM Redis Caching Settings
+    LLM_CACHE_ENABLED: bool = Field(default=True, env="LLM_CACHE_ENABLED")
+    LLM_CACHE_NAMESPACE: str = Field(default="tailr4u", env="LLM_CACHE_NAMESPACE")
+    LLM_CACHE_SCHEMA_VERSION: str = Field(default="v1", env="LLM_CACHE_SCHEMA_VERSION")
+    LLM_CACHE_TTL_JD_SECONDS: int = Field(default=604800, env="LLM_CACHE_TTL_JD_SECONDS")
+    LLM_CACHE_TTL_RECOVERY_SECONDS: int = Field(default=604800, env="LLM_CACHE_TTL_RECOVERY_SECONDS")
+    LLM_CACHE_TTL_TAILORING_SECONDS: int = Field(default=86400, env="LLM_CACHE_TTL_TAILORING_SECONDS")
+    LLM_CACHE_TTL_SUMMARY_SECONDS: int = Field(default=86400, env="LLM_CACHE_TTL_SUMMARY_SECONDS")
+    LLM_CACHE_TTL_COVER_LETTER_SECONDS: int = Field(default=86400, env="LLM_CACHE_TTL_COVER_LETTER_SECONDS")
+    LLM_CACHE_LOCK_TTL_SECONDS: int = Field(default=120, env="LLM_CACHE_LOCK_TTL_SECONDS")
+    LLM_CACHE_LOCK_WAIT_SECONDS: float = Field(default=15.0, env="LLM_CACHE_LOCK_WAIT_SECONDS")
+
     PROJECT_NAME: str = "Resume Tailor AI"
     API_V1_STR: str = "/api/v1"
+
+    def validate_llm_provider(self) -> None:
+        """Startup validation enforcing DeepSeek as the sole valid LLM provider."""
+        provider = (self.LLM_PROVIDER or "deepseek").lower()
+        if provider != "deepseek":
+            raise ValueError(f"Unsupported LLM_PROVIDER '{self.LLM_PROVIDER}'. Tailr4U exclusively supports 'deepseek'.")
+
+        base_url = (self.DEEPSEEK_BASE_URL or "").rstrip("/")
+        if not base_url.startswith("http"):
+            raise ValueError(f"Invalid DEEPSEEK_BASE_URL: '{self.DEEPSEEK_BASE_URL}'. Must be a valid HTTP/HTTPS URL.")
+
+        disallowed_aliases = {"deepseek-chat", "deepseek-reasoner"}
+        if self.DEEPSEEK_MODEL_FLASH.lower() in disallowed_aliases or self.DEEPSEEK_MODEL_PRO.lower() in disallowed_aliases:
+            raise ValueError(f"Deprecated model alias detected. Flash='{self.DEEPSEEK_MODEL_FLASH}', Pro='{self.DEEPSEEK_MODEL_PRO}'. Must use 'deepseek-v4-flash' and 'deepseek-v4-pro'.")
 
     class Config:
         env_file = (BASE_DIR / ".env", ".env")
@@ -71,3 +111,4 @@ class Settings(BaseSettings):
         extra = "ignore"
 
 settings = Settings()
+settings.validate_llm_provider()

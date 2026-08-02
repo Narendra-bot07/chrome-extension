@@ -94,11 +94,11 @@ function JobTrackerContent() {
   const [readinessFilter, setReadinessFilter] = useState('All'); // 'All' | 'resume_pending' | 'cover_letter_pending' | 'followup_due'
   const [sortBy, setSortBy] = useState('last_activity');
   const [viewMode, setViewMode] = useState(() => {
-    return localStorage.getItem('tailorflow.job_tracker_view_mode') || 'list';
+    return localStorage.getItem('tailr4u.job_tracker_view_mode') || 'list';
   });
   const handleSetViewMode = (mode) => {
     setViewMode(mode);
-    localStorage.setItem('tailorflow.job_tracker_view_mode', mode);
+    localStorage.setItem('tailr4u.job_tracker_view_mode', mode);
   };
   const [loading, setLoading] = useState(() => applications.length === 0);
 
@@ -607,7 +607,7 @@ function JobTrackerContent() {
           <JobTrackerEmptyState
             isFilterEmpty={applications.length > 0}
             onClearFilters={() => { setSearchQuery(''); setStageFilter('All'); setReadinessFilter('All'); }}
-            onOpenExtensionGuide={() => window.open('https://tailorflow.ai', '_blank')}
+            onOpenExtensionGuide={() => window.open('https://tailr4u.com', '_blank')}
           />
         ) : viewMode === 'cards' ? (
           /* FULL-WIDTH RESPONSIVE CARD GRID (3 COLUMNS ON DESKTOP) */

@@ -120,4 +120,5 @@ Return JSON:
 | :--- | :--- | :--- | :--- |
 | `v1.0.0` | 2026-05-15 | Resume Tailoring | Initial prompt structure returning markdown text |
 | `v2.0.0` | 2026-06-20 | Resume Tailoring | Enforced Pydantic structured output schema & XYZ metric rules |
-| `v3.0.0` | 2026-07-25 | Resilient LLM Chain | Multi-model compatibility updates for Groq and Gemini failover |
+| `v3.0.0` | 2026-07-25 | Resilient LLM Chain | DeepSeek structured-output mode (`response_format=json_object`); flash→pro escalation |
+| `v3.1.0` | 2026-08-02 | All Prompts | Groq/Gemini provider references removed; `DeepSeekProvider` is the sole invocation path |

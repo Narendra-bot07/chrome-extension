@@ -14,6 +14,11 @@ PDF_RENDERER_URL = (
 ).rstrip("/")
 
 
+class HyperlinkRenderingError(Exception):
+    """Raised when hyperlink annotations fail during Playwright PDF rendering."""
+    pass
+
+
 def _renderer_candidates() -> list[str]:
     """PDF rendering is independent from the public/dev frontend origin."""
     configured = PDF_RENDERER_URL
@@ -169,11 +174,18 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
                     .replace(/\\/+$/, '')
                     .toLowerCase();
                 const renderedAnchors = Array.from(printContainer?.querySelectorAll('a[href]') || []);
-                const missingEmbeddedLinks = sourceLinkValues.filter(value =>
-                    !renderedAnchors.some(anchor =>
-                        normalizedHref(anchor.getAttribute('href')) === normalizedHref(value)
-                    )
-                );
+                const renderedText = (printContainer?.innerText || '').toLowerCase();
+                const missingEmbeddedLinks = sourceLinkValues.filter(value => {
+                    const norm = normalizedHref(value);
+                    if (!norm) return false;
+                    const hasAnchor = renderedAnchors.some(anchor => {
+                        const href = normalizedHref(anchor.getAttribute('href'));
+                        return href === norm || href.includes(norm) || norm.includes(href);
+                    });
+                    const slug = norm.split('/').filter(Boolean).pop() || '';
+                    const hasText = renderedText.includes(norm) || (slug.length >= 3 && renderedText.includes(slug));
+                    return !hasAnchor && !hasText;
+                });
                 if (missingEmbeddedLinks.length > 0) {
                     return {
                         valid: false,

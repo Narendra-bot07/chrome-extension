@@ -42,8 +42,8 @@ const WebGoogleLoginButton = ({ onSuccess, onError }) => {
 export default function LoginPage() {
   const location = useLocation();
   const postAuthDestination = authDestinationFromSearch(location.search);
-  const completeAuthentication = (accessToken) => {
-    storeAuthenticatedSession(accessToken);
+  const completeAuthentication = (accessToken, refreshToken = null) => {
+    storeAuthenticatedSession(accessToken, refreshToken);
     window.location.hash = `#${postAuthDestination}`;
     window.location.reload();
   };
@@ -79,7 +79,7 @@ export default function LoginPage() {
       }
       
       const data = await res.json();
-      completeAuthentication(data.session.access_token);
+      completeAuthentication(data.session?.access_token, data.session?.refresh_token);
     } catch (err) {
       setLoginError(err.message || 'Authentication failed.');
     } finally {
@@ -105,7 +105,7 @@ export default function LoginPage() {
       const data = await res.json();
       if (data.google_profile_import) {
         localStorage.setItem(
-          'tailorflow.google-profile-import-debug',
+          'tailr4u.google-profile-import-debug',
           JSON.stringify(data.google_profile_import)
         );
         console.info('[tailr4u] Google profile import', data.google_profile_import);

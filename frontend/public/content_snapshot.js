@@ -191,11 +191,80 @@
     return Object.freeze(bundle);
   };
 
+  const SENTRY_EXTENSION_DSN = ""; // Extension DSN
+  const EXTENSION_VERSION = "1.0.0";
+  const APP_RELEASE = `tailr4u-extension@${EXTENSION_VERSION}`;
+
+  const reportContentError = (error, contextName) => {
+    if (!SENTRY_EXTENSION_DSN) return;
+    try {
+      const url = new URL(SENTRY_EXTENSION_DSN);
+      const publicKey = url.username;
+      const host = url.host;
+      const projectId = url.pathname.replace("/", "");
+      const sentryUrl = `https://${host}/api/${projectId}/store/`;
+      const eventId = typeof crypto !== 'undefined' && crypto.randomUUID 
+        ? crypto.randomUUID().replace(/-/g, "") 
+        : Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+
+      // Strip query parameters for user privacy
+      let sanitizedUrl = "unknown";
+      try {
+        const parsed = new URL(location.href);
+        parsed.search = "";
+        parsed.hash = "";
+        sanitizedUrl = parsed.toString();
+      } catch {}
+
+      const payload = {
+        event_id: eventId,
+        timestamp: new Date().toISOString().split(".")[0],
+        logger: "chrome-extension-content",
+        platform: "javascript",
+        release: APP_RELEASE,
+        environment: "production",
+        exception: {
+          values: [{
+            type: error.name || "Error",
+            value: (error.message || String(error)).slice(0, 1000),
+            stacktrace: error.stack ? {
+              frames: error.stack.split("\n").map(line => ({ filename: line.trim() })).reverse()
+            } : undefined
+          }]
+        },
+        tags: {
+          extension_version: EXTENSION_VERSION,
+          execution_context: "content_script",
+          browser_family: "chrome",
+          normalized_job_platform: location.hostname
+        },
+        request: {
+          url: sanitizedUrl
+        }
+      };
+
+      fetch(sentryUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Sentry-Auth": `Sentry sentry_version=7, sentry_client=tailr4u-extension-content/1.0, sentry_key=${publicKey}`
+        },
+        body: JSON.stringify(payload)
+      }).catch(() => {});
+    } catch (err) {
+      console.warn("[ContentScript] Sentry report error:", err);
+    }
+  };
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type !== 'CAPTURE_PAGE_SNAPSHOT') return false;
     capture(message.requestId)
       .then(snapshot => sendResponse({ ok: true, snapshot }))
-      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+      .catch(error => {
+        const errObj = error instanceof Error ? error : new Error(String(error));
+        reportContentError(errObj, "page_capture");
+        sendResponse({ ok: false, error: errObj.message });
+      });
     return true;
   });
 })();

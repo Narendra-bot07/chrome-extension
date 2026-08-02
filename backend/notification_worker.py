@@ -9,7 +9,7 @@ from app.services.email_service import EmailService
 from services.notifications import EmailDeliveryProcessor, ReminderScheduler
 
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("tailorflow.notification-worker")
+log = logging.getLogger("tailr4u.notification-worker")
 
 def check_configuration():
     with psycopg2.connect(settings.DATABASE_URL) as conn:

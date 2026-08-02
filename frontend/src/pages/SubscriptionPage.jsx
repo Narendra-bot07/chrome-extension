@@ -7,6 +7,7 @@ import { createCheckoutSession } from '../services/subscriptionApi';
 import { PaymentModal } from '../components/PaymentModal';
 import { PaymentStatusModal } from '../components/modals/PaymentStatusModal';
 import { useTailr4uReducedMotion } from '../motion/MotionSystem';
+import { fetchLiveUsdToInrRate, convertUsdToInrSync, formatInrPrice } from '../utils/currencyConverter';
 import './SubscriptionPage.css';
 
 function formatDate(value) {
@@ -14,15 +15,19 @@ function formatDate(value) {
   return new Date(value).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-function formatPrice(plan) {
+function formatPrice(plan, usdToInrRate = 86.5) {
   const interval = plan.billing_interval || 'month';
-  const amount = typeof plan.price_amount === 'number' ? plan.price_amount : plan.price;
-  if (typeof amount === 'number') {
-    const formatted = amount === 0 ? '0' : amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    return `$${formatted}/${interval}`;
+  const amount = typeof plan.price_amount === 'number' ? plan.price_amount : (typeof plan.price === 'number' ? plan.price : 0);
+  if (amount > 0) {
+    const formattedUsd = `$${amount.toFixed(2)}`;
+    const inrVal = Math.round(amount * usdToInrRate);
+    const formattedInr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(inrVal);
+    return {
+      usd: `${formattedUsd}/${interval}`,
+      inr: `${formattedInr}/${interval}`
+    };
   }
-  if (plan.price_display) return `${plan.price_display}/${interval}`;
-  return `$0/month`;
+  return { usd: `$0/month`, inr: `₹0/month` };
 }
 
 function normalizeFeatures(features) {
@@ -42,6 +47,11 @@ export default function SubscriptionPage() {
   const { apiUrl, session } = useApp();
   const [spreadCards, setSpreadCards] = useState(reducedMotion);
   const { subscription, plans, loading, error, refresh } = useSubscription();
+  const [usdToInrRate, setUsdToInrRate] = useState(86.5);
+
+  useEffect(() => {
+    fetchLiveUsdToInrRate().then(rate => setUsdToInrRate(rate));
+  }, []);
 
   const [checkoutModalPlan, setCheckoutModalPlan] = useState(null);
   const [checkoutError, setCheckoutError] = useState(null);
@@ -178,26 +188,27 @@ export default function SubscriptionPage() {
         provider
       });
 
-      // Handle Razorpay Inline SDK Checkout
-      if (res.provider === 'razorpay' && res.subscription_id && !res.checkout_url.startsWith('http')) {
-        if (checkoutTab && !checkoutTab.closed) checkoutTab.close();
-        const rzpKey = res.key_id || 'rzp_test_mock123';
+      // Handle Razorpay Inline SDK Checkout in new tab or hosted checkout
+      if (res.provider === 'razorpay' && res.subscription_id && (!res.checkout_url || !res.checkout_url.startsWith('http'))) {
+        const rzpKey = res.key_id || 'rzp_test_TKlgFVnPx4QCdU';
+        const targetWin = (checkoutTab && !checkoutTab.closed) ? checkoutTab : window;
         
-        if (!window.Razorpay) {
-          const script = document.createElement('script');
+        if (!targetWin.Razorpay) {
+          const script = targetWin.document.createElement('script');
           script.src = 'https://checkout.razorpay.com/v1/checkout.js';
           script.async = true;
-          document.body.appendChild(script);
+          targetWin.document.body.appendChild(script);
           await new Promise((resolve) => { script.onload = resolve; });
         }
 
-        if (window.Razorpay) {
-          const rzp = new window.Razorpay({
+        if (targetWin.Razorpay) {
+          const rzp = new targetWin.Razorpay({
             key: rzpKey,
             subscription_id: res.subscription_id,
             name: 'Tailr4U Subscriptions',
             description: `Upgrade to ${targetPlan?.name || 'Pro'}`,
             handler: function (response) {
+              if (targetWin !== window && !targetWin.closed) targetWin.close();
               setPaymentStatusModal({
                 isOpen: true,
                 status: 'success',
@@ -211,6 +222,7 @@ export default function SubscriptionPage() {
             },
             modal: {
               ondismiss: function () {
+                if (targetWin !== window && !targetWin.closed) targetWin.close();
                 setPaymentStatusModal({
                   isOpen: true,
                   status: 'cancelled',
@@ -260,7 +272,58 @@ export default function SubscriptionPage() {
   };
 
   if (loading && !subscription) {
-    return <div className="p-6 text-sm text-zinc-500">Loading pricing...</div>;
+    return (
+      <div className="p-6 space-y-6 overflow-y-auto animate-in fade-in duration-300">
+        <div className="space-y-2">
+          <div className="h-8 w-64 bg-zinc-200 dark:bg-zinc-800 rounded-xl animate-pulse" />
+          <div className="h-4 w-96 bg-zinc-100 dark:bg-zinc-800/60 rounded-lg animate-pulse" />
+        </div>
+
+        {/* Current Plan Skeleton Banner */}
+        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-5 space-y-4 shadow-sm">
+          <div className="flex justify-between items-center">
+            <div className="space-y-2">
+              <div className="h-3 w-24 bg-zinc-200 dark:bg-zinc-800 rounded-md animate-pulse" />
+              <div className="h-6 w-32 bg-zinc-200 dark:bg-zinc-800 rounded-lg animate-pulse" />
+            </div>
+            <div className="h-9 w-24 bg-zinc-100 dark:bg-zinc-800 rounded-lg animate-pulse" />
+          </div>
+          <div className="space-y-2">
+            <div className="h-2 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full animate-pulse" />
+            <div className="h-4 w-48 bg-zinc-100 dark:bg-zinc-800 rounded-md animate-pulse" />
+          </div>
+        </div>
+
+        {/* Available Plans Skeleton Cards Grid */}
+        <div>
+          <div className="h-6 w-40 bg-zinc-200 dark:bg-zinc-800 rounded-lg animate-pulse mb-4" />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {[1, 2, 3].map((item) => (
+              <div
+                key={item}
+                className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-6 flex flex-col space-y-5 min-h-[420px] shadow-sm relative overflow-hidden"
+              >
+                <div className="flex justify-between items-center">
+                  <div className="h-6 w-24 bg-zinc-200 dark:bg-zinc-800 rounded-lg animate-pulse" />
+                  {item === 2 && <div className="h-5 w-20 bg-indigo-100 dark:bg-indigo-950 rounded-full animate-pulse" />}
+                </div>
+                <div className="h-10 w-36 bg-zinc-200 dark:bg-zinc-800 rounded-xl animate-pulse" />
+                <div className="h-4 w-full bg-zinc-100 dark:bg-zinc-800/80 rounded-md animate-pulse" />
+                <div className="space-y-3 flex-1 pt-4">
+                  {[1, 2, 3, 4, 5].map((f) => (
+                    <div key={f} className="flex items-center gap-2">
+                      <div className="h-4 w-4 rounded-full bg-emerald-100 dark:bg-emerald-950 animate-pulse shrink-0" />
+                      <div className="h-4 w-full bg-zinc-100 dark:bg-zinc-800/60 rounded-md animate-pulse" />
+                    </div>
+                  ))}
+                </div>
+                <div className="h-12 w-full bg-zinc-200 dark:bg-zinc-800 rounded-xl animate-pulse mt-auto" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -361,7 +424,7 @@ export default function SubscriptionPage() {
                 </div>
 
                 <div className="mt-4 text-3xl font-black text-zinc-950 dark:text-white">
-                  {formatPrice(plan)}
+                  {formatPrice(plan, usdToInrRate).usd}
                 </div>
 
                 <p className="text-sm text-zinc-500 mt-3 min-h-[42px]">{plan.description}</p>

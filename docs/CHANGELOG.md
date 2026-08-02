@@ -4,6 +4,64 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.6.0] - 2026-08-02
+
+### Added
+- **Production-Grade LLM Redis Caching Layer**: Built `LLMCacheService` (`services/cache/llm_cache.py`), `LLMFingerprintBuilder` (`services/cache/llm_fingerprint.py`), and `LLMCacheTelemetry` (`services/cache/llm_cache_telemetry.py`) on top of Upstash Redis.
+- **Canonical Input Fingerprinting**: Normalizes Unicode NFC, line endings (`\r\n` ➔ `\n`), and sorts object keys recursively to build deterministic SHA-256 fingerprints without exposing raw PII in Redis keys.
+- **Envelope Storage & Pydantic Validation**: All cached responses are enveloped with task metadata, prompt/schema versions, and token usage. Invalid or stale schemas automatically purge on cache hit.
+- **Single-Flight Distributed Locking (`SET NX`)**: Prevents cache stampedes by locking cache misses for up to 120s with owner UUID verification, allowing waiter processes to reuse the single LLM response.
+- **Integrated Across All 9 LLM Workflows**: Wrapped `analyze_job_description`, `parse_resume`, `generate_tailoring_patch`, `generate_cover_letter`, `analyze_gaps`, `refine_section_with_ai`, `calculate_llm_live_scores`, `extraction_agent`, and `DeepSeekSemanticAnalyzer.analyze`.
+- **Phase 6 Subscription Plans & Pricing Update**: Standardized pricing tiers to **Basic** ($9.99/mo), **Pro** ($19.99/mo), and **Elite** ($39.99/mo). Database seeded via `seed_phase6_plans.py`. Added live USD-to-INR real-time currency conversion for Razorpay modal checkout and 3-card animated skeleton loading UI.
+
+### Changed
+- `backend/core/config.py`: Added `LLM_CACHE_*` configuration settings for task-specific TTLs and lock timeouts.
+- `backend/.env.example`: Added documentation for all `LLM_CACHE_*` parameters.
+
+---
+
+## [3.5.0] - 2026-08-02
+
+### Removed
+- **Groq & Gemini services fully eliminated**: Removed `langchain-groq`, `groq` from `requirements.txt`; deleted dead shim files `app/groq_service.py` and `app/gemini_service.py`; removed `GROQ_API_KEY` and `GEMINI_API_KEY` from `core/config.py`, `app/config.py`, and `backend/.env`.
+- **Legacy `x_groq_key` / `x_gemini_key` HTTP headers**: Removed all per-request API-key override headers from every route in `api/v1/resume.py` and `app/routers/api.py`. DeepSeek reads its key from `settings.DEEPSEEK_API_KEY` only.
+- **`ChatGroq` in `semantic.py`**: Replaced `GroqSemanticAnalyzer` (backed by `langchain_groq.ChatGroq`) with `DeepSeekSemanticAnalyzer` — same protocol interface, backed by `DeepSeekProvider`.
+
+### Changed
+- `api/dependencies.py`: `get_ai_service()` return type corrected from `GeminiService` to `AIService`.
+- `services/ai/ai_service.py`: `GeminiService`/`GroqService` kept as transparent `AIService` aliases for any remaining import sites.
+- `tests/test_copilot_scope.py` and `tests/test_streaming.py`: patch paths updated from `app.groq_service.*` → `app.ai_service.*`.
+- `test_multi_agent.py`: `GROQ_API_KEY` reference replaced with `DEEPSEEK_API_KEY`.
+- `docs/`: ARCHITECTURE, BACKEND, DECISIONS, PROMPTS updated to reflect single-provider DeepSeek architecture.
+
+---
+
+## [3.4.0] - 2026-08-02
+
+### Added
+- **Job Tracker DAG Workflow Board**: Enforced a Directed Acyclic Graph (DAG) system inside `JobTrackerPage.jsx` preventing cards from being dragged backward in the sequence of stages.
+- **Visual Upstream Completion Cues**: Completed upstream stages in the horizontal stepper dynamically display emerald green borders, soft green backgrounds, checkmark icons, and header "Done" tags.
+- **Unified 3D Card Flip Auth Pages**: Styled both `LoginPage.jsx` and `RegisterPage.jsx` with symmetrical features, custom light-mode gradients, and hardware-accelerated 3D perspective flip card transitions.
+- **Robust Page Error Boundaries**: Added `DashboardErrorBoundary` and `JobTrackerErrorBoundary` wrapper components to catch and display detailed traceback stack logs in-place, eliminating blank page crashes.
+- **Missing Core Backend Dependencies**: Appended `supabase`, `redis`, `upstash-redis`, `requests`, `langchain-deepseek`, and `pytest` dependencies to `backend/requirements.txt`.
+
+### Fixed
+- **Scroll Layout Cut-off**: Removed centering alignment (`xl:justify-center`) in the horizontal pipeline overflow container so that layout starts on the left boundary and scrolls cleanly.
+- **Lucide Icon Reference Errors**: Fixed crashes caused by missing `Send` and `Clock` imports in `DashboardPage.jsx`.
+
+## [3.3.0] - 2026-08-02
+
+### Added
+- **Theme-Aware Secure Checkout Loading Screen**: Updated `PaymentModal.jsx` to inject a theme-aware loading template into newly opened Stripe Checkout tabs (`checkoutTab`). Features the official **Tailr4U Logo** (`/application-logo.png` + `Tailr4U` wordmark), animated loading spinner, and SSL encryption badge matching light/dark mode.
+- **Database Performance Index Migration**: Executed `backend/migrate_db_performance_indexes.py` directly on PostgreSQL, applying 14 database indexes across `resumes`, `resume_versions`, `applications`, `usage_events`, `subscriptions`, `user_sessions`, `reminders`, `notification_deliveries`, and `profiles`.
+- **Backend Redis Read Caching**: Added Upstash Redis caching across `profile_repository.py`, `subscription.py`, `resume.py`, and `job_preferences_repository.py` for sub-2ms read response times.
+
+### Changed
+- **Zero-Latency Client Cache Hydration**: Initialized `ProfilePage.jsx` state from `localStorage` (`tailr4u_user_profile`), delivering instant <1ms UI rendering on profile navigation.
+- **System-Wide Brand Uniformity**: Replaced all remaining occurrences of legacy product names across codebase and documentation with **Tailr4U** / **`tailr4u`**.
+
+---
+
 ## [3.2.0] - 2026-08-02
 
 ### Added
@@ -41,7 +99,7 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 ### Added
 - **FastAPI Clean Architecture**: Refactored backend into 4 decoupled layers (`api/v1/`, `services/`, `repositories/`, `core/`).
 - **Playwright HTML-to-PDF Engine**: Direct backend Chromium vector PDF compilation for pixel-perfect, ATS-scannable resumes.
-- **Resilient Multi-Model LLM Orchestration**: Implemented `ResilientLLMWrapper` supporting automatic failover between Groq (`llama-3.3-70b-versatile`), Gemini 2.0 Flash, and Gemini 1.5 Flash.
+- **Resilient DeepSeek LLM Orchestration**: Implemented `ResilientLLMWrapper` with two-tier DeepSeek failover (`deepseek-v4-flash` primary, `deepseek-v4-pro` escalation).
 - **LangSmith Tracing**: Integrated full LLM prompt and chain execution tracing.
 - **Health Probes**: Added root liveness (`/live`), readiness (`/ready`), and health status (`/health`) endpoints.
 - **Centralized `/docs` Knowledge Base**: Established self-documenting repository specification containing 13 core technical documents.

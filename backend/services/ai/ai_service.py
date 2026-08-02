@@ -48,6 +48,4 @@ class AIService(LLMService):
         res = legacy_cover_letter(resume, job, api_key=self.api_key)
         return self._ensure_schema(res, CoverLetterResult)
 
-# Compatibility Aliases
-GeminiService = AIService
-GroqService = AIService
+# AIService is the single provider — backed by DeepSeek via app.ai_service.

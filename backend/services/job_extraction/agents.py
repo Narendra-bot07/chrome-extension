@@ -14,6 +14,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from markdownify import markdownify
 
 from app.ai_service import get_llm
+from services.cache.llm_cache import llm_cache
 from core.logging import logger
 from services.job_extraction.schemas import (
     ClassificationDecision, EvidenceSource, ExtractedJob, JDState, ReviewDecision,
@@ -998,11 +999,21 @@ separate. Deduplicate semantically equivalent items. Preserve the complete sourc
 def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     state = _state(value)
     logger.info("%s Extraction started request_id=%s", LOG_PREFIX, state.request_id)
-    structured = get_llm(temperature=0).with_structured_output(ExtractedJob)
-    job = structured.invoke([
-        SystemMessage(content=EXTRACTION_PROMPT),
-        HumanMessage(content=json.dumps(state.evidence, ensure_ascii=False)),
-    ])
+
+    def _call_llm():
+        structured = get_llm(temperature=0).with_structured_output(ExtractedJob)
+        return structured.invoke([
+            SystemMessage(content=EXTRACTION_PROMPT),
+            HumanMessage(content=json.dumps(state.evidence, ensure_ascii=False)),
+        ])
+
+    job = llm_cache.execute_with_cache(
+        task="jd_agent_extraction",
+        payload_to_fingerprint=state.evidence,
+        llm_callable=_call_llm,
+        expected_schema=ExtractedJob,
+        prompt_version="jd-agent-v1"
+    )
     job_dict = ExtractedJob.model_validate(job).model_dump(mode="json")
     job_dict["skills"] = _atomize_skill_labels(job_dict.get("skills", []))
     explicit_keys = {skill.casefold() for skill in job_dict["skills"]}
@@ -1270,7 +1281,7 @@ def reviewer_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     logger.info(
         "%s Deterministic reviewer completed request_id=%s valid=%s "
         "needs_repair=%s repair_fields=%s extracted_skills_count=%s issues=%s "
-        "groq_calls_so_far=1",
+        "llm_calls_so_far=1",
         LOG_PREFIX,
         state.request_id,
         not needs_repair,
@@ -1496,6 +1507,8 @@ def final_response_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
 
 def _compat_job(job: dict[str, Any]) -> dict[str, Any]:
     salary = job.get("salary")
+    if hasattr(salary, "model_dump"):
+        salary = salary.model_dump()
     if isinstance(salary, dict):
         raw = salary.get("raw")
         if raw:
@@ -1516,8 +1529,10 @@ def _compat_job(job: dict[str, Any]) -> dict[str, Any]:
             salary_display = " ".join(
                 part for part in (currency, amount, period) if part
             )
+    elif salary is None:
+        salary_display = ""
     else:
-        salary_display = str(salary or "")
+        salary_display = str(salary)
 
     explicit_skills = list(dict.fromkeys(job.get("skills", []) or []))
     suggested_skills = list(dict.fromkeys(job.get("suggested_skills", []) or []))

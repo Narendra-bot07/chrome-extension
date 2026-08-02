@@ -42,12 +42,30 @@ import {
 export default function ProfilePage() {
   const navigate = useNavigate();
   const { user, session, darkMode, apiUrl, logout, subscription } = useApp();
-  const [profile, setProfile] = useState({
-    full_name: '',
-    email: '',
-    resume_count: 0
+  const [profile, setProfile] = useState(() => {
+    try {
+      const saved = localStorage.getItem('tailr4u_user_profile');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return {
+      full_name: user?.full_name || '',
+      email: user?.email || '',
+      resume_count: 0
+    };
   });
-  const [profileForm, setProfileForm] = useState({});
+  const [profileForm, setProfileForm] = useState(() => {
+    try {
+      const saved = localStorage.getItem('tailr4u_user_profile');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          ...parsed,
+          timezone: parsed.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || ''
+        };
+      }
+    } catch (e) {}
+    return {};
+  });
   const [editingName, setEditingName] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -99,6 +117,9 @@ export default function ProfilePage() {
             ...data,
             timezone: data.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || ''
           });
+          try {
+            localStorage.setItem('tailr4u_user_profile', JSON.stringify(data));
+          } catch (e) {}
         }
       } catch (err) {
         console.error('Failed to load profile:', err);

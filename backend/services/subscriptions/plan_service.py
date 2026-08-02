@@ -4,13 +4,13 @@ PLAN_DISPLAY = {
     "free": {
         "description": "A focused free start.",
     },
-    "pro": {
+    "basic": {
         "description": "For active job hunting.",
     },
-    "elite": {
+    "pro": {
         "description": "For serious job hunters.",
     },
-    "advanced": {
+    "elite": {
         "description": "For power users and teams.",
     },
 }

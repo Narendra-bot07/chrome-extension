@@ -24,6 +24,7 @@ class EmailService:
             return False
 
         resend_key = (settings.RESEND_API_KEY or os.getenv("RESEND_API_KEY", "")).strip()
+        resend_from_email = (getattr(settings, "RESEND_FROM_EMAIL", None) or os.getenv("RESEND_FROM_EMAIL", "")).strip() or "onboarding@resend.dev"
         from_email = settings.SMTP_FROM_EMAIL or "onboarding@resend.dev"
         from_name = settings.SMTP_FROM_NAME or "tailr4u"
 
@@ -35,7 +36,7 @@ class EmailService:
                     "Content-Type": "application/json",
                 }
                 payload = {
-                    "from": f"{from_name} <{from_email}>",
+                    "from": f"{from_name} <{resend_from_email}>",
                     "to": [recipient],
                     "subject": subject,
                     "html": html_body,

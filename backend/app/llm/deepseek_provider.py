@@ -23,9 +23,6 @@ def throttle_ai_call():
     if elapsed < _MIN_AI_SPACING_SEC:
         time.sleep(_MIN_AI_SPACING_SEC - elapsed)
 
-# Compatibility aliases
-throttle_gemini_call = throttle_ai_call
-throttle_groq_call = throttle_ai_call
 
 class DeepSeekProvider:
     """

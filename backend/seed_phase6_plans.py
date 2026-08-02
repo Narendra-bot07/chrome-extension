@@ -30,8 +30,8 @@ PLANS = [
         },
     },
     {
-        "code": "pro",
-        "name": "Pro",
+        "code": "basic",
+        "name": "Basic",
         "description": "For active job hunting.",
         "monthly_jd_limit": 100,
         "resume_limit": 3,
@@ -53,8 +53,8 @@ PLANS = [
         },
     },
     {
-        "code": "elite",
-        "name": "Elite",
+        "code": "pro",
+        "name": "Pro",
         "description": "For serious job hunters.",
         "monthly_jd_limit": 500,
         "resume_limit": None,
@@ -76,8 +76,8 @@ PLANS = [
         },
     },
     {
-        "code": "advanced",
-        "name": "Advanced",
+        "code": "elite",
+        "name": "Elite",
         "description": "For power users and teams.",
         "monthly_jd_limit": 1200,
         "resume_limit": None,

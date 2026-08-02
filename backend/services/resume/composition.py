@@ -106,6 +106,112 @@ def _canonical_url(value: str) -> str:
     return normalized.rstrip("/")
 
 
+def is_valid_url(url: Any) -> bool:
+    if not url or not isinstance(url, str):
+        return False
+    clean = url.strip()
+    if clean in {"#", "", "github", "github.com"} or clean.endswith("://github/"):
+        return False
+    if not (clean.startswith("http://") or clean.startswith("https://") or ("." in clean and "/" in clean)):
+        return False
+    parsed_path = re.sub(r"^(?:https?://)?(?:www\.)?", "", clean, flags=re.IGNORECASE)
+    parts = [p for p in parsed_path.rstrip("/").split("/") if p]
+    if not parts:
+        return False
+    if parts[0].lower() in {"github.com", "gitlab.com"} and len(parts) <= 1:
+        return False
+    return True
+
+
+def is_valid_project_url(url: Any) -> bool:
+    if not is_valid_url(url):
+        return False
+    clean = str(url).strip()
+    parsed_path = re.sub(r"^(?:https?://)?(?:www\.)?", "", clean, flags=re.IGNORECASE)
+    parts = [p for p in parsed_path.rstrip("/").split("/") if p]
+    if parts[0].lower() in {"github.com", "gitlab.com"}:
+        if len(parts) < 3:
+            return False
+    return True
+
+
+def clean_and_repair_project_links(resume: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    import uuid
+    cleaned_resume = copy.deepcopy(resume)
+    audit_logs: list[dict[str, Any]] = []
+
+    personal_info = cleaned_resume.get("personal_info") or {}
+    candidate_profile_urls = set()
+    if isinstance(personal_info, dict):
+        for key in ("github", "linkedin", "website", "portfolio"):
+            val = personal_info.get(key)
+            if val and isinstance(val, str):
+                candidate_profile_urls.add(_canonical_url(val))
+
+    projects = cleaned_resume.get("projects")
+    if not isinstance(projects, list):
+        return cleaned_resume, audit_logs
+
+    for proj in projects:
+        if not isinstance(proj, dict):
+            continue
+        proj_name = proj.get("name") or proj.get("title") or "Unnamed Project"
+        proj_id = proj.get("id") or str(uuid.uuid4())
+
+        repo_url = proj.get("repository_url")
+        if repo_url and not is_valid_project_url(repo_url):
+            audit_logs.append({
+                "project_id": proj_id,
+                "project_name": proj_name,
+                "removed_url": repo_url,
+                "reason": "Malformed or invalid project repository URL removed"
+            })
+            proj.pop("repository_url", None)
+
+        links = proj.get("links")
+        if not isinstance(links, list):
+            links = []
+
+        seen_urls = set()
+        valid_links = []
+        for link in links:
+            if not isinstance(link, dict):
+                continue
+            url = link.get("url") or link.get("link")
+            if not url or not is_valid_project_url(url):
+                audit_logs.append({
+                    "project_id": proj_id,
+                    "project_name": proj_name,
+                    "removed_url": url,
+                    "reason": "Malformed or non-repository URL removed from project links"
+                })
+                continue
+            canon = _canonical_url(url)
+            if canon in candidate_profile_urls:
+                audit_logs.append({
+                    "project_id": proj_id,
+                    "project_name": proj_name,
+                    "removed_url": url,
+                    "reason": "Candidate profile link removed from project links"
+                })
+                continue
+            if canon in seen_urls:
+                audit_logs.append({
+                    "project_id": proj_id,
+                    "project_name": proj_name,
+                    "removed_url": url,
+                    "reason": "Duplicate link removed"
+                })
+                continue
+            seen_urls.add(canon)
+            link["display_label"] = "GitHub" if "github" in canon else link.get("display_label", "Link")
+            valid_links.append(link)
+
+        proj["links"] = valid_links
+
+    return cleaned_resume, audit_logs
+
+
 def _rendered_urls(resume: ResumeStructure | dict[str, Any]) -> set[str]:
     """Return only URLs the ownership-aware renderer is expected to expose."""
 

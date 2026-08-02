@@ -1,4 +1,4 @@
-# TailorFlow AI — Complete End-to-End Executive Summary & Technology Specification
+# Tailr4U — Complete End-to-End Executive Summary & Technology Specification
 
 ---
 
@@ -13,9 +13,9 @@
 | **Backend Framework** | **FastAPI** | `v0.100+` | High-performance asynchronous REST API server |
 | **Data Validation** | **Pydantic V2** | `v2.0+` | Strict request/response payload schema validation |
 | **ASGI Web Server** | **Uvicorn** | `v0.22+` | Asynchronous Python web server implementation |
-| **Primary AI Engine** | **Google Gemini** | `gemini-2.5-flash` / `2.0-flash` / `1.5-flash` | Resume parsing, job analysis, ATS scoring, tailoring, cover letters |
-| **AI Integration** | **LangChain** | `langchain-google-genai v4.3.2` | Structured output parsing and prompt chaining |
-| **AI Resiliency** | **ResilientLLMWrapper** | Custom Runnable | Multi-tier Gemini model failover & 1-at-a-time concurrency lock |
+| **Primary AI Engine** | **DeepSeek** | `deepseek-v4-flash` / `deepseek-v4-pro` | Resume parsing, job analysis, ATS scoring, tailoring, cover letters |
+| **AI Integration** | **LangChain + OpenAI SDK** | `langchain-openai` (OpenAI-compatible client) | Structured output parsing and prompt chaining via DeepSeek API |
+| **AI Resiliency** | **ResilientLLMWrapper** | Custom Runnable | Flash → Pro escalation, bounded retry, concurrency lock |
 | **Global Payments** | **Stripe** | `stripe-python` | International checkout sessions, webhooks, subscription billing |
 | **Domestic Payments** | **Razorpay** | `razorpay-python` | India region geo-routed payment orders & HMAC signature verification |
 | **Billing Router** | **BillingService** | Geo-Routing Engine | Automatic routing: India → Razorpay, Rest of World → Stripe |
@@ -91,8 +91,8 @@
 
 | Item | Architectural Area | What We Are Not Following Yet | Recommended Action Item |
 | :---: | :--- | :--- | :--- |
-| **1** | **Database Security** | Connection string uses default superuser `postgres` URI in `DATABASE_URL`. | Create a restricted `tailorflow_app` application role in Supabase. |
-| **2** | **Environment Isolation** | Development and production share the same Supabase project instance. | Create a separate `tailorflow-staging` Supabase project for dev testing. |
+| **1** | **Database Security** | Connection string uses default superuser `postgres` URI in `DATABASE_URL`. | Create a restricted `tailr4u_app` application role in Supabase. |
+| **2** | **Environment Isolation** | Development and production share the same Supabase project instance. | Create a separate `tailr4u-staging` Supabase project for dev testing. |
 | **3** | **Real-Time Error Tracking** | Server logs stream to stdout, but Sentry exception tracking is unconfigured. | Add `SENTRY_DSN` to `backend/core/config.py` and `backend/.env`. |
 | **4** | **Backup Recovery Drills** | Automated daily Supabase backups are active, but restoration is un-drilled. | Schedule a quarterly automated backup restoration test. |
 | **5** | **Frontend Code-Splitting** | Large vendor chunks (>500kB) compile cleanly, but lack dynamic import splitting. | Add dynamic `import()` chunking in `vite.config.js` for lighter initial page loads. |

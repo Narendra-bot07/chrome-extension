@@ -18,7 +18,18 @@ class StripeProvider(BaseProvider):
                 "subscription_id": "sub_mock_stripe_123"
             }
 
-        price_id = plan.get("stripe_price_id") or os.getenv("STRIPE_DEFAULT_PRICE_ID")
+        plan_key = str(plan.get("id") or "").lower()
+        price_id = plan.get("stripe_price_id")
+        if not price_id:
+            if "basic" in plan_key or "free" in plan_key:
+                price_id = os.getenv("STRIPE_PRICE_BASIC_MONTHLY")
+            elif "elite" in plan_key or "premium" in plan_key:
+                price_id = os.getenv("STRIPE_PRICE_ELITE_MONTHLY")
+            else:
+                price_id = os.getenv("STRIPE_PRICE_PRO_MONTHLY")
+        if not price_id:
+            price_id = os.getenv("STRIPE_DEFAULT_PRICE_ID")
+
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
         
         session = None
@@ -50,7 +61,7 @@ class StripeProvider(BaseProvider):
                     'price_data': {
                         'currency': currency,
                         'product_data': {
-                            'name': plan.get("name", "TailorFlow Subscription"),
+                            'name': plan.get("name", "Tailr4U Subscription"),
                         },
                         'unit_amount': amount,
                         'recurring': {'interval': 'month'}

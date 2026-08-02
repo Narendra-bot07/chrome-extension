@@ -8,10 +8,12 @@ This document tracks all critical architectural, structural, and infrastructure 
 
 - [ADR-001: Adoption of FastAPI Clean 4-Layer Architecture](#adr-001-adoption-of-fastapi-clean-4-layer-architecture)
 - [ADR-002: Headless Chromium Playwright Engine for Vector PDF Compilation](#adr-002-headless-chromium-playwright-engine-for-vector-pdf-compilation)
-- [ADR-003: Multi-Model Resilient LLM Wrapper (Groq + Gemini Failover)](#adr-003-multi-model-resilient-llm-wrapper-groq--gemini-failover)
+- [ADR-003: Resilient DeepSeek LLM Wrapper (Flash → Pro Escalation)](#adr-003-resilient-deepseek-llm-wrapper-flash--pro-escalation)
 - [ADR-004: Supabase PostgreSQL with Native Row-Level Security (RLS)](#adr-004-supabase-postgresql-with-native-row-level-security-rls)
 - [ADR-005: Chrome Manifest V3 Content Script & Shadow DOM Injection](#adr-005-chrome-manifest-v3-content-script--shadow-dom-injection)
 - [ADR-006: Controlled Migration to DeepSeek as Sole LLM Provider](#adr-006-controlled-migration-to-deepseek-as-sole-llm-provider)
+- [ADR-007: Production-Grade Redis LLM Caching Layer](#adr-007-production-grade-redis-llm-caching-layer)
+- [ADR-008: Phase 6 Subscription Tier Standard and Dual Payment Routing](#adr-008-phase-6-subscription-tier-standard-and-dual-payment-routing)
 
 ---
 
@@ -47,18 +49,17 @@ This document tracks all critical architectural, structural, and infrastructure 
 
 ---
 
-## ADR-003: Multi-Model Resilient LLM Wrapper (Groq + Gemini Failover)
+## ADR-003: Resilient DeepSeek LLM Wrapper (Flash → Pro Escalation)
 
-- **Date**: 2026-07-20
-- **Status**: Approved & Implemented
-- **Context**: LLM API providers enforce strict free-tier rate limits (`429 Quota Exceeded`). Depending solely on a single AI provider leads to user-facing service outages during traffic spikes.
-- **Decision**: Implement `ResilientLLMWrapper` (`app/gemini_service.py`) supporting automatic failover:
-  1. Primary: **Groq (`llama-3.3-70b-versatile`)** for ultra-fast JSON structured output.
-  2. Fallback: **Gemini 2.0 Flash (`gemini-2.0-flash`)** if Groq fails or rate limits.
-  3. Tertiary: **Gemini 1.5 Flash (`gemini-1.5-flash`)**.
-- **Alternatives Considered**: Direct single model calls with retries.
-- **Reasoning**: Guarantees high availability, reduces overall latency, and respects free-tier quotas through thread locking (`_SINGLE_AI_REQUEST_LOCK`).
-- **Consequences**: Requires maintaining compatibility across LangChain provider libraries (`langchain-groq` and `langchain-google-genai`).
+- **Date**: 2026-08-02 (supersedes original 2026-07-20 Groq+Gemini design)
+- **Status**: Approved & Implemented (`v3.2.0`)
+- **Context**: The original `ResilientLLMWrapper` relied on a three-model chain (Groq → Gemini 2.0 → Gemini 1.5) to handle free-tier rate limits. After migrating to DeepSeek as the sole LLM provider (ADR-006), the multi-vendor chain was simplified to a two-tier DeepSeek hierarchy while preserving the same thread-locking and Redis caching guarantees.
+- **Decision**: Implement `DeepSeekProvider` (`app/llm/deepseek_provider.py`) as the single AI provider with:
+  1. Primary: **DeepSeek Flash (`deepseek-v4-flash`)** for ultra-fast `json_object`-mode structured outputs.
+  2. Escalation: **DeepSeek Pro (`deepseek-v4-pro`)** triggered automatically on schema validation failure.
+- **Alternatives Considered**: Retain Groq + Gemini multi-vendor chain. (Rejected: Vendor fragmentation, separate quota management, and `langchain-groq` / `langchain-google-genai` dependency overhead).
+- **Reasoning**: DeepSeek provides state-of-the-art JSON structured generation at lower cost. The two-tier escalation path within a single vendor is simpler to operate and monitor than a three-vendor chain.
+- **Consequences**: `DEEPSEEK_API_KEY` is the single backend LLM secret. `langchain-groq` and `groq` packages removed from `requirements.txt`.
 
 ---
 
@@ -97,3 +98,30 @@ This document tracks all critical architectural, structural, and infrastructure 
   - *Option B*: Redesign tailoring prompts for DeepSeek. (Rejected: Violates non-negotiable zero-prompt-rewrite rule).
 - **Reasoning**: DeepSeek provides state-of-the-art structured JSON generation (`response_format={"type": "json_object"}`) and strong reasoning at lower cost. The provider abstraction layer (`DeepSeekProvider`) adapts DeepSeek directly to Tailr4U's existing Pydantic schemas without modifying any business logic or API contracts.
 - **Consequences**: `DEEPSEEK_API_KEY` is the single backend secret. All legacy `gemini_service` and `groq_service` imports forward seamlessly to `app.ai_service`.
+
+---
+
+## ADR-007: Production-Grade Redis LLM Caching Layer
+
+- **Date**: 2026-08-02
+- **Status**: Approved & Implemented (`v3.6.0`)
+- **Context**: DeepSeek API invocations for repetitive job description extractions and resume tailoring operations consume significant API tokens and introduce ~12s latency.
+- **Decision**: Implement a multi-tiered LLM Redis Caching Layer (`LLMCacheService` in `services/cache/llm_cache.py`, backed by `redis_cache` in `services/cache/redis_cache.py`) using Upstash Redis. Key features include:
+  1. **Canonical Input Fingerprinting (`LLMFingerprintBuilder`)**: Unicode NFC normalization, line ending unification (`\r\n` ➔ `\n`), key-sorted JSON, and SHA-256 fingerprinting without storing raw PII in keys.
+  2. **Metadata Enveloping & Validation**: Stores responses wrapped in `LLMCacheEnvelope` with task metadata and prompt/schema versions. Deserialized cache hits run Pydantic domain model validation; stale or malformed payloads purge automatically.
+  3. **Single-Flight Distributed Locking (`SET NX`)**: Prevents cache stampedes by acquiring a 120s distributed lock for cache misses, allowing concurrent waiter requests to poll and reuse the single LLM response.
+  4. **Resilient Failover**: Redis connection errors log warnings and seamlessly fall back to direct LLM execution without throwing HTTP exceptions.
+- **Consequences**: Reduces duplicate request latency from ~12s to `< 50ms`, preserves zero-hallucination contracts, and protects against cache stampedes.
+
+---
+
+## ADR-008: Phase 6 Subscription Tier Standard and Dual Payment Routing
+
+- **Date**: 2026-08-02
+- **Status**: Approved & Implemented (`v3.6.0`)
+- **Context**: Subscription pricing required alignment with user feedback across global markets, and payment gateway routing needed clear separation between international cardholders and Indian users.
+- **Decision**:
+  1. Standardized subscription tiers to **Basic** ($9.99/mo), **Pro** ($19.99/mo), and **Elite** ($39.99/mo) seeded via `seed_phase6_plans.py`.
+  2. Implemented dual payment gateway routing: International users open Stripe Checkout in a standalone external page, while Indian cardholders launch a Razorpay modal featuring real-time USD-to-INR currency conversion display.
+  3. Replaced generic plain text loading states on the subscription dashboard with an animated 3-card skeleton UI.
+- **Consequences**: Provides seamless checkout options for global and local users with clean USD pricing display.

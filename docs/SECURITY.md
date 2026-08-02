@@ -90,7 +90,7 @@ FastAPI configures `CORSMiddleware` with explicit origin whitelisting:
 | Threat Vectors | Risk Level | Mitigation Standard |
 | :--- | :--- | :--- |
 | **Unauthorized Data Access** | High | PostgreSQL Row-Level Security (RLS) & JWT verification on every router |
-| **API Key Depletion (LLM Rate Limit)**| High | Redis prompt caching, single-request lock, and Groq ↔ Gemini failover |
+| **API Key Depletion (LLM Rate Limit)**| High | Redis prompt caching, single-request lock, bounded retry with optional DeepSeek Pro escalation |
 | **Extension DOM Injection Attacks** | Medium | Isolated Shadow DOM for injected overlay; strict innerText sanitization |
 | **Malicious PDF Upload Exploits** | Medium | Content-type magic byte check, sandbox parsing, size limit enforcement |
 | **Cross-Origin Request Forgery (CSRF)**| Low | Stateless JWT authentication in Authorization header; no ambient cookies |
@@ -101,7 +101,7 @@ FastAPI configures `CORSMiddleware` with explicit origin whitelisting:
 
 - [x] All database tables enforce Row-Level Security (RLS).
 - [x] Storage buckets isolate files under `{user_id}` directories.
-- [x] Environment secrets (`GEMINI_API_KEY`, `SUPABASE_JWT_SECRET`) stored in `.env` and excluded from git version control.
+- [x] Environment secrets (`DEEPSEEK_API_KEY`, `SUPABASE_JWT_SECRET`) stored in `.env` and excluded from git version control.
 - [x] CORS origin regex strictly restricted to production web domains and Chrome Extension schemes.
 - [x] RequestLoggingMiddleware strips authorization headers from output logs.
 - [x] Headless Chromium Playwright sandbox runs under non-root unprivileged container users.
