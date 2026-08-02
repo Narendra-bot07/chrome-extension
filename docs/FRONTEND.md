@@ -258,3 +258,19 @@ Dynamically adjusts font sizes to prevent multi-page spillover on dense resumes:
 - `.print-compression-level-1`: `15px` font size
 - `.print-compression-level-2`: `14px` font size
 - `.print-compression-level-3`: `13.5px` font size (Tight fit)
+
+---
+
+## 8. Global Custom Cursor & Portal Overlay System
+
+### 8.1 Global Custom Cursor Engine
+- **Component**: `GlobalCursor.jsx` mounted globally at root level.
+- **Styling System**: Global `.lp-custom-cursor` CSS tokens in `index.css` enforced via `@media (pointer: fine) { *, *::before, *::after { cursor: none !important; } }`.
+- **Portal Rendering**: Rendered via `createPortal(<div className="lp-custom-cursor">...</div>, document.body)` with `z-index: 9999999` so the custom vector cursor floats freely over all pages, modals, and overlays.
+- **Interaction Tracking**: Real-time `mousemove` and `pointermove` event listeners track pointer coordinates, toggling `.interactive` class when hovering over clickable elements (`button`, `a`, `input`, `textarea`, `select`, `[role="button"]`).
+
+### 8.2 Payment Checkout & Status Modals
+- **PaymentModal**: Gateway selection modal (`Stripe International` vs `Razorpay India`) rendered via `createPortal(..., document.body)` with `max-h-[90vh]` overflow handling for perfect responsive viewport centering. Launches Stripe Checkout in a separate window/tab (`checkoutTab`) synchronously on user click.
+- **PaymentStatusModal**: Real-time status popup modal displaying the official **Tailr4U Brand Logo** (`BrandLogo`), 1.5-second automated background signal polling (`/api/v1/subscription/me`), and status state transitions (`pending`, `success`, `cancelled`, `failed`).
+- **QuotaExceededModal**: Modal popup triggered on HTTP 429 (`QUOTA_EXCEEDED`) status across application context (`AppContext.jsx` & `Layout.jsx`).
+

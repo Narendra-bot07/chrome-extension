@@ -43,8 +43,8 @@ Tailr4U is composed of three interconnected sub-systems:
 
 ## 3. Current Development Stage & Versioning
 
-- **Current Version**: `v3.0.0`
-- **Architecture State**: Enterprise Clean Architecture with decoupled API routers, repository abstraction layers, resilient LLM fallback wrappers, and dedicated worker threads.
+- **Current Version**: `v3.2.0`
+- **Architecture State**: Enterprise Clean Architecture with decoupled API routers, repository abstraction layers, resilient DeepSeek LLM orchestration via LangChain, multi-tab Stripe billing workflow, global custom cursor engine, and real-time payment signal tracking.
 - **Status**: Production Ready / Active Enhancement Phase.
 
 ---
