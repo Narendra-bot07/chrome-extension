@@ -3,12 +3,11 @@ import { useApp } from '../context/AppContext';
 import UploaderView from '../components/UploaderView';
 import JobReviewView from '../components/JobReviewView';
 import ChecklistLoader from '../components/ChecklistLoader';
+import SessionRestorationLoader from '../components/SessionRestorationLoader';
 import { Navigate, useNavigate } from 'react-router-dom';
 
-function JobExtractPage() {
+export default function JobExtractPage() {
   const navigate = useNavigate();
-  const lastSeenTabUrlRef = useRef('');
-  const scanDebounceRef = useRef(null);
   const [autoExtractionStarted, setAutoExtractionStarted] = useState(false);
   const [awaitingAutoReview, setAwaitingAutoReview] = useState(false);
   const matchRequestKeyRef = useRef('');
@@ -86,12 +85,7 @@ function JobExtractPage() {
   }, [jobAnalysis, parsedResume]);
 
   if (loadingAuth || loadingResume || loadingPreferences) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[450px] gap-3 p-8 text-center select-none font-sans">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#00bda5]/20 border-t-[#00bda5]" />
-        <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Restoring Session & User Profile...</span>
-      </div>
-    );
+    return <SessionRestorationLoader label="Restoring Session & User Profile..." />;
   }
 
   const isAutoExtractionPending =
@@ -198,5 +192,3 @@ function JobExtractPage() {
     />
   );
 }
-
-export default JobExtractPage;

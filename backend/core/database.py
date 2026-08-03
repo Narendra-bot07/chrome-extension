@@ -20,11 +20,15 @@ def get_db_pool() -> ThreadedConnectionPool:
             if _db_pool is None:
                 if not settings.DATABASE_URL:
                     raise ValueError("DATABASE_URL is not set in environment settings.")
-                logger.info("[DATABASE_POOL] Pre-warming ThreadedConnectionPool (minconn=10, maxconn=50)...")
+                logger.info("[DATABASE_POOL] Pre-warming ThreadedConnectionPool (minconn=2, maxconn=50)...")
+                dsn = settings.DATABASE_URL
+                if "connect_timeout" not in dsn.lower():
+                    sep = "&" if "?" in dsn else "?"
+                    dsn = f"{dsn}{sep}connect_timeout=10&keepalives=1"
                 _db_pool = ThreadedConnectionPool(
-                    minconn=10,
+                    minconn=2,
                     maxconn=50,
-                    dsn=settings.DATABASE_URL
+                    dsn=dsn
                 )
                 logger.info("[DATABASE_POOL] Connection pool initialized successfully.")
     return _db_pool

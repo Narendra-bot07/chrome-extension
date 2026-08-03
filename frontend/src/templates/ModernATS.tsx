@@ -34,8 +34,8 @@ export default function ModernATS({ resume }) {
         <div className="text-sm mt-3 flex flex-wrap gap-4 text-gray-600 font-medium">
           {personal_info.phone && <span>{personal_info.phone}</span>}
           {personal_info.email && <a href={`mailto:${personal_info.email}`} className="hover:underline text-indigo-700">{personal_info.email}</a>}
-          {personal_info.linkedin && <a href={personal_info.linkedin.startsWith('http') ? personal_info.linkedin : `https://${personal_info.linkedin}`} target="_blank" rel="noreferrer" className="hover:underline text-indigo-700">{personal_info.linkedin.replace(/^(https?:\\/\\/)?(www\.)?/, '')}</a>}
-          {personal_info.github && <a href={personal_info.github.startsWith('http') ? personal_info.github : `https://${personal_info.github}`} target="_blank" rel="noreferrer" className="hover:underline text-indigo-700">{personal_info.github.replace(/^(https?:\\/\\/)?(www\.)?/, '')}</a>}
+          {personal_info.linkedin && <a href={personal_info.linkedin.includes('linkedin.com') ? (personal_info.linkedin.startsWith('http') ? personal_info.linkedin : `https://${personal_info.linkedin}`) : `https://linkedin.com/in/${personal_info.linkedin}`} target="_blank" rel="noreferrer" className="hover:underline text-indigo-700">{personal_info.linkedin.replace(/^(https?:\\/\\/)?(www\.)?/, '')}</a>}
+          {personal_info.github && <a href={personal_info.github.includes('github.com') ? (personal_info.github.startsWith('http') ? personal_info.github : `https://${personal_info.github}`) : `https://github.com/${personal_info.github}`} target="_blank" rel="noreferrer" className="hover:underline text-indigo-700">{personal_info.github.replace(/^(https?:\\/\\/)?(www\.)?/, '')}</a>}
           {personal_info.website && <a href={personal_info.website.startsWith('http') ? personal_info.website : `https://${personal_info.website}`} target="_blank" rel="noreferrer" className="hover:underline text-indigo-700">{personal_info.website.replace(/^(https?:\\/\\/)?(www\.)?/, '')}</a>}
           {personal_info.location && <span>{personal_info.location}</span>}
         </div>

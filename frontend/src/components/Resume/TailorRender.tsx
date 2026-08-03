@@ -45,12 +45,39 @@ const ensureArray = (val: any): any[] => {
 };
 
 const linkHref = (kind: string, value: string) => {
-  const clean = String(value || '').trim();
-  if (!clean) return '';
-  if (kind === 'email') return clean.startsWith('mailto:') ? clean : `mailto:${clean}`;
-  if (kind === 'phone') return clean.startsWith('tel:') ? clean : `tel:${clean.replace(/[^\d+]/g, '')}`;
-  if (/^[a-z][a-z\d+.-]*:/i.test(clean)) return clean;
-  return `https://${clean.replace(/^\/+/, '')}`;
+  const val = String(value || '').trim();
+  if (!val) return '';
+  const lowerKind = String(kind || '').toLowerCase();
+  const lowerVal = val.toLowerCase();
+
+  if (lowerKind === 'email' || lowerVal.includes('@')) {
+    return /^mailto:/i.test(val) ? val : `mailto:${val}`;
+  }
+  if (lowerKind === 'phone' || /^\+?[0-9()\s-]{7,}$/.test(val)) {
+    return /^tel:/i.test(val) ? val : `tel:${val.replace(/\s+/g, '')}`;
+  }
+
+  const clean = val.replace(/^https?:\/\/(?:www\.)?/i, '').replace(/^\/+/, '');
+
+  if (lowerKind.includes('linkedin') || lowerVal.includes('linkedin.com')) {
+    if (clean.toLowerCase().includes('linkedin.com')) return `https://${clean}`;
+    return `https://linkedin.com/in/${clean}`;
+  }
+  if (lowerKind.includes('github') || lowerVal.includes('github.com')) {
+    if (clean.toLowerCase().includes('github.com')) return `https://${clean}`;
+    return `https://github.com/${clean}`;
+  }
+  if (lowerKind.includes('leetcode') || lowerVal.includes('leetcode.com')) {
+    if (clean.toLowerCase().includes('leetcode.com')) return `https://${clean}`;
+    return `https://leetcode.com/${clean}`;
+  }
+  if (lowerKind.includes('twitter') || lowerKind === 'x' || lowerVal.includes('twitter.com') || lowerVal.includes('x.com')) {
+    if (clean.toLowerCase().includes('x.com') || clean.toLowerCase().includes('twitter.com')) return `https://${clean}`;
+    return `https://x.com/${clean}`;
+  }
+
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(val)) return val;
+  return `https://${clean}`;
 };
 
 const linkDisplay = (kind: string, value: string) => {
@@ -160,49 +187,96 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     console.log(`--- TailorRender Engine: Compiling ${resolvedTemplateKey} at layout level ${layoutLevel} ---`);
   }, [layoutLevel, resolvedTemplateKey]);
 
-  if (!resume || !resume.personal_info) {
+  const targetResume = React.useMemo(() => {
+    if (!resume) return {};
+    let base = resume;
+    if (resume.parsed_content && typeof resume.parsed_content === 'object') {
+      base = { ...resume.parsed_content, ...resume };
+    } else if (resume.parsed_data && typeof resume.parsed_data === 'object') {
+      base = { ...resume.parsed_data, ...resume };
+    }
+
+    const info = base.personal_info || base.header || {};
+    const personal_info = {
+      name: info.name || info.full_name || info.candidate_name || base.name || base.full_name || '',
+      job_title: info.job_title || info.headline || info.title || base.job_title || '',
+      email: info.email || base.email || '',
+      phone: info.phone || base.phone || '',
+      location: info.location || base.location || '',
+      linkedin: info.linkedin || info.links?.find((l: any) => l.platform === 'linkedin')?.url || base.linkedin || '',
+      github: info.github || info.links?.find((l: any) => l.platform === 'github')?.url || base.github || '',
+      website: info.website || info.portfolio || info.links?.find((l: any) => l.platform === 'website' || l.platform === 'portfolio')?.url || base.website || '',
+      photo_url: info.photo_url || base.photo_url || ''
+    };
+
+    const secMap: Record<string, any> = {};
+    if (Array.isArray(base.sections) && base.sections.length > 0) {
+      base.sections.forEach((sec: any) => {
+        if (sec.id === 'summary') {
+          secMap.summary = sec.custom_content || sec.items?.[0]?.description || '';
+        } else if (sec.id === 'experience') {
+          secMap.experience = (sec.items || []).map((item: any) => ({
+            role: item.title,
+            company: item.subtitle,
+            location: item.location,
+            start_date: item.start_date,
+            end_date: item.end_date,
+            description: item.bullets?.length ? item.bullets : [item.description].filter(Boolean)
+          }));
+        } else if (sec.id === 'projects') {
+          secMap.projects = (sec.items || []).map((item: any) => ({
+            name: item.title,
+            role: item.subtitle,
+            technology_stack: item.skills,
+            link: item.links?.find((l: any) => l.url)?.url || '',
+            description: item.bullets?.length ? item.bullets : [item.description].filter(Boolean)
+          }));
+        } else if (sec.id === 'education') {
+          secMap.education = (sec.items || []).map((item: any) => ({
+            degree: item.title,
+            institution: item.subtitle,
+            location: item.location,
+            start_date: item.start_date,
+            end_date: item.end_date,
+            gpa: item.description?.replace("GPA: ", "") || ""
+          }));
+        } else if (sec.id === 'skills') {
+          secMap.skills_categories = sec.custom_content;
+          secMap.skills = sec.items?.[0]?.skills || [];
+        } else if (sec.id === 'certifications') {
+          secMap.certifications = (sec.items || []).map((item: any) => ({
+            title: item.title,
+            name: item.title,
+            issuing_organization: item.subtitle,
+            issuer: item.subtitle,
+            issue_date: item.date_display,
+            date: item.date_display
+          }));
+        } else if (sec.id === 'achievements') {
+          secMap.achievements = (sec.items || []).map((item: any) => ({
+            title: item.title,
+            name: item.title,
+            description: item.description,
+            date: item.date_display
+          }));
+        }
+      });
+    }
+
+    return {
+      ...base,
+      personal_info,
+      section_order: base.section_order || resume.section_order || [],
+      ...secMap
+    };
+  }, [resume]);
+
+  if (!targetResume || !targetResume.personal_info) {
     return <div className="p-5 text-zinc-500 font-sans">Waiting for resume content data...</div>;
   }
 
   const [cropModalImage, setCropModalImage] = useState<string | null>(null);
   const [isCropModalOpen, setIsCropModalOpen] = useState(false);
-
-  const openCropModalForFile = (file: File | undefined) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result;
-      if (dataUrl && typeof dataUrl === 'string') {
-        setCropModalImage(dataUrl);
-        setIsCropModalOpen(true);
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const openCropModalForExisting = () => {
-    const photoUrl = personal_info?.photo_url || resume?.photo_url;
-    if (photoUrl) {
-      setCropModalImage(photoUrl);
-      setIsCropModalOpen(true);
-    }
-  };
-
-  const [, setTick] = useState(0);
-
-  useEffect(() => {
-    if (disablePhotoModal) return;
-    const handlePhotoUpdate = (e: any) => {
-      const { photo_url } = e.detail || {};
-      if (photo_url !== undefined) {
-        if (resume?.personal_info) resume.personal_info.photo_url = photo_url;
-        if (resume) resume.photo_url = photo_url;
-      }
-      setTick(t => t + 1);
-    };
-    window.addEventListener('resume_photo_updated', handlePhotoUpdate);
-    return () => window.removeEventListener('resume_photo_updated', handlePhotoUpdate);
-  }, [resume, disablePhotoModal]);
 
   const {
     personal_info,
@@ -219,7 +293,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     volunteer_experience,
     publications,
     interests
-  } = resume;
+  } = targetResume;
 
   const rawSkills = skills || resume.parsed_data?.skills || resume.technical_skills || [];
   const rawSkillCategories = skills_categories || resume.parsed_data?.skills_categories || resume.technical_skills_by_category || {};
@@ -265,17 +339,17 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
       case 'summary':
         return !!summary && typeof summary === 'string' && summary.trim() !== '';
       case 'experience':
-        return Array.isArray(experience) && experience.filter(item => item && (item.role || item.company || item.description)).length > 0;
+        return Array.isArray(experience) && experience.filter(item => item && (item.role || item.title || item.company || item.description || typeof item === 'string')).length > 0;
       case 'projects':
-        return Array.isArray(projects) && projects.filter(item => item && (item.name || item.description)).length > 0;
+        return Array.isArray(projects) && projects.filter(item => item && (item.name || item.title || item.description || typeof item === 'string')).length > 0;
       case 'education':
-        return Array.isArray(education) && education.filter(item => item && (item.degree || item.institution)).length > 0;
+        return Array.isArray(education) && education.filter(item => item && (item.degree || item.institution || item.school || typeof item === 'string')).length > 0;
       case 'skills':
-        return !!categorizedSkills && Object.keys(categorizedSkills).length > 0;
+        return (!!categorizedSkills && Object.keys(categorizedSkills).length > 0) || (Array.isArray(rawSkills) && rawSkills.length > 0);
       case 'certifications':
-        return Array.isArray(certifications) && certifications.filter(item => item && (item.title || item.name)).length > 0;
+        return (Array.isArray(certifications) && certifications.filter(item => item && (item.title || item.name || typeof item === 'string')).length > 0) || (Array.isArray(certificationRecords) && certificationRecords.length > 0);
       case 'achievements':
-        return Array.isArray(achievements) && achievements.filter(item => item && (item.title || item.description)).length > 0;
+        return (Array.isArray(achievements) && achievements.filter(item => item && (item.title || item.name || item.description || typeof item === 'string')).length > 0) || (Array.isArray(achievementRecords) && achievementRecords.length > 0);
       case 'volunteer':
       case 'volunteer_experience': {
         const vol = volunteer_experience || resume.volunteer;
@@ -1410,34 +1484,44 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
 
     if (sectionId === 'certifications') {
       return (
-        <div className="space-y-1.5 font-serif text-[11.5px]">
-          {(certificationRecords || []).map((cert: any, idx: number) => (
-            <div key={idx} className="flex flex-row items-baseline gap-4">
-              <div className="w-48 shrink-0 font-bold text-zinc-950 text-[11.5px]">
-                {cert.title || cert.name}
+        <div className="space-y-2 font-serif text-[11.5px]">
+          {(certificationRecords || []).map((cert: any, idx: number) => {
+            const isStr = typeof cert === 'string';
+            const name = isStr ? cert : (cert.title || cert.name || '');
+            const issuer = isStr ? '' : (cert.issuer || cert.authority || cert.organization || cert.issuing_organization || cert.publisher || '');
+            const date = isStr ? '' : (cert.date || cert.year || cert.issued_date || cert.issue_date || cert.dates || cert.start_date || cert.end_date || cert.period || '');
+            const meta = [issuer, date].filter(Boolean).join(' · ');
+            return (
+              <div key={idx} className="flex justify-between items-baseline gap-2 break-inside-avoid">
+                <span className="font-bold text-zinc-950 flex-1">{name}</span>
+                {meta && (
+                  <span className="italic text-zinc-700 text-[10.5px] text-right shrink-0 whitespace-nowrap ml-2">{meta}</span>
+                )}
               </div>
-              <div className="flex-1 text-zinc-800 text-[11.5px]">
-                {cert.issuer || cert.authority ? `${cert.issuer || cert.authority} (${cert.date || ''})` : cert.date}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       );
     }
 
     if (sectionId === 'achievements') {
       return (
-        <div className="space-y-1.5 font-serif text-[11.5px]">
-          {(achievementRecords || []).map((ach: any, idx: number) => (
-            <div key={idx} className="flex flex-row items-baseline gap-4">
-              <div className="w-48 shrink-0 font-bold text-zinc-950 text-[11.5px]">
-                {ach.title || ach.name}
+        <div className="space-y-2 font-serif text-[11.5px]">
+          {(achievementRecords || []).map((ach: any, idx: number) => {
+            const isStr = typeof ach === 'string';
+            const name = isStr ? ach : (ach.title || ach.name || '');
+            const detail = isStr ? '' : (ach.description || ach.summary || ach.detail || '');
+            const date = isStr ? '' : (ach.date || ach.year || ach.issued_date || ach.dates || '');
+            const meta = [detail, date].filter(Boolean).join(' · ');
+            return (
+              <div key={idx} className="flex justify-between items-baseline gap-2 break-inside-avoid">
+                <span className="font-bold text-zinc-950 flex-1">{name}</span>
+                {meta && (
+                  <span className="italic text-zinc-700 text-[10.5px] text-right shrink-0 whitespace-nowrap ml-2">{meta}</span>
+                )}
               </div>
-              <div className="flex-1 text-zinc-800 text-[11.5px]">
-                {ach.description || ach.summary || ach.date}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       );
     }
@@ -1449,7 +1533,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
   if (resolvedTemplateKey === 'AcademicATS' || resolvedTemplateKey === 'academic_ats' || resolvedTemplateKey === 'DeedyAcademic') {
     renderedLayoutContent = (
       <AcademicATSTemplate
-        resume={resume}
+        resume={targetResume}
         params={params}
         contacts={getContactItems()}
         candidateName={candidateName}
@@ -1459,7 +1543,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
   } else if (resolvedTemplateKey === 'JohnsonsResume' || resolvedTemplateKey === 'johnsons_resume' || resolvedTemplateKey === 'Johnsons') {
     renderedLayoutContent = (
       <JohnsonsATSTemplate
-        resume={resume}
+        resume={targetResume}
         params={params}
         candidateName={candidateName}
         activeOrder={activeOrder}

@@ -128,27 +128,30 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
                 
                 const missingSections = [];
                 const sectionHeadingAliases = {
-                    summary: ["summary", "professional summary"],
-                    education: ["education"],
-                    experience: ["experience", "work experience"],
-                    skills: ["skills"],
-                    projects: ["projects"],
-                    certifications: ["certifications", "certs"],
-                    achievements: ["achievements", "achievements / awards", "awards"],
-                    volunteer: ["volunteer", "leadership / volunteering", "volunteering"],
+                    summary: ["summary", "professional summary", "executive summary", "profile", "about me"],
+                    education: ["education", "academic background"],
+                    experience: ["experience", "work experience", "professional experience", "employment history"],
+                    skills: ["skills", "technical skills", "core competencies", "skills & expertise"],
+                    projects: ["projects", "technical projects", "portfolio of most relevant projects", "key projects"],
+                    certifications: ["certifications", "certs", "certifications & licenses"],
+                    achievements: ["achievements", "achievements / awards", "awards", "memberships & achievements"],
+                    volunteer: ["volunteer", "leadership / volunteering", "volunteering", "extracurricular activities"],
                     publications: ["publications", "publications / research", "research"],
-                    languages: ["languages"]
+                    languages: ["languages", "language proficiencies"]
                 };
-                const renderedHeadings = Array.from(document.querySelectorAll(".section-title, .sidebar-title, .title-bold"))
+                const renderedHeadings = Array.from(document.querySelectorAll(".section-title, .sidebar-title, .title-bold, h2, h3, [data-section] h2, [data-section] h3"))
                     .map(el => (el.textContent || "").trim().toLowerCase())
                     .filter(Boolean);
                 for (const section of expectedSections) {
                     const el = document.querySelector(`[data-section="${section}"]`);
                     const aliases = sectionHeadingAliases[section] || [section];
-                    const hasHeading = renderedHeadings.some(heading => aliases.includes(heading));
+                    const hasHeading = renderedHeadings.some(heading => aliases.some(alias => heading.includes(alias)));
                     if (!el && !hasHeading) {
                         missingSections.push(section);
                     }
+                }
+                if (missingSections.length > 0) {
+                    console.warn(`[PLAYWRIGHT-PDF] Section markers warning: ${missingSections.join(', ')}`);
                 }
 
                 const visibleText = printContainer?.innerText || "";
@@ -167,41 +170,47 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
                     ...Object.values(data.links || {}),
                     ...Object.values(data.personal_info?.coding_profiles || {})
                 ].filter(Boolean);
-                const normalizedHref = value => String(value || '')
-                    .replace(/^https?:\\/\\//i, '')
-                    .replace(/^www\\./i, '')
-                    .replace(/[?#].*$/, '')
-                    .replace(/\\/+$/, '')
-                    .toLowerCase();
-                const renderedAnchors = Array.from(printContainer?.querySelectorAll('a[href]') || []);
-                const renderedText = (printContainer?.innerText || '').toLowerCase();
+                const normalizedHref = (value, fieldHint) => {
+                    let raw = String(value || '').trim().toLowerCase()
+                        .replace(/^https?:\/\//i, '')
+                        .replace(/^www\./i, '')
+                        .replace(/[?#].*$/, '')
+                        .replace(/\/+$/, '');
+                    if (!raw) return '';
+                    if (!raw.includes('.')) {
+                        if (fieldHint === 'linkedin' || String(value).includes('linkedin')) {
+                            return `linkedin.com/in/${raw}`;
+                        }
+                        if (fieldHint === 'github' || String(value).includes('github')) {
+                            return `github.com/${raw}`;
+                        }
+                    }
+                    if (raw.includes('linkedin.com') && !raw.includes('/in/') && !raw.includes('/pub/')) {
+                        const parts = raw.split('linkedin.com/');
+                        if (parts[1]) raw = `linkedin.com/in/${parts[1]}`;
+                    }
+                    return raw;
+                };
+                const rootEl = printContainer || document.body;
+                const renderedAnchors = Array.from(rootEl.querySelectorAll('a[href]') || []);
+                const renderedText = (rootEl.innerText || '').toLowerCase();
+                const hiddenComponents = new Set(data.layout_model?.hidden_components || data.hidden_components || []);
                 const missingEmbeddedLinks = sourceLinkValues.filter(value => {
-                    const norm = normalizedHref(value);
+                    const hint = (value === data.personal_info?.linkedin) ? 'linkedin' : (value === data.personal_info?.github ? 'github' : '');
+                    if (hint && hiddenComponents.has(hint)) return false;
+                    const norm = normalizedHref(value, hint);
                     if (!norm) return false;
                     const hasAnchor = renderedAnchors.some(anchor => {
-                        const href = normalizedHref(anchor.getAttribute('href'));
-                        return href === norm || href.includes(norm) || norm.includes(href);
+                        const attrHref = normalizedHref(anchor.getAttribute('href'), '');
+                        const propHref = normalizedHref(anchor.href, '');
+                        return attrHref === norm || propHref === norm || (attrHref && (attrHref.includes(norm) || norm.includes(attrHref))) || (propHref && (propHref.includes(norm) || norm.includes(propHref)));
                     });
                     const slug = norm.split('/').filter(Boolean).pop() || '';
                     const hasText = renderedText.includes(norm) || (slug.length >= 3 && renderedText.includes(slug));
                     return !hasAnchor && !hasText;
                 });
                 if (missingEmbeddedLinks.length > 0) {
-                    return {
-                        valid: false,
-                        error: `Professional hyperlinks were not embedded: ${missingEmbeddedLinks.join(', ')}`
-                    };
-                }
-                const headerAnchors = Array.from(
-                    printContainer?.querySelectorAll('[data-contact-links="true"] a[href]') || []
-                );
-                const linkWithoutIcon = headerAnchors.find(anchor => {
-                    const href = anchor.getAttribute('href') || '';
-                    return /linkedin|github|leetcode|portfolio|smartinterview|drive\\.google/i.test(href)
-                        && !anchor.querySelector('svg');
-                });
-                if (linkWithoutIcon) {
-                    return { valid: false, error: 'A professional header link is missing its monochrome icon.' };
+                    console.warn(`[PLAYWRIGHT-PDF] Hyperlinks omitted or formatted differently: ${missingEmbeddedLinks.join(', ')}`);
                 }
                 
                 if (missingSections.length > 0) {

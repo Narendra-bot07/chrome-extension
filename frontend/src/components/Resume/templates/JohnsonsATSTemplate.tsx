@@ -172,35 +172,53 @@ export const JohnsonsATSTemplate: React.FC<JohnsonsATSTemplateProps> = ({
 
     if (sectionId === 'certifications') {
       return (
-        <div className="space-y-1.5 font-serif text-[11.5px]">
-          {(certifications || []).map((cert: any, idx: number) => (
-            <div key={idx} className="flex flex-row items-baseline gap-4">
-              <div className="w-48 shrink-0 font-bold text-zinc-950 text-[11.5px]">
-                {cert.title || cert.name}
+        <div className="space-y-2 font-serif text-[11.5px]">
+          {(certifications || []).map((cert: any, idx: number) => {
+            const isStr = typeof cert === 'string';
+            const name = isStr ? cert : (cert.title || cert.name || '');
+            const issuer = isStr ? '' : (cert.issuer || cert.authority || cert.organization || cert.issuing_organization || cert.publisher || '');
+            const date = isStr ? '' : (cert.date || cert.year || cert.issued_date || cert.issue_date || cert.dates || cert.start_date || cert.end_date || cert.period || '');
+            const meta = [issuer, date].filter(Boolean).join(' · ');
+            return (
+              <div key={idx} className="flex justify-between items-baseline gap-2 break-inside-avoid">
+                <span className="font-bold text-zinc-950 flex-1">{name}</span>
+                {meta && (
+                  <span className="italic text-zinc-700 text-[10.5px] text-right shrink-0 whitespace-nowrap ml-2">{meta}</span>
+                )}
               </div>
-              <div className="flex-1 text-zinc-800 text-[11.5px]">
-                {cert.issuer || cert.authority ? `${cert.issuer || cert.authority} (${cert.date || ''})` : cert.date}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       );
     }
 
     if (sectionId === 'achievements') {
       return (
-        <div className="space-y-1.5 font-serif text-[11.5px]">
-          {(achievements || []).map((ach: any, idx: number) => (
-            <div key={idx} className="flex flex-row items-baseline gap-4">
-              <div className="w-48 shrink-0 font-bold text-zinc-950 text-[11.5px]">
-                {ach.title || ach.name}
+        <div className="space-y-2 font-serif text-[11.5px]">
+          {(achievements || []).map((ach: any, idx: number) => {
+            const isStr = typeof ach === 'string';
+            const name = isStr ? ach : (ach.title || ach.name || '');
+            const detail = isStr ? '' : (ach.description || ach.summary || ach.detail || '');
+            const date = isStr ? '' : (ach.date || ach.year || ach.issued_date || ach.dates || '');
+            const meta = [detail, date].filter(Boolean).join(' · ');
+            return (
+              <div key={idx} className="flex justify-between items-baseline gap-2 break-inside-avoid">
+                <span className="font-bold text-zinc-950 flex-1">{name}</span>
+                {meta && (
+                  <span className="italic text-zinc-700 text-[10.5px] text-right shrink-0 whitespace-nowrap ml-2">{meta}</span>
+                )}
               </div>
-              <div className="flex-1 text-zinc-800 text-[11.5px]">
-                {ach.description || ach.summary || ach.date}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
+      );
+    }
+
+    if (sectionId === 'summary') {
+      return (
+        <p className="font-serif text-zinc-900 text-[11.5px] leading-relaxed italic">
+          {resume.summary}
+        </p>
       );
     }
 
@@ -238,7 +256,7 @@ export const JohnsonsATSTemplate: React.FC<JohnsonsATSTemplateProps> = ({
             {personal_info?.phone && <span>Telephone number: {personal_info.phone}</span>}
           </div>
           {(personal_info?.linkedin || personal_info?.github || personal_info?.website) && (
-            <div data-contact-links="true" className="flex flex-wrap justify-center items-center gap-x-2">
+            <div className="flex flex-wrap justify-center items-center gap-x-2">
               {personal_info?.linkedin && <span>LinkedIn: {linkDisplay('linkedin', personal_info.linkedin)}</span>}
               {personal_info?.linkedin && (personal_info?.github || personal_info?.website) && <span className="text-[#1d5288] select-none">✻</span>}
               {personal_info?.github && <span>GitHub: {linkDisplay('github', personal_info.github)}</span>}

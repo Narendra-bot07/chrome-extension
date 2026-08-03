@@ -49,6 +49,26 @@ async def create_checkout(
         key_id=checkout_res.get("key_id")
     )
 
+@router.post("/verify-session")
+async def verify_checkout_session(
+    req: Dict[str, Any],
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    sub_svc: SubscriptionService = Depends(get_subscription_service),
+    credit_svc: CreditService = Depends(get_credit_service)
+):
+    plan_id = (req.get("plan_id") or req.get("plan_code") or "pro").lower()
+    plan = sub_svc.get_plan(plan_id)
+    if not plan:
+        plans = sub_svc.get_all_plans()
+        plan = next((p for p in plans if p["code"].lower() == plan_id or p["id"].lower() == plan_id), None)
+        if not plan and plans:
+            plan = plans[0]
+
+    if plan:
+        sub_svc.activate_subscription(user["id"], plan["id"], "stripe", f"sub_active_{user['id']}")
+        return {"status": "success", "plan": plan}
+    return {"status": "success"}
+
 @router.get("/history", response_model=BillingHistoryResponse)
 async def get_history(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),

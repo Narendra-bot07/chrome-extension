@@ -36,11 +36,25 @@ def list_notifications(category: Optional[str] = None, action_required: bool = F
     return {"items": rows[:limit], "next_cursor": rows[limit-1]["created_at"] if len(rows) > limit else None}
 
 @router.get("/unread-count")
-def unread_count(user: Dict[str, Any] = Depends(verify_supabase_jwt), conn=Depends(get_db_connection)):
-    row = _rows(conn, """select count(*)::int count from notifications where user_id=%s and status='unread'
-        and priority in ('critical','high','normal') and deleted_at is null
-        and (expires_at is null or expires_at > now())""", (user["id"],), True)
-    return {"count": row["count"], "display": "99+" if row["count"] > 99 else str(row["count"])}
+def unread_count(user: Dict[str, Any] = Depends(verify_supabase_jwt)):
+    try:
+        from core.database import get_db_pool
+        pool = get_db_pool()
+        conn = pool.getconn()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""select count(*)::int count from notifications where user_id=%s and status='unread'
+                    and priority in ('critical','high','normal') and deleted_at is null
+                    and (expires_at is null or expires_at > now())""", (user["id"],))
+                row = cur.fetchone()
+            pool.putconn(conn)
+            count = row["count"] if row else 0
+            return {"count": count, "display": "99+" if count > 99 else str(count)}
+        except Exception:
+            pool.putconn(conn, close=True)
+            return {"count": 0, "display": "0"}
+    except Exception:
+        return {"count": 0, "display": "0"}
 
 @router.patch("/{notification_id}")
 def update_notification(notification_id: str, body: NotificationStateRequest,

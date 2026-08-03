@@ -192,11 +192,45 @@ class LangChainDeepSeekWrapper:
             prompt = input_data
         elif hasattr(input_data, "to_string"):
             prompt = input_data.to_string()
+        elif hasattr(input_data, "text"):
+            prompt = str(input_data.text)
         elif isinstance(input_data, list):
             prompt = "\n".join([str(m) for m in input_data])
+        elif isinstance(input_data, dict):
+            prompt = json.dumps(input_data)
         else:
             prompt = str(input_data)
         return self.provider.invoke_structured(prompt=prompt, schema_cls=self.schema_cls)
+
+    def __call__(self, input_data: Any, **kwargs: Any) -> Any:
+        return self.invoke(input_data, **kwargs)
+
+    def __or__(self, other: Any) -> Any:
+        return _RunnablePipe(self, other)
+
+    def __ror__(self, other: Any) -> Any:
+        return _RunnablePipe(other, self)
+
+class _RunnablePipe:
+    """Lightweight LCEL Runnable Pipe composing prompts with DeepSeek structured output."""
+    def __init__(self, first: Any, second: Any):
+        self.first = first
+        self.second = second
+
+    def invoke(self, input_data: Any, **kwargs: Any) -> Any:
+        if hasattr(self.first, "invoke"):
+            first_res = self.first.invoke(input_data, **kwargs)
+        elif callable(self.first):
+            first_res = self.first(input_data, **kwargs)
+        else:
+            first_res = self.first
+        return self.second.invoke(first_res, **kwargs)
+
+    def __or__(self, other: Any) -> Any:
+        return _RunnablePipe(self, other)
+
+    def __ror__(self, other: Any) -> Any:
+        return _RunnablePipe(other, self)
 
 class ResilientLLMWrapper:
     """Provider-neutral ResilientLLMWrapper providing backward compatibility for get_llm()."""

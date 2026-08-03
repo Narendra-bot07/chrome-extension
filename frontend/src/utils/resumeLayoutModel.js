@@ -120,17 +120,23 @@ export function createResumeLayoutModel(resume = {}, templateId = 'ExecutiveATS'
   const existingSidebar = uniqueSupported(
     existing.sidebar || treeColumns.filter(column => Number(column.width) <= 4).flatMap(column => column.sections || [])
   ).filter(section => availability.body[section]);
+  const templateChanged = existing.template_id && existing.template_id !== templateId;
+  const needRebalance = templateChanged || (split && existingSidebar.length === 0);
   const claimed = new Set([...existingMain, ...existingSidebar]);
   const remaining = sourceOrder.filter(section => !claimed.has(section));
+
   const main = !split
-    ? [...existingMain, ...existingSidebar, ...remaining]
-    : existingMain.length || existingSidebar.length
+    ? (existingMain.length || existingSidebar.length
+        ? [...existingMain, ...existingSidebar, ...remaining]
+        : sourceOrder)
+    : (!needRebalance && (existingMain.length || existingSidebar.length))
     ? [...existingMain, ...remaining]
     : sourceOrder.filter(section => !split || !DEFAULT_SIDEBAR.has(section));
+
   const sidebar = split
-    ? (existingMain.length || existingSidebar.length
+    ? (!needRebalance && (existingMain.length || existingSidebar.length))
       ? existingSidebar
-      : sourceOrder.filter(section => DEFAULT_SIDEBAR.has(section)))
+      : sourceOrder.filter(section => DEFAULT_SIDEBAR.has(section))
     : [];
 
   const repairedMain = [...main];

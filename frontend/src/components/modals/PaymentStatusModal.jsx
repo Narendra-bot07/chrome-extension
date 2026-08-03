@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, CheckCircle2, AlertCircle, ShieldCheck } from 'lucide-react';
 import BrandLogo from '../BrandLogo';
 
-export function PaymentStatusModal({ isOpen, status, planName, onClose, onRetry }) {
+export function PaymentStatusModal({ isOpen, status, planName, onClose, onRetry, onCheckStatus }) {
   if (!isOpen || typeof document === 'undefined') return null;
 
   const isPending = status === 'pending' || status === 'processing';

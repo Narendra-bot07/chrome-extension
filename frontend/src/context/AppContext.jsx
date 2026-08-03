@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+﻿import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { compressResumeData } from '../utils/resumeCompression';
 import { toRenderableResume } from '../utils/renderableResume';
@@ -791,7 +791,7 @@ export function AppProvider({ children }) {
         setJobSessionHydrated(true);
       }
     } else {
-      const savedKey = localStorage.getItem('gemini_api_key') || localStorage.getItem('groq_api_key');
+      const savedKey = null; // Legacy API key storage removed (DeepSeek migration)
       const savedUrl = localStorage.getItem('fastapi_api_url');
       const savedResume = localStorage.getItem('parsed_resume');
       const savedTailored = localStorage.getItem('tailored_resume');
@@ -1660,7 +1660,7 @@ export function AppProvider({ children }) {
     const headers = {
       "Content-Type": "application/json",
       ...(token ? { "Authorization": `Bearer ${token}` } : {}),
-      ...(apiKey ? { "x-groq-key": apiKey } : {})
+      
     };
     const resume = toRenderableResume(parsedResume);
     try {
@@ -2250,7 +2250,7 @@ export function AppProvider({ children }) {
 
     try {
       const headers = {};
-      if (apiKey) headers["x-groq-key"] = apiKey;
+      
       const token = session?.access_token || localStorage.getItem('access_token');
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
@@ -2418,7 +2418,7 @@ export function AppProvider({ children }) {
       const token = session?.access_token || localStorage.getItem('access_token');
       const headers = {};
       if (token) headers["Authorization"] = `Bearer ${token}`;
-      if (apiKey) headers["x-groq-key"] = apiKey;
+      
 
       const formData = new FormData();
       formData.append("file", selectedFile);
@@ -2499,7 +2499,7 @@ export function AppProvider({ children }) {
         const token = session?.access_token || localStorage.getItem('access_token');
         const parseHeaders = {};
         if (token) parseHeaders["Authorization"] = `Bearer ${token}`;
-        if (apiKey) parseHeaders["x-groq-key"] = apiKey;
+        
 
         const parseRes = await fetch(`${apiUrl}/api/v1/resumes/${parsedResume.id}/parse`, {
           method: "POST",
@@ -2514,7 +2514,7 @@ export function AppProvider({ children }) {
       }
 
       const headers = {};
-      if (apiKey) headers["x-groq-key"] = apiKey;
+      
       const token = session?.access_token || localStorage.getItem('access_token');
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
@@ -2607,7 +2607,7 @@ export function AppProvider({ children }) {
         const token = session?.access_token || localStorage.getItem('access_token');
         const parseHeaders = {};
         if (token) parseHeaders["Authorization"] = `Bearer ${token}`;
-        if (apiKey) parseHeaders["x-groq-key"] = apiKey;
+        
 
         const parseRes = await fetch(`${apiUrl}/api/v1/resumes/${activeParsed.id}/parse`, {
           method: "POST",
@@ -2631,7 +2631,7 @@ export function AppProvider({ children }) {
         const recoveryToken = session?.access_token || localStorage.getItem('access_token');
         const recoveryHeaders = {};
         if (recoveryToken) recoveryHeaders.Authorization = `Bearer ${recoveryToken}`;
-        if (apiKey) recoveryHeaders['x-groq-key'] = apiKey;
+        
         const recoveryRes = await fetch(
           `${apiUrl}/api/v1/resumes/${activeParsed.id}/recover-source`,
           {
@@ -2650,7 +2650,7 @@ export function AppProvider({ children }) {
       }
 
       const headers = {};
-      if (apiKey) headers["x-groq-key"] = apiKey;
+      
       const token = session?.access_token || localStorage.getItem('access_token');
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
@@ -3242,7 +3242,7 @@ export function AppProvider({ children }) {
     setLoadingProgress(35);
     try {
       const headers = { "Content-Type": "application/json" };
-      if (apiKey) headers["x-groq-key"] = apiKey;
+      
       const response = await fetch(`${apiUrl}/api/cover-letter`, {
         method: "POST",
         headers,
@@ -3315,7 +3315,7 @@ export function AppProvider({ children }) {
     setLoadingProgress(15);
     try {
       const headers = { "Content-Type": "application/json" };
-      if (apiKey) headers["x-groq-key"] = apiKey;
+      
 
       let currentCtx = coverLetterContext;
       if (!currentCtx || !currentCtx.ready_for_generation) {
@@ -3483,7 +3483,7 @@ export function AppProvider({ children }) {
     setCoverLetterEditStreaming(true);
     try {
       const headers = { "Content-Type": "application/json" };
-      if (apiKey) headers["x-groq-key"] = apiKey;
+      
       const response = await fetch(`${apiUrl}/api/cover-letter/edit/stream`, {
         method: "POST",
         headers,
@@ -3614,7 +3614,7 @@ export function AppProvider({ children }) {
         const token = session?.access_token || localStorage.getItem('access_token');
         const parseHeaders = {};
         if (token) parseHeaders["Authorization"] = `Bearer ${token}`;
-        if (apiKey) parseHeaders["x-groq-key"] = apiKey;
+        
 
         const parseRes = await fetch(`${apiUrl}/api/v1/resumes/${activeParsed.id}/parse`, {
           method: "POST",
@@ -3646,7 +3646,7 @@ export function AppProvider({ children }) {
       }
 
       const headers = {};
-      if (apiKey) headers["x-groq-key"] = apiKey;
+      
 
       const response = await fetch(`${apiUrl}/api/cover-letter/context`, {
         method: "POST",
@@ -3901,5 +3901,6 @@ export function useApp() {
   if (!context) throw new Error("useApp must be used inside an AppProvider");
   return context;
 }
+
 
 

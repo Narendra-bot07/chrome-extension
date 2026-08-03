@@ -29,8 +29,8 @@ export default function MinimalATS({ resume }) {
         <div className="text-xs mt-2 flex flex-col gap-1">
           {personal_info.phone && <span>P: {personal_info.phone}</span>}
           {personal_info.email && <a href={`mailto:${personal_info.email}`} className="hover:underline">E: {personal_info.email}</a>}
-          {personal_info.linkedin && <a href={personal_info.linkedin.startsWith('http') ? personal_info.linkedin : `https://${personal_info.linkedin}`} target="_blank" rel="noreferrer" className="hover:underline">In: {personal_info.linkedin.replace(/^(https?:\/\/)?(www\.)?/, '')}</a>}
-          {personal_info.github && <a href={personal_info.github.startsWith('http') ? personal_info.github : `https://${personal_info.github}`} target="_blank" rel="noreferrer" className="hover:underline">Git: {personal_info.github.replace(/^(https?:\/\/)?(www\.)?/, '')}</a>}
+          {personal_info.linkedin && <a href={personal_info.linkedin.includes('linkedin.com') ? (personal_info.linkedin.startsWith('http') ? personal_info.linkedin : `https://${personal_info.linkedin}`) : `https://linkedin.com/in/${personal_info.linkedin}`} target="_blank" rel="noreferrer" className="hover:underline">In: {personal_info.linkedin.replace(/^(https?:\/\/)?(www\.)?/, '')}</a>}
+          {personal_info.github && <a href={personal_info.github.includes('github.com') ? (personal_info.github.startsWith('http') ? personal_info.github : `https://${personal_info.github}`) : `https://github.com/${personal_info.github}`} target="_blank" rel="noreferrer" className="hover:underline">Git: {personal_info.github.replace(/^(https?:\/\/)?(www\.)?/, '')}</a>}
           {personal_info.website && <a href={personal_info.website.startsWith('http') ? personal_info.website : `https://${personal_info.website}`} target="_blank" rel="noreferrer" className="hover:underline">W: {personal_info.website.replace(/^(https?:\/\/)?(www\.)?/, '')}</a>}
           {personal_info.location && <span>L: {personal_info.location}</span>}
         </div>

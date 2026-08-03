@@ -23,10 +23,33 @@ const isUrl = value => typeof value === 'string' && /^(https?:\/\/|mailto:)/i.te
 const contactHref = (key, value) => {
   const text = String(value || '').trim();
   if (!text || key === 'location') return undefined;
-  if (key === 'email') return /^mailto:/i.test(text) ? text : `mailto:${text}`;
-  if (key === 'phone') return /^tel:/i.test(text) ? text : `tel:${text.replace(/[^\d+]/g, '')}`;
-  if (/^[a-z][a-z\d+.-]*:/i.test(text)) return text;
-  return `https://${text.replace(/^\/+/, '')}`;
+  const lowerKey = String(key || '').toLowerCase();
+  const lowerVal = text.toLowerCase();
+
+  if (lowerKey === 'email' || lowerVal.includes('@')) return /^mailto:/i.test(text) ? text : `mailto:${text}`;
+  if (lowerKey === 'phone' || /^\+?[0-9()\s-]{7,}$/.test(text)) return /^tel:/i.test(text) ? text : `tel:${text.replace(/[^\d+]/g, '')}`;
+
+  const clean = text.replace(/^https?:\/\/(?:www\.)?/i, '').replace(/^\/+/, '');
+
+  if (lowerKey.includes('linkedin') || lowerVal.includes('linkedin.com')) {
+    if (clean.toLowerCase().includes('linkedin.com')) return `https://${clean}`;
+    return `https://linkedin.com/in/${clean}`;
+  }
+  if (lowerKey.includes('github') || lowerVal.includes('github.com')) {
+    if (clean.toLowerCase().includes('github.com')) return `https://${clean}`;
+    return `https://github.com/${clean}`;
+  }
+  if (lowerKey.includes('leetcode') || lowerVal.includes('leetcode.com')) {
+    if (clean.toLowerCase().includes('leetcode.com')) return `https://${clean}`;
+    return `https://leetcode.com/${clean}`;
+  }
+  if (lowerKey.includes('twitter') || lowerKey === 'x' || lowerVal.includes('twitter.com') || lowerVal.includes('x.com')) {
+    if (clean.toLowerCase().includes('x.com') || clean.toLowerCase().includes('twitter.com')) return `https://${clean}`;
+    return `https://x.com/${clean}`;
+  }
+
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(text)) return text;
+  return `https://${clean}`;
 };
 const hasVisibleValue = value => {
   if (value === null || value === undefined || value === '') return false;

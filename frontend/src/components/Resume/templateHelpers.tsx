@@ -41,12 +41,37 @@ export const ensureArray = (val: any): any[] => {
 export const linkHref = (kind: string, value: string): string => {
   const val = String(value || '').trim();
   if (!val) return '#';
-  if (/^https?:\/\//i.test(val)) return val;
-  if (kind === 'email' || val.includes('@')) return `mailto:${val}`;
-  if (kind === 'phone' || /^\+?[0-9()\s-]{7,}$/.test(val)) return `tel:${val.replace(/\s+/g, '')}`;
-  if (kind === 'linkedin') return `https://${val.replace(/^https?:\/\//i, '')}`;
-  if (kind === 'github') return `https://${val.replace(/^https?:\/\//i, '')}`;
-  return `https://${val}`;
+  const lowerKind = String(kind || '').toLowerCase();
+  const lowerVal = val.toLowerCase();
+
+  if (lowerKind === 'email' || lowerVal.includes('@')) {
+    return /^mailto:/i.test(val) ? val : `mailto:${val}`;
+  }
+  if (lowerKind === 'phone' || /^\+?[0-9()\s-]{7,}$/.test(val)) {
+    return /^tel:/i.test(val) ? val : `tel:${val.replace(/\s+/g, '')}`;
+  }
+
+  const clean = val.replace(/^https?:\/\/(?:www\.)?/i, '').replace(/^\/+/, '');
+
+  if (lowerKind.includes('linkedin') || lowerVal.includes('linkedin.com')) {
+    if (clean.toLowerCase().includes('linkedin.com')) return `https://${clean}`;
+    return `https://linkedin.com/in/${clean}`;
+  }
+  if (lowerKind.includes('github') || lowerVal.includes('github.com')) {
+    if (clean.toLowerCase().includes('github.com')) return `https://${clean}`;
+    return `https://github.com/${clean}`;
+  }
+  if (lowerKind.includes('leetcode') || lowerVal.includes('leetcode.com')) {
+    if (clean.toLowerCase().includes('leetcode.com')) return `https://${clean}`;
+    return `https://leetcode.com/${clean}`;
+  }
+  if (lowerKind.includes('twitter') || lowerKind === 'x' || lowerVal.includes('twitter.com') || lowerVal.includes('x.com')) {
+    if (clean.toLowerCase().includes('x.com') || clean.toLowerCase().includes('twitter.com')) return `https://${clean}`;
+    return `https://x.com/${clean}`;
+  }
+
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(val)) return val;
+  return `https://${clean}`;
 };
 
 export const professionalLink = (kind: string, value: string) => {

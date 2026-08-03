@@ -94,10 +94,13 @@ export const professionalLink = (key, value) => {
     if (cleanUrl.includes('github.com/')) {
       username = cleanUrl.split('github.com/')[1]?.split('/')[0] || cleanUrl;
     }
+    const href = cleanUrl.toLowerCase().includes('github.com')
+      ? (raw.startsWith('http') ? raw : `https://${cleanUrl}`)
+      : `https://github.com/${cleanUrl}`;
     return {
       label: username || 'GitHub',
       type: 'github',
-      href: /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^https?:\/\//i, '')}`
+      href
     };
   }
 
@@ -108,26 +111,33 @@ export const professionalLink = (key, value) => {
     } else if (cleanUrl.includes('linkedin.com/pub/')) {
       username = cleanUrl.split('linkedin.com/pub/')[1]?.split('/')[0] || cleanUrl;
     }
+    const href = cleanUrl.toLowerCase().includes('linkedin.com')
+      ? (raw.startsWith('http') ? raw : `https://${cleanUrl}`)
+      : `https://linkedin.com/in/${cleanUrl}`;
     return {
       label: username || 'LinkedIn',
       type: 'linkedin',
-      href: /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^https?:\/\//i, '')}`
+      href
     };
   }
 
-  if (lowerVal.includes('leetcode.com')) {
+  if (lowerVal.includes('leetcode.com') || lowerKey.includes('leetcode')) {
     let username = cleanUrl;
     if (cleanUrl.includes('leetcode.com/')) {
       username = cleanUrl.split('leetcode.com/')[1]?.split('/')[0] || cleanUrl;
     }
-    return { label: username || cleanUrl, type: 'code' };
+    const href = cleanUrl.toLowerCase().includes('leetcode.com')
+      ? (raw.startsWith('http') ? raw : `https://${cleanUrl}`)
+      : `https://leetcode.com/${cleanUrl}`;
+    return { label: username || cleanUrl, type: 'code', href };
   }
 
   if (lowerVal.includes('drive.google') || lowerVal.includes('certificate')) {
-    return { label: 'Certificates', type: 'folder' };
+    return { label: 'Certificates', type: 'folder', href: raw.startsWith('http') ? raw : `https://${cleanUrl}` };
   }
 
-  return { label: cleanUrl || raw || 'Profile', type: 'website' };
+  const href = raw.startsWith('http') ? raw : `https://${cleanUrl}`;
+  return { label: cleanUrl || raw || 'Profile', type: 'website', href };
 };
 
 export const normalizePersonName = value => {

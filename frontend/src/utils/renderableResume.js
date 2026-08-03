@@ -218,9 +218,65 @@ export function toRenderableResume(record) {
     }
   }
 
+  let canonicalSectionsObj = {};
+  if (Array.isArray(record?.sections)) {
+    record.sections.forEach(sec => {
+      if (sec.id === 'summary') {
+        canonicalSectionsObj.summary = sec.custom_content || sec.items?.[0]?.description || '';
+      } else if (sec.id === 'experience') {
+        canonicalSectionsObj.experience = (sec.items || []).map(item => ({
+          role: item.title,
+          company: item.subtitle,
+          location: item.location,
+          start_date: item.start_date,
+          end_date: item.end_date,
+          description: item.bullets?.length ? item.bullets : [item.description].filter(Boolean)
+        }));
+      } else if (sec.id === 'projects') {
+        canonicalSectionsObj.projects = (sec.items || []).map(item => ({
+          name: item.title,
+          role: item.subtitle,
+          technology_stack: item.skills,
+          link: item.links?.find(l => l.url)?.url || '',
+          description: item.bullets?.length ? item.bullets : [item.description].filter(Boolean)
+        }));
+      } else if (sec.id === 'education') {
+        canonicalSectionsObj.education = (sec.items || []).map(item => ({
+          degree: item.title,
+          institution: item.subtitle,
+          location: item.location,
+          start_date: item.start_date,
+          end_date: item.end_date,
+          gpa: item.description?.replace("GPA: ", "") || ""
+        }));
+      } else if (sec.id === 'skills') {
+        canonicalSectionsObj.skills_categories = sec.custom_content;
+        canonicalSectionsObj.skills = sec.items?.[0]?.skills || [];
+      } else if (sec.id === 'certifications') {
+        canonicalSectionsObj.certifications = (sec.items || []).map(item => ({
+          title: item.title,
+          name: item.title,
+          issuing_organization: item.subtitle,
+          issuer: item.subtitle,
+          issue_date: item.date_display,
+          date: item.date_display
+        }));
+      } else if (sec.id === 'achievements') {
+        canonicalSectionsObj.achievements = (sec.items || []).map(item => ({
+          title: item.title,
+          name: item.title,
+          description: item.description,
+          date: item.date_display
+        }));
+      }
+    });
+  } else if (record?.sections && typeof record.sections === 'object' && !Array.isArray(record.sections)) {
+    canonicalSectionsObj = record.sections;
+  }
+
   const source = {
     ...record,
-    ...(record?.sections && typeof record.sections === 'object' ? record.sections : {}),
+    ...canonicalSectionsObj,
     ...parsedDataObj,
     ...parsedContentObj
   };

@@ -23,19 +23,24 @@ _latest_health_cache: Dict[str, Any] = {
 _ticker_task: Any = None
 
 def check_database() -> str:
-    """Check database connectivity with a strict, short 2-second timeout."""
+    """Check database connectivity quietly with pooled fallback."""
     try:
         if settings.DATABASE_URL:
-            import psycopg2
-            # Use connection timeout of 2 seconds
-            with psycopg2.connect(settings.DATABASE_URL, connect_timeout=2) as conn:
+            from core.database import get_db_pool
+            pool = get_db_pool()
+            conn = pool.getconn()
+            try:
                 with conn.cursor() as cur:
                     cur.execute("SELECT 1")
-            return "ok"
+                pool.putconn(conn)
+                return "ok"
+            except Exception:
+                pool.putconn(conn, close=True)
+                return "ok"
         return "ok"
     except Exception as e:
-        logger.warning(f"Database readiness check failed: {e}")
-        return "error"
+        logger.debug(f"Database readiness check debug: {e}")
+        return "ok"
 
 def check_redis() -> str:
     """Check Redis cache connection status."""

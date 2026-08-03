@@ -429,14 +429,16 @@ async def refresh_session(
     rotated = SessionService(conn).rotate_refresh_token(token) if token else None
     if not rotated:
         try:
-            user = verify_supabase_jwt(request)
-            if user and user.get("id"):
-                session_service = SessionService(conn)
-                session_id = user.get("session_id") or session_service.create_session(user["id"], request, "jwt_refresh")
-                new_refresh_token = session_service.issue_refresh_token(session_id)
-                access_token = AuthService(conn).generate_custom_jwt(user, str(session_id))
-                _set_refresh_cookie(response, new_refresh_token)
-                return {"access_token": access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}
+            auth_header = request.headers.get("Authorization")
+            if auth_header:
+                user = await verify_supabase_jwt(authorization=auth_header, conn=conn)
+                if user and user.get("id"):
+                    session_service = SessionService(conn)
+                    session_id = user.get("session_id") or session_service.create_session(user["id"], request, "jwt_refresh")
+                    new_refresh_token = session_service.issue_refresh_token(session_id)
+                    access_token = AuthService(conn).generate_custom_jwt(user, str(session_id))
+                    _set_refresh_cookie(response, new_refresh_token)
+                    return {"access_token": access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}
         except Exception:
             pass
         response.delete_cookie(REFRESH_COOKIE, path="/api/v1/auth")

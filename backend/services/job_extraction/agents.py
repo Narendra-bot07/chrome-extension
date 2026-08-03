@@ -92,13 +92,21 @@ def discovery_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     state = _state(value)
     parsed = urlparse(state.url)
     portal = _portal(state.url)
+    # Detect job identity in URL path OR query string (e.g. LinkedIn search results with currentJobId)
+    query_params = dict(re.findall(r"([^=&?]+)=([^&]+)", parsed.query))
+    job_in_query = any(query_params.get(k) for k in (
+        "currentJobId", "jobId", "job_id", "jobid", "jk", "gh_jid", "requisitionId", "postingId"
+    ))
     discovery = {
         "scheme": parsed.scheme, "host": parsed.hostname, "path": parsed.path,
-        "has_job_path": bool(re.search(r"/(job|jobs|career|position|opening|viewjob)", parsed.path, re.I)),
+        "has_job_path": bool(
+            re.search(r"/(job|jobs|career|position|opening|viewjob)", parsed.path, re.I)
+            or job_in_query
+        ),
         "likely_spa": portal in {"linkedin", "workday", "indeed", "glassdoor"},
         "language_hint": None,
     }
-    logger.info("%s Discovery completed request_id=%s portal=%s", LOG_PREFIX, state.request_id, portal)
+    logger.info("%s Discovery completed request_id=%s portal=%s job_in_query=%s", LOG_PREFIX, state.request_id, portal, job_in_query)
     return {
         "detected_portal": portal,
         "discovery": discovery,
@@ -110,6 +118,22 @@ def discovery_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
 def browser_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     state = _state(value)
     attempt = state.browser_attempts + 1
+
+    # Rewrite LinkedIn /jobs/search-results/?currentJobId=XXX → /jobs/view/XXX/
+    # The search-results page requires login in the backend but the canonical
+    # job-view URL is publicly accessible for many postings.
+    fetch_url = state.url
+    parsed_url = urlparse(fetch_url)
+    if "linkedin.com" in (parsed_url.hostname or "") and "/jobs/search-results" in parsed_url.path:
+        query_params = dict(re.findall(r"([^=&?]+)=([^&]+)", parsed_url.query))
+        job_id = query_params.get("currentJobId") or query_params.get("jobId")
+        if job_id:
+            fetch_url = f"https://www.linkedin.com/jobs/view/{job_id}/"
+            logger.info(
+                "%s LinkedIn search-results URL rewritten to canonical request_id=%s original=%s canonical=%s",
+                LOG_PREFIX, state.request_id, state.url, fetch_url,
+            )
+
     logger.info("%s Browser launch request_id=%s attempt=%s", LOG_PREFIX, state.request_id, attempt)
     started = time.perf_counter()
     errors: list[str] = []
@@ -120,7 +144,7 @@ def browser_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             page = browser.new_page()
             page.on("pageerror", lambda error: errors.append(str(error)[:300]))
             page.goto(
-                state.url,
+                fetch_url,
                 wait_until=state.browser_strategy.get("wait_until", "domcontentloaded"),
                 timeout=state.browser_strategy.get("timeout_ms", 30000),
             )
@@ -191,14 +215,50 @@ def _content_text(content: Any) -> str:
 
 
 def _restriction_for_source(
-    content: Any, *, final_url: str = "", source_url: str = "", failed: bool = False
+    content: Any, *, final_url: str = "", source_url: str = "", failed: bool = False,
+    extension_source: bool = False,
 ) -> tuple[str | None, float, list[str]]:
+    """Detect access restrictions in scraped content.
+
+    For extension-sourced evidence the user is already logged in, so:
+    - URL redirect detection is skipped (final_url == source_url by design).
+    - Text scan uses only the first 6 000 chars to avoid false positives from
+      LinkedIn / Indeed navigation noise (e.g. "not authorized" in nav links).
+    - Only the highest-confidence patterns (captcha, cloudflare, security
+      challenge, rate-limit) are applied; softer signals like "access denied"
+      and "not authorized" that routinely appear in SPA navigation are ignored.
+    """
     if failed:
         return "network_failure", .9, ["browser acquisition failed"]
-    text = _content_text(content).casefold()[:30000]
+
     signals: list[str] = []
     restriction = None
     confidence = 0.0
+
+    if extension_source:
+        # Extension evidence: user is logged in. Only scan selected/focused text
+        # (first 6 000 chars) for the most definitive restriction signals.
+        # Full-page visible_text and full DOM clones are intentionally NOT scanned
+        # because they routinely contain "not authorized", "sign in", "access denied"
+        # in LinkedIn / Indeed navigation elements even when the user IS authenticated.
+        EXTENSION_RESTRICTION_PATTERNS = (
+            ("captcha", .99, ("captcha", "verify you are human", "i'm not a robot", "recaptcha")),
+            ("cloudflare", .98, ("cloudflare ray id",)),
+            ("security_challenge", .96, ("checking your browser", "challenge-platform")),
+            ("rate_limited", .95, ("too many requests", "rate limit exceeded")),
+            ("login_required", .90, ("sign in to view this job", "log in to view this job",
+                                     "please sign in", "create a free account to apply")),
+        )
+        text = _content_text(content).casefold()[:6000]
+        for kind, score, patterns in EXTENSION_RESTRICTION_PATTERNS:
+            matched = [p for p in patterns if p in text]
+            if matched and score > confidence:
+                restriction, confidence = kind, score
+                signals = matched[:4]
+        return restriction, confidence, signals
+
+    # Backend sources: full strict scan
+    text = _content_text(content).casefold()[:30000]
     final_path = (urlparse(final_url).path or "").casefold()
     source_path = (urlparse(source_url).path or "").casefold()
     auth_path = r"/(?:login|signin|sign-in|auth|checkpoint)(?:/|$)"
@@ -263,10 +323,12 @@ def _make_evidence_source(
     failed: bool = False,
     freshness: float = 1.0,
     metadata: dict[str, Any] | None = None,
+    extension_source: bool = False,
 ) -> EvidenceSource:
     length = len(_content_text(content))
     restriction, restriction_confidence, restriction_signals = _restriction_for_source(
-        content, final_url=final_url, source_url=source_url, failed=failed
+        content, final_url=final_url, source_url=source_url, failed=failed,
+        extension_source=extension_source,
     )
     available = content not in (None, "", [], {}) or failed
     job_score = _job_signal_score(content, selected=selected, structured=structured)
@@ -372,6 +434,7 @@ def evidence_evaluation_agent(value: JDState | dict[str, Any]) -> dict[str, Any]
             "extension_selected_panel", extension_panel_text,
             selected=extension_panel_selected,
             final_url=extension.get("url", ""), source_url=state.url,
+            extension_source=True,
             metadata={
                 "captured_at": (extension.get("capture") or {}).get("captured_at"),
                 "selector": extension.get("selected_panel_selector"),
@@ -380,14 +443,17 @@ def evidence_evaluation_agent(value: JDState | dict[str, Any]) -> dict[str, Any]
         _make_evidence_source(
             "extension_jsonld", extension.get("jsonld") or [],
             structured=True, final_url=extension.get("url", ""), source_url=state.url,
+            extension_source=True,
         ),
         _make_evidence_source(
             "extension_dom", extension.get("html"),
             final_url=extension.get("url", ""), source_url=state.url,
+            extension_source=True,
         ),
         _make_evidence_source(
             "extension_visible_text", extension.get("visible_text"),
             final_url=extension.get("url", ""), source_url=state.url,
+            extension_source=True,
         ),
         _make_evidence_source(
             "backend_jsonld", backend_jsonld, structured=True,

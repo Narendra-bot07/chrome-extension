@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Check, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useSubscription } from '../hooks/useSubscription';
@@ -82,21 +82,45 @@ export default function SubscriptionPage() {
     ['Resume uploads', subscription?.usage?.resume_upload]
   ];
 
+  const handleVerifyAndActivate = useCallback(async (targetPlanCode) => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!token) return;
+    try {
+      await fetch(`${apiUrl}/api/v1/billing/verify-session`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ plan_code: targetPlanCode || 'pro' })
+      });
+      await refresh();
+      setPaymentStatusModal(prev => ({
+        ...prev,
+        status: 'success',
+        targetPlanName: targetPlanCode || prev.targetPlanName || 'Pro'
+      }));
+    } catch (e) {
+      console.error('Session verify failed:', e);
+      refresh();
+    }
+  }, [apiUrl, refresh, session?.access_token]);
+
+  // Check URL parameters & cross-tab events for payment completion
   useEffect(() => {
-    // Check URL parameters for payment notifications
     const params = new URLSearchParams(window.location.search);
     const paymentStatus = params.get('payment');
     if (paymentStatus === 'success' || paymentStatus?.includes('success')) {
-      setPaymentStatusModal({
-        isOpen: true,
-        status: 'success',
-        targetPlanName: subscription?.plan?.name || 'Pro'
-      });
+      handleVerifyAndActivate(params.get('plan_id') || 'pro');
       setPaymentBanner({
         type: 'success',
         message: 'Payment completed successfully! Your subscription features and credits are now active.'
       });
-      refresh();
+      try {
+        const bc = new BroadcastChannel('payment_channel');
+        bc.postMessage({ type: 'PAYMENT_SUCCESS', plan: params.get('plan_id') || 'pro' });
+        bc.close();
+      } catch (e) {}
     } else if (paymentStatus === 'cancelled') {
       setPaymentStatusModal({
         isOpen: true,
@@ -108,18 +132,51 @@ export default function SubscriptionPage() {
         message: 'Payment was cancelled. You can retry upgrading anytime.'
       });
     }
-  }, [refresh, subscription?.plan?.name]);
+  }, [handleVerifyAndActivate]);
 
-  // Periodic polling & tab focus status check while payment status modal is pending
+  // Listen to cross-tab payment broadcasts & storage events
+  useEffect(() => {
+    let bc;
+    try {
+      bc = new BroadcastChannel('payment_channel');
+      bc.onmessage = (event) => {
+        if (event.data?.type === 'PAYMENT_SUCCESS') {
+          handleVerifyAndActivate(event.data?.plan);
+        }
+      };
+    } catch (e) {}
+
+    const handleStorage = (e) => {
+      if (e.key === 'payment_event' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed.status === 'success') {
+            handleVerifyAndActivate(parsed.planName);
+          }
+        } catch (err) {}
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      if (bc) bc.close();
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [handleVerifyAndActivate]);
+
+  // Automatic 2-second background polling & window focus verification while status modal is pending
   useEffect(() => {
     if (!paymentStatusModal.isOpen || paymentStatusModal.status !== 'pending') return undefined;
 
+    // Immediately trigger check on modal open
+    handleVerifyAndActivate(paymentStatusModal.targetPlanName);
+
     const interval = setInterval(() => {
-      refresh();
-    }, 3000);
+      handleVerifyAndActivate(paymentStatusModal.targetPlanName);
+    }, 2000);
 
     const handleFocus = () => {
-      refresh();
+      handleVerifyAndActivate(paymentStatusModal.targetPlanName);
     };
 
     window.addEventListener('focus', handleFocus);
@@ -127,12 +184,12 @@ export default function SubscriptionPage() {
       clearInterval(interval);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [paymentStatusModal.isOpen, paymentStatusModal.status, refresh]);
+  }, [handleVerifyAndActivate, paymentStatusModal.isOpen, paymentStatusModal.status, paymentStatusModal.targetPlanName]);
 
   // Auto-detect plan upgrade completion while status modal is pending
   useEffect(() => {
     if (paymentStatusModal.isOpen && paymentStatusModal.status === 'pending') {
-      const code = subscription?.plan?.code;
+      const code = (subscription?.plan?.code || '').toLowerCase();
       if (code && code !== 'free' && code !== 'trial') {
         setPaymentStatusModal(prev => ({
           ...prev,
@@ -469,6 +526,7 @@ export default function SubscriptionPage() {
         status={paymentStatusModal.status}
         planName={paymentStatusModal.targetPlanName || checkoutModalPlan?.name || 'Pro'}
         onClose={() => setPaymentStatusModal(prev => ({ ...prev, isOpen: false }))}
+        onCheckStatus={() => handleVerifyAndActivate(paymentStatusModal.targetPlanName || checkoutModalPlan?.name || 'pro')}
         onRetry={() => {
           if (availablePlans.length > 0) {
             setCheckoutModalPlan(availablePlans[0]);
