@@ -1,5 +1,6 @@
 import asyncio
 import json
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -105,14 +106,22 @@ def put_preferences(body: PreferencesUpdate, user: Dict[str, Any] = Depends(veri
     return get_preferences(user, conn)
 
 @router.get("/stream")
-async def stream_notifications(user: Dict[str, Any] = Depends(verify_supabase_jwt), conn=Depends(get_db_connection)):
+async def stream_notifications(user: Dict[str, Any] = Depends(verify_supabase_jwt)):
     user_id = user["id"]
+    # This generator runs for as long as the client's EventSource stays open —
+    # potentially hours per open browser tab. A dependency-injected connection
+    # (Depends(get_db_connection)) would be checked out from the pool for that
+    # entire lifetime while sitting idle between 15s polls, and with only 50
+    # pool connections total, a handful of open tabs would starve every other
+    # request. Check out a connection only for the instant each poll needs it.
+    db_context = contextmanager(get_db_connection)
     async def events():
         last = datetime.now(timezone.utc)
         yield "event: connected\ndata: {}\n\n"
         while True:
-            rows = _rows(conn, """select * from notifications where user_id=%s and created_at>%s
-                and deleted_at is null order by created_at""", (user_id,last))
+            with db_context() as conn:
+                rows = _rows(conn, """select * from notifications where user_id=%s and created_at>%s
+                    and deleted_at is null order by created_at""", (user_id,last))
             for row in rows:
                 last = max(last, row["created_at"])
                 yield f"event: notification\ndata: {json.dumps(row, default=str)}\n\n"

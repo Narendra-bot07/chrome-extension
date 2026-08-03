@@ -1,6 +1,7 @@
 """Authenticated API integration for the single active JD intelligence engine."""
 import asyncio
 import uuid
+from contextlib import contextmanager
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -13,13 +14,13 @@ from services.job_extraction.backend_extractor import extract_job_from_url
 from services.subscriptions.usage_service import UsageService
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+_db_context = contextmanager(get_db_connection)
 
 
 @router.post("/extract-url")
 async def extract_job_from_provided_url(
     request: JobUrlExtractRequest,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
-    conn = Depends(get_db_connection),
 ):
     """Run the autonomous graph for the complete current-tab URL."""
     request_id = request.request_id or str(uuid.uuid4())
@@ -31,20 +32,24 @@ async def extract_job_from_provided_url(
         bool(request.browser_evidence),
     )
     try:
-        usage = UsageService(conn)
-        usage.require_available(user["id"], "jd_extraction")
+        # A pool connection is only needed for these two quick quota checks —
+        # not for the Playwright/LLM pipeline in between, which can run
+        # 5-30+s and would otherwise hold a connection idle that long.
+        with _db_context() as conn:
+            UsageService(conn).require_available(user["id"], "jd_extraction")
         result = await asyncio.to_thread(
             extract_job_from_url,
             request.url,
             request_id,
             request.browser_evidence,
         )
-        usage.consume_usage(
-            user["id"],
-            "jd_extraction",
-            request_id=request_id,
-            metadata={"url": request.url},
-        )
+        with _db_context() as conn:
+            UsageService(conn).consume_usage(
+                user["id"],
+                "jd_extraction",
+                request_id=request_id,
+                metadata={"url": request.url},
+            )
         return result
     except HTTPException:
         raise

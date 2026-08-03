@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import sys
 from datetime import datetime
 from typing import Any, Dict, Union
@@ -13,6 +14,23 @@ SENSITIVE_KEYS = {
     "cover_letter", "prompt", "response", "text", "email_address",
     "phone_number", "bearer_token", "client_secret"
 }
+# Compound keys (contain "_") are intentionally specific phrases and stay
+# substring-matched. Single-word keys must match a whole underscore/case
+# token — plain substring matching let short common words like "text" match
+# unrelated keys that merely contain those letters (e.g. Sentry's own
+# "contexts" field, which then breaks the Sentry SDK when its value gets
+# replaced with the literal string "[REDACTED]" instead of the dict it
+# expects).
+_COMPOUND_SENSITIVE_KEYS = {key for key in SENSITIVE_KEYS if "_" in key}
+_SINGLE_WORD_SENSITIVE_KEYS = {key for key in SENSITIVE_KEYS if "_" not in key}
+
+
+def _key_is_sensitive(key: str) -> bool:
+    lowered = key.lower()
+    if any(compound in lowered for compound in _COMPOUND_SENSITIVE_KEYS):
+        return True
+    tokens = re.split(r"[^a-z0-9]+", lowered)
+    return any(token in _SINGLE_WORD_SENSITIVE_KEYS for token in tokens if token)
 
 def redact_sensitive_data(data: Any) -> Any:
     """Recursively redact keys matching sensitive strings."""
@@ -20,7 +38,7 @@ def redact_sensitive_data(data: Any) -> Any:
         return {
             k: (
                 "[REDACTED]"
-                if any(sec in k.lower() for sec in SENSITIVE_KEYS)
+                if _key_is_sensitive(k)
                 else redact_sensitive_data(v)
             )
             for k, v in data.items()
@@ -30,7 +48,6 @@ def redact_sensitive_data(data: Any) -> Any:
     elif isinstance(data, str):
         # Additional regex/check to ensure email is not logged
         if "@" in data and len(data) < 100:
-            import re
             if re.match(r"[^@]+@[^@]+\.[^@]+", data.strip()):
                 return "[REDACTED_EMAIL]"
     return data

@@ -1,13 +1,15 @@
+from contextlib import contextmanager
 from typing import Dict, Any
-from fastapi import Header, Depends
+from fastapi import Header
 from core.database import get_db_connection
 from core.exceptions import CredentialError
 from core.config import settings
 from app.services.session_service import SessionService
 
+_db_context = contextmanager(get_db_connection)
+
 async def verify_supabase_jwt(
     authorization: str = Header(None, description="Bearer JWT token from custom auth"),
-    conn = Depends(get_db_connection)
 ) -> Dict[str, Any]:
     """
     Validates client session token (JWT) using settings.JWT_SECRET.

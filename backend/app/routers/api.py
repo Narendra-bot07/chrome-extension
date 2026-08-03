@@ -1244,7 +1244,7 @@ async def api_refine_section_stream(
     user_id = "00000000-0000-0000-0000-000000000000"
     if authorization:
         try:
-            user_data = await verify_supabase_jwt(authorization, conn)
+            user_data = await verify_supabase_jwt(authorization)
             user_id = user_data.get("id", user_id)
         except Exception:
             pass

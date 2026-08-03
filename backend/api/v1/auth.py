@@ -431,7 +431,7 @@ async def refresh_session(
         try:
             auth_header = request.headers.get("Authorization")
             if auth_header:
-                user = await verify_supabase_jwt(authorization=auth_header, conn=conn)
+                user = await verify_supabase_jwt(authorization=auth_header)
                 if user and user.get("id"):
                     session_service = SessionService(conn)
                     session_id = user.get("session_id") or session_service.create_session(user["id"], request, "jwt_refresh")
