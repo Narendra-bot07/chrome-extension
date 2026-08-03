@@ -151,19 +151,28 @@ export function AppProvider({ children }) {
       (async () => {
         try {
           let activeToken = storedToken;
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 5000);
           let res = null;
 
-          try {
-            res = await fetch(`${getApiUrl()}/api/v1/auth/session`, {
-              headers: { 'Authorization': `Bearer ${storedToken}` },
-              signal: controller.signal
-            });
-          } catch (fetchErr) {
-            console.warn("Session check request timed out or failed network:", fetchErr);
-          } finally {
-            clearTimeout(timeoutId);
+          // The "instant unblock" above already rendered the cached user/name
+          // optimistically, before this check ran. A single transient failure
+          // here (backend redeploy, brief network blip) shouldn't immediately
+          // count as "not logged in", so retry once before giving up.
+          for (let attempt = 0; attempt < 2 && !res; attempt++) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            try {
+              res = await fetch(`${getApiUrl()}/api/v1/auth/session`, {
+                headers: { 'Authorization': `Bearer ${storedToken}` },
+                signal: controller.signal
+              });
+            } catch (fetchErr) {
+              console.warn("Session check request timed out or failed network:", fetchErr);
+            } finally {
+              clearTimeout(timeoutId);
+            }
+            if (!res && attempt === 0) {
+              await new Promise(resolve => setTimeout(resolve, 1200));
+            }
           }
 
           if (res && res.ok) {
@@ -204,6 +213,18 @@ export function AppProvider({ children }) {
             setUser(null);
             setSession(null);
             setParsedResume(null);
+          } else {
+            // Could not get a definitive answer even after retrying — network
+            // failure, timeout, or a 5xx from the backend, not a clean 401.
+            // The instant-unblock above already showed the cached user as
+            // logged in; leaving that displayed with zero real confirmation
+            // is exactly the "shows my name without me being logged in" bug.
+            // Stop presenting it as an active session, but don't wipe the
+            // stored token — it may still be perfectly valid once the backend
+            // recovers, and the next app open will silently re-confirm it.
+            console.warn("Session verification unavailable after retry; not treating cached session as confirmed.");
+            setUser(null);
+            setSession(null);
           }
         } catch (err) {
           console.error("Background auth sync failed:", err);

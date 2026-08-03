@@ -24,6 +24,26 @@ def throttle_ai_call():
         time.sleep(_MIN_AI_SPACING_SEC - elapsed)
 
 
+def _inline_schema_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively replace Pydantic's $ref/$defs pointers with the actual
+    nested schema inline, so a model reading this JSON Schema top-to-bottom
+    never has to resolve an indirection to find a nested object's required
+    fields."""
+    defs = schema.get("$defs", {})
+
+    def resolve(node: Any) -> Any:
+        if isinstance(node, dict):
+            if "$ref" in node:
+                ref_name = node["$ref"].rsplit("/", 1)[-1]
+                return resolve(defs.get(ref_name, {}))
+            return {key: resolve(value) for key, value in node.items() if key != "$defs"}
+        if isinstance(node, list):
+            return [resolve(item) for item in node]
+        return node
+
+    return resolve(schema)
+
+
 class DeepSeekProvider:
     """
     Provider-neutral DeepSeek LLM client adapter using the OpenAI-compatible API protocol.
@@ -83,6 +103,31 @@ class DeepSeekProvider:
                 "You are an expert AI resume strategist and ATS optimization engine. "
                 "Output valid JSON matching the specified JSON schema strictly. Ensure all JSON is well-formed."
             )
+
+            # The instruction above only ever *said* "matching the specified
+            # schema" without ever including that schema anywhere in the
+            # request — the model had to guess field names/nesting from
+            # prose alone. That's unreliable for anything beyond a flat
+            # schema (e.g. a schema requiring top-level keys like
+            # original/current/potential, each itself a nested object, has
+            # no way to be inferred from context). Always attach the real
+            # JSON Schema so required keys and nesting are explicit.
+            try:
+                # Pydantic emits nested models as $ref pointers into $defs.
+                # DeepSeek's json_object mode has no constrained decoding, so
+                # the model has to *mentally* dereference those pointers —
+                # inline them so every required field is spelled out exactly
+                # where it's needed, with no indirection to drop along the way.
+                schema_json = json.dumps(_inline_schema_refs(schema_cls.model_json_schema()), ensure_ascii=False)
+                sys_msg = (
+                    f"{sys_msg}\n\nRespond with a single JSON object that strictly matches this "
+                    f"JSON Schema. Every field listed in every \"required\" array — at every level "
+                    f"of nesting, not just the top level — MUST be present with a value. Do not omit "
+                    f"a required field inside a nested object just because other fields were easier "
+                    f"to determine:\n{schema_json}"
+                )
+            except Exception:
+                pass
 
             # Build messages array
             messages = [

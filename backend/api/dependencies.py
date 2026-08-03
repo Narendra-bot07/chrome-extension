@@ -46,6 +46,16 @@ def get_ai_service() -> AIService:
     return AIService()
 
 def get_storage_service() -> FileService:
+    from core.supabase_client import get_supabase_client
+    supabase_client = get_supabase_client()
+    if supabase_client is not None:
+        from services.storage.supabase_storage import SupabaseStorageService
+        return SupabaseStorageService(supabase_client)
+
+    # Only reached when SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY aren't
+    # configured (e.g. local dev without cloud credentials). Files saved
+    # here live on local disk and will NOT survive a redeploy/restart on an
+    # ephemeral host — this must not be what production is running on.
     from core.config import BASE_DIR
     from services.storage.local_storage import LocalStorageService
     return LocalStorageService(str(BASE_DIR / "local_uploads"))
