@@ -21,6 +21,7 @@ import { InteractiveAuroraBackground } from './layout/InteractiveAuroraBackgroun
 import { PageContainer } from './layout/PageContainer';
 import { getPageLayout } from './layout/pageLayout';
 import { ApplicationLogo, UserAvatar } from './ApplicationLogo';
+import { formatUserDisplayName } from '../utils/userNameFormatter';
 import BrandLogo from './BrandLogo';
 import NotificationCenter from './notifications/NotificationCenter';
 
@@ -428,7 +429,7 @@ function Layout() {
 
             {/* User Profile Dropdown Glass Pill */}
             {(() => {
-              const displayName = profile?.full_name || user?.user_metadata?.full_name || (user?.email ? user.email.split('@')[0] : 'User');
+              const displayName = formatUserDisplayName(user, profile, parsedResume);
               return (
                 <div className="relative border-l border-tf-border/60 pl-2.5" ref={profileMenuRef}>
                   <button
@@ -436,7 +437,7 @@ function Layout() {
                     className="p-1 rounded-full hover:bg-tf-surface-2/70 backdrop-blur-md transition cursor-pointer select-none border border-transparent hover:border-tf-border/50 flex items-center justify-center"
                     title={displayName}
                   >
-                    <UserAvatar user={user} profile={profile} size={36} />
+                    <UserAvatar user={user} profile={profile} parsedResume={parsedResume} size={36} />
                   </button>
 
                   {/* Profile Dropdown Menu */}

@@ -1,6 +1,6 @@
 import React, { memo, useMemo, useState } from 'react';
-import { getInitials } from './companyLogoUtils';
 import { selectProfileImage } from '../services/profilePolicy';
+import { formatUserDisplayName, getUserInitials } from '../utils/userNameFormatter';
 import BrandLogo from './BrandLogo';
 
 export const APPLICATION_LOGO_SRC = `${import.meta.env.BASE_URL || '/'}application-logo.png`;
@@ -20,6 +20,7 @@ export const ApplicationLogo = memo(function ApplicationLogo({
 export const UserAvatar = memo(function UserAvatar({
   user,
   profile,
+  parsedResume,
   size = 32,
   className = ''
 }) {
@@ -28,10 +29,8 @@ export const UserAvatar = memo(function UserAvatar({
     () => selectProfileImage(profile, user),
     [profile, user]
   );
-  const displayName = profile?.full_name
-    || user?.user_metadata?.full_name
-    || user?.email?.split('@')[0]
-    || 'User';
+  const displayName = formatUserDisplayName(user, profile, parsedResume);
+  const initials = getUserInitials(user, profile, parsedResume);
   const dimension = typeof size === 'number' ? `${size}px` : size;
 
   if (photoUrl && !photoFailed) {
@@ -54,7 +53,7 @@ export const UserAvatar = memo(function UserAvatar({
       style={{ width: dimension, height: dimension }}
       aria-label={displayName}
     >
-      {getInitials(displayName)}
+      {initials}
     </span>
   );
 });

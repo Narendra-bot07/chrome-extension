@@ -75,7 +75,7 @@ export function CoverLetterRender({
   const job = context?.job || coverLetter.job || {};
   const recipientObj = context?.recipient || coverLetter.recipient || {};
 
-  const name = candidate.name || coverLetter.applicant_name || coverLetter.name || 'Candidate Name';
+  const name = candidate.name || coverLetter.applicant_name || coverLetter.name || candidate.full_name || '';
   const email = candidate.email || coverLetter.email || '';
   const phone = candidate.phone || coverLetter.phone || '';
   const location = candidate.location || coverLetter.location || '';

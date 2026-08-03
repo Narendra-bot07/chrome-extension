@@ -127,20 +127,20 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
     || parsedResume
     || {
         personal_info: {
-          name: application.candidate?.name || 'Candidate Name',
-          email: application.candidate?.email || 'email@example.com',
-          phone: application.candidate?.phone || '+1 (555) 000-0000',
-          location: application.location || 'Remote'
+          name: application.candidate?.name || '',
+          email: application.candidate?.email || '',
+          phone: application.candidate?.phone || '',
+          location: application.location || ''
         },
-        summary: 'Experienced professional with a strong track record of technical delivery.',
-        experience: [
+        summary: '',
+        experience: application.job_title ? [
           {
-            title: application.job_title || 'Software Engineer',
-            company: application.company_name || 'Target Company',
-            dates: '2023 - Present',
-            bullets: ['Led cross-functional initiatives and built scalable cloud backend services.']
+            title: application.job_title,
+            company: application.company_name || '',
+            dates: '',
+            bullets: []
           }
-        ]
+        ] : []
       };
 
   const rawCandidateName = displayResume?.personal_info?.name
