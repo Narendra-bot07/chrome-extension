@@ -109,6 +109,21 @@ EXPOSE 8000
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
+### 3.2 Render Native (Non-Docker) Build Command
+Render's actual production deployment for this service uses Render's **native Python runtime**, not the Dockerfile above — the Dockerfile is retained for portability/local parity but is not what Render builds from. The Build Command must point at `backend/render-build.sh`:
+
+```bash
+#!/usr/bin/env bash
+set -o errexit
+
+pip install -r requirements.txt
+playwright install chromium
+```
+
+> **Do not add `--with-deps`** to the `playwright install` call here. That flag shells out to `apt-get install` via `su`, which requires root. Render's native build environment runs as a non-root user with no passwordless sudo, so `--with-deps` fails the build outright with `su: Authentication failure` before the browser is ever downloaded (see [KNOWN_ISSUES.md](KNOWN_ISSUES.md) / [CHANGELOG.md](CHANGELOG.md) 3.7.0). If Render's dashboard Build Command field was configured manually before this script existed, verify it was updated to match — a stale dashboard setting will still fail even though the repo-tracked script is correct.
+
+Because Render's build-machine browser cache does not reliably persist into the deployed runtime container, `main.py`'s `lifespan` startup hook also runs an idempotent `playwright install chromium` on every process boot as a self-healing fallback (see [BACKEND.md](BACKEND.md) §5.2) — so even if the build-time cache doesn't carry over, the app installs Chromium itself before accepting traffic.
+
 ---
 
 ## 4. GitHub Actions CI/CD Pipelines

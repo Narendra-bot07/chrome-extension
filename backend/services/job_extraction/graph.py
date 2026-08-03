@@ -39,11 +39,15 @@ def route_after_discovery(state: JDState) -> Literal["browser", "evidence_evalua
 def route_after_evidence(state: JDState) -> Literal["browser", "jsonld", "final_response"]:
     # If we skipped the Playwright fetch (browser_attempts == 0) and the
     # extension evidence alone turned out insufficient, fall back to a real
-    # browser fetch once rather than failing outright.
-    if (
-        state.browser_attempts == 0
-        and state.extraction_readiness in {"BLOCKED", "NOT_READY"}
-        and state.browser_attempts < state.max_browser_attempts
+    # browser fetch once rather than failing outright. Also retry when the
+    # Playwright fetch itself failed (navigation timeout, launch error, etc.)
+    # and attempts remain — a single timeout on a slow-loading portal (e.g.
+    # amazon.jobs) previously failed the whole extraction on the first try
+    # even though max_browser_attempts budgets for a second one.
+    browser_failed = bool(state.error and state.error.get("code") == "BROWSER_FAILED")
+    if state.browser_attempts < state.max_browser_attempts and (
+        (state.browser_attempts == 0 and state.extraction_readiness in {"BLOCKED", "NOT_READY"})
+        or browser_failed
     ):
         return "browser"
     if state.error or state.extraction_readiness in {"BLOCKED", "NOT_READY", "MANUAL_REVIEW"}:

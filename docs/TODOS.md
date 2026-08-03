@@ -6,10 +6,16 @@ This document categorizes all active development, refactoring, testing, and oper
 
 ## 1. Critical Priority (P0 - Blocker / Immediate Action)
 
+- [ ] **Eliminate Request-Long DB Connections Around Slow AI/Playwright Work**:
+  - `TailoringService.execute_tailoring_flow` (`services/resume/tailoring_service.py`, used by `tailor_resume` in `api/v1/tailoring.py`) and `api_compare` (`app/routers/api.py`) still hold one `Depends(get_db_connection)` connection across the full request, including the LLM call — only the event-loop-blocking half was fixed (`run_in_threadpool`). Refactor to take short-lived connections (see `_db_context()` pattern already applied to `api_cover_letter` in `app/routers/api.py`) only around the actual repo reads/writes.
+  - Same issue in `download_pdf` (`api/v1/tailoring.py` — connection held through the Playwright render + `_PDF_RENDER_LOCK` queue wait), `build_selected_resume_intelligence` / `confirm_selected_resume_intelligence` (`api/v1/resume.py`), and `api_generate_cover_letter_draft` (`app/routers/api.py`).
+  - See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) ISSUE-005 for full audit findings.
 - [ ] **Playwright Browser Pool Initialization**:
   - Implement reusable browser pool context in `app/playwright_pdf.py` to eliminate cold-start PDF generation latency.
 - [ ] **Production Secret Verification**:
   - Audit all deployment environment variables to ensure zero default development secrets remain in production.
+- [ ] **Confirm Render Dashboard Build Command matches `backend/render-build.sh`**:
+  - The dashboard's manually-configured Build Command field may still contain the old `playwright install --with-deps chromium` (which fails on Render's native non-root runtime, see [KNOWN_ISSUES.md](KNOWN_ISSUES.md) / [CHANGELOG.md](CHANGELOG.md) 3.7.0). Verify it invokes `backend/render-build.sh` (or an equivalent command without `--with-deps`).
 
 ---
 

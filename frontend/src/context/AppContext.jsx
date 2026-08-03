@@ -154,12 +154,17 @@ export function AppProvider({ children }) {
           let res = null;
 
           // The "instant unblock" above already rendered the cached user/name
-          // optimistically, before this check ran. A single transient failure
-          // here (backend redeploy, brief network blip) shouldn't immediately
-          // count as "not logged in", so retry once before giving up.
-          for (let attempt = 0; attempt < 2 && !res; attempt++) {
+          // optimistically when a cached `user` record existed — but when it
+          // doesn't (e.g. a freshly opened tab that only has a token, or a
+          // stale cache never repopulated after a previous inconclusive check),
+          // THIS call is the only thing that can populate `user`, and a cold
+          // Render instance can legitimately take 20-30s+ to wake up. A short
+          // budget here doesn't just delay recovery — it wrongly reads as
+          // "not logged in" for a fully valid token. Retry generously (3
+          // attempts, 8s each, with backoff) before giving up.
+          for (let attempt = 0; attempt < 3 && !res; attempt++) {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            const timeoutId = setTimeout(() => controller.abort(), 8000);
             try {
               res = await fetch(`${getApiUrl()}/api/v1/auth/session`, {
                 headers: { 'Authorization': `Bearer ${storedToken}` },
@@ -170,8 +175,8 @@ export function AppProvider({ children }) {
             } finally {
               clearTimeout(timeoutId);
             }
-            if (!res && attempt === 0) {
-              await new Promise(resolve => setTimeout(resolve, 1200));
+            if (!res && attempt < 2) {
+              await new Promise(resolve => setTimeout(resolve, 1500 * (attempt + 1)));
             }
           }
 
@@ -215,16 +220,20 @@ export function AppProvider({ children }) {
             setParsedResume(null);
           } else {
             // Could not get a definitive answer even after retrying — network
-            // failure, timeout, or a 5xx from the backend, not a clean 401.
-            // The instant-unblock above already showed the cached user as
-            // logged in; leaving that displayed with zero real confirmation
-            // is exactly the "shows my name without me being logged in" bug.
-            // Stop presenting it as an active session, but don't wipe the
-            // stored token — it may still be perfectly valid once the backend
-            // recovers, and the next app open will silently re-confirm it.
-            console.warn("Session verification unavailable after retry; not treating cached session as confirmed.");
-            setUser(null);
-            setSession(null);
+            // failure, timeout, or a 5xx from the backend (e.g. a cold-starting
+            // Render instance, which can take well over this function's ~11s
+            // retry budget to wake up), not a clean 401. This is NOT evidence
+            // the session is invalid, so it must never be treated as a logout:
+            // ProtectedRoute (App.jsx) redirects to the login/setup screen the
+            // instant `user` becomes null, which previously kicked the user
+            // out of an already-open, still-valid session purely because a
+            // verification ping was slow — exactly the "session doesn't stay
+            // logged in" bug. Keep the optimistically-restored cached session
+            // as-is; a real invalid/expired token still gets caught by the
+            // 401 branch above (on this check or any subsequent API call via
+            // authSession.js's fetch wrapper), which does attempt a refresh
+            // before ever clearing the session.
+            console.warn("Session verification unavailable after retry; keeping cached session — will re-confirm later.");
           }
         } catch (err) {
           console.error("Background auth sync failed:", err);

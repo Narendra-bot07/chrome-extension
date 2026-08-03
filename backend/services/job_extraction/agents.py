@@ -134,7 +134,17 @@ def browser_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
                 LOG_PREFIX, state.request_id, state.url, fetch_url,
             )
 
-    logger.info("%s Browser launch request_id=%s attempt=%s", LOG_PREFIX, state.request_id, attempt)
+    # Escalate the navigation timeout on retries: a page that didn't finish
+    # loading in the base window (e.g. amazon.jobs, which routinely exceeds
+    # 30s) is more likely to succeed given more time than given the exact
+    # same budget again.
+    base_timeout_ms = state.browser_strategy.get("timeout_ms", 30000)
+    timeout_ms = min(base_timeout_ms + (attempt - 1) * 15000, 60000)
+
+    logger.info(
+        "%s Browser launch request_id=%s attempt=%s timeout_ms=%s",
+        LOG_PREFIX, state.request_id, attempt, timeout_ms,
+    )
     started = time.perf_counter()
     errors: list[str] = []
     try:
@@ -154,7 +164,7 @@ def browser_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             page.goto(
                 fetch_url,
                 wait_until=state.browser_strategy.get("wait_until", "domcontentloaded"),
-                timeout=state.browser_strategy.get("timeout_ms", 30000),
+                timeout=timeout_ms,
             )
             try:
                 # Best-effort only: JS-heavy SPAs (LinkedIn, Workday) rarely go

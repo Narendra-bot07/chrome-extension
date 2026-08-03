@@ -99,7 +99,7 @@ backend/
 To prevent database connection overhead and eliminate connection pool exhaustion under high concurrency, Tailr4U implements a global thread-safe `ThreadedConnectionPool` singleton.
 
 ### 3.1 Pool Characteristics
-- **Pool Size**: `minconn = 10`, `maxconn = 50` persistent connections.
+- **Pool Size**: `minconn = 2`, `maxconn = 50` persistent connections.
 - **Thread Safety**: Initialized inside a thread lock (`_pool_lock = threading.Lock()`).
 - **Pre-Warming**: Pre-warms connections during application startup in `main.py` lifespan context manager.
 
@@ -134,6 +134,28 @@ def get_db_connection():
         if conn and conn.closed == 0:
             pool.putconn(conn)
 ```
+
+### 3.3 Connection Lifetime Gotcha: `Depends()` Holds a Connection for the Whole Request
+FastAPI caches dependency resolution per-request — every `Depends(get_db_connection)` in a single request (directly, or transitively via a repo dependency) resolves to the **same one connection**, checked out for as long as that dependency lives. Since `get_db_connection` is a request-scoped generator dependency, that means the connection is held for the **entire request**, including any slow synchronous LLM (`ResilientLLMWrapper`) or Playwright work done in between DB reads and writes — not just the query itself.
+
+This caused a recurring `psycopg2.pool.PoolError: connection pool exhausted` under concurrent load (see [KNOWN_ISSUES.md](KNOWN_ISSUES.md) ISSUE-005). The fix, applied where practical, is to avoid injecting the connection via `Depends` in routes that also do slow work, and instead take a short-lived connection only around the actual DB read/write using a module-level context-manager helper:
+
+```python
+from contextlib import contextmanager
+from core.database import get_db_connection
+
+_db_context = contextmanager(get_db_connection)
+
+# usage — connection is returned to the pool immediately after the `with` block,
+# not held across the LLM call in between:
+with _db_context() as conn:
+    UsageService(conn).require_available(user["id"], "cover_letter_generation")
+letter = await run_in_threadpool(generate_cover_letter, resume, job)
+with _db_context() as conn:
+    UsageService(conn).consume_usage(user["id"], "cover_letter_generation")
+```
+
+This pattern is applied in `api_cover_letter` (`app/routers/api.py`). Several other endpoints (`tailor_resume`, `api_compare`, `download_pdf`, the resume-intelligence build/confirm routes, `api_generate_cover_letter_draft`) still bind one request-long connection via a service class and have not yet been refactored to this pattern — tracked in [TODOS.md](TODOS.md) P0.
 
 ---
 
@@ -200,6 +222,11 @@ Rather than relying on client-side canvas renderers, Tailr4U runs a headless Chr
    )
    ```
 5. Saves PDF artifact to Supabase Storage bucket (`generated-resumes`) and returns the public download URL.
+
+### 5.2 Render Deployment: Startup Self-Healing & Render Serialization
+- **Runtime browser cache gap**: Render's native (non-Docker) build environment does not reliably carry the Playwright browser cache from the build machine into the deployed runtime container — a successful `playwright install chromium` at build time does not guarantee the running instance has it. `main.py`'s `lifespan` startup hook runs `_ensure_playwright_chromium()` (an idempotent `playwright install chromium`, executed via `asyncio.to_thread` so it doesn't block the async startup context) on every process start to self-heal this gap.
+- **Build command**: `backend/render-build.sh` deliberately omits `--with-deps` on `playwright install chromium` — that flag shells out to `apt-get` via `su`, which requires root and fails with `su: Authentication failure` on Render's native non-root build environment.
+- **Concurrency guard**: All three PDF/render entry points (`generate_pdf_via_playwright`, `generate_cover_letter_pdf_via_playwright`, `render_cover_letter_artifact`) are wrapped in `@_serialize_pdf_render`, which serializes execution behind a single process-wide `threading.Lock()` (`_PDF_RENDER_LOCK`). This bounds peak concurrent Chromium memory usage, added after a suspected OOM-driven 502 cascade (see [KNOWN_ISSUES.md](KNOWN_ISSUES.md) ISSUE-006) — concurrent Chromium launches from retried PDF-render requests could otherwise exceed Render's per-instance memory limit and crash the whole process.
 
 ---
 

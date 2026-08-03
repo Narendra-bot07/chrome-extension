@@ -664,7 +664,7 @@ Blocked sources have already been excluded, so a security challenge cannot conta
 
 ### 8.16 Classification review and bounded retry
 
-Low-confidence classification can request one bounded browser retry.
+Low-confidence classification can request one bounded browser retry. As of 2026-08-04, a hard Playwright navigation failure (timeout, launch error) on the initial fetch is *also* retried against the same budget — previously `route_after_evidence` only routed back to `browser` when the fetch had been deliberately skipped (extension evidence looked sufficient but wasn't), so an actual `BROWSER_FAILED` exception short-circuited straight to `final_response` on the first attempt without ever spending the retry budget below. On retry, `browser_agent` also escalates the navigation timeout (30s → 45s, capped at 60s) rather than reusing the same window that already proved insufficient — relevant for slow-loading portals such as `amazon.jobs`. See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) ISSUE-008.
 
 Limits:
 

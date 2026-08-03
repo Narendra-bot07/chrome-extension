@@ -59,3 +59,19 @@ if (typeof chrome !== 'undefined' && chrome.storage?.local) {
 }
 ```
 `installAuthenticatedFetch()` (same file) monkey-patches `window.fetch` to attach the stored `Authorization: Bearer` header to same-origin API calls and transparently retries once via `POST /api/v1/auth/refresh` on a `401`.
+
+---
+
+## 4. New-Tab Session Handoff & Verification Resilience
+
+Clicking "Resume" / "Cover Letter" in the extension panel (`components/JobReviewView.jsx::openWorkflowRoute`) opens a **new tab pointing at the extension's own bundled page** — `chrome.runtime.getURL('index.html#/tailor-config')` via `chrome.tabs.create` — not an externally hosted site. Because the new tab is the same `chrome-extension://<id>` origin as the panel, `localStorage` (written synchronously just before the tab opens) is already visible to it; `chrome.storage.local` is written as a backup/secondary path. No token/session query param or `postMessage` handoff is needed or used for this flow.
+
+### 4.1 Session Restoration on Mount (`context/AppContext.jsx::checkSession`)
+Every mounted instance (side panel, or any newly opened tab) runs its own `checkSession()` on mount:
+1. **Instant unblock**: if both a stored `access_token` AND a cached `user` object are found (`localStorage`, falling back to `chrome.storage.local`), the UI renders as logged-in immediately (`<10ms`), before any network call.
+2. **Background verification**: regardless of the instant-unblock outcome, a `GET /api/v1/auth/session` call runs to confirm the token server-side. It retries up to 3 times (8s timeout each, with backoff) before giving up — sized generously because a cold-starting Render backend instance can take well over 10-20s to respond, and a short budget here reads a merely-slow backend as "logged out."
+3. **Confirmed `401`**: attempts one token refresh (`refreshAccessToken()`) before falling back to actually clearing the session (`localStorage.removeItem('access_token'/'refresh_token')`, `setUser(null)`, `setSession(null)`).
+4. **Inconclusive result** (network error, timeout, non-401 5xx — i.e. we simply couldn't confirm either way): the session is left exactly as-is. It must **never** be treated as a logout here — see the gotcha below.
+
+### 4.2 Gotcha: `setUser(null)` Deletes Storage, Not Just React State
+`setUser()` is a wrapper (not the raw `useState` setter): calling it with a real object writes `user` to both `localStorage` and `chrome.storage.local`; calling it with `null` **deletes** `user` from both. This makes it strictly more destructive than it looks at the call site — using it to represent "couldn't confirm this cycle" silently and permanently destroys the cached profile, which then makes every future tab's "instant unblock" (§4.1 step 1) fail until a live verification call happens to succeed, since that check requires both a stored token AND a stored user. This exact chain caused new tabs opened via "Resume"/"Cover Letter" to land on `/extension-setup` despite a fully valid token (see [KNOWN_ISSUES.md](KNOWN_ISSUES.md) ISSUE-007, resolved 2026-08-04). Only call `setUser(null)` for an actually-confirmed invalid session, never for "the check was inconclusive."
