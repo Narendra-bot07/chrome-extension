@@ -43,6 +43,7 @@ yarn.lock
 # Build
 frontend/dist/
 frontend/build/
+backend/pdf_renderer_dist/
 
 # TeX & PDF Outputs
 *.pdf

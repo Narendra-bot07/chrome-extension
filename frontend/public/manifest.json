@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "tailr4u",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "ATS-optimization resume tailor. Auto-scans job descriptions, suggests modifications, and generates searchable PDFs.",
   "permissions": [
     "sidePanel",

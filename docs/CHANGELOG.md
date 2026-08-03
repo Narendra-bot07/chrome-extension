@@ -4,6 +4,13 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.7.4] - 2026-08-04
+
+### Fixed
+- **Resume preview succeeded but PDF download failed with `GET /__pdf_renderer/index.html 404` on Render**: the backend build installed Python and Chromium but never built the React application that Playwright uses as its print renderer. `main.py` therefore skipped the static mount because no renderer `index.html` existed. `backend/render-build.sh` now builds the React app into `backend/pdf_renderer_dist`, verifies `index.html` exists, and only then installs the backend dependencies. `main.py` mounts this backend-contained artifact first and logs an explicit startup error if it is missing. The Render service must use a blank Root Directory so both `frontend/` and `backend/` are available to the build.
+
+---
+
 ## [3.7.3] - 2026-08-04
 
 ### Fixed

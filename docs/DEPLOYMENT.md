@@ -16,6 +16,18 @@ This document details the multi-environment deployment strategy, environment var
 
 ## 2. Master Environment Variables Specification (`.env`)
 
+### Render build settings for the backend
+
+The backend PDF renderer depends on React source under `frontend/`, so the Render service must have access to the entire repository:
+
+```text
+Root Directory:       (blank)
+Build Command:        bash backend/render-build.sh
+Start Command:        cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
+```
+
+Do not set Root Directory to `backend`. Render excludes files outside a configured root directory, which would make `frontend/` unavailable and prevent creation of `backend/pdf_renderer_dist/index.html`. A successful startup logs `[PDF-RENDERER] Mounted static renderer from .../backend/pdf_renderer_dist`.
+
 > The block below is corrected to match the actual Pydantic `Settings` fields in `backend/core/config.py` and `backend/.env.example` (the source of truth — consult it directly for any var not listed here). `PROJECT_NAME` and `API_V1_STR` are internal defaults, not meant to be overridden per-deployment; there is no `PORT` setting (Uvicorn's `--port` / the host platform's `$PORT` controls this, not an app setting).
 
 ```ini

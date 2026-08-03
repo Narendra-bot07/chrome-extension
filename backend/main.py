@@ -105,11 +105,34 @@ templates_dir = os.path.join(os.path.dirname(__file__), "templates")
 os.makedirs(templates_dir, exist_ok=True)
 app.mount("/templates", StaticFiles(directory=templates_dir), name="templates")
 
-# Serve the production React build to Playwright. PDF generation must not
-# depend on a separately running Vite development server.
-frontend_dist_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
-if os.path.isfile(os.path.join(frontend_dist_dir, "index.html")):
-    app.mount("/__pdf_renderer", StaticFiles(directory=frontend_dist_dir, html=True), name="pdf-renderer")
+# Serve the production React build to Playwright. Render's build script places
+# the bundle inside the backend artifact. Keep frontend/dist as a local-dev
+# fallback, but never silently hide a missing production renderer.
+_renderer_dist_candidates = [
+    os.environ.get("PDF_RENDERER_DIST_DIR", ""),
+    os.path.join(BASE_DIR, "pdf_renderer_dist"),
+    os.path.abspath(os.path.join(BASE_DIR, "..", "frontend", "dist")),
+]
+frontend_dist_dir = next(
+    (
+        os.path.abspath(candidate)
+        for candidate in _renderer_dist_candidates
+        if candidate and os.path.isfile(os.path.join(candidate, "index.html"))
+    ),
+    None,
+)
+if frontend_dist_dir:
+    app.mount(
+        "/__pdf_renderer",
+        StaticFiles(directory=frontend_dist_dir, html=True),
+        name="pdf-renderer",
+    )
+    _startup_logger.info("[PDF-RENDERER] Mounted static renderer from %s", frontend_dist_dir)
+else:
+    _startup_logger.error(
+        "[PDF-RENDERER] Static renderer is missing; PDF downloads will fail. "
+        "Run backend/render-build.sh from a Render service whose Root Directory is blank."
+    )
 
 @app.get("/")
 async def root():
