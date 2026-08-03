@@ -38,10 +38,28 @@ from api.router import api_router
 from api.v1.health import router as health_router, start_health_ticker
 from app.routers.api import router as legacy_api_router
 
+_startup_logger = logging.getLogger("main")
+
+def _ensure_playwright_chromium() -> None:
+    """
+    Render's native (non-Docker) runtime does not reliably carry Playwright's
+    browser cache from the build machine into the actual deployed instance —
+    `playwright install` succeeding at build time doesn't guarantee the
+    running container has it. `playwright install chromium` is idempotent
+    (a fast no-op if a matching browser is already cached), so running it
+    unconditionally on every startup self-heals that gap cheaply.
+    """
+    import subprocess
+    try:
+        subprocess.run(["playwright", "install", "chromium"], check=True, timeout=300)
+    except Exception as exc:
+        _startup_logger.error(f"[PLAYWRIGHT] Startup Chromium install failed: {exc}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     get_db_pool()
     start_health_ticker()
+    await asyncio.to_thread(_ensure_playwright_chromium)
     yield
     close_db_pool()
 
