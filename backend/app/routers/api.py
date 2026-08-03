@@ -1,6 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, Header, HTTPException, status, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from contextlib import contextmanager
 import io
 import json
 import re
@@ -26,6 +27,8 @@ from core.database import get_db_connection
 from repositories.resume_repository import ResumeRepository
 from repositories.ats_repository import ATSRepository
 from services.subscriptions.usage_service import UsageService
+
+_db_context = contextmanager(get_db_connection)
 
 
 from app.template_engine import template_engine
@@ -352,7 +355,9 @@ async def api_compare(
             )
 
         try:
-            comparison = generate_tailoring_patch(
+            from fastapi.concurrency import run_in_threadpool
+            comparison = await run_in_threadpool(
+                generate_tailoring_patch,
                 resume,
                 job,
                 api_key=None,
@@ -1143,16 +1148,15 @@ async def api_render_cover_letter(request: CoverLetterRenderRequest):
 async def api_cover_letter(
     request: CoverLetterRequest,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
-    conn = Depends(get_db_connection),
 ):
     try:
-        usage = UsageService(conn)
-        usage.require_available(user["id"], "cover_letter_generation")
-        letter = generate_cover_letter(request.resume, request.job, api_key=None)
-        usage.consume_usage(user["id"], "cover_letter_generation", metadata={"source": "cover-letter"})
+        from fastapi.concurrency import run_in_threadpool
+        with _db_context() as conn:
+            UsageService(conn).require_available(user["id"], "cover_letter_generation")
+        letter = await run_in_threadpool(generate_cover_letter, request.resume, request.job, api_key=None)
+        with _db_context() as conn:
+            UsageService(conn).consume_usage(user["id"], "cover_letter_generation", metadata={"source": "cover-letter"})
         return letter
-    except HTTPException:
-        raise
     except HTTPException:
         raise
     except Exception as e:
@@ -1239,7 +1243,6 @@ async def api_refine_section(
 async def api_refine_section_stream(
     request: RefineSectionRequest,
     authorization: Optional[str] = Header(None),
-    conn = Depends(get_db_connection)
 ):
     user_id = "00000000-0000-0000-0000-000000000000"
     if authorization:
@@ -1265,7 +1268,6 @@ async def api_refine_section_stream(
             accepted_changes=request.accepted_changes,
             pending_changes=request.pending_changes,
             user_id=user_id,
-            conn=conn
         ),
         media_type="text/event-stream"
     )

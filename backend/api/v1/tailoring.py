@@ -86,14 +86,16 @@ async def tailor_resume(
     conn = Depends(get_db_connection)
 ):
     try:
-        # We assume request has job_analysis attached if the old format had it, 
+        # We assume request has job_analysis attached if the old format had it,
         # but in the updated TailorRequest, we might need a default title for mock resolution.
         # Let's handle it safely.
         job_title = "Tailored Role"
         if hasattr(request, "job_analysis") and request.job_analysis:
             job_title = str(request.job_analysis.title)
-            
-        record = service.execute_tailoring_flow(
+
+        from fastapi.concurrency import run_in_threadpool
+        record = await run_in_threadpool(
+            service.execute_tailoring_flow,
             user_id=user["id"],
             resume_id=str(request.resume.personal_info.name),  # Mock resolution
             job_id=job_title,

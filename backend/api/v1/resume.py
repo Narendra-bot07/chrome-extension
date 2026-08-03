@@ -370,8 +370,9 @@ async def get_active_resume(
             source_links = ResumeParser.extract_links(file_bytes, file_name)
 
             if raw_text:
+                from fastapi.concurrency import run_in_threadpool
                 ai = AIService()
-                parsed_res = ai.parse_resume(raw_text)
+                parsed_res = await run_in_threadpool(ai.parse_resume, raw_text)
                 updated_content = parsed_res.dict()
                 updated_content = restore_source_evidence(updated_content, raw_text, source_links)
                 updated_content["raw_text"] = raw_text
@@ -547,9 +548,10 @@ async def parse_existing_resume(
             detail="No raw text could be extracted from resume file in storage bucket."
         )
         
+    from fastapi.concurrency import run_in_threadpool
     ai = AIService()
-    parsed_res = ai.parse_resume(raw_text)
-    
+    parsed_res = await run_in_threadpool(ai.parse_resume, raw_text)
+
     updated_content = parsed_res.dict()
     source_links = dict(parsed_content.get("links") or {})
     if record.get("file_path") and str(record.get("file_type") or "").lower() == "pdf":
