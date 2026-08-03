@@ -38,9 +38,10 @@ async def verify_supabase_jwt(
         # Verify session using SessionService
         session_id = payload.get("jti")
         if session_id:
-            session_service = SessionService(conn)
-            if not session_service.verify_and_update_session(session_id):
-                raise CredentialError("Session expired or revoked.")
+            with _db_context() as conn:
+                session_service = SessionService(conn)
+                if not session_service.verify_and_update_session(session_id):
+                    raise CredentialError("Session expired or revoked.")
 
         return {
             "id": payload["sub"],
