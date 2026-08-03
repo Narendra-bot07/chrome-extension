@@ -2,11 +2,15 @@
 
 This document provides the full database schema, relational constraints, performance indexes, Row-Level Security (RLS) policies, and Blob Storage link references for **Tailr4U**.
 
+> **Scope note**: The schema below is a simplified, representative core (5 tables) illustrating the account/resume/tailoring flow. The actual `supabase/migrations/` DDL defines **31+ tables** (`ai_generations`, `ats_analyses`, `cover_letter_sessions`, `credits`, `device_registrations`, `notifications`, `subscriptions`, `templates`, `workflow_runs`, `workflow_checkpoints`, etc.) — see [DATABASE_DDL_MIGRATIONS.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/DATABASE_DDL_MIGRATIONS.md) for the authoritative, migration-sourced list. Column names below have also been corrected to match the actual `init_schema.sql` migration rather than an earlier draft schema.
+
 ---
 
 ## 1. Storage Buckets & Unstructured File Link Mapping
 
-Unstructured binary files (candidate resume uploads, AI-generated tailored PDFs, template thumbnails, and profile avatars) are stored in **Supabase Storage** (or S3-compatible Blob Storage). Database tables maintain deterministic URI object paths referencing these assets.
+Unstructured binary files (candidate resume uploads, AI-generated tailored PDFs, template thumbnails, and profile avatars) are *designed* to be stored in **Supabase Storage** (or S3-compatible Blob Storage), and the bucket architecture and RLS policies below are real (defined in `supabase/migrations/20260713000002_rls_storage_policies.sql`). Database tables maintain deterministic URI object paths referencing these assets.
+
+> ⚠️ **Current implementation gap**: `backend/api/dependencies.py::get_storage_service()` unconditionally returns `LocalStorageService` (local filesystem, `backend/local_uploads/`) — `SupabaseStorageService` (`backend/services/storage/supabase_storage.py`) is fully implemented but never instantiated anywhere in the app. On an ephemeral host (e.g. Render), uploaded resumes and generated PDFs do **not** survive a restart or redeploy. This needs to be wired up (construct a `supabase.Client` from `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` and swap the dependency) before the bucket architecture below is actually in effect in production.
 
 ### 1.1 Storage Buckets Architecture
 
@@ -93,17 +97,19 @@ erDiagram
 Stores core candidate account information, authentication links, and subscription tiers.
 
 ```sql
+-- Source: supabase/migrations/20260713000000_init_schema.sql
 CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-    email TEXT NOT NULL UNIQUE,
+    email TEXT UNIQUE NOT NULL,
     full_name TEXT,
-    target_job_title TEXT,
     avatar_url TEXT,
-    tier TEXT NOT NULL DEFAULT 'free' CHECK (tier IN ('free', 'pro', 'enterprise')),
-    monthly_tailor_limit INTEGER DEFAULT 10,
-    tailor_count_this_month INTEGER DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+    subscription_plan TEXT NOT NULL DEFAULT 'free',
+    credits_remaining INTEGER NOT NULL DEFAULT 5,
+    resume_count INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    last_login TIMESTAMP WITH TIME ZONE,
+    deleted_at TIMESTAMP WITH TIME ZONE
 );
 
 CREATE INDEX IF NOT EXISTS idx_profiles_email ON public.profiles(email);
@@ -115,20 +121,22 @@ CREATE INDEX IF NOT EXISTS idx_profiles_email ON public.profiles(email);
 Stores candidate master resumes (both raw uploaded file paths and parsed structured JSON representations).
 
 ```sql
+-- Source: supabase/migrations/20260713000000_init_schema.sql
 CREATE TABLE IF NOT EXISTS public.resumes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-    title TEXT NOT NULL DEFAULT 'Master Resume',
     file_path TEXT NOT NULL,
-    file_format TEXT NOT NULL CHECK (file_format IN ('pdf', 'docx', 'txt')),
-    parsed_content JSONB NOT NULL DEFAULT '{}'::jsonb,
-    is_master BOOLEAN DEFAULT false,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+    file_name TEXT NOT NULL,
+    file_size INTEGER NOT NULL,
+    file_type TEXT NOT NULL CHECK (file_type IN ('PDF', 'DOCX')),
+    parsed_content JSONB,
+    embeddings TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    deleted_at TIMESTAMP WITH TIME ZONE
 );
 
 CREATE INDEX IF NOT EXISTS idx_resumes_user_id ON public.resumes(user_id);
-CREATE INDEX IF NOT EXISTS idx_resumes_is_master ON public.resumes(user_id, is_master);
 ```
 
 ---
@@ -202,22 +210,8 @@ CREATE INDEX IF NOT EXISTS idx_applications_user_status ON public.applications(u
 
 ---
 
-### 3.6 `public.device_abuse_tracking`
-Anti-abuse and rate limiting tracking for free-tier endpoints.
-
-```sql
-CREATE TABLE IF NOT EXISTS public.device_abuse_tracking (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    device_fingerprint TEXT NOT NULL,
-    ip_address TEXT NOT NULL,
-    request_count INTEGER DEFAULT 1,
-    first_seen_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    last_seen_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    is_blocked BOOLEAN DEFAULT false
-);
-
-CREATE INDEX IF NOT EXISTS idx_device_abuse_fingerprint ON public.device_abuse_tracking(device_fingerprint);
-```
+### 3.6 `public.device_registrations`
+Anti-abuse and rate limiting tracking for free-tier endpoints (actual table name — not `device_abuse_tracking`). Defined in `backend/supabase/migrations/20260801030000_device_registrations.sql` and consumed by `backend/app/services/device_abuse_service.py` and `backend/api/v1/admin_abuse.py`. See that migration file directly for the exact column list; it is not reproduced here to avoid re-introducing drift.
 
 ---
 

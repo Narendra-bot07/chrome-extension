@@ -6,34 +6,37 @@ This document details the security posture, authentication architecture, rate-li
 
 ## 1. Authentication & Session Architecture
 
-Tailr4U delegates identity management and authentication credentials to **Supabase Auth** backed by OAuth 2.0 and JWT (JSON Web Tokens).
+> **Correction**: Tailr4U does **not** use Supabase Auth for identity. Authentication is fully custom: passwords are hashed with `bcrypt` (`core/security.py::hash_password`, 12 rounds) and stored in `public.profiles`, and sessions are self-issued HS256 JWTs signed with the app's own `JWT_SECRET` — verified by `core/security.py::verify_supabase_jwt()` (a misleading legacy name; it performs no call to Supabase at all). Supabase is used only as the Postgres host (and, per `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`, for storage — see [DATABASE.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/DATABASE.md) for the storage-wiring gap). Google Sign-In goes through `google-auth` token verification (`POST /auth/google`, `api/v1/auth.py:335`), then issues the same self-issued session JWT — it is not routed through Supabase Auth either.
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor User
     participant Frontend as Web App / Chrome Ext
-    participant Auth as Supabase Auth (OAuth/Email)
-    participant API as FastAPI Backend
+    participant API as FastAPI Backend (auth_service.py)
+    participant DB as PostgreSQL (profiles, sessions)
     participant RLS as PostgreSQL (RLS)
 
-    User->>Auth: Authenticates (Email/Password or Google OAuth)
-    Auth-->>Frontend: Issues Signed JWT Access Token (HS256/RS256)
-    
+    User->>API: POST /api/v1/auth/login (email/password) or /auth/google (ID token)
+    API->>DB: Verifies bcrypt password hash or Google ID token, checks profiles/sessions
+    API-->>Frontend: Issues self-issued JWT (HS256, signed with JWT_SECRET) + refresh token
+
     Frontend->>API: Sends REST HTTP Request with `Authorization: Bearer <JWT>`
-    API->>API: Verifies JWT Signature using Supabase Public Key / Secret
-    API->>API: Extracts `user_id` & `tier` claims from JWT payload
-    
-    API->>RLS: Passes `auth.uid()` context into DB query connection
+    API->>API: verify_supabase_jwt() decodes with jwt.decode(token, settings.JWT_SECRET, [JWT_ALGORITHM])
+    API->>DB: SessionService.verify_and_update_session(jti) — checks session not expired/revoked
+    API->>API: Extracts `sub` (user_id) & `email` claims from JWT payload
+
+    API->>RLS: Passes `auth.uid()`-equivalent context into DB query connection
     RLS-->>API: Executes SQL with tenant isolation
     API-->>Frontend: 200 OK Response
 ```
 
 ### 1.1 JWT Validation Protocol
-- FastAPI dependency (`api/dependencies.py`) intercepts every non-public route.
+- FastAPI dependency `verify_supabase_jwt` (`core/security.py:8`) intercepts every non-public route via `Depends()`.
 - Verifies `Authorization: Bearer <token>` header.
-- Decodes header using standard asymmetric RSA or shared JWT secret.
-- Enforces token expiration (`exp`), issuer (`iss`), and audience (`aud`).
+- Decodes using `jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])` — a single shared HS256 secret, not asymmetric RSA, and no Supabase public key is involved.
+- Enforces token expiration (`exp`, via `pyjwt`'s built-in check) and additionally checks the `jti` claim against `SessionService` so a session can be revoked server-side even before the JWT expires (logout, password reset, account deletion).
+- A `local-dev-token` bypass exists for local development seeding (`core/security.py:25-30`) — returns a fixed local-developer identity without touching the DB. Confirm this path is unreachable in production (e.g. via the seeded UUID never matching a real `profiles` row, since RLS/foreign-key constraints would reject writes under that id in a real deployment).
 
 ---
 
@@ -56,21 +59,18 @@ sequenceDiagram
 
 ### 3.1 Rate Limiting Architecture
 To prevent API key depletion and DDOS attacks on LLM pipelines:
-1. **IP & Device Fingerprinting**: `device_abuse_tracking` table records client IP addresses and Chrome extension device signatures.
+1. **IP & Device Fingerprinting**: `device_registrations` table (not `device_abuse_tracking`, see [DATABASE.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/DATABASE.md) §3.6) records client IP addresses and Chrome extension device signatures.
 2. **Tiered Endpoint Throttling**:
    - Free Tier Users: Maximum 10 tailoring requests per month, throttled to 1 request every 60 seconds.
    - Pro Tier Users: Higher tier quota with minimal throttling.
 3. **Resilient AI Spacing**: `_SINGLE_AI_REQUEST_LOCK` enforces a strict minimum spacing (`1.5` seconds) between LLM invocations to prevent `429 Quota Exceeded` errors on upstream providers.
 
 ### 3.2 CORS & HTTP Security Headers
-FastAPI configures `CORSMiddleware` with explicit origin whitelisting:
-- Allowed Origins: `https://app.tailr4u.com`, `http://localhost:5173`
+FastAPI configures `CORSMiddleware` (`main.py:63-74`) with explicit origin whitelisting:
+- Allowed Origins: `settings.FRONTEND_URL` (production default `https://tailr4u.com`, not `app.tailr4u.com`), plus `http://localhost:5173` and `http://127.0.0.1:5173` for local dev.
 - Allowed Origin Regex: `^chrome-extension://.+$` (Permits Manifest V3 extension communications)
 - Credentials Allowed: `true`
-- Security Headers Enforced:
-  - `X-Content-Type-Options: nosniff`
-  - `X-Frame-Options: DENY`
-  - `Content-Security-Policy: default-src 'self'`
+- **Security headers gap**: `X-Content-Type-Options`, `X-Frame-Options`, and `Content-Security-Policy` are **not currently set** anywhere in the stack — `main.py` only registers `CorrelationAndLoggingMiddleware` and `CORSMiddleware` (no dedicated security-headers middleware exists in `core/middleware.py`). This was previously documented as enforced; it is not. Worth adding if this doc's threat model is meant to hold.
 
 ---
 
@@ -91,7 +91,7 @@ FastAPI configures `CORSMiddleware` with explicit origin whitelisting:
 | :--- | :--- | :--- |
 | **Unauthorized Data Access** | High | PostgreSQL Row-Level Security (RLS) & JWT verification on every router |
 | **API Key Depletion (LLM Rate Limit)**| High | Redis prompt caching, single-request lock, bounded retry with optional DeepSeek Pro escalation |
-| **Extension DOM Injection Attacks** | Medium | Isolated Shadow DOM for injected overlay; strict innerText sanitization |
+| **Malicious/Hostile Page Content During Extraction** | Medium | No content-script injection or Shadow DOM overlay exists — extraction runs via a single `chrome.scripting.executeScript` call from the side panel (`frontend/src/services/jdExtractionFlow.js`) that reads DOM text into a plain JS object; page text is never executed. See [BROWSER_INTELLIGENCE_ARCHITECTURE.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/BROWSER_INTELLIGENCE_ARCHITECTURE.md) status note for the corrected extension architecture. |
 | **Malicious PDF Upload Exploits** | Medium | Content-type magic byte check, sandbox parsing, size limit enforcement |
 | **Cross-Origin Request Forgery (CSRF)**| Low | Stateless JWT authentication in Authorization header; no ambient cookies |
 
@@ -101,7 +101,7 @@ FastAPI configures `CORSMiddleware` with explicit origin whitelisting:
 
 - [x] All database tables enforce Row-Level Security (RLS).
 - [x] Storage buckets isolate files under `{user_id}` directories.
-- [x] Environment secrets (`DEEPSEEK_API_KEY`, `SUPABASE_JWT_SECRET`) stored in `.env` and excluded from git version control.
+- [x] Environment secrets (`DEEPSEEK_API_KEY`, `JWT_SECRET`) stored in `.env` and excluded from git version control.
 - [x] CORS origin regex strictly restricted to production web domains and Chrome Extension schemes.
 - [x] RequestLoggingMiddleware strips authorization headers from output logs.
 - [x] Headless Chromium Playwright sandbox runs under non-root unprivileged container users.

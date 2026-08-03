@@ -1,5 +1,11 @@
 # Browser Intelligence Engine Architecture
 
+> ⚠️ **Status: Design document, not implemented.** The modular pipeline below (Collector / Evidence Engine / Classification Engine / Strategy Planner / Recovery / Learning) was scaffolded as empty directories under `frontend/src/browser-intelligence/` (`adapters/`, `cache/`, `classification/`, `collector/`, `core/`, `domains/`, `evidence/`, `planning/`, `recovery/`, `telemetry/`) but no files were ever added to them — the folders have since been removed as dead scaffolding.
+>
+> **What actually ships today** is a single, much simpler generic heuristic collector: `frontend/src/services/jdExtractionFlow.js::captureActiveTabJobEvidence()`, invoked via one `chrome.scripting.executeScript` call from the side panel. It scores candidate DOM containers by job-signal keyword density, checks `application/ld+json` for `JobPosting` markup, reads a few LinkedIn-specific top-card selectors with a generic fallback for everything else, and returns a flat evidence object — no session/evidence/classification/planning module boundary, no AI-proposed extraction plans, no learned strategy registry, no domain adapter framework. `assessBrowserJobEvidence()` in the same file does a simple weighted-signal readiness score (`READY` / `PARTIAL` / `NOT_READY`) in place of the classifier described in §3.3 below.
+>
+> This document is retained as a design reference for a more sophisticated architecture the team considered, in case that direction is revisited — it should not be read as describing current behavior. If you're debugging extraction issues, start in `jdExtractionFlow.js`, not here.
+
 ## 1. Architectural intent
 
 The Browser Intelligence Engine (BIE) is a domain-neutral browser-native system. Its first domain package understands job listings, but the core does not know about LinkedIn, Glassdoor, jobs, products, or articles.

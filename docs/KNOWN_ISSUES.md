@@ -31,11 +31,11 @@ This document tracks all currently identified technical issues, edge-case bugs, 
 ### ISSUE-003: Dynamic DOM Class Name Mutations on Custom Niche Job Boards
 - **Date Discovered**: 2026-07-15
 - **Severity**: Low
-- **Component**: Chrome Extension Content Scripts (`src/browser-intelligence/`)
+- **Component**: Extension JD Collector (`frontend/src/services/jdExtractionFlow.js::captureActiveTabJobEvidence`) — not `src/browser-intelligence/`, which is unused/empty; see [BROWSER_INTELLIGENCE_ARCHITECTURE.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/BROWSER_INTELLIGENCE_ARCHITECTURE.md) status note.
 - **Description**: Occasional job descriptions on niche ATS portals (e.g. custom company career pages) fail auto-parsing and require user fallback selection.
 - **Root Cause**: Non-standard HTML markup missing standard ARIA roles or microdata tags.
-- **Current Status**: Active Monitoring.
-- **Assigned Fix**: Add generic heuristic DOM parser relying on main container density and article text extraction algorithms.
+- **Current Status**: Active Monitoring. Note: a generic heuristic fallback (density/signal-word scoring over `[role="dialog"], [role="main"], article, main, aside, section`) already exists in the collector — this issue tracks the remaining cases it still misses, not an unimplemented fallback.
+- **Assigned Fix**: Improve the existing heuristic scoring further (see `jdExtractionFlow.js` lines 62-90 for current logic) rather than adding a new parser.
 
 ---
 

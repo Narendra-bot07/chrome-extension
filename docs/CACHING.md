@@ -1,6 +1,8 @@
 # Tailr4U - Caching Architecture & Redis Specification
 
-This document details the production-grade, multi-tiered caching architecture, Upstash Redis integration, input normalization, canonical SHA-256 fingerprinting, envelope schemas, distributed locking protocols, TTL retention policies, and in-memory fallback strategies for **Tailr4U**.
+This document details the production-grade, multi-tiered caching architecture, Redis integration, input normalization, canonical SHA-256 fingerprinting, envelope schemas, distributed locking protocols, TTL retention policies, and in-memory fallback strategies for **Tailr4U**.
+
+> **Vendor note**: Only the REST fallback tier (`https://api.upstash.io`) is genuinely Upstash-specific. The primary TCP path (`redis_cache.py:24-31`) is plain `redis-py` calling `redis.from_url()` against any `rediss://` URL — it will work against any TLS-capable Redis host, not just Upstash. "Upstash Redis" below refers to the specific instance currently configured in `.env`, not a hard vendor dependency in the code.
 
 ---
 
@@ -55,7 +57,7 @@ graph TD
 1. **Official Upstash Redis SDK (`upstash_redis.Redis`)**: Uses `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
 2. **Standard Redis TCP (`rediss://`)**: Uses TLS-encrypted socket connection via `redis.from_url()`.
 3. **Upstash REST HTTP API**: Direct HTTP POST/GET calls (`https://api.upstash.io`) with Bearer authorization headers for serverless environments.
-4. **Local In-Memory Fallback Cache**: In-memory Python dictionary using Least Recently Used (LRU) eviction when no external Redis server is reachable.
+4. **Local In-Memory Fallback Cache**: In-memory Python dictionary capped at 500 entries, evicting the oldest-inserted key first (FIFO via `next(iter(dict))`, `redis_cache.py:124-126`) when no external Redis server is reachable. This is insertion-order eviction, not true LRU — there is no access-time tracking on `get()`.
 
 ---
 
@@ -115,7 +117,9 @@ TTL retention policies are configured per workflow task via environment variable
 | **Section Content Refinement** | `refine_*` | `86,400s` (24 hrs) | `LLM_CACHE_TTL_SUMMARY_SECONDS` |
 | **Cover Letter Generation** | `cover_letter_generation` | `86,400s` (24 hrs) | `LLM_CACHE_TTL_COVER_LETTER_SECONDS` |
 | **Semantic Live Scoring** | `live_scoring` | `86,400s` (24 hrs) | `LLM_CACHE_TTL_TAILORING_SECONDS` |
-| **Semantic Resume Analysis** | `semantic_insights` | `604,800s` (7 days) | `LLM_CACHE_TTL_RECOVERY_SECONDS` |
+| **Semantic Resume Analysis** | `semantic_insights` | `86,400s` (24 hrs) — falls through to the tailoring default | `LLM_CACHE_TTL_TAILORING_SECONDS` |
+
+> `get_task_ttl()` (`llm_cache.py:57-67`) matches by substring against `task`: `"jd"` → JD TTL, `"recovery"`/`"resume_structure"`/`"parse_resume"` → recovery TTL, `"summary"`/`"refinement"` → summary TTL, `"cover_letter"` → cover-letter TTL, everything else (including `"semantic_insights"`, used by `services/resume_intelligence/semantic.py:70`) falls through to the tailoring TTL. The table above previously claimed `semantic_insights` got the 7-day recovery TTL — it does not, since the string doesn't match any of the substring checks.
 
 ---
 

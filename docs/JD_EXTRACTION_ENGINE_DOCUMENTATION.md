@@ -2,8 +2,10 @@
 
 ## End-to-End Engineering Documentation
 
-**Document status:** Current implementation  
+**Document status:** Current implementation, with one stale provider name (see correction below)  
 **Scope:** Chrome extension JD capture, hybrid evidence acquisition, backend Job Intelligence graph, extraction, review, session management, ATS comparison integration, frontend states, observability, testing, and operations.
+
+> ⚠️ **Provider correction**: every mention of **Groq** throughout this document (the "one structured Groq call" pattern, `Groq rate limiting`, `Groq's tool_use_failed`, §15 "Groq call management", §18.5, etc.) should be read as **DeepSeek**. Per [ADR_DEEPSEEK_SOLE_PROVIDER.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/ADR_DEEPSEEK_SOLE_PROVIDER.md), Groq was fully removed from the codebase (`groq_service.py` deleted, `groq` package not in `requirements.txt`) and `backend/services/job_extraction/agents.py` now calls `app.ai_service.get_llm()`, which routes through `DeepSeekProvider`/`ResilientLLMWrapper` (`deepseek-v4-flash` → `deepseek-v4-pro` escalation) instead. The call-count discipline this document describes (one normal-path call, at most one repair call) is a real, still-enforced constraint — only the vendor name is outdated. This banner was added rather than rewriting all ~15 in-body mentions individually, to avoid introducing new errors in a 37KB document without re-verifying every surrounding claim line-by-line.
 
 ---
 

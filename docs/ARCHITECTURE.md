@@ -16,7 +16,7 @@ graph TD
     subgraph API Gateway & Service Layer
         FASTAPI["FastAPI Backend Engine<br/>(Port 8000 / Production Host)"]
         MIDDLEWARE["RequestLoggingMiddleware<br/>& CORSMiddleware"]
-        AUTH["Supabase Auth / JWT Validation<br/>(Bearer Token Verification)"]
+        AUTH["Self-Issued HS256 JWT Guard<br/>(Bearer Token Verification, JWT_SECRET — not Supabase Auth)"]
     end
 
     subgraph Persistence & Caching
@@ -50,8 +50,8 @@ graph TD
     AUTH --> FASTAPI
 
     %% Data Storage & Caching
-    FASTAPI -->|"Async SQL / asyncpg"| SUPABASE_DB
-    FASTAPI -->|"File Uploads / Downloads"| SUPABASE_STORAGE
+    FASTAPI -->|"Sync SQL / psycopg2 (ThreadedConnectionPool)"| SUPABASE_DB
+    FASTAPI -->|"File Uploads / Downloads (currently LocalStorageService — see DATABASE.md storage gap note)"| SUPABASE_STORAGE
     FASTAPI -->|"Get / Set Cached Hashes"| REDIS
 
     %% AI Pipeline
@@ -118,10 +118,12 @@ sequenceDiagram
 ## 3. Sub-System Architectural Breakdowns
 
 ### 3.1 Browser Intelligence Engine (Chrome Extension)
-- **Manifest Version**: V3 (`manifest.json`)
-- **Content Scripts**: Scrapes DOM elements dynamically using dedicated parser engines (`linkedin.js`, `indeed.js`, `glassdoor.js`, `lever.js`, `greenhouse.js`, `workday.js`).
-- **Background Service Worker**: Handles OAuth token synchronization between web application tabs and extension storage.
-- **Injected Floating Widget**: Shadow DOM container ensuring zero CSS styling pollution on target job board pages.
+> Corrected from an earlier draft — see the status note at the top of [BROWSER_INTELLIGENCE_ARCHITECTURE.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/BROWSER_INTELLIGENCE_ARCHITECTURE.md) for the full detail.
+- **Manifest Version**: V3, `sidePanel` model (`frontend/public/manifest.json`) — no `content_scripts` entry. There is no injected floating overlay on job board pages; the entire UI runs in the Chrome side panel.
+- **Extraction**: A single generic, site-agnostic heuristic collector — no per-site parser files (`linkedin.js`, `indeed.js`, etc. do not exist). The side panel calls `chrome.scripting.executeScript` with an inline function (`frontend/src/services/jdExtractionFlow.js::captureActiveTabJobEvidence`) that scores candidate DOM containers by job-related text signals, JSON-LD `JobPosting` presence, and known top-card selectors (LinkedIn-specific, with a generic fallback for other sites).
+- **Background Service Worker** (`frontend/public/background.js`): Sets side-panel-on-click behavior and relays a couple of runtime messages. It does not do DOM scraping or OAuth token relay.
+
+**Repository note**: `frontend/src/browser-intelligence/` (empty directories) and `frontend/public/content_snapshot.js` were an earlier, unused iteration of this collector — superseded by the inline collector above.
 
 ### 3.2 FastAPI Enterprise Engine Architecture
 The backend follows a 4-layer Clean Architecture pattern:

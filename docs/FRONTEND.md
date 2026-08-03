@@ -17,8 +17,8 @@ The Tailr4U frontend is a high-performance Single Page Application (SPA) built w
 | **Styling Engine** | TailwindCSS v3 + CSS Variables | Utility-first layout & custom design tokens |
 | **Iconography** | Lucide React (`lucide-react`) | Crisp vector iconography set |
 | **Animations** | Framer Motion (`framer-motion`) | Glassmorphism transitions, spring dynamics & page routes |
-| **HTTP Client** | Axios (`axios`) | REST API client with Bearer JWT interceptors |
-| **Extension UI** | Shadow DOM Container | Isolated Chrome Extension overlay injected into job portals |
+| **HTTP Client** | Native `fetch` | REST API client with Bearer JWT headers attached per-call (no Axios dependency — not in `package.json`) |
+| **Extension UI** | Chrome `sidePanel` | The extension UI is the same React app running inside the Chrome side panel — there is no injected overlay on job portal pages |
 
 ---
 
@@ -213,17 +213,11 @@ Tailr4U provides smooth responsive motion using CSS variables and Framer Motion 
 
 ---
 
-## 6. Chrome Extension Shadow DOM UI Isolation
+## 6. Chrome Extension UI Isolation (corrected)
 
-To guarantee zero CSS contamination when injected into external job board pages (LinkedIn, Indeed, Lever, Greenhouse):
-- The content script creates a closed Shadow Root container:
-  ```javascript
-  const host = document.createElement('div');
-  host.id = 'tailr4u-extension-root';
-  const shadow = host.attachShadow({ mode: 'open' });
-  ```
-- Tailr4U design token styles (`styles.css` compiled bundle) are injected directly inside the Shadow Root.
-- Host page styles (`bootstrap`, `tailwind`, or custom company styles) are completely isolated and unable to affect the floating extension widget.
+> This section previously described a Shadow DOM floating overlay injected into job board pages. That does not exist in the current codebase — no `attachShadow` call, no `tailr4u-extension-root` container, and no `content_scripts` entry in `manifest.json`.
+
+The actual isolation model is simpler: the extension is a `sidePanel`-type Manifest V3 extension (`frontend/public/manifest.json`). The entire Tailr4U React app runs inside the Chrome side panel's own document — a completely separate rendering context from the job board page — so there is no CSS collision to guard against in the first place. The side panel reads job page content via a single `chrome.scripting.executeScript` call (`frontend/src/services/jdExtractionFlow.js::captureActiveTabJobEvidence`) that returns extracted text/DOM data to the panel; it never injects Tailr4U's own UI into the host page.
 
 ---
 

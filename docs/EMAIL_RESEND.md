@@ -55,7 +55,7 @@ Triggered automatically if `RESEND_API_KEY` is not provided or returns an API er
 
 1. **Password Reset (`send_password_reset`)**:
    - Generates password reset link (`/#/reset-password?token=...`).
-   - Expiration: `PASSWORD_RESET_MINUTES` (Default: 30 mins).
+   - Expiration: `PASSWORD_RESET_MINUTES` (Default: 45 mins, `backend/core/config.py:42`).
 2. **Email Verification (`send_verification`)**:
    - Verification link (`/#/verify-email?token=...`).
    - Expiration: `EMAIL_VERIFICATION_HOURS` (Default: 24 hrs).

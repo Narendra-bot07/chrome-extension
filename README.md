@@ -104,14 +104,14 @@ graph TD
 
     subgraph API Gateway & Security
         API["FastAPI Server Application"]
-        AUTH["Supabase JWT Auth Guard"]
+        AUTH["Self-Issued JWT Auth Guard (not Supabase Auth)"]
         LOCK["Single-AI-Request Concurrency Lock"]
     end
 
     subgraph Resilient AI Pipeline
         WRAP["ResilientLLMWrapper"]
-        GEMINI_PRIMARY["Primary: Gemini 2.5 Flash"]
-        GEMINI_FALLBACK["Fallback: Gemini 2.0 / 1.5 Flash"]
+        DEEPSEEK_PRIMARY["Primary: DeepSeek v4 Flash"]
+        DEEPSEEK_ESCALATION["Escalation: DeepSeek v4 Pro"]
     end
 
     subgraph Billing Geo-Router
@@ -132,8 +132,8 @@ graph TD
     API --> AUTH
     API --> LOCK
     LOCK --> WRAP
-    WRAP -->|1st Choice| GEMINI_PRIMARY
-    WRAP -->|Failover| GEMINI_FALLBACK
+    WRAP -->|1st Choice| DEEPSEEK_PRIMARY
+    WRAP -->|Escalation on schema failure| DEEPSEEK_ESCALATION
     API --> BILLING
     BILLING -->|Global| STRIPE
     BILLING -->|India| RAZORPAY
@@ -151,9 +151,9 @@ graph TD
 chrome-extension/
 ├── backend/                        # FastAPI Backend Application Server
 │   ├── api/v1/                     # REST API Endpoint Routers (Resume, Jobs, Tailoring)
-│   ├── app/                        # Gemini AI Services, Schemas & Core Pipeline
+│   ├── app/                        # DeepSeek AI Services, Schemas & Core Pipeline
 │   │   ├── billing/                # Stripe & Razorpay Billing Routers & Providers
-│   │   ├── gemini_service.py       # ResilientLLMWrapper & Concurrency Lock Engine
+│   │   ├── llm/deepseek_provider.py # ResilientLLMWrapper, Flash→Pro Escalation & Concurrency Lock
 │   │   └── schemas.py              # Pydantic V2 Request / Response Schemas
 │   ├── core/                       # App Configuration & PostgreSQL Database Connection
 │   ├── services/                   # Storage, Caching, Scraper & Email Services

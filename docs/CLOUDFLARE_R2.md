@@ -1,12 +1,14 @@
 # Tailr4U - Cloudflare R2 & Object Storage Specification
 
+> ⚠️ **Status: Not implemented.** There are zero references to Cloudflare, R2, or an S3 client anywhere in `backend/`. The document below describes a target/planned architecture. The actual current storage implementation is `backend/services/storage/local_storage.py::LocalStorageService`, unconditionally selected by `backend/api/dependencies.py::get_storage_service()`, writing to `backend/local_uploads/` on local disk — which does not persist across restarts/redeploys on an ephemeral host like Render. A `SupabaseStorageService` class exists (`backend/services/storage/supabase_storage.py`) and is fully coded against the Supabase Storage SDK, but it is never instantiated anywhere in the app. Treat everything below as a design target, not current behavior, until the storage dependency is actually wired to either Supabase Storage or R2.
+
 This document details the object storage architecture, S3-compatible Cloudflare R2 / Supabase Storage integrations, bucket security policies, and deterministic asset file-path mapping for **Tailr4U**.
 
 ---
 
-## 1. Storage Architecture Overview
+## 1. Storage Architecture Overview (target design, not current behavior — see status note above)
 
-Tailr4U uses **Cloudflare R2** (or S3-compatible Supabase Storage) for storing unstructured binary blobs (candidate master resumes, AI-tailored rendered PDFs, template preview thumbnails, and profile avatars).
+Tailr4U's storage buckets, RLS policies, and this document's target architecture assume **Cloudflare R2** (or S3-compatible Supabase Storage) for storing unstructured binary blobs (candidate master resumes, AI-tailored rendered PDFs, template preview thumbnails, and profile avatars). Today, uploads instead land on local disk via `LocalStorageService`.
 
 ```mermaid
 graph TD

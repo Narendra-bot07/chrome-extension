@@ -115,16 +115,16 @@ class ResilientLLMWrapper(Runnable):
 | `POST` | `/api/v1/resumes/upload` | Stores uploaded candidate PDF/DOCX to Supabase Storage | Yes (JWT) |
 | `POST` | `/api/v1/resumes/{id}/parse` | On-demand AI resume parsing with structured JSON output | Yes (JWT) |
 | `POST` | `/api/v1/resumes/{id}/layout/recommendation` | Generates neutral ATS section layout recommendations | Yes (JWT) |
-| `POST` | `/api/v1/tailor` | Generates tailored resume patch matched to target JD | Yes (JWT) |
-| `POST` | `/api/v1/compare` | Scores match percentage and keyword gaps | Yes (JWT) |
-| `POST` | `/api/v1/cover-letter/generate` | Generates tailored cover letter draft | Yes (JWT) |
-| `POST` | `/api/v1/refine-section/stream` | Streams AI section refinements for summary/experience/skills | Yes (JWT) |
+| `POST` | `/api/v1/tailor/` | Generates tailored resume patch matched to target JD | Yes (JWT) |
+| `POST` | `/api/compare` | Scores match percentage and keyword gaps — **legacy router, `/api` prefix, not `/api/v1`** | Yes (JWT) |
+| `POST` | `/api/cover-letter/generate` | Generates tailored cover letter draft — **legacy router, `/api` prefix, not `/api/v1`** | Yes (JWT) |
+| `POST` | `/api/refine-section/stream` | Streams AI section refinements for summary/experience/skills — **legacy router, `/api` prefix, not `/api/v1`** | Yes (JWT) |
 
 ---
 
 ## 5. Database Schema & Data Design (Supabase PostgreSQL)
 
-The backend utilizes **Supabase PostgreSQL** with 10 normalized, multi-tenant tables protected by Row Level Security (RLS):
+The backend utilizes **Supabase PostgreSQL** with 31+ normalized, multi-tenant tables protected by Row Level Security (RLS) — the three below are illustrative core tables, not the full list (see [DATABASE.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/DATABASE.md) for the corrected scope note):
 
 ```sql
 -- 1. Resumes Master Table

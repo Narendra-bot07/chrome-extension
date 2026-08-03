@@ -224,19 +224,25 @@ All unhandled or application exceptions are formatted into uniform JSON structur
 
 ---
 
-## 7. Authentication & Dependency Injection (`api/dependencies.py`)
+## 7. Authentication & Dependency Injection (`core/security.py`, `api/dependencies.py`)
 
-Every protected endpoint uses FastAPI's `Depends()` mechanism:
+> Corrected: auth is self-issued, not Supabase Auth. Full detail in [SECURITY.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/SECURITY.md) §1.
+
+Every protected endpoint depends on `verify_supabase_jwt` (`core/security.py:8`) — a legacy name; it decodes a session JWT signed by the app itself, not one issued by Supabase:
 
 ```python
-async def get_current_user(authorization: str = Header(...)) -> Dict[str, Any]:
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid token header format.")
+async def verify_supabase_jwt(
+    authorization: str = Header(None),
+    conn = Depends(get_db_connection),
+) -> Dict[str, Any]:
     token = authorization.split(" ")[1]
-    
-    # Verify JWT signature against Supabase JWT Secret / Public Key
-    payload = decode_supabase_jwt(token)
-    return payload
+    payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+
+    session_id = payload.get("jti")
+    if session_id and not SessionService(conn).verify_and_update_session(session_id):
+        raise CredentialError("Session expired or revoked.")
+
+    return {"id": payload["sub"], "session_id": session_id, "email": payload["email"], ...}
 ```
 
 ---

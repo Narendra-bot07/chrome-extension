@@ -19,14 +19,14 @@
 | **Global Payments** | **Stripe** | `stripe-python` | International checkout sessions, webhooks, subscription billing |
 | **Domestic Payments** | **Razorpay** | `razorpay-python` | India region geo-routed payment orders & HMAC signature verification |
 | **Billing Router** | **BillingService** | Geo-Routing Engine | Automatic routing: India → Razorpay, Rest of World → Stripe |
-| **Database Engine** | **Supabase PostgreSQL** | Managed Postgres 15+ | Multi-tenant relational storage (10 indexed tables, RLS enabled) |
+| **Database Engine** | **Supabase PostgreSQL** | Managed Postgres 15+ | Multi-tenant relational storage (31+ tables across `supabase/migrations/`, RLS enabled) |
 | **Database Connection** | **Psycopg2 Binary** | Transaction Pooler (Port 6543) | PgBouncer connection pooling with SSL mode |
 | **Blob Storage** | **Supabase Storage** | Cloud Object Buckets | Binary file storage (`original-resumes`, `generated-resumes`) |
 | **Caching Layer** | **Upstash Redis Cloud** | REST API (`topical-katydid-92319.upstash.io`) | Sub-50ms AI response caching & JD extraction caching |
 | **Cache Fallback** | **In-Memory Cache** | Custom Python Dict | Graceful offline cache fallback when Redis is unconfigured |
 | **Email Service** | **Resend REST API** | `https://api.resend.com/emails` | Transactional email delivery with automatic SMTP fallback |
 | **Job Web Scraper** | **Playwright + BeautifulSoup4** | Headless Browser / HTML Parser | Full DOM rendering and JD markdown extraction |
-| **Authentication** | **Supabase JWT Guard** | PyJWT + Supabase Auth | RSA/HS256 JWT validation on protected API endpoints |
+| **Authentication** | **Self-Issued JWT Guard** | PyJWT + bcrypt (not Supabase Auth) | HS256 JWT signed with app-local `JWT_SECRET`, session revocation via `SessionService`; see [SECURITY.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/SECURITY.md) §1 |
 
 ---
 
@@ -58,7 +58,7 @@
 ## 3. What We Are Following (Active Best Practices & Implemented Standards)
 
 ### AI & Pipeline Resiliency
-* [x] **100% Gemini Exclusive**: Engine relies exclusively on Google Gemini models (`gemini-2.0-flash`, `gemini-1.5-flash`, `gemini-2.5-flash`).
+* [x] **100% DeepSeek Exclusive**: Engine relies exclusively on DeepSeek models (`deepseek-v4-flash`, `deepseek-v4-pro`) — Gemini and Groq were fully removed, see [ADR_DEEPSEEK_SOLE_PROVIDER.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/ADR_DEEPSEEK_SOLE_PROVIDER.md).
 * [x] **Single-Request Concurrency Lock (`_SINGLE_AI_REQUEST_LOCK`)**: Enforces 1-at-a-time LLM execution with 1.5s cooling intervals, eliminating 429 quota exhaustion errors.
 * [x] **Multi-Tier Model Fallback**: Automatically tries alternative Gemini model strings if a primary model returns 404 or temporary errors.
 
@@ -69,9 +69,9 @@
 
 ### Database & Cloud Storage
 * [x] **Supabase Managed Postgres**: Database hosted on Supabase managed infrastructure connected via Transaction Pooler PgBouncer on port `6543`.
-* [x] **100% Indexed Relational Schema**: 10 normalized tables (`resumes`, `tailored_resumes`, `job_descriptions`, `resume_versions`, `phase2_checkpoints`, `usage_events`, `audit_logs`, `subscription_tiers`, `user_subscriptions`, `cover_letters`) with primary keys, foreign keys, and indexes.
+* [x] **Indexed Relational Schema**: 31+ tables across `supabase/migrations/*.sql` (not the previously-documented "10" — that count is stale from an early schema draft; see [DATABASE.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/DATABASE.md) scope note and [DATABASE_DDL_MIGRATIONS.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/DATABASE_DDL_MIGRATIONS.md) for the full list), with primary keys, foreign keys, and indexes.
 * [x] **Row Level Security (RLS)**: Row-level security policies enforced on Supabase tables to isolate multi-tenant user data.
-* [x] **Cloud Storage Buckets**: Binary file storage migrated to Supabase Storage (`original-resumes` and `generated-resumes`).
+* [ ] **Cloud Storage Buckets**: **Not yet wired up.** `original-resumes`/`generated-resumes` bucket RLS policies exist in migrations and `SupabaseStorageService` is fully implemented, but `get_storage_service()` (`backend/api/dependencies.py:48`) unconditionally returns `LocalStorageService` (local disk) — uploads do not currently reach Supabase Storage. See [DATABASE.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/DATABASE.md) §1 for detail.
 
 ### Caching, Performance & Email
 * [x] **Upstash Cloud Redis**: Live and authenticated at `topical-katydid-92319.upstash.io` providing sub-50ms cache hits for AI responses.
@@ -93,15 +93,14 @@
 | :---: | :--- | :--- | :--- |
 | **1** | **Database Security** | Connection string uses default superuser `postgres` URI in `DATABASE_URL`. | Create a restricted `tailr4u_app` application role in Supabase. |
 | **2** | **Environment Isolation** | Development and production share the same Supabase project instance. | Create a separate `tailr4u-staging` Supabase project for dev testing. |
-| **3** | **Real-Time Error Tracking** | Server logs stream to stdout, but Sentry exception tracking is unconfigured. | Add `SENTRY_DSN` to `backend/core/config.py` and `backend/.env`. |
+| **3** | **Real-Time Error Tracking** | ~~Sentry exception tracking is unconfigured~~ — **stale, already resolved**: `backend/observability/sentry.py` is fully wired (PII redaction, FastAPI integration) and called from `main.py`, keyed off `SENTRY_BACKEND_DSN`/`SENTRY_FRONTEND_DSN`/`SENTRY_EXTENSION_DSN`. | Verify DSN values are actually populated per environment (not a code gap). |
 | **4** | **Backup Recovery Drills** | Automated daily Supabase backups are active, but restoration is un-drilled. | Schedule a quarterly automated backup restoration test. |
 | **5** | **Frontend Code-Splitting** | Large vendor chunks (>500kB) compile cleanly, but lack dynamic import splitting. | Add dynamic `import()` chunking in `vite.config.js` for lighter initial page loads. |
+| **6** | **Blob Storage Wiring** | `get_storage_service()` always returns `LocalStorageService`; `SupabaseStorageService` is fully implemented but never instantiated. Uploads do not persist across restarts on ephemeral hosts. | Construct a `supabase.Client` from `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` and swap the dependency to `SupabaseStorageService`. |
 
 ---
 
 ## 5. Master System Scorecard
 
-* **Total Architectural Standards Audited**: **160 Standards**
-* **Standards Currently Following**: **153 Standards (95.6%)**
-* **Gaps / Action Items Remaining**: **7 Minor Action Items (4.4%)**
-* **Current Operational Status**: **PRODUCTION READY**
+* **Gaps / Action Items Remaining**: **6 items** (§4 above) — one newly added (Blob Storage Wiring, item 6) since the prior audit, one resolved (Sentry, item 3, downgraded to a verification-only note).
+* **Current Operational Status**: Production-deployed; the storage wiring gap (item 6) is the highest-priority open item since it risks silent data loss on redeploy.

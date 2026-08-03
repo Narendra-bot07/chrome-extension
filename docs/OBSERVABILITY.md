@@ -64,7 +64,7 @@ All observability variables must be set in the backend `.env` (Render dashboard 
 
 ### 2.3 Chrome Extension
 
-The extension DSN constants are currently hardcoded strings at the top of `background.js` and `content_snapshot.js` (empty by default). Set `SENTRY_EXTENSION_DSN` before publishing a Chrome Web Store build.
+The extension DSN constant is currently a hardcoded string at the top of `background.js` (empty by default). `content_snapshot.js` was removed as orphaned dead code — it was never referenced by the manifest or injected anywhere; the actual JD collector is `frontend/src/services/jdExtractionFlow.js`, which reports errors through the web app's normal Sentry frontend integration rather than its own DSN constant. Set `SENTRY_EXTENSION_DSN` before publishing a Chrome Web Store build.
 
 ---
 

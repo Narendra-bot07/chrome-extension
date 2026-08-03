@@ -22,28 +22,32 @@ class CorrelationAndLoggingMiddleware(BaseHTTPMiddleware):
         trace_id = request.headers.get("x-trace-id") or ""
         set_trace_id(trace_id)
 
-        # Retrieve matching route path template to prevent cardinality explosions
-        route_path = "unknown"
-        if "route" in request.scope:
-            route_path = request.scope["route"].path
-        else:
-            # Fallback to path parsing if match is pending
-            route_path = request.url.path
-
-        # Log inbound request
+        # Log inbound request. The route hasn't been matched yet at this point
+        # (routing happens inside call_next(), below) so only the raw path is
+        # known here — this line is for correlation only, not metrics.
         logger.info(
             f"http_request_inbound",
             extra={
                 "method": request.method,
-                "route": route_path,
+                "route": request.url.path,
                 "client_ip": request.client.host if request.client else "unknown"
             }
         )
 
+        def resolve_route_path() -> str:
+            """Read the matched route TEMPLATE (e.g. '/resumes/{resume_id}') off the
+            shared ASGI scope. Only valid after call_next() has run — the Router
+            populates scope['route'] during dispatch, mutating the same scope dict
+            this Request wraps. Falls back to the raw path for unmatched routes
+            (404s) to avoid an 'unknown' bucket swallowing real 404 signal."""
+            route = request.scope.get("route")
+            return route.path if route is not None else request.url.path
+
         try:
             response = await call_next(request)
             duration_ms = (time.time() - start_time) * 1000
-            
+            route_path = resolve_route_path()
+
             # Record Prometheus Metrics
             record_http_request(
                 method=request.method,
@@ -69,7 +73,8 @@ class CorrelationAndLoggingMiddleware(BaseHTTPMiddleware):
 
         except BaseAppException as exc:
             duration_ms = (time.time() - start_time) * 1000
-            
+            route_path = resolve_route_path()
+
             # Record Prometheus Metrics for exceptions
             record_http_request(
                 method=request.method,
@@ -98,7 +103,8 @@ class CorrelationAndLoggingMiddleware(BaseHTTPMiddleware):
 
         except Exception as unhandled:
             duration_ms = (time.time() - start_time) * 1000
-            
+            route_path = resolve_route_path()
+
             # Record Prometheus Metrics for 500 error
             record_http_request(
                 method=request.method,

@@ -26,7 +26,7 @@ To empower job seekers with real-time browser intelligence, AI-assisted resume c
 ## 2. Product Overview & Key Features
 
 Tailr4U is composed of three interconnected sub-systems:
-1. **Chrome Extension (Browser Intelligence Engine)**: DOM scraper & floating overlay injected into major job platforms (LinkedIn, Indeed, Glassdoor, Lever, Greenhouse, Workday) to capture raw Job Descriptions and trigger instant tailoring.
+1. **Chrome Extension (Side Panel + Heuristic Collector)**: A Manifest V3 `sidePanel` extension. From the side panel, a single generic heuristic collector (`chrome.scripting.executeScript`, no per-site parsers) reads the active tab's DOM to capture raw Job Descriptions and trigger instant tailoring — there is no injected floating overlay on the job platform page itself.
 2. **Web Application (Vite + React Frontend)**: Premium dark-mode dashboard providing resume management, real-time tailoring editors, template customization, cover letter generator, application status tracking, and account management.
 3. **Backend API (FastAPI Enterprise Engine)**: Asynchronous REST API providing DeepSeek LLM orchestration (`deepseek-v4-flash` -> `deepseek-v4-pro`), production Redis caching, Playwright PDF compilation, ATS scoring, account security, usage analytics, and Supabase integration.
 
@@ -74,11 +74,10 @@ tailr4u/
 ├── docs/                                 # Central Knowledge Base & Specifications
 ├── frontend/                             # React + Vite Web Application
 │   ├── src/
-│   │   ├── browser-intelligence/        # Injected Chrome Extension logic & content scripts
 │   │   ├── components/                  # UI Components (Dashboard, Resume Editors, Modals)
 │   │   ├── context/                     # React Auth & Theme Contexts
 │   │   ├── pages/                       # Route pages (Dashboard, Resume, CoverLetter, Profile)
-│   │   ├── services/                    # Axios API client services
+│   │   ├── services/                    # fetch-based API client services (incl. jdExtractionFlow.js — the extension's JD collector, run via chrome.scripting.executeScript from the side panel)
 │   │   └── templates/                   # HTML/CSS Resume Render Templates for Playwright
 │   ├── index.html
 │   ├── tailwind.config.js

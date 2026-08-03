@@ -62,7 +62,7 @@ We performed a strict line-by-line audit of the **Tailr4U** backend codebase (`b
 ---
 
 ### Section 3: Schema Design (12 / 12 Following) — 100% COMPLIANT
-* [x] **Define primary keys for every table**: Following (UUID `PRIMARY KEY DEFAULT gen_random_uuid()` across all 10 tables).
+* [x] **Define primary keys for every table**: Following (UUID `PRIMARY KEY DEFAULT gen_random_uuid()` across all 31+ tables — see [DATABASE.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/DATABASE.md) scope note; the "10 tables" figure was a stale early-schema count).
 * [x] **Add foreign-key constraints**: Following (`original_resume_id REFERENCES public.resumes(id)`, `job_id REFERENCES public.job_descriptions(id)`).
 * [x] **Add `NOT NULL` constraints where required**: Following (`user_id NOT NULL`, `file_path NOT NULL`, `file_name NOT NULL`).
 * [x] **Add `UNIQUE` constraints for fields such as email or transaction ID**: Following (`email UNIQUE`, `stripe_customer_id UNIQUE`).
@@ -214,7 +214,7 @@ We performed a strict line-by-line audit of the **Tailr4U** backend codebase (`b
 * [x] **Connection pooling is configured**: Following (Port `6543`).
 * [x] **Backups are enabled**: Following (Supabase Daily Snapshots).
 * [x] **Migrations are version-controlled**: Following (Git tracked).
-* [x] **Critical queries have indexes**: Following (10/10 tables indexed).
+* [x] **Critical queries have indexes**: Following (indexes present per migration file; not independently re-verified table-by-table in this pass — see `backend/migrate_db_performance_indexes.py` and `backend/migrate_performance_indexes.py` for the index migrations).
 * [x] **Query & connection timeouts are configured**: Following (`connect_timeout=5`, `statement_timeout=10000`).
 * [x] **Logs do not expose secrets**: Following (Sanitized logging).
 

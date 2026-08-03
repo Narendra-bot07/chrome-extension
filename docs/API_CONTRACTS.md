@@ -10,8 +10,9 @@ This document provides complete REST API endpoint contracts for the **Tailr4U Ba
 - **Content-Type**: `application/json` (unless handling `multipart/form-data` uploads)
 - **Authentication**: HTTP Bearer Token in Request Header:
   ```http
-  Authorization: Bearer <supabase_jwt_token>
+  Authorization: Bearer <session_jwt_token>
   ```
+  This is a self-issued HS256 JWT (signed with `JWT_SECRET`, verified in `core/security.py::verify_supabase_jwt`), **not** a Supabase Auth token — see [SECURITY.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/SECURITY.md) §1 for the corrected auth architecture.
 - **Standard Error Response Format**:
   ```json
   {
@@ -25,8 +26,8 @@ This document provides complete REST API endpoint contracts for the **Tailr4U Ba
 
 ## 2. Authentication Router (`/api/v1/auth`)
 
-### 2.1 Register User (`POST /auth/signup`)
-- **Purpose**: Creates a new user account in Supabase Auth and initializes a candidate profile record.
+### 2.1 Register User (`POST /auth/register`)
+- **Purpose**: Creates a new user account (custom bcrypt + JWT auth, not Supabase Auth) and initializes a candidate profile record. Actual route: `backend/api/v1/auth.py:144`.
 - **Auth**: None (Public)
 - **Request Body**:
   ```json
@@ -76,9 +77,11 @@ This document provides complete REST API endpoint contracts for the **Tailr4U Ba
 
 ---
 
-## 3. Resume Management Router (`/api/v1/resume`)
+## 3. Resume Management Router (`/api/v1/resumes`)
 
-### 3.1 Upload Master Resume (`POST /resume/upload`)
+> Note the prefix is plural (`resumes`, `backend/api/v1/resume.py:43`). This router also exposes many more routes than shown below (versions, layout, activate, mark-used, recover-source, intelligence, etc.) — see the file directly for the full 20+ route list.
+
+### 3.1 Upload Master Resume (`POST /resumes/upload`)
 - **Purpose**: Uploads raw candidate resume file (`PDF` or `DOCX`), parses text structure via AI, and saves to storage.
 - **Auth**: Bearer JWT Required
 - **Request Format**: `multipart/form-data`
@@ -101,7 +104,7 @@ This document provides complete REST API endpoint contracts for the **Tailr4U Ba
 
 ---
 
-### 3.2 List Master Resumes (`GET /resume/list`)
+### 3.2 List Master Resumes (`GET /resumes/`)
 - **Purpose**: Fetches all master resume files owned by the authenticated candidate.
 - **Auth**: Bearer JWT Required
 - **Response (`200 OK`)**:
@@ -120,84 +123,43 @@ This document provides complete REST API endpoint contracts for the **Tailr4U Ba
 
 ## 4. Job Intelligence Router (`/api/v1/jobs`)
 
-### 4.1 Extract Job Description (`POST /jobs/extract`)
-- **Purpose**: Accepts raw scraped DOM text or URL and extracts structured job requirement data.
-- **Auth**: Bearer JWT / API Key
-- **Request Body**:
+### 4.1 Extract Job Description (`POST /jobs/extract-url`)
+- **Purpose**: Accepts a job listing URL plus browser-collected evidence (from the extension's in-page heuristic collector, see `frontend/src/services/jdExtractionFlow.js`) and runs the job extraction graph (`backend/services/job_extraction/`).
+- **Auth**: Bearer JWT Required
+- **Request Body** (`JobUrlExtractRequest`, `backend/schemas/jobs.py:79`):
   ```json
   {
-    "company_name": "Google",
-    "job_title": "Senior AI Systems Engineer",
-    "job_url": "https://careers.google.com/jobs/results/12345",
-    "raw_html_or_text": "We are seeking a Senior AI Systems Engineer with expertise in Python, FastAPI, distributed caching..."
+    "url": "https://careers.google.com/jobs/results/12345",
+    "request_id": "optional-idempotency-id",
+    "browser_evidence": { "title": "...", "visible_text": "...", "selected_panel_text": "...", "jsonld": [] }
   }
   ```
-- **Response (`200 OK`)**:
-  ```json
-  {
-    "job_id": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
-    "company_name": "Google",
-    "job_title": "Senior AI Systems Engineer",
-    "extracted_keywords": ["Python", "FastAPI", "Distributed Caching", "LangChain", "PostgreSQL"],
-    "experience_level": "Senior",
-    "cleaned_description": "We are seeking a Senior AI Systems Engineer..."
-  }
-  ```
+- **Response (`200 OK`)**: shape varies by extraction outcome — `page_type` of `job_detail` | `job_list` | `non_job`, with `extracted_job` (a `JobAnalysis`, see `backend/schemas/jobs.py`) present only on success. See `frontend/src/services/jdExtractionFlow.js::classifyJDResult` for the full response contract this endpoint is expected to satisfy.
 
 ---
 
 ## 5. AI Resume Tailoring Router (`/api/v1/tailor`)
 
-### 5.1 Tailor Resume for Target Job (`POST /tailor/resume`)
-- **Purpose**: Invokes `ResilientLLMWrapper` to generate a tailored resume version and calculates ATS match score.
+### 5.1 Tailor Resume for Target Job (`POST /tailor/`)
+- **Purpose**: Invokes the DeepSeek `ResilientLLMWrapper` to generate a tailored resume patch and calculates ATS match score. Actual route: `backend/api/v1/tailoring.py:81`.
 - **Auth**: Bearer JWT Required
-- **Request Body**:
+- **Request Body** (`TailorRequest`, `backend/schemas/tailoring.py:103`):
   ```json
   {
-    "resume_id": "c9d8e7f6-5a4b-3c2d-1e0f-9a8b7c6d5e4f",
-    "job_description_id": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
-    "target_template": "modern_clean"
+    "resume": { "...": "RenderableResume — the full canonical resume JSON, not a resume_id" },
+    "patch": { "...": "ResumePatch — the target job/section instructions" }
   }
   ```
-- **Response (`200 OK`)**:
-  ```json
-  {
-    "version_id": "98765432-10fe-dcba-ba98-76543210fedc",
-    "ats_score": 88,
-    "tailored_content": {
-      "summary": "Results-driven Senior AI Systems Engineer specializing in Python microservices, FastAPI clean architecture...",
-      "experience": [...]
-    },
-    "tailoring_report": {
-      "added_keywords": ["FastAPI", "Distributed Caching"],
-      "gaps": ["Kubernetes"],
-      "match_percentage": 88
-    },
-    "rendered_pdf_url": "https://api.tailr4u.com/templates/preview/98765432.pdf"
-  }
-  ```
+  Unlike a typical `{resume_id, job_description_id}` shape, this endpoint takes the full resume document and patch instructions in-body rather than referencing stored IDs.
+- **Related routes on the same router**: `POST /tailor/preservation` (`tailoring.py:19`), `POST /tailor/download-pdf` (`tailoring.py:118`), `GET /tailor/history` (`tailoring.py:211`).
 
 ---
 
-### 5.2 Generate Cover Letter (`POST /tailor/cover-letter`)
-- **Purpose**: Generates a targeted, highly persuasive cover letter tailored to the job description and candidate background.
+### 5.2 Generate Cover Letter (`POST /api/cover-letter/generate`)
+- **Purpose**: Generates a targeted cover letter tailored to the job description and candidate background.
 - **Auth**: Bearer JWT Required
-- **Request Body**:
-  ```json
-  {
-    "resume_id": "c9d8e7f6-5a4b-3c2d-1e0f-9a8b7c6d5e4f",
-    "job_description_id": "f1e2d3c4-b5a6-7890-1234-567890abcdef",
-    "tone": "professional_enthusiastic"
-  }
-  ```
-- **Response (`200 OK`)**:
-  ```json
-  {
-    "cover_letter_text": "Dear Hiring Manager at Google,\n\nI am writing to express my strong enthusiasm for the Senior AI Systems Engineer position...",
-    "company_name": "Google",
-    "job_title": "Senior AI Systems Engineer"
-  }
-  ```
+- **Important**: This is **not** under `/api/v1/tailor` — cover letter routes live in the legacy router (`backend/app/routers/api.py:910`, mounted at the bare `/api` prefix, not `/api/v1`, see `main.py:83`). Related routes on the same legacy router: `POST /api/cover-letter/context`, `POST /api/cover-letter/strategy`, `POST /api/cover-letter/review`, `POST /api/cover-letter/edit/stream`, `POST /api/cover-letter/render`, `POST /api/download-cover-letter-pdf`, `POST /api/refine-section/stream`.
+- **Response shape**: see `GeneratedCoverLetter` in `backend/schemas/cover_letter_generation.py`.
 
 ---
 
@@ -231,3 +193,29 @@ This document provides complete REST API endpoint contracts for the **Tailr4U Ba
 
 ### 7.3 Observability Status (`GET /api/observability/status`)
 - **Response (`200 OK`)**: `{"langsmith_enabled": true, "project": "tailr4u-prod"}`
+- Note: this is a standalone route defined directly in `main.py:106`, not part of `health.py`.
+
+---
+
+## 8. Additional Routers (previously undocumented)
+
+All mounted under `/api/v1` via `backend/api/router.py` unless noted. This list exists so the endpoint inventory above isn't mistaken for the complete API surface — each of these is a real, live router with request/response schemas defined under `backend/schemas/`.
+
+| Router | Prefix | File |
+| :--- | :--- | :--- |
+| Analytics | `/api/v1/analytics` | `backend/api/v1/analytics.py` |
+| Profile | `/api/v1/profile` | `backend/api/v1/profile.py` |
+| Sessions | `/api/v1/sessions` | `backend/api/v1/sessions.py` |
+| Support | `/api/v1/support` | `backend/api/v1/support.py` |
+| Plans | `/api/v1/plans` | `backend/api/v1/plans.py` |
+| Subscription | `/api/v1/subscription` | `backend/api/v1/subscription.py` |
+| Usage | `/api/v1/usage` | `backend/api/v1/usage.py` |
+| Admin Subscriptions | `/api/v1/admin` | `backend/api/v1/admin_subscriptions.py` |
+| Admin Abuse | `/api/v1/admin/abuse` | `backend/api/v1/admin_abuse.py` |
+| Job Preferences | `/api/v1/job-preferences` | `backend/api/v1/job_preferences.py` |
+| Workflows | `/api/v1/workflows` | `backend/api/v1/workflows.py` |
+| Billing | `/api/v1/billing` | `backend/app/billing/routers/billing.py` (Stripe + Razorpay checkout & webhooks) |
+| Notifications | `/api/v1/notifications` | `backend/api/v1/notifications.py` |
+| Reminders | `/api/v1/reminders` | `backend/api/v1/notifications.py` (`reminder_router`) |
+
+The legacy router (`backend/app/routers/api.py`, mounted at bare `/api` — no `/v1`) additionally hosts cover-letter generation, section refinement, and PDF download routes retained for backward compatibility with older frontend builds.
