@@ -25,6 +25,7 @@ import {
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { cardVariants, staggerContainer, fadeUp } from '../utils/motion';
+import { getApiUrl } from '../config/apiConfig';
 
 export default function SecurityPage() {
   const { session, darkMode, handleLogout } = useApp();
@@ -50,7 +51,7 @@ export default function SecurityPage() {
     setDeleteError('');
     try {
       const token = session?.access_token || localStorage.getItem('access_token');
-      const res = await fetch(`${apiUrl}/api/v1/auth/delete-account/request-otp`, {
+      const res = await fetch(`${getApiUrl()}/api/v1/auth/delete-account/request-otp`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -75,7 +76,7 @@ export default function SecurityPage() {
     setDeleteError('');
     try {
       const token = session?.access_token || localStorage.getItem('access_token');
-      const res = await fetch(`${apiUrl}/api/v1/auth/delete-account/confirm`, {
+      const res = await fetch(`${getApiUrl()}/api/v1/auth/delete-account/confirm`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -110,7 +111,7 @@ export default function SecurityPage() {
     try {
       const token = session?.access_token || localStorage.getItem('access_token');
       if (!token) return;
-      const res = await fetch(`${apiUrl}/api/v1/profile/`, {
+      const res = await fetch(`${getApiUrl()}/api/v1/profile/`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) setAccount(await res.json());
@@ -123,7 +124,7 @@ export default function SecurityPage() {
     try {
       const token = session?.access_token;
       if (!token) return;
-      const res = await fetch(`${apiUrl}/api/v1/sessions/`, {
+      const res = await fetch(`${getApiUrl()}/api/v1/sessions/`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -145,7 +146,7 @@ export default function SecurityPage() {
     setRevokingId(sessionId);
     try {
       const token = session?.access_token;
-      const res = await fetch(`${apiUrl}/api/v1/sessions/${sessionId}`, {
+      const res = await fetch(`${getApiUrl()}/api/v1/sessions/${sessionId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -163,7 +164,7 @@ export default function SecurityPage() {
     setRevokingAll(true);
     try {
       const token = session?.access_token;
-      const res = await fetch(`${apiUrl}/api/v1/sessions/all/others`, {
+      const res = await fetch(`${getApiUrl()}/api/v1/sessions/all/others`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -186,7 +187,7 @@ export default function SecurityPage() {
     setPasswordStatus({ loading: true, error: '', message: '' });
     try {
       const token = session?.access_token || localStorage.getItem('access_token');
-      const res = await fetch(`${apiUrl}/api/v1/auth/change-password`, {
+      const res = await fetch(`${getApiUrl()}/api/v1/auth/change-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(passwordForm)

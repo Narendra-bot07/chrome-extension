@@ -238,6 +238,10 @@ class GapsAnalysis(BaseModel):
     bullet_rewrites: List[BulletRewriteItem]
     section_breakdown: List[SectionGapDetail]
 
+class ScopeCheckResult(BaseModel):
+    in_scope: bool
+    reason: str = ""
+
 class SummaryEditorOutput(BaseModel):
     summary: str
     added_keywords: List[str]
