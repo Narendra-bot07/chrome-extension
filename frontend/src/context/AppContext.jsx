@@ -18,6 +18,7 @@ import {
   writeJDPipelineSession
 } from '../utils/jobPipelineSession';
 import { buildTailoringComparePayload } from '../utils/tailoringRequest';
+import { ToastNotification } from '../components/common/ToastNotification';
 import { useInactivityManager } from '../hooks/useInactivityManager';
 import { AUTH_STORAGE } from '../config/authConfig';
 import { refreshAccessToken } from '../services/authSession';
@@ -282,6 +283,23 @@ export function AppProvider({ children }) {
       return [];
     }
   });
+  const [toast, setToast] = useState(null);
+  const showToast = useCallback((message, type = 'info', title = '') => {
+    setToast({ id: Date.now(), message, type, title });
+  }, []);
+  const dismissToast = useCallback(() => {
+    setToast(null);
+  }, []);
+
+  useEffect(() => {
+    const handleCustomToast = (event) => {
+      if (event.detail?.message) {
+        showToast(event.detail.message, event.detail.type || 'info', event.detail.title || '');
+      }
+    };
+    window.addEventListener('tailr4u-toast', handleCustomToast);
+    return () => window.removeEventListener('tailr4u-toast', handleCustomToast);
+  }, [showToast]);
   const initialJDPipelineSession = typeof sessionStorage !== 'undefined'
     ? readJDPipelineSession(sessionStorage)
     : null;
@@ -2192,7 +2210,7 @@ export function AppProvider({ children }) {
     if (!ensureExtractionProfileReady()) return;
 
     if (!jobText) {
-      alert("Please scan or paste a job description first.");
+      showToast("Please scan or paste a job description first.", "warning", "Job Description Required");
       return;
     }
 
@@ -2361,7 +2379,7 @@ export function AppProvider({ children }) {
   const handleParseResume = async (fileOverride = null, options = {}) => {
     const selectedFile = fileOverride || resumeFile;
     if (!selectedFile && !parsedResume) {
-      alert("Please select a resume file to parse.");
+      showToast("Please select a resume file to parse.", "warning", "File Required");
       return;
     }
 
@@ -2532,7 +2550,7 @@ export function AppProvider({ children }) {
 
   const handleRunGapAnalysis = async () => {
     if (!parsedResume || !jobAnalysis) {
-      alert("Missing resume or job details.");
+      showToast("Missing resume or job details.", "warning", "Incomplete Data");
       return;
     }
 
@@ -3151,7 +3169,7 @@ export function AppProvider({ children }) {
       }
     } catch (e) {
       console.error(e);
-      alert("Error generating PDF: " + e.message);
+      showToast("Error generating PDF: " + e.message, "error", "PDF Error");
       return false;
     } finally {
       setLoading(false);
@@ -3201,13 +3219,13 @@ export function AppProvider({ children }) {
     } catch (error) {
       console.error(error);
       setLoading(false);
-      alert("Error compiling PDF: " + error.message);
+      showToast("Error compiling PDF: " + error.message, "error", "Compilation Error");
     }
   };
 
   const handleDraftCoverLetterFromContext = async () => {
     if (!coverLetterContext?.ready_for_generation || !parsedResume || !jobAnalysis) {
-      alert("Complete the cover letter context questions before drafting.");
+      showToast("Complete the cover letter context questions before drafting.", "warning", "Questions Required");
       return false;
     }
     setLoading(true);
@@ -3238,7 +3256,7 @@ export function AppProvider({ children }) {
       return true;
     } catch (error) {
       console.error(error);
-      alert("Error drafting cover letter: " + error.message);
+      showToast("Error drafting cover letter: " + error.message, "error", "Draft Error");
       return false;
     } finally {
       setLoading(false);
@@ -3247,7 +3265,7 @@ export function AppProvider({ children }) {
 
   const handleBuildCoverLetterStrategy = async () => {
     if (!coverLetterContext?.ready_for_generation) {
-      alert("Complete and validate the cover letter context first.");
+      showToast("Complete and validate the cover letter context first.", "warning", "Context Required");
       return false;
     }
     setLoading(true);
@@ -3272,7 +3290,7 @@ export function AppProvider({ children }) {
       return true;
     } catch (error) {
       console.error(error);
-      alert("Error building cover letter strategy: " + error.message);
+      showToast("Error building cover letter strategy: " + error.message, "error", "Strategy Error");
       return false;
     } finally {
       setLoading(false);
@@ -3293,7 +3311,7 @@ export function AppProvider({ children }) {
       let currentCtx = coverLetterContext;
       if (!currentCtx || !currentCtx.ready_for_generation) {
         if (!parsedResume || !jobAnalysis) {
-          alert("Please select an active resume and extract a job description first.");
+          showToast("Please select an active resume and extract a job description first.", "warning", "Setup Required");
           return false;
         }
         const ctxRes = await fetch(`${apiUrl}/api/cover-letter/context`, {
@@ -3432,7 +3450,7 @@ export function AppProvider({ children }) {
       const detailMsg = typeof error?.message === 'string'
         ? error.message
         : (typeof error === 'string' ? error : JSON.stringify(error));
-      alert(detailMsg);
+      showToast(detailMsg, "error", "Generation Failed");
       return false;
     } finally {
       if (coverLetterAbortControllerRef.current === abortController) {
@@ -3512,7 +3530,7 @@ export function AppProvider({ children }) {
       return true;
     } catch (error) {
       console.error(error);
-      alert("Error editing cover letter: " + error.message);
+      showToast("Error editing cover letter: " + error.message, "error", "Edit Error");
       return false;
     } finally {
       setCoverLetterEditStreaming(false);
@@ -3554,14 +3572,33 @@ export function AppProvider({ children }) {
       contextAnswers = {};
     }
     if (!Array.isArray(skippedQuestions)) skippedQuestions = [];
-    const sourceResume = workflowSource?.resume || parsedResume;
-    const sourceJob = workflowSource?.job || getCanonicalJobAnalysis();
+    let sourceResume = workflowSource?.resume || parsedResume;
+    let sourceJob = workflowSource?.job || getCanonicalJobAnalysis();
+
+    if (!sourceJob && workflowSource?.application) {
+      const app = workflowSource.application;
+      sourceJob = (app.organized_jd && Object.keys(app.organized_jd).length)
+        ? app.organized_jd
+        : {
+            job_description: app.job_description || '',
+            description: app.job_description || '',
+            job_title: app.job_title || 'Target Role',
+            company_name: app.company_name || 'Hiring Company',
+            location: app.location || 'Remote',
+            job_url: app.job_url || ''
+          };
+    }
+
+    if (sourceJob) {
+      setJobAnalysis(sourceJob);
+    }
+
     if (!sourceResume) {
-      alert("Please select or upload a resume before drafting a cover letter.");
+      showToast("Please select or upload a resume before drafting a cover letter.", "warning", "Resume Required");
       return;
     }
-    if (!sourceJob) {
-      alert("Please analyze a job description first.");
+    if (!sourceJob || (!sourceJob.job_description && !sourceJob.description && !sourceJob.job_title)) {
+      showToast("Please analyze a job description first.", "warning", "Job Description Required");
       return;
     }
 
@@ -3712,7 +3749,7 @@ export function AppProvider({ children }) {
       setLoading(false);
       if (error?.name === 'AbortError') return null;
       console.error(error);
-      alert("Error: " + error.message);
+      showToast("Error: " + error.message, "error", "Operation Failed");
     } finally {
       if (coverLetterAbortControllerRef.current === abortController) {
         coverLetterAbortControllerRef.current = null;
@@ -3724,7 +3761,7 @@ export function AppProvider({ children }) {
     if (!coverLetter) return;
     const fullText = `${coverLetter.date}\n\nTo:\n${coverLetter.recipient_name}\n${coverLetter.company_name}\n\n${coverLetter.salutation}\n\n${coverLetter.body}\n\n${coverLetter.signoff}`;
     navigator.clipboard.writeText(fullText);
-    alert("Cover Letter copied to clipboard!");
+    showToast("Cover Letter copied to clipboard!", "success", "Copied to Clipboard");
   };
 
   const currentResumeId = parsedResume?.id || parsedResume?.resume_id || null;
@@ -3839,9 +3876,12 @@ export function AppProvider({ children }) {
       handleCopyToClipboard,
       showQuotaModal, setShowQuotaModal,
       quotaModalMessage, setQuotaModalMessage,
-      openQuotaModal
+      openQuotaModal,
+      showToast,
+      toast
     }}>
       {children}
+      <ToastNotification toast={toast} onDismiss={dismissToast} />
       {showInactivityWarning && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/35 p-4" role="presentation">
           <div

@@ -91,7 +91,8 @@ export default function TemplateSelectionView({ onBack }) {
     setCustomFileName,
     companyName,
     comparison,
-    liveATS
+    liveATS,
+    showToast
   } = useApp();
 
   const [isDownloading, setIsDownloading] = useState(false);
@@ -161,7 +162,8 @@ export default function TemplateSelectionView({ onBack }) {
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error(err);
-      alert('Failed to download PDF.');
+      if (showToast) showToast('Failed to download PDF.', 'error', 'Download Error');
+      else alert('Failed to download PDF.');
     } finally {
       setIsDownloading(false);
     }

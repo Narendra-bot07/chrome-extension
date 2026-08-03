@@ -339,7 +339,9 @@ export default function ResumePreview({
       throw new Error('The validated preview artifact is not ready yet.');
     } catch (err) {
       console.error(err);
-      alert('Failed to download PDF.');
+      if (typeof window !== 'undefined' && window.dispatchEvent) {
+        window.dispatchEvent(new CustomEvent('tailr4u-toast', { detail: { message: 'Failed to download PDF.', type: 'error', title: 'Download Error' } }));
+      }
     } finally {
       setIsDownloading(false);
     }

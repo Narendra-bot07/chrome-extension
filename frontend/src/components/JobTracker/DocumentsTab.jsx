@@ -93,30 +93,34 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
   const isStale = application.resume_status === 'stale' || application.cover_letter_status === 'stale';
 
   const handleOpenStudio = async (docType) => {
+    const storedJob = (application.organized_jd && Object.keys(application.organized_jd).length)
+      ? application.organized_jd
+      : {
+          job_description: application.job_description || '',
+          description: application.job_description || '',
+          job_title: application.job_title || 'Target Role',
+          company_name: application.company_name || 'Hiring Company',
+          location: application.location || 'Remote',
+          job_url: application.job_url || ''
+        };
+    const storedResume = (application.resume_snapshot && Object.keys(application.resume_snapshot).length)
+      ? application.resume_snapshot
+      : tailoredResume || parsedResume;
+
+    if (storedJob) {
+      setJobAnalysis(storedJob);
+    }
+
     if (docType === 'resume') {
       navigate('/resume-review');
     } else {
-      const storedJob = application.organized_jd && Object.keys(application.organized_jd).length
-        ? application.organized_jd
-        : application.job_description
-          ? {
-              job_description: application.job_description,
-              description: application.job_description,
-              job_title: application.job_title,
-              company_name: application.company_name,
-              location: application.location,
-              job_url: application.job_url
-            }
-          : null;
-      const storedResume = application.resume_snapshot && Object.keys(application.resume_snapshot).length
-        ? application.resume_snapshot
-        : tailoredResume || parsedResume;
-
       await handleGenerateCoverLetter({}, [], {
         applicationId: application.id,
+        application: application,
         resume: storedResume,
         job: storedJob
       });
+      navigate('/cover-letter');
     }
   };
 
