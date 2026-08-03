@@ -2,6 +2,8 @@ import os
 import json
 import re
 import hashlib
+import threading
+import functools
 from io import BytesIO
 from typing import Optional
 from urllib.parse import urlencode
@@ -12,6 +14,22 @@ PDF_RENDERER_URL = (
     os.environ.get("PDF_RENDERER_URL")
     or "http://127.0.0.1:8000/__pdf_renderer/index.html"
 ).rstrip("/")
+
+# Each render launches a full, separate headless Chromium process. On a
+# memory-constrained host, concurrent renders (e.g. a user's browser retrying
+# a failed export) can stack up enough Chromium instances to exceed the
+# container's memory limit and get the whole process OOM-killed -- which
+# takes down every in-flight request, not just the PDF one. Serializing
+# renders bounds worst-case memory to one browser at a time.
+_PDF_RENDER_LOCK = threading.Lock()
+
+
+def _serialize_pdf_render(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with _PDF_RENDER_LOCK:
+            return func(*args, **kwargs)
+    return wrapper
 
 
 class HyperlinkRenderingError(Exception):
@@ -53,6 +71,7 @@ def _open_renderer(page, route: str, query: Optional[dict] = None):
         f"configured frontend origins. {' | '.join(failures)}"
     )
 
+@_serialize_pdf_render
 def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Optional[bytes]:
     """
     Spins up a headless Chromium browser using Playwright's sync API, 
@@ -172,10 +191,10 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
                 ].filter(Boolean);
                 const normalizedHref = (value, fieldHint) => {
                     let raw = String(value || '').trim().toLowerCase()
-                        .replace(/^https?:\/\//i, '')
-                        .replace(/^www\./i, '')
+                        .replace(/^https?:\\/\\//i, '')
+                        .replace(/^www\\./i, '')
                         .replace(/[?#].*$/, '')
-                        .replace(/\/+$/, '');
+                        .replace(/\\/+$/, '');
                     if (!raw) return '';
                     if (!raw.includes('.')) {
                         if (fieldHint === 'linkedin' || String(value).includes('linkedin')) {
@@ -321,6 +340,7 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
         traceback.print_exc()
         raise e
 
+@_serialize_pdf_render
 def generate_cover_letter_pdf_via_playwright(cover_letter_json_str: str) -> Optional[bytes]:
     try:
         with sync_playwright() as p:
@@ -359,6 +379,7 @@ def generate_cover_letter_pdf_via_playwright(cover_letter_json_str: str) -> Opti
         raise e
 
 
+@_serialize_pdf_render
 def render_cover_letter_artifact(
     render_payload_json: str,
     paper_size: str = "A4",

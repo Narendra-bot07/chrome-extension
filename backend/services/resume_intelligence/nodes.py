@@ -96,7 +96,13 @@ class SelectedResumeNode(WorkflowNode):
                 details={"reason": "selected_resume_stale"},
             )
         if verify_bytes:
-            content = self.storage.download_file("original-resumes", record["file_path"])
+            try:
+                content = self.storage.download_file("original-resumes", record["file_path"])
+            except Exception as exc:
+                raise BlockedWorkflowError(
+                    "Selected resume source file is inaccessible",
+                    details={"reason": "selected_resume_file_missing"},
+                ) from exc
             if canonical_fingerprint(content) != lock.fingerprint:
                 raise BlockedWorkflowError(
                     "Selected resume content changed; restart and reconfirm the resume",

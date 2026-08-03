@@ -398,7 +398,13 @@ async def get_resume_file(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Resume not found."
         )
-    file_bytes = storage.download_file("original-resumes", record["file_path"])
+    try:
+        file_bytes = storage.download_file("original-resumes", record["file_path"])
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This resume's original file is no longer available in storage. Please re-upload it."
+        )
     media_type = "application/pdf" if (record.get("file_type") or "").lower() == "pdf" else "application/octet-stream"
     return Response(
         content=file_bytes,
@@ -598,8 +604,15 @@ async def recover_resume_source_details(
     raw_text = str(parsed_content.get("raw_text") or "")
     source_links = dict(parsed_content.get("links") or {})
     if record.get("file_path") and str(record.get("file_type") or "").lower() == "pdf":
-        source_bytes = storage.download_file("original-resumes", record["file_path"])
-        source_links.update(ResumeParser.extract_links_from_pdf(source_bytes))
+        try:
+            source_bytes = storage.download_file("original-resumes", record["file_path"])
+            source_links.update(ResumeParser.extract_links_from_pdf(source_bytes))
+        except Exception as exc:
+            logger.warning(
+                "[RESUME][BACKEND] Source link recovery unavailable resume_id=%s error=%s",
+                resume_id,
+                exc,
+            )
     recovery = ResumeRecoveryAgent().recover(
         parsed_content,
         raw_text,

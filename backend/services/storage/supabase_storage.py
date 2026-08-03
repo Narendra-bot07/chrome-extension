@@ -1,4 +1,5 @@
 from supabase import Client
+from storage3.exceptions import StorageApiError
 from services.storage.file_service import FileService
 
 class SupabaseStorageService(FileService):
@@ -14,4 +15,14 @@ class SupabaseStorageService(FileService):
         return path
 
     def download_file(self, bucket: str, path: str) -> bytes:
-        return self.supabase.storage.from_(bucket).download(path)
+        try:
+            return self.supabase.storage.from_(bucket).download(path)
+        except StorageApiError as exc:
+            # Records created before this app was wired up to Supabase Storage
+            # (or from an interrupted upload) can reference an object that was
+            # never actually persisted to the bucket. Surface a plain
+            # FileNotFoundError so API layers can return a clean 404 instead of
+            # letting the raw storage-client exception crash the request.
+            if "not_found" in str(exc).lower() or "404" in str(exc):
+                raise FileNotFoundError(f"Object not found in storage: {bucket}/{path}") from exc
+            raise
