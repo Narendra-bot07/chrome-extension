@@ -381,6 +381,7 @@ async def google_login(
             "status": "success",
             "session": {
                 "access_token": access_token,
+                "refresh_token": refresh_token,
                 "token_type": "bearer",
                 "user": {
                     "id": user["id"],
