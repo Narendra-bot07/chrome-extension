@@ -44,7 +44,7 @@ function SettingsOverlay({
               className="w-full bg-white border border-slate-200 dark:bg-[#09090b] dark:border-slate-900 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand placeholder-slate-400 dark:placeholder-slate-650 shadow-sm"
               value={apiUrl}
               onChange={(e) => setApiUrl(e.target.value)}
-              placeholder="http://localhost:8000"
+              placeholder="https://chrome-extension-lbq5.onrender.com"
             />
           </div>
 

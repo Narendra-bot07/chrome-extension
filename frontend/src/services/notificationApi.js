@@ -1,7 +1,9 @@
-const BASE = 'http://127.0.0.1:8000/api/v1';
+import { getApiUrl } from '../config/apiConfig';
+
+const getBase = () => `${getApiUrl()}/api/v1`;
 
 async function request(path, token, options = {}) {
-  const response = await fetch(`${BASE}${path}`, {
+  const response = await fetch(`${getBase()}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',

@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { toRenderableResume } from '../../utils/renderableResume';
 import { getTemplateComponent } from '../../templates';
 import { createCompositionPlan } from '../../utils/resumeComposition';
+import { getApiUrl } from '../../config/apiConfig';
 
 type ZoomMode = 'fit_width' | 'fit_page' | 'actual_size';
 type PagePreference = 'auto' | 'prefer_one_page' | 'prefer_two_pages';
@@ -23,10 +24,8 @@ interface ResumePreviewProps {
   layoutLevel?: number;
   onClose?: () => void;
   onDownloadArtifact?: (artifact: {
-    blob: Blob;
-    url: string;
+    downloadUrl: string;
     filename: string;
-    renderHash: string;
     compositionPlan: any;
   }) => Promise<unknown>;
 }
@@ -35,7 +34,7 @@ export default function ResumePreview({
   resumeData,
   selectedTemplate,
   sectionOrder,
-  apiUrl = 'http://localhost:8000',
+  apiUrl = getApiUrl(),
   resumeVersionId,
   companyName = 'Company',
   onCompositionChange,

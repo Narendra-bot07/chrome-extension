@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import AuthCard from '../components/AuthCard';
+import { getApiUrl } from '../config/apiConfig';
 
 const scorePassword = (value) => [value.length >= 10, value.length >= 14, /[a-z]/i.test(value) && /\d/.test(value), /[^a-z0-9]/i.test(value)].filter(Boolean).length;
 
@@ -20,7 +21,7 @@ export default function ResetPasswordPage() {
 
   useEffect(() => {
     if (!token) return setValid(false);
-    fetch('http://localhost:8000/api/v1/auth/reset-password/validate', {
+    fetch(`${getApiUrl()}/api/v1/auth/reset-password/validate`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token })
     }).then((r) => r.json()).then((data) => setValid(Boolean(data.valid))).catch(() => setValid(false));
   }, [token]);
@@ -30,7 +31,7 @@ export default function ResetPasswordPage() {
     if (password !== confirm) return setMessage('Passwords do not match.');
     setLoading(true); setMessage('');
     try {
-      const response = await fetch('http://localhost:8000/api/v1/auth/reset-password', {
+      const response = await fetch(`${getApiUrl()}/api/v1/auth/reset-password`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, new_password: password, confirm_password: confirm })
       });

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import AuthCard from '../components/AuthCard';
+import { getApiUrl } from '../config/apiConfig';
 
 const neutral = 'If an account exists for this email, a reset link has been sent.';
 
@@ -14,7 +15,7 @@ export default function ForgotPasswordPage() {
     event.preventDefault();
     setLoading(true);
     try {
-      await fetch('http://localhost:8000/api/v1/auth/forgot-password', {
+      await fetch(`${getApiUrl()}/api/v1/auth/forgot-password`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })
       });

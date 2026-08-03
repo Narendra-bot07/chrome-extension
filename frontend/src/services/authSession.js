@@ -1,13 +1,15 @@
 import { AUTH_CONFIG, AUTH_STORAGE } from '../config/authConfig';
+import { getApiUrl } from '../config/apiConfig';
 
-const API_ORIGIN = 'http://127.0.0.1:8000';
+const getApiOrigin = () => getApiUrl();
 let refreshPromise = null;
 let originalFetch = null;
 let installCount = 0;
 
 const isApiRequest = input => {
   const url = typeof input === 'string' ? input : input?.url || '';
-  return url.startsWith('http://127.0.0.1:8000') || url.startsWith('http://localhost:8000') || url.startsWith('/api/');
+  const currentOrigin = getApiUrl();
+  return url.startsWith(currentOrigin) || url.startsWith('http://127.0.0.1:8000') || url.startsWith('http://localhost:8000') || url.startsWith('/api/');
 };
 
 export const storeAuthenticatedSession = (accessToken, refreshToken = null) => {
@@ -32,7 +34,7 @@ export const refreshAccessToken = async () => {
   if (storedAccessToken) {
     headers['Authorization'] = `Bearer ${storedAccessToken}`;
   }
-  refreshPromise = fetchImpl(`${API_ORIGIN}/api/v1/auth/refresh`, {
+  refreshPromise = fetchImpl(`${getApiOrigin()}/api/v1/auth/refresh`, {
     method: 'POST',
     headers,
     credentials: 'include',

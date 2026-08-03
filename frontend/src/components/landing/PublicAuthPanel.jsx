@@ -7,6 +7,7 @@ import { useApp } from '../../context/AppContext';
 import { authDestinationFromSearch } from '../../utils/authRedirect';
 import { useTailr4uReducedMotion } from '../../motion/MotionSystem';
 import { storeAuthenticatedSession } from '../../services/authSession';
+import { getApiUrl } from '../../config/apiConfig';
 
 const isExtension = typeof chrome !== 'undefined' && chrome.identity;
 const scopes = ['openid', 'email', 'profile'].join(' ');
@@ -73,7 +74,7 @@ export default function PublicAuthPanel() {
   const exchangeGoogleToken = async credential => {
     setLoading(true); setError('');
     try {
-      const response = await fetch('http://localhost:8000/api/v1/auth/google', {
+      const response = await fetch(`${getApiUrl()}/api/v1/auth/google`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ credential })
       });
@@ -103,7 +104,7 @@ export default function PublicAuthPanel() {
     setLoading(true); setError('');
     try {
       if (mode === 'forgot_password') {
-        await fetch('http://localhost:8000/api/v1/auth/forgot-password', {
+        await fetch(`${getApiUrl()}/api/v1/auth/forgot-password`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email })
         }).catch(() => null);
@@ -113,7 +114,7 @@ export default function PublicAuthPanel() {
       if (mode === 'register') {
         if (!strongPassword) throw new Error('Use 8+ characters with mixed case, a number, and a special character.');
         if (password !== confirmPassword) throw new Error('Passwords do not match.');
-        const response = await fetch('http://localhost:8000/api/v1/auth/register', {
+        const response = await fetch(`${getApiUrl()}/api/v1/auth/register`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, password })
         });
@@ -122,7 +123,7 @@ export default function PublicAuthPanel() {
         go('/login');
         return;
       }
-      const response = await fetch('http://localhost:8000/api/v1/auth/login', {
+      const response = await fetch(`${getApiUrl()}/api/v1/auth/login`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
       });

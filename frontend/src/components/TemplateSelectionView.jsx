@@ -4,6 +4,7 @@ import { toRenderableResume } from '../utils/renderableResume';
 import { Download, Wand2, CheckCircle2, ShieldCheck, ChevronRight, X, ZoomIn, Eye, ArrowLeft, Layers, Image, Minimize2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { getApiUrl } from '../config/apiConfig';
 import TailorRender from './Resume/TailorRender';
 import DownloadPage from '../pages/DownloadPage';
 
@@ -134,7 +135,7 @@ export default function TemplateSelectionView({ onBack }) {
     const targetTemplate = templateId || activeTemplate;
     try {
       setIsDownloading(true);
-      const res = await fetch('http://localhost:8000/api/download-pdf?company_name=Company', {
+      const res = await fetch(`${getApiUrl()}/api/download-pdf?company_name=Company`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -5,6 +5,7 @@ import {
   ExternalLink, AlertCircle, CheckCircle2, Clock, Plus, X, Edit3
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { getApiUrl } from '../../config/apiConfig';
 import TailorRender from '../Resume/TailorRender';
 import { CoverLetterRender } from '../CoverLetterRender';
 
@@ -25,7 +26,7 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
   const handleDownloadResume = async () => {
     try {
       setDownloadingType('resume');
-      const response = await fetch('http://localhost:8000/api/render-unified-pdf', {
+      const response = await fetch(`${getApiUrl()}/api/render-unified-pdf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

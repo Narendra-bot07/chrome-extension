@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import AuthCard from '../components/AuthCard';
+import { getApiUrl } from '../config/apiConfig';
 
 export default function VerifyEmailPage() {
   const [params] = useSearchParams();
@@ -8,7 +9,7 @@ export default function VerifyEmailPage() {
   useEffect(() => {
     const token = params.get('token');
     if (!token) return setState({ loading: false, ok: false, message: 'This verification link is invalid or has expired.' });
-    fetch('http://localhost:8000/api/v1/auth/verify-email', {
+    fetch(`${getApiUrl()}/api/v1/auth/verify-email`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token })
     }).then(async (r) => {
       const data = await r.json();

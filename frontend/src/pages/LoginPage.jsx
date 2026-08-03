@@ -8,6 +8,7 @@ import BrandLogo from '../components/BrandLogo';
 import { authDestinationFromSearch } from '../utils/authRedirect';
 import { storeAuthenticatedSession } from '../services/authSession';
 import { getOrCreateInstallationId } from '../utils/installationId';
+import { getApiUrl } from '../config/apiConfig';
 
 const isExtension = typeof chrome !== 'undefined' && chrome.identity;
 const BASIC_GOOGLE_SCOPES = ['openid', 'email', 'profile'];
@@ -63,7 +64,7 @@ export default function LoginPage() {
 
     try {
       const installationId = getOrCreateInstallationId();
-      const res = await fetch('http://localhost:8000/api/v1/auth/login', {
+      const res = await fetch(`${getApiUrl()}/api/v1/auth/login`, {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -92,7 +93,7 @@ export default function LoginPage() {
     setLoginLoading(true);
     setLoginError(null);
     try {
-      const res = await fetch('http://localhost:8000/api/v1/auth/google', {
+      const res = await fetch(`${getApiUrl()}/api/v1/auth/google`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },

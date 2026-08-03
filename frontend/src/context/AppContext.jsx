@@ -1,4 +1,4 @@
-﻿import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { compressResumeData } from '../utils/resumeCompression';
 import { toRenderableResume } from '../utils/renderableResume';
@@ -21,6 +21,7 @@ import { buildTailoringComparePayload } from '../utils/tailoringRequest';
 import { useInactivityManager } from '../hooks/useInactivityManager';
 import { AUTH_STORAGE } from '../config/authConfig';
 import { refreshAccessToken } from '../services/authSession';
+import { getApiUrl } from '../config/apiConfig';
 import {
   createResumeWorkflowState,
   finalizeTailoredResume,
@@ -154,7 +155,7 @@ export function AppProvider({ children }) {
           let res = null;
 
           try {
-            res = await fetch('http://127.0.0.1:8000/api/v1/auth/session', {
+            res = await fetch(`${getApiUrl()}/api/v1/auth/session`, {
               headers: { 'Authorization': `Bearer ${storedToken}` },
               signal: controller.signal
             });
@@ -184,7 +185,7 @@ export function AppProvider({ children }) {
               const newToken = await refreshAccessToken();
               if (newToken) {
                 setSession({ access_token: newToken });
-                const retryRes = await fetch('http://127.0.0.1:8000/api/v1/auth/session', {
+                const retryRes = await fetch(`${getApiUrl()}/api/v1/auth/session`, {
                   headers: { 'Authorization': `Bearer ${newToken}` }
                 });
                 if (retryRes.ok) {
@@ -195,7 +196,7 @@ export function AppProvider({ children }) {
                 }
               }
             } catch (refErr) {
-              console.warn("[AUTH] Refresh on 401 session check failed:", refErr);
+              console.warn("Session retry failed:", refErr);
             }
             localStorage.removeItem('access_token');
             localStorage.removeItem('refresh_token');
@@ -214,51 +215,23 @@ export function AppProvider({ children }) {
     checkSession();
   }, []);
 
-  const logout = (reason = 'manual_logout', options = {}) => {
-    const token = localStorage.getItem(AUTH_STORAGE.accessToken);
-    if (token) {
-      fetch(`${apiUrl}/api/v1/auth/logout`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        credentials: 'include',
-        keepalive: true,
-      }).catch(() => {});
+  const logout = async (reason = 'manual_logout') => {
+    localStorage.removeItem(AUTH_STORAGE.accessToken);
+    localStorage.removeItem('refresh_token');
+    localStorage.removeItem(AUTH_STORAGE.lastActivityAt);
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.remove(['access_token', 'refresh_token']);
     }
-    if (options.broadcast !== false) {
-      localStorage.setItem(AUTH_STORAGE.event, JSON.stringify({
-        type: 'LOGOUT', reason, at: Date.now(),
-      }));
-    }
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('parsed_resume');
-    const isExt = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local;
-    if (isExt) {
-      chrome.storage.local.remove('parsedResume');
-    }
-    setUser(null);
     setSession(null);
-    setParsedResume(null);
-    setJobAnalysis(null);
-    setComparison(null);
-    setReviewSuggestions([]);
-    setLiveATS(null);
-    setTailoredResume(null);
-    setResumeWorkflow(null);
-    resumeWorkflowRepository.clear().catch(() => {});
-    setCoverLetter(null);
-    setJobText('');
-    setCompanyName('');
-    setJobTitle('');
-    setJobPreferences(null);
+    setUser(null);
     setHasCompletedPreferences(false);
-    setLoadingPreferences(false);
     setHasRedirectedOnStartup(false);
     if (reason === 'manual_logout') navigate('/');
     else navigate(`/login?reason=${reason}`, { replace: true });
   };
   const { showWarning: showInactivityWarning, staySignedIn } = useInactivityManager({
     accessToken: session?.access_token,
-    apiUrl: 'http://127.0.0.1:8000',
+    apiUrl: getApiUrl(),
     onLogout: logout,
   });
   const toggleDarkMode = () => {
@@ -277,7 +250,7 @@ export function AppProvider({ children }) {
 
   // Credentials
   const [apiKey, setApiKey] = useState('');
-  const [apiUrl, setApiUrl] = useState('http://127.0.0.1:8000');
+  const [apiUrl, setApiUrl] = useState(getApiUrl());
 
   // Input states
   const [resumeFile, setResumeFile] = useState(null);
