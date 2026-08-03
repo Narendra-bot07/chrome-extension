@@ -4,6 +4,13 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.7.3] - 2026-08-04
+
+### Fixed
+- **PDF generation failing outright in production** (`RuntimeError: PDF renderer is unavailable ... net::ERR_CONNECTION_REFUSED` on both candidate URLs): `app/playwright_pdf.py`'s self-referential renderer URL (Playwright navigates the backend's own bundled frontend build at `/__pdf_renderer` to render each PDF) had `127.0.0.1:8000` hardcoded as its default target port. `main.py` binds Uvicorn to Render's dynamically-injected `$PORT` (its own comment already noted "hardcoding 8000 only works by coincidence of platform configuration"), so on Render the app is never actually listening on port 8000 — every self-referential Playwright navigation hit a closed port and failed immediately. Fixed by deriving the default renderer port from `os.environ.get("PORT", "8000")`, matching `main.py`'s own bind logic exactly. The second failing candidate in the traceback (`http://localhost:5173`) was not a code bug — it came from the Render environment's `FRONTEND_URL` variable being set to the local Vite dev server address instead of the real production frontend origin; that requires a Render dashboard config fix, not a code change. See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) ISSUE-009.
+
+---
+
 ## [3.7.2] - 2026-08-04
 
 ### Fixed

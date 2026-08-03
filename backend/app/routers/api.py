@@ -565,8 +565,6 @@ async def api_ats_live_score(
     request: LiveScoreRequest,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
 ):
-    from fastapi.concurrency import run_in_threadpool
-    from services.resume.llm_scoring import calculate_llm_live_scores
     from services.resume.scoring import ATSScoringEngine
     import logging
 
@@ -593,59 +591,12 @@ async def api_ats_live_score(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid payload: {e}")
 
     try:
-        scores = await run_in_threadpool(
-            calculate_llm_live_scores,
-            resume.model_dump(mode="json"),
-            current_resume.model_dump(mode="json"),
-            estimated_resume.model_dump(mode="json"),
-            job.model_dump(mode="json"),
-        )
-        original = scores.original
-        current = scores.current
-        estimated = scores.potential
-
-        def breakdown(score):
-            return {
-                "resume_match": {
-                    "score": score.resume_match_score,
-                    "role_alignment": score.role_alignment,
-                    "required_skills_coverage": score.required_skills_coverage,
-                    "experience_relevance": score.experience_relevance,
-                },
-                "ats_optimization": {
-                    "score": score.ats_score,
-                    "evidence_quality": score.evidence_quality,
-                },
-            }
-
-        return {
-            "scoring_source": "llm",
-            "original_resume_match": original.resume_match_score,
-            "current_resume_match": current.resume_match_score,
-            "estimated_resume_match": estimated.resume_match_score,
-            "original_ats": original.ats_score,
-            "current_ats": current.ats_score,
-            "estimated_ats": estimated.ats_score,
-            "breakdown_before": breakdown(original),
-            "breakdown_current": breakdown(current),
-            "breakdown_estimated": breakdown(estimated),
-            "quality_issues_before": original.missing_required_skills + original.unsupported_claims,
-            "quality_issues_current": current.missing_required_skills + current.unsupported_claims,
-            "quality_issues_estimated": estimated.missing_required_skills + estimated.unsupported_claims,
-            "explanations": {
-                "original": original.explanation,
-                "current": current.explanation,
-                "potential": estimated.explanation,
-            },
-        }
-    except Exception as e:
-        logging.warning(f"LLM live scoring failed (e.g. rate limit 429), falling back to deterministic scoring: {e}")
         orig_res = ATSScoringEngine.calculate_score(resume, job)
         curr_res = ATSScoringEngine.calculate_score(current_resume, job)
         est_res = ATSScoringEngine.calculate_score(estimated_resume, job)
 
         return {
-            "scoring_source": "deterministic",
+            "scoring_source": "deterministic_rules_v1.3",
             "original_resume_match": orig_res["resume_match_score"],
             "current_resume_match": curr_res["resume_match_score"],
             "estimated_resume_match": est_res["resume_match_score"],
@@ -664,6 +615,9 @@ async def api_ats_live_score(
                 "potential": "Deterministic rule-based match score with all proposed edits.",
             },
         }
+    except Exception as e:
+        logging.exception("Deterministic live ATS scoring failed: %s", e)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"ATS scoring failed: {e}")
 
 @router.post("/tailor", response_model=ResumeStructure)
 async def api_tailor(request: TailorRequest):

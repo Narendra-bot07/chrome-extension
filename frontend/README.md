@@ -1,70 +1,35 @@
-# Getting Started with Create React App
+# Tailr4U frontend
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+React 18 and Vite application used by both the Tailr4U web experience and the Chrome Manifest V3 side panel.
 
-## Available Scripts
+## Local development
 
-In the project directory, you can run:
+1. Copy `.env.example` to `.env.local` and fill in browser-safe values.
+2. Install with `npm ci`.
+3. Start with `npm run dev`.
 
-### `npm start`
+## Release checks
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+Run `npm run check`. This executes every Node-based unit test and creates the production build in `dist/`.
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+## Vercel deployment
 
-### `npm test`
+Use `frontend/` as the Vercel project root. `vercel.json` configures `npm ci`, the Vite build, immutable asset caching, and baseline security headers.
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+Configure these production variables in Vercel:
 
-### `npm run build`
+- `VITE_API_BASE_URL` — public HTTPS backend origin, without a trailing slash.
+- `VITE_GOOGLE_CLIENT_ID` — Google OAuth web client ID with the deployed origin registered.
+- `VITE_APP_ENV=production`
+- `VITE_APP_RELEASE` — immutable release identifier or commit SHA.
+- `VITE_SENTRY_DSN`, `VITE_SENTRY_ENABLED=true`, and `VITE_SENTRY_TRACES_SAMPLE_RATE` when monitoring is enabled.
+- `VITE_ENABLE_ERROR_MONITORING=true`
+- `VITE_ENABLE_GOOGLE_PROFILE_ENRICHMENT` only when the corresponding Google scopes are approved.
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+Do not place JWT secrets, service-role keys, payment secrets, SMTP credentials, or LLM keys in any `VITE_*` variable. Vite embeds these values into the public browser bundle.
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+After deploying, register the exact HTTPS origin and redirect URI in Google Cloud, set the backend `FRONTEND_URL` to this origin, verify CORS, and smoke-test login, resume upload, tailoring, AI editing, deterministic ATS rescoring, payments, and PDF download.
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+## Chrome extension package
 
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
-
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+Run `npm run build`, then load or package `dist/`. Reload the unpacked extension after every build. Review `public/manifest.json` permissions and bump both the package and manifest versions before a store release.

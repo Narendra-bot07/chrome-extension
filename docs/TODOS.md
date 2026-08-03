@@ -16,6 +16,8 @@ This document categorizes all active development, refactoring, testing, and oper
   - Audit all deployment environment variables to ensure zero default development secrets remain in production.
 - [ ] **Confirm Render Dashboard Build Command matches `backend/render-build.sh`**:
   - The dashboard's manually-configured Build Command field may still contain the old `playwright install --with-deps chromium` (which fails on Render's native non-root runtime, see [KNOWN_ISSUES.md](KNOWN_ISSUES.md) / [CHANGELOG.md](CHANGELOG.md) 3.7.0). Verify it invokes `backend/render-build.sh` (or an equivalent command without `--with-deps`).
+- [ ] **Correct the `FRONTEND_URL` environment variable on Render**:
+  - Currently set to a local Vite dev server address (`http://localhost:5173`) instead of the real production frontend origin, breaking the PDF renderer's last-resort fallback candidate. See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) ISSUE-009.
 
 ---
 

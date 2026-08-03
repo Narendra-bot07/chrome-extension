@@ -352,7 +352,7 @@ def generate_tailoring_patch(
         "1. Produce changes ONLY for SELECTED SECTIONS.\n"
         "2. DO NOT recreate or rewrite the whole resume. Output ONLY delta patch suggestions for requested sections.\n"
         "3. PRESERVE EVERY SECTION. Never omit sections or truncate content.\n"
-        "4. summary: Write a compelling, high-impact professional summary closely aligned with the target job.\n"
+        "4. summary: When summary is selected, ALWAYS return a materially rewritten, concise professional summary closely aligned with the target job. Preserve factual claims and never return the original wording unchanged.\n"
         "5. skills_append: Suggest relevant skills from the target job description that strengthen ATS alignment.\n"
         "6. experience: Map item index string to bullet index string to updated bullet text string.\n"
         "7. projects: Map project item index string to bullet index string to updated bullet text string.\n"
@@ -387,7 +387,7 @@ def generate_tailoring_patch(
         payload_to_fingerprint=payload_dict,
         llm_callable=_call_llm,
         expected_schema=ResumePatch,
-        prompt_version="tailor-patch-v3"
+        prompt_version="tailor-patch-v4-selected-sections"
     )
 
     pipeline = StrictTailoringEngine().validate_patch(

@@ -6,11 +6,16 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "check": "npm run test && npm run build",
+    "test": "node scripts/run-tests.mjs",
     "test:extraction": "node --test src/services/jdExtractionFlow.test.js",
     "test:auth": "node --test src/services/inactivity.test.js",
     "test:tailoring-trend": "node --test src/services/tailoringTrend.test.js",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "engines": {
+    "node": ">=20 <23"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",

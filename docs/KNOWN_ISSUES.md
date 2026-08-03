@@ -86,6 +86,20 @@ This document tracks all currently identified technical issues, edge-case bugs, 
 
 ---
 
+### ISSUE-009: PDF Generation Failing in Production via Hardcoded Self-Referential Port — RESOLVED (Partially — Action Required)
+- **Date Discovered**: 2026-08-04
+- **Date Closed (code side)**: 2026-08-04
+- **Severity**: High
+- **Component**: `app/playwright_pdf.py`
+- **Description**: Every PDF render (download/preview) failed in production with `RuntimeError: PDF renderer is unavailable ... net::ERR_CONNECTION_REFUSED` against both candidate URLs.
+- **Root Cause**: Two independent problems surfaced together:
+  1. **(Code bug, fixed)** `PDF_RENDERER_URL`'s default value hardcoded `127.0.0.1:8000` as the self-referential port Playwright navigates to render the backend's own bundled frontend build (`/__pdf_renderer`). `main.py` binds Uvicorn to Render's dynamically-injected `$PORT`, not a fixed 8000 (its own comment already flagged hardcoding 8000 as coincidental). On Render, nothing listens on port 8000, so this candidate always failed.
+  2. **(Environment misconfiguration, NOT a code bug — action required)** The second failing candidate in the traceback was `http://localhost:5173` — the Vite dev server address. This came from the Render environment's `FRONTEND_URL` variable being set to a local-dev value instead of the actual production frontend origin. `playwright_pdf.py` falls back to `FRONTEND_URL` only as a last-resort compatibility path (see `_renderer_candidates()`), so this fallback is currently useless in production.
+- **Current Status**: Code-side root cause (#1) is resolved — `PDF_RENDERER_URL`'s default now derives from `os.environ.get("PORT", "8000")`, matching `main.py`'s own bind logic. **Root cause #2 still needs manual action**: check Render dashboard → Environment → `FRONTEND_URL` and correct it to the real deployed frontend origin.
+- **Assigned Fix**: Update the `FRONTEND_URL` environment variable on Render.
+
+---
+
 ### ISSUE-006: Suspected OOM-Driven 502 Cascade During Concurrent PDF Rendering — UNCONFIRMED
 - **Date Discovered**: 2026-08-03
 - **Severity**: Medium

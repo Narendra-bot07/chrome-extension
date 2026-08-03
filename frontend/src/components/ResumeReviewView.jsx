@@ -273,7 +273,7 @@ function ResumeReviewView({
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
     try {
-      const res = await fetch(`${apiUrl}/api/refine-section/stream`, {
+      const res = await fetch(`${apiUrl}/api/refine-section`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -303,62 +303,32 @@ function ResumeReviewView({
         throw new Error(detailStr);
       }
 
-      const reader = res.body.getReader();
-      activeReaderRef.current = reader;
-      const decoder = new TextDecoder();
-      let accumulatedText = "";
+      const responsePayload = await res.json();
+      const accumulatedText = String(responsePayload.refined || '').trim();
+      if (!accumulatedText) throw new Error('AI returned an empty edit.');
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const matches = chunk.matchAll(/data:\s*(.*?)(?:\n\n|\n|$)/g);
-        for (const match of matches) {
-          const content = match[1];
-          if (content.startsWith("[ERROR]")) {
-            throw new Error(content.replace("[ERROR]", "").trim());
-          }
-          accumulatedText += content;
-        }
-
-        let updated;
-        if (sectionType === 'summary') {
-          updated = suggestions.map(s => {
-            if (s.sectionType === 'summary') {
-              return { ...s, suggested: accumulatedText, status: 'pending', isTyping: true };
-            }
-            return s;
-          });
-        } else if (sectionType === 'skills') {
-          const items = accumulatedText.split(',').map(item => item.trim()).filter(Boolean);
-          updated = suggestions.map(s => {
-            if (s.sectionType === 'skills') {
-              const idx = targetSuggestions.findIndex(ts => ts.id === s.id);
-              if (idx !== -1 && items[idx] !== undefined) {
-                const isLast = idx === items.length - 1;
-                return { ...s, skillName: items[idx], suggested: items[idx], status: 'pending', isTyping: isLast };
-              }
-            }
-            return s;
-          });
-        } else {
-          const lines = accumulatedText.split('\n')
-            .map(line => line.trim())
-            .filter(line => line.length > 0)
-            .map(line => line.replace(/^[-•*]\s*/, ''));
-          updated = suggestions.map(s => {
-            if (s.sectionType === sectionType) {
-              const idx = targetSuggestions.findIndex(ts => ts.id === s.id);
-              if (idx !== -1 && lines[idx] !== undefined) {
-                const isLast = idx === lines.length - 1;
-                return { ...s, suggested: lines[idx], status: 'pending', isTyping: isLast };
-              }
-            }
-            return s;
-          });
-        }
-        setReviewSuggestions(updated);
+      // The structured endpoint returns one complete, validated edit. Keeping
+      // the update atomic avoids partial JSON/SSE chunks being shown as resume text.
+      if (sectionType === 'summary' && targetSuggestions.length === 0) {
+        const summarySuggestion = {
+          id: 'summary:0',
+          change_id: 'summary:0',
+          category: 'Professional Summary',
+          status: 'pending',
+          original: parsedResume.summary || '',
+          suggested: accumulatedText,
+          reason: 'User-requested AI refinement.',
+          atsImpact: 0,
+          confidence: 'High',
+          sectionType: 'summary',
+          itemIndex: 0,
+          bulletIndex: 0,
+          isTyping: false
+        };
+        setReviewSuggestions([...suggestions, summarySuggestion]);
+        setActiveEditSection(null);
+        setCustomPrompt('');
+        return;
       }
 
       const finalSuggestions = suggestions.map(s => {
@@ -762,7 +732,8 @@ function ResumeReviewView({
     ?? comparison?.resume_match_after
     ?? Math.min(98, originalResumeMatch + 15);
   const estimatedResumeMatch = Math.max(originalResumeMatch, rawEstimatedResumeMatch);
-  const currentResumeMatch = Math.round(originalResumeMatch + (estimatedResumeMatch - originalResumeMatch) * acceptedRatio);
+  const currentResumeMatch = liveATS?.current_resume_match
+    ?? calculateJDMatchScore(mergeReviewResume(originalResume || parsedResume, suggestions).workingResume, jobAnalysis).score;
 
   const originalATS = liveATS?.original_ats
     ?? comparison?.ats_score_before
@@ -771,7 +742,8 @@ function ResumeReviewView({
     ?? comparison?.ats_score_after
     ?? Math.min(98, originalATS + 15);
   const estimatedATS = Math.max(originalATS, rawEstimatedATS);
-  const currentATS = Math.round(originalATS + (estimatedATS - originalATS) * acceptedRatio);
+  const currentATS = liveATS?.current_ats
+    ?? calculateJDMatchScore(mergeReviewResume(originalResume || parsedResume, suggestions).workingResume, jobAnalysis).atsScore;
 
   const breakdownBefore = liveATS?.breakdown_before ?? comparison?.breakdown_before ?? {
     resume_match: {
