@@ -10,9 +10,15 @@ from urllib.parse import urlencode
 from pypdf import PdfReader
 from playwright.sync_api import sync_playwright
 
+# main.py binds Uvicorn to Render's dynamically-injected $PORT (hardcoding
+# 8000 there "only works by coincidence of platform configuration" per its
+# own comment) -- this self-referential renderer URL must track the same
+# port, or it silently tries to connect to a port nothing is listening on
+# in production and every PDF render fails with net::ERR_CONNECTION_REFUSED.
+_BACKEND_PORT = os.environ.get("PORT", "8000")
 PDF_RENDERER_URL = (
     os.environ.get("PDF_RENDERER_URL")
-    or "http://127.0.0.1:8000/__pdf_renderer/index.html"
+    or f"http://127.0.0.1:{_BACKEND_PORT}/__pdf_renderer/index.html"
 ).rstrip("/")
 
 # Each render launches a full, separate headless Chromium process. On a
@@ -40,7 +46,7 @@ class HyperlinkRenderingError(Exception):
 def _renderer_candidates() -> list[str]:
     """PDF rendering is independent from the public/dev frontend origin."""
     configured = PDF_RENDERER_URL
-    backend_static = "http://127.0.0.1:8000/__pdf_renderer/index.html"
+    backend_static = f"http://127.0.0.1:{_BACKEND_PORT}/__pdf_renderer/index.html"
     candidates = [configured, backend_static]
     # Keep the public frontend as a last-resort compatibility path only. A
     # stopped Vite server must not block the backend-served production build.
