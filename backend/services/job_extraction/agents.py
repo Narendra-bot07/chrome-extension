@@ -140,7 +140,15 @@ def browser_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            # --disable-dev-shm-usage is required in Docker/Render-style containers:
+            # Chromium's default /dev/shm is capped at 64MB there, and a heavier page
+            # will crash the browser subprocess outright (not a catchable Python
+            # exception). Matches the hardened launch args already used in
+            # app/playwright_pdf.py.
+            browser = playwright.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+            )
             page = browser.new_page()
             page.on("pageerror", lambda error: errors.append(str(error)[:300]))
             page.goto(
@@ -149,7 +157,11 @@ def browser_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
                 timeout=state.browser_strategy.get("timeout_ms", 30000),
             )
             try:
-                page.wait_for_load_state("networkidle", timeout=5000)
+                # Best-effort only: JS-heavy SPAs (LinkedIn, Workday) rarely go
+                # fully idle (analytics/chat beacons keep polling), so this
+                # routinely burns its entire timeout for no extra content.
+                # domcontentloaded above already guarantees the DOM we parse.
+                page.wait_for_load_state("networkidle", timeout=2000)
             except Exception:
                 pass
             selectors = PORTALS.get(state.detected_portal, ("", ["main", "article"]))[1]
@@ -1191,14 +1203,25 @@ each explicit skill."""
 def skill_intelligence_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     state = _state(value)
     current_job = ExtractedJob.model_validate(state.extracted_job or {})
-    skill_model = get_llm(temperature=0).with_structured_output(SkillDecision)
-    decision = skill_model.invoke([
-        SystemMessage(content=SKILL_INTELLIGENCE_PROMPT),
-        HumanMessage(content=json.dumps({
-            "current_extraction": current_job.model_dump(mode="json"),
-            "evidence": state.evidence,
-        }, ensure_ascii=False)),
-    ])
+    fingerprint_payload = {
+        "current_extraction": current_job.model_dump(mode="json"),
+        "evidence": state.evidence,
+    }
+
+    def _call_llm():
+        skill_model = get_llm(temperature=0).with_structured_output(SkillDecision)
+        return skill_model.invoke([
+            SystemMessage(content=SKILL_INTELLIGENCE_PROMPT),
+            HumanMessage(content=json.dumps(fingerprint_payload, ensure_ascii=False)),
+        ])
+
+    decision = llm_cache.execute_with_cache(
+        task="jd_agent_skill_intelligence",
+        payload_to_fingerprint=fingerprint_payload,
+        llm_callable=_call_llm,
+        expected_schema=SkillDecision,
+        prompt_version="jd-agent-skill-v1",
+    )
     skills = SkillDecision.model_validate(decision)
     explicit = list(dict.fromkeys(
         skill.strip() for skill in skills.explicit_skills if skill and skill.strip()

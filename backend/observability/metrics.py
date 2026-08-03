@@ -1,10 +1,22 @@
 import time
 from typing import Dict, Any, Optional
-from prometheus_client import Counter, Histogram, Gauge, CollectorRegistry, CONTENT_TYPE_LATEST
+from prometheus_client import (
+    Counter, Histogram, Gauge, CollectorRegistry, CONTENT_TYPE_LATEST,
+    ProcessCollector, PlatformCollector, GCCollector,
+)
 from observability.config import METRICS_ENABLED, SERVICE_NAME, APP_ENV, APP_RELEASE
 
 # Initialize global registry or use default
 registry = CollectorRegistry()
+
+# prometheus_client auto-registers these onto its own default REGISTRY at
+# import time, not onto a custom CollectorRegistry() like the one above.
+# Without registering them here explicitly, process_cpu_seconds_total,
+# process_resident_memory_bytes, etc. never appear in /internal/metrics —
+# which is exactly why CPU/memory panels in Grafana have nothing to plot.
+ProcessCollector(registry=registry)
+PlatformCollector(registry=registry)
+GCCollector(registry=registry)
 
 # ----------------- HTTP METRICS -----------------
 http_requests_total = Counter(

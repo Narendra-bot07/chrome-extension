@@ -96,7 +96,7 @@ function StartupLoader({ label = "Restoring session" }) {
 function ProtectedRoute({ children }) {
   const { user, loadingAuth, parsedResume, resumesList, loadingResume } = useApp();
   const location = useLocation();
-  const isExtension = (typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id)) || window.location.protocol === 'chrome-extension:';
+  const isExtension = window.location.protocol === 'chrome-extension:';
   const hasAnyResume = Boolean(parsedResume) || (Array.isArray(resumesList) && resumesList.length > 0);
   
   if (loadingAuth || (isExtension && loadingResume)) {
@@ -135,7 +135,7 @@ function AppRoutes() {
   } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
-  const isExtension = (typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id)) || window.location.protocol === 'chrome-extension:';
+  const isExtension = window.location.protocol === 'chrome-extension:';
   const hasAnyResume = Boolean(parsedResume) || (Array.isArray(resumesList) && resumesList.length > 0);
 
   useEffect(() => {

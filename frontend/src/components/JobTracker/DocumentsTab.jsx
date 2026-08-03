@@ -15,7 +15,8 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
     tailoredResume,
     coverLetter,
     parsedResume,
-    handleGenerateCoverLetter
+    handleGenerateCoverLetter,
+    setJobAnalysis
   } = useApp();
 
   const [previewModalType, setPreviewModalType] = useState(null); // null | 'resume' | 'coverletter'
@@ -114,13 +115,15 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
     if (docType === 'resume') {
       navigate('/resume-review');
     } else {
+      // handleGenerateCoverLetter already navigates to /cover-letter on success
+      // and returns undefined (without navigating) when it bails out early on
+      // missing resume/JD — don't force navigation past a validation warning.
       await handleGenerateCoverLetter({}, [], {
         applicationId: application.id,
         application: application,
         resume: storedResume,
         job: storedJob
       });
-      navigate('/cover-letter');
     }
   };
 

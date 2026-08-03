@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { compressResumeData } from '../utils/resumeCompression';
 import { toRenderableResume } from '../utils/renderableResume';
@@ -1618,7 +1618,7 @@ export function AppProvider({ children }) {
     const token = session?.access_token || localStorage.getItem('access_token');
     const hasResume = Boolean(parsedResume) || (Array.isArray(resumesList) && resumesList.length > 0);
 
-    const isExtension = (typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id)) || window.location.protocol === 'chrome-extension:';
+    const isExtension = window.location.protocol === 'chrome-extension:';
 
     if (!token || !user) {
       setLoading(false);

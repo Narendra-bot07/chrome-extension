@@ -18,7 +18,7 @@ function ResumeDetectPage() {
     loadingResume
   } = useApp();
 
-  const isExtension = (typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id)) || window.location.protocol === 'chrome-extension:';
+  const isExtension = window.location.protocol === 'chrome-extension:';
 
   React.useEffect(() => {
     fetchResumesList();

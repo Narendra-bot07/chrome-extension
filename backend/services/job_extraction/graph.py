@@ -14,12 +14,38 @@ from services.job_extraction.agents import (
     dom_cleaner_agent, evidence_planner_agent, extraction_agent,
     extraction_manual_review_agent, final_response_agent, jsonld_agent,
     markdown_agent, metadata_agent, planner_agent, repair_agent, reviewer_agent,
-    source_builder_agent,
+    source_builder_agent, _job_signal_score,
 )
 from services.job_extraction.schemas import JDState
 
 
-def route_after_evidence(state: JDState) -> Literal["jsonld", "final_response"]:
+def route_after_discovery(state: JDState) -> Literal["browser", "evidence_evaluation"]:
+    """Skip the Playwright fetch when the extension already captured strong
+    evidence from the user's own logged-in page — a cold browser launch plus
+    navigation typically costs 5-15s and is redundant when we already have a
+    usable job panel or structured JobPosting JSON-LD."""
+    evidence = state.extension_evidence or {}
+    panel_text = str(evidence.get("selected_panel_text") or "").strip()
+    strong_panel = bool(panel_text) and len(panel_text) >= 200 and (
+        bool((evidence.get("capture") or {}).get("portal_optimized_panel"))
+        or _job_signal_score(panel_text) >= .35
+    )
+    has_job_jsonld = _job_signal_score(evidence.get("jsonld") or [], structured=True) >= .9
+    if strong_panel or has_job_jsonld:
+        return "evidence_evaluation"
+    return "browser"
+
+
+def route_after_evidence(state: JDState) -> Literal["browser", "jsonld", "final_response"]:
+    # If we skipped the Playwright fetch (browser_attempts == 0) and the
+    # extension evidence alone turned out insufficient, fall back to a real
+    # browser fetch once rather than failing outright.
+    if (
+        state.browser_attempts == 0
+        and state.extraction_readiness in {"BLOCKED", "NOT_READY"}
+        and state.browser_attempts < state.max_browser_attempts
+    ):
+        return "browser"
     if state.error or state.extraction_readiness in {"BLOCKED", "NOT_READY", "MANUAL_REVIEW"}:
         return "final_response"
     return "jsonld"
@@ -71,7 +97,7 @@ def build_job_intelligence_graph():
     for name, node in nodes.items():
         graph.add_node(name, node)
     graph.add_edge(START, "discovery")
-    graph.add_edge("discovery", "browser")
+    graph.add_conditional_edges("discovery", route_after_discovery)
     graph.add_edge("browser", "evidence_evaluation")
     graph.add_conditional_edges("evidence_evaluation", route_after_evidence)
     graph.add_edge("jsonld", "dom_cleaner")

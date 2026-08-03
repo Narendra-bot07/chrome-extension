@@ -157,4 +157,17 @@ async def metrics_endpoint(request: Request):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    # reload=True runs a file-watcher that restarts the whole server on any
+    # detected file change under the working directory — including writes the
+    # app makes to itself at runtime (resume uploads to local_uploads/,
+    # Playwright temp/cache files, logs). A restart mid-request kills every
+    # in-flight connection, not just the one that triggered it. Never enable
+    # this outside local development. Render (and most PaaS hosts) also inject
+    # the port to bind via $PORT — hardcoding 8000 only works by coincidence
+    # of platform configuration.
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 8000)),
+        reload=bool(os.environ.get("UVICORN_RELOAD")),
+    )
