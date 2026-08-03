@@ -34,13 +34,39 @@ export const refreshAccessToken = async () => {
   if (storedAccessToken) {
     headers['Authorization'] = `Bearer ${storedAccessToken}`;
   }
-  refreshPromise = fetchImpl(`${getApiOrigin()}/api/v1/auth/refresh`, {
-    method: 'POST',
-    headers,
-    credentials: 'include',
-    body: JSON.stringify({ refresh_token: storedRefreshToken || '' })
-  }).then(async response => {
-    if (!response.ok) throw new Error('refresh_failed');
+
+  const attemptRefresh = () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    return fetchImpl(`${getApiOrigin()}/api/v1/auth/refresh`, {
+      method: 'POST',
+      headers,
+      credentials: 'include',
+      body: JSON.stringify({ refresh_token: storedRefreshToken || '' }),
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeoutId));
+  };
+
+  refreshPromise = (async () => {
+    let response = null;
+    // A failed refresh here logs the user out entirely (see AppContext's
+    // checkSession confirmed-401 branch) — so a single transient network
+    // blip or a slow/cold-starting backend must not be indistinguishable
+    // from an actually-invalid refresh token. Retry transient failures;
+    // give up immediately only on a definitive 401/403 (the refresh token
+    // itself was rejected — retrying with the same token can't help).
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        response = await attemptRefresh();
+        if (response.ok || response.status === 401 || response.status === 403) break;
+      } catch (err) {
+        response = null;
+      }
+      if (attempt < 2) {
+        await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+      }
+    }
+    if (!response || !response.ok) throw new Error('refresh_failed');
     const data = await response.json();
     if (data.access_token) {
       localStorage.setItem(AUTH_STORAGE.accessToken, data.access_token);
@@ -55,7 +81,7 @@ export const refreshAccessToken = async () => {
       chrome.storage.local.set(updatePayload);
     }
     return data.access_token;
-  }).finally(() => {
+  })().finally(() => {
     refreshPromise = null;
   });
   return refreshPromise;

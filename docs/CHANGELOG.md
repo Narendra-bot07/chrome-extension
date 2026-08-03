@@ -4,6 +4,13 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.7.2] - 2026-08-04
+
+### Fixed
+- **Extension tabs still occasionally dropping to the sign-in / Extension Setup screen after 3.7.1**: `refreshAccessToken()` (`frontend/src/services/authSession.js`) made exactly one attempt at `POST /api/v1/auth/refresh` with no timeout — and it's what `checkSession()`'s confirmed-`401` branch depends on before actually clearing the session. Given the backend's documented cold-start/DB-pool latency (see [KNOWN_ISSUES.md](KNOWN_ISSUES.md) ISSUE-005), a single transient failure on that one refresh call was indistinguishable from a genuinely invalid refresh token and logged the user out regardless. `refreshAccessToken()` now retries transient failures (network error, timeout, 5xx) up to 3 times with backoff, an 8s timeout per attempt, and gives up immediately only on a definitive `401`/`403` response (the refresh token itself was rejected — retrying with the same token can't help). See [AUTH_OAUTH.md](AUTH_OAUTH.md) §4.1.
+
+---
+
 ## [3.7.1] - 2026-08-04
 
 ### Fixed
