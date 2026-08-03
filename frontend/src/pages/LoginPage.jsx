@@ -111,7 +111,10 @@ export default function LoginPage() {
         );
         console.info('[tailr4u] Google profile import', data.google_profile_import);
       }
-      completeAuthentication(data.session.access_token);
+      completeAuthentication(
+        data.session?.access_token,
+        data.session?.refresh_token
+      );
     } catch (err) {
       setLoginError(err.message || 'Google login failed.');
     } finally {
