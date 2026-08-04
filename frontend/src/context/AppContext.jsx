@@ -85,6 +85,7 @@ export function AppProvider({ children }) {
     } catch (e) {}
   };
   const [session, setSession] = useState(null);
+  const [sessionVerified, setSessionVerified] = useState(false);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [loadingResume, setLoadingResume] = useState(true);
   const [hasRedirectedOnStartup, setHasRedirectedOnStartup] = useState(false);
@@ -142,6 +143,7 @@ export function AppProvider({ children }) {
       }
 
       if (!storedToken) {
+        setSessionVerified(false);
         setLoadingAuth(false);
         setLoadingResume(false);
         return;
@@ -184,6 +186,7 @@ export function AppProvider({ children }) {
             const data = await res.json();
             setUser(data.user);
             setSession({ access_token: activeToken });
+            setSessionVerified(true);
             setHasCompletedPreferences(!!data.has_completed_preferences);
 
             fetchJobPreferences(activeToken).catch(() => {});
@@ -206,6 +209,7 @@ export function AppProvider({ children }) {
                 if (retryRes.ok) {
                   const retryData = await retryRes.json();
                   setUser(retryData.user);
+                  setSessionVerified(true);
                   setHasCompletedPreferences(!!retryData.has_completed_preferences);
                   return;
                 }
@@ -215,6 +219,7 @@ export function AppProvider({ children }) {
             }
             localStorage.removeItem('access_token');
             localStorage.removeItem('refresh_token');
+            setSessionVerified(false);
             setUser(null);
             setSession(null);
             setParsedResume(null);
@@ -254,6 +259,7 @@ export function AppProvider({ children }) {
       chrome.storage.local.remove(['access_token', 'refresh_token']);
     }
     setSession(null);
+    setSessionVerified(false);
     setUser(null);
     setHasCompletedPreferences(false);
     setHasRedirectedOnStartup(false);
@@ -357,6 +363,7 @@ export function AppProvider({ children }) {
     const data = await res.json();
     setUser(data.user);
     setSession({ access_token: accessToken });
+    setSessionVerified(true);
     setHasCompletedPreferences(!!data.has_completed_preferences);
     const prefPromise = fetchJobPreferences(accessToken).catch(() => null);
     const resumesPromise = (async () => {
@@ -490,6 +497,9 @@ export function AppProvider({ children }) {
     if (requestState.timer) clearTimeout(requestState.timer);
     if (requestState.controller) requestState.controller.abort();
 
+    // Acceptance/rejection is an explicit user action, so scoring should feel
+    // immediate. Keep only a tiny coalescing window for rapid Accept All /
+    // Reject All updates instead of the former 2.5 second artificial delay.
     requestState.timer = setTimeout(async () => {
       const controller = new AbortController();
       requestState.controller = controller;
@@ -533,7 +543,7 @@ export function AppProvider({ children }) {
           liveATSRequestRef.current.timer = null;
         }
       }
-    }, 2500);
+    }, 100);
   });
 
   useEffect(() => () => {
@@ -3810,7 +3820,7 @@ export function AppProvider({ children }) {
 
   return (
     <AppContext.Provider value={{
-      user, session, loadingAuth, logout, adoptAuthenticatedSession,
+      user, session, sessionVerified, loadingAuth, logout, adoptAuthenticatedSession,
       darkMode, setDarkMode, toggleDarkMode,
       showSettings, setShowSettings,
       apiKey, setApiKey,

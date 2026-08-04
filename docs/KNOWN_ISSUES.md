@@ -101,6 +101,17 @@ This document tracks all currently identified technical issues, edge-case bugs, 
 
 ---
 
+### ISSUE-010: PDF Render Validation Failing for All Sections on Photo-Enabled Templates — RESOLVED
+- **Date Discovered**: 2026-08-04
+- **Date Closed**: 2026-08-04
+- **Severity**: High (Resolved)
+- **Component**: `frontend/src/services/profilePolicy.js`, `frontend/src/components/Resume/TailorRender.tsx`
+- **Description**: `ValueError: Rendering Validation Failed: Missing sections in rendered HTML DOM: summary, experience, projects, education, skills, achievements` — every section reported missing, but only for the `PortfolioPro` and `PremiumExecutive` templates.
+- **Root Cause**: The Playwright print route loads the app in a fresh, unauthenticated browser context (data is injected via `window.__INJECTED_RESUME_DATA__`, no login/session), so `AppContext`'s `user` state is genuinely `null` there. `renderProfilePhoto()` in `TailorRender.tsx` — only called for templates with `profilePhoto: true`, i.e. exactly these two — calls `selectProfileImage(profile, user)`, whose default parameters (`user = {}`) only apply to `undefined`, not an explicit `null`. `null.user_metadata` threw during render, crashing the entire template component tree before any section mounted, which is why validation reported *every* section missing rather than just the photo. Templates with `profilePhoto: false` never call this function, so they were unaffected.
+- **Current Status**: **RESOLVED**. `selectProfileImage` now coerces `profile`/`user` to `{}` internally whenever either is falsy, covering `null` as well as `undefined`. See [CHANGELOG.md](CHANGELOG.md) 3.7.5.
+
+---
+
 ### ISSUE-006: Suspected OOM-Driven 502 Cascade During Concurrent PDF Rendering — UNCONFIRMED
 - **Date Discovered**: 2026-08-03
 - **Severity**: Medium

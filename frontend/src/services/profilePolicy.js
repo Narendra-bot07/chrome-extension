@@ -10,13 +10,19 @@ export function calculateProfileCompleteness(profile = {}) {
 }
 
 export function selectProfileImage(profile = {}, user = {}) {
-  return profile.uploaded_profile_image_url
-    || profile.google_profile_image_url
-    || profile.avatar_url
-    || profile.photo_url
-    || profile.picture
-    || user.user_metadata?.avatar_url
-    || user.user_metadata?.picture
+  // Default params only cover `undefined` -- the unauthenticated Playwright
+  // PDF-render context genuinely passes `user: null` (AppContext's logged-out
+  // state), which skips the default and previously crashed the whole render
+  // tree on `null.user_metadata` for every profilePhoto-enabled template.
+  const safeProfile = profile || {};
+  const safeUser = user || {};
+  return safeProfile.uploaded_profile_image_url
+    || safeProfile.google_profile_image_url
+    || safeProfile.avatar_url
+    || safeProfile.photo_url
+    || safeProfile.picture
+    || safeUser.user_metadata?.avatar_url
+    || safeUser.user_metadata?.picture
     || '';
 }
 

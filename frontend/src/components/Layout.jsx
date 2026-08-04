@@ -46,6 +46,7 @@ function Layout() {
     isExtension,
     user,
     session,
+    sessionVerified,
     pendingApplicationSubmitted,
     setPendingApplicationSubmitted,
     activeApplicationId,
@@ -425,7 +426,9 @@ function Layout() {
               {darkMode ? <Sun size={16} /> : <Moon size={16} />}
             </button>
 
-            <NotificationCenter token={session?.access_token} />
+            {sessionVerified && user && session?.access_token ? (
+              <NotificationCenter token={session.access_token} />
+            ) : null}
 
             {/* User Profile Dropdown Glass Pill */}
             {(() => {

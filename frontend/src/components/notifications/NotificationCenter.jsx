@@ -40,7 +40,17 @@ function NotificationCenter({ token }) {
     finally { setLoading(false); }
   }, [token, tab]);
 
-  useEffect(() => { refreshCount(); const id = setInterval(refreshCount, 15000); return () => clearInterval(id); }, [refreshCount]);
+  useEffect(() => {
+    if (!token) {
+      setCount(0);
+      setItems([]);
+      setOpen(false);
+      return undefined;
+    }
+    refreshCount();
+    const id = setInterval(refreshCount, 15000);
+    return () => clearInterval(id);
+  }, [token, refreshCount]);
   useEffect(() => { if (open) load(); }, [open, load]);
   useEffect(() => {
     const close = event => { if (root.current && !root.current.contains(event.target)) setOpen(false); };

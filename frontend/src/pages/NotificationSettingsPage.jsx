@@ -40,14 +40,14 @@ function getTimezoneLabel(tz) {
 }
 
 export default function NotificationSettingsPage() {
-  const { session } = useApp();
+  const { session, sessionVerified } = useApp();
   const token = session?.access_token;
   const [rows, setRows] = useState(initial);
   const [settings, setSettings] = useState({ timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, quiet_hours_start: '22:00', quiet_hours_end: '07:00', smart_reminders_enabled: true });
   const [state, setState] = useState('idle');
 
   useEffect(() => {
-    if (!token) return;
+    if (!sessionVerified || !token) return;
     notificationApi.preferences(token).then(data => {
       if (data.categories?.length) {
         setRows(initial.map(row => {
@@ -57,11 +57,12 @@ export default function NotificationSettingsPage() {
       }
       if (data.categories?.[0]) setSettings(s => ({ ...s, ...data.categories[0] }));
     }).catch(() => setState('error'));
-  }, [token]);
+  }, [sessionVerified, token]);
 
   const toggle = (index, key) => setRows(v => v.map((r, i) => i === index ? { ...r, [key]: !r[key] } : r));
 
   const save = async () => {
+    if (!sessionVerified || !token) return;
     setState('saving');
     try {
       await notificationApi.savePreferences(token, { ...settings, categories: rows });

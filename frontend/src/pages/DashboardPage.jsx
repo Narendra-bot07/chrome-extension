@@ -342,7 +342,7 @@ function CareerPerformanceRadar({ metrics, updatedAt }) {
 }
 
 function DashboardContent() {
-  const { session, applications: rawApps, fetchApplications, apiUrl, profile, user, parsedResume } = useApp();
+  const { session, sessionVerified, applications: rawApps, fetchApplications, apiUrl, profile, user, parsedResume } = useApp();
   const applications = rawApps || [];
   const navigate = useNavigate();
 
@@ -381,6 +381,10 @@ function DashboardContent() {
   };
 
   useEffect(() => {
+    if (!sessionVerified) {
+      setLoading(false);
+      return undefined;
+    }
     let active = true;
     const loadDashboardData = async () => {
       if (applications.length === 0) {
@@ -410,11 +414,11 @@ function DashboardContent() {
     }
 
     return () => { active = false; };
-  }, [session?.access_token, apiUrl]);
+  }, [sessionVerified, session?.access_token, apiUrl]);
 
   useEffect(() => {
-    const token = session?.access_token || localStorage.getItem('access_token');
-    if (!token) return undefined;
+    const token = session?.access_token;
+    if (!sessionVerified || !token) return undefined;
     let active = true;
 
     const refreshLiveDashboardData = async () => {
@@ -462,11 +466,11 @@ function DashboardContent() {
       window.removeEventListener('focus', refreshLiveDashboardData);
       document.removeEventListener('visibilitychange', handleVisibilityRefresh);
     };
-  }, [session?.access_token, apiUrl]);
+  }, [sessionVerified, session?.access_token, apiUrl]);
 
   useEffect(() => {
-    const token = session?.access_token || localStorage.getItem('access_token');
-    if (!token) return;
+    const token = session?.access_token;
+    if (!sessionVerified || !token) return;
     const days = trendTimeframe === 'Last 7 days' ? 7 : trendTimeframe === 'Last 90 days' ? 90 : 30;
     const controller = new AbortController();
     fetch(`${apiUrl}/api/v1/analytics/trend?days=${days}`, {
@@ -479,7 +483,7 @@ function DashboardContent() {
         if (error.name !== 'AbortError') setTrendActivity([]);
       });
     return () => controller.abort();
-  }, [apiUrl, session?.access_token, trendTimeframe]);
+  }, [apiUrl, sessionVerified, session?.access_token, trendTimeframe]);
 
   // Clean Display Name Resolution (First Name, Middle Name, Last Name)
   const firstName = useMemo(() => {

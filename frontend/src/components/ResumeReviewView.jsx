@@ -724,6 +724,13 @@ function ResumeReviewView({
   const acceptedRatio = suggestions.length > 0 ? acceptedCount / suggestions.length : 0;
 
   const fallbackMatch = useMemo(() => calculateJDMatchScore(parsedResume, jobAnalysis), [parsedResume, jobAnalysis]);
+  const deterministicCurrentScore = useMemo(() => {
+    const workingResume = mergeReviewResume(
+      originalResume || parsedResume,
+      suggestions
+    ).workingResume;
+    return calculateJDMatchScore(workingResume, jobAnalysis);
+  }, [originalResume, parsedResume, suggestions, jobAnalysis]);
 
   const originalResumeMatch = liveATS?.original_resume_match
     ?? comparison?.resume_match_before
@@ -732,8 +739,10 @@ function ResumeReviewView({
     ?? comparison?.resume_match_after
     ?? Math.min(98, originalResumeMatch + 15);
   const estimatedResumeMatch = Math.max(originalResumeMatch, rawEstimatedResumeMatch);
-  const currentResumeMatch = liveATS?.current_resume_match
-    ?? calculateJDMatchScore(mergeReviewResume(originalResume || parsedResume, suggestions).workingResume, jobAnalysis).score;
+  // Never leave the previous accepted-state score on screen while waiting for
+  // the backend breakdown. This engine is deterministic and runs locally in
+  // the same render that applies the review decision.
+  const currentResumeMatch = deterministicCurrentScore.score;
 
   const originalATS = liveATS?.original_ats
     ?? comparison?.ats_score_before
@@ -742,8 +751,7 @@ function ResumeReviewView({
     ?? comparison?.ats_score_after
     ?? Math.min(98, originalATS + 15);
   const estimatedATS = Math.max(originalATS, rawEstimatedATS);
-  const currentATS = liveATS?.current_ats
-    ?? calculateJDMatchScore(mergeReviewResume(originalResume || parsedResume, suggestions).workingResume, jobAnalysis).atsScore;
+  const currentATS = deterministicCurrentScore.atsScore;
 
   const breakdownBefore = liveATS?.breakdown_before ?? comparison?.breakdown_before ?? {
     resume_match: {

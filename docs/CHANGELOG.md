@@ -4,6 +4,13 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.7.5] - 2026-08-04
+
+### Fixed
+- **PDF renderer validation failing with "Missing sections in rendered HTML DOM" for every section, but only on `PortfolioPro` and `PremiumExecutive`**: the Playwright print route loads the app in a fresh, unauthenticated browser context (no `localStorage`/session — resume data is injected directly via `window.__INJECTED_RESUME_DATA__`), so `AppContext`'s `user` state is genuinely `null` there. `TailorRender.tsx`'s `renderProfilePhoto()` — only invoked for templates with `profilePhoto: true`, which is exactly these two templates — called `selectProfileImage(profile, user)` (`services/profilePolicy.js`), whose default parameters (`user = {}`) only apply to `undefined`, not an explicit `null`. `null.user_metadata` threw during render, crashing the entire template tree before any section mounted — which is why validation reported *every* section missing rather than just the photo. Templates with `profilePhoto: false` never call this function at all, so they were unaffected. Fixed by coercing `profile`/`user` to `{}` inside `selectProfileImage` itself when either is falsy (covers `null` as well as `undefined`), rather than relying on default parameters alone.
+
+---
+
 ## [3.7.4] - 2026-08-04
 
 ### Fixed
