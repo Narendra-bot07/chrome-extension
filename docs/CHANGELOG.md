@@ -4,6 +4,15 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.11.1] - 2026-08-04
+
+### Fixed
+- **Mock payment success redirect landed on a Vercel 404 page** (`tailr4u.com/pricing?payment=mock_razorpay_success&plan_id=basic`): two independent bugs.
+  1. `frontend/vercel.json` had no SPA fallback `rewrites` rule. Client-side navigation within the app never hits this gap (React Router handles it without a page load), but a *full browser redirect* landing directly on a path — exactly what a payment provider callback does — is resolved by Vercel's static file server, which 404s on any path with no matching file. Added the standard `{"source": "/(.*)", "destination": "/index.html"}` rewrite.
+  2. Even with that fixed, the redirect target itself was wrong on two counts: `backend/app/billing/providers/razorpay_provider.py` and `stripe_provider.py`'s no-API-key mock checkout paths pointed to `/pricing`, a route that has never existed in `App.jsx` (the real route is `/subscription`) — and the whole app uses `HashRouter` (confirmed via `App.jsx`), so the correct target needed a `#` prefix (`/#/subscription?...`) the same way the *real* Stripe provider's `success_url`/`cancel_url` already correctly does a few lines below the mock path in the same file. Fixed both mock checkout URLs to `{frontend_url}/#/subscription?payment=mock_..._success&plan_id=...`, matching the pattern the real Stripe integration already used and that `SubscriptionPage.jsx` already correctly parses (`payment`/`plan_id` query params).
+
+---
+
 ## [3.11.0] - 2026-08-04
 
 ### Fixed

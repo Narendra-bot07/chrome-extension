@@ -67,8 +67,3 @@ html:has(.landing-page)::-webkit-scrollbar-track{background:transparent}
 html:has(.landing-page)::-webkit-scrollbar-thumb{border:2px solid transparent;border-radius:99px;background:linear-gradient(#5e9bfa,#22b6a2);background-clip:padding-box}
 
 .lp-custom-cursor i{width:22px;height:28px;margin:0;border:0;background:transparent;backdrop-filter:none;filter:drop-shadow(0 2px 2px rgba(21,39,62,.24));transform-origin:3px 3px;transition:filter .16s ease}.lp-custom-cursor i svg{display:block;width:100%;height:100%;overflow:visible;transition:transform .16s ease}.lp-custom-cursor i path{fill:#162236;stroke:#fff;stroke-width:1.5;stroke-linejoin:round;transition:fill .16s ease}.lp-custom-cursor i.interactive{width:22px;height:28px;margin:0;border:0;background:transparent}.lp-custom-cursor i.interactive svg{transform:scale(1.16) rotate(-3deg)}.lp-custom-cursor i.interactive path{fill:#3578f6}.lp-custom-cursor b{display:none}.dark .lp-custom-cursor i{border:0}.dark .lp-custom-cursor i path{fill:#f4f8ff;stroke:#111b2a}.dark .lp-custom-cursor i.interactive path{fill:#5b96f7}
-
-/* Without the removed <h2> to force a line break, the kicker label and CTA
-   button now sit inline on the same row inside text-align:center; nudge the
-   button right so it isn't crowding the label text. */
-.lp-final-cta .lp-primary-cta{margin-left:18px}

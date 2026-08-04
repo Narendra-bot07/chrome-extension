@@ -20,7 +20,7 @@ class RazorpayProvider(BaseProvider):
         if not self.client:
             frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
             return {
-                "checkout_url": f"{frontend_url}/pricing?payment=mock_razorpay_success&plan_id={plan.get('id')}",
+                "checkout_url": f"{frontend_url}/#/subscription?payment=mock_razorpay_success&plan_id={plan.get('id')}",
                 "provider": "razorpay",
                 "subscription_id": "sub_mock_razorpay_123",
                 "key_id": "rzp_test_mock123"
@@ -62,7 +62,7 @@ class RazorpayProvider(BaseProvider):
             print(f"Razorpay subscription creation failed: {e}")
             frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
             return {
-                "checkout_url": f"{frontend_url}/pricing?payment=mock_razorpay_success&plan_id={plan.get('id')}",
+                "checkout_url": f"{frontend_url}/#/subscription?payment=mock_razorpay_success&plan_id={plan.get('id')}",
                 "provider": "razorpay",
                 "subscription_id": "sub_mock_razorpay_123",
                 "key_id": self.key_id or "rzp_test_mock123"

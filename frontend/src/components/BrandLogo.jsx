@@ -4,7 +4,7 @@ import React, { memo } from 'react';
  * BrandLogo Component
  * Renders the official Tailr4U Logo:
  * - Application logo image (raccoon mark) on the left
- * - Tailr4U wordmark on the right (Dark Navy/White 'Tailr' with top-right floating Electric Blue accent on 'T', Electric Blue '4', Vibrant Orange 'U')
+ * - Tailr4U wordmark on the right (Dark Navy/White 'Tailr' with top-right floating Electric Blue accent on 'T', Electric Blue '4', Electric Blue 'U')
  */
 export const BrandLogo = memo(function BrandLogo({
   size = 'md', // 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl' | number
@@ -84,8 +84,8 @@ export const BrandLogo = memo(function BrandLogo({
             4
           </span>
 
-          {/* 'U' in Vibrant Orange */}
-          <span className="text-orange-500 dark:text-orange-400 font-black ml-[0.01em] filter drop-shadow-[0_2px_4px_rgba(249,115,22,0.3)]">
+          {/* 'U' in Electric Blue */}
+          <span className="text-blue-600 dark:text-blue-500 font-black ml-[0.01em] filter drop-shadow-[0_2px_4px_rgba(37,99,235,0.3)]">
             U
           </span>
         </span>

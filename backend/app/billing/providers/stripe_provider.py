@@ -13,7 +13,7 @@ class StripeProvider(BaseProvider):
         if not self.api_key:
             frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
             return {
-                "checkout_url": f"{frontend_url}/pricing?payment=mock_stripe_success&plan_id={plan.get('id')}",
+                "checkout_url": f"{frontend_url}/#/subscription?payment=mock_stripe_success&plan_id={plan.get('id')}",
                 "provider": "stripe",
                 "subscription_id": "sub_mock_stripe_123"
             }
