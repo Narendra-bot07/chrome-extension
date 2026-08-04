@@ -28,7 +28,6 @@ from app.schemas import (
 from app.llm.deepseek_provider import (
     DeepSeekProvider,
     ResilientLLMWrapper,
-    throttle_ai_call,
 )
 
 from services.cache.redis_cache import redis_cache

@@ -366,6 +366,15 @@ export function AppProvider({ children }) {
   );
   const canonicalJDRef = useRef(initialJDPipelineSession?.canonicalJD || null);
   const jdFingerprintRef = useRef(initialJDPipelineSession?.fingerprint || '');
+  // JobExtractPage fires a speculative background /api/compare as soon as
+  // jobAnalysis+parsedResume are both set, purely to warm the gap-analysis
+  // preview. If the user proceeds to "Tailor Now" before that finishes,
+  // handleRunGapAnalysis used to fire its own, near-identical /api/compare
+  // request -- racing the same DeepSeek tailoring call (the single most
+  // expensive step in the pipeline) twice in parallel and burning two
+  // resume_generation quota units for one user action. Callers with a
+  // matching key now await the same in-flight request instead.
+  const compareRequestCacheRef = useRef({ key: null, promise: null });
   const setJobAnalysis = (nextValue) => {
     const resolved = typeof nextValue === 'function'
       ? nextValue(canonicalJDRef.current)
@@ -2542,6 +2551,32 @@ export function AppProvider({ children }) {
     }
   };
 
+  // Dedupes concurrent /api/compare calls that share the same resume/job/
+  // sections key so two near-simultaneous callers (the speculative
+  // background comparison and the real "Tailor Now" click) share one
+  // network request and one backend LLM call instead of racing two.
+  const requestTailoringCompareDeduped = (key, buildRequest) => {
+    if (compareRequestCacheRef.current.key === key && compareRequestCacheRef.current.promise) {
+      return compareRequestCacheRef.current.promise;
+    }
+    const promise = (async () => {
+      const { url, options } = buildRequest();
+      const res = await fetch(url, options);
+      if (res.ok) {
+        return { ok: true, status: res.status, body: await res.json() };
+      }
+      const body = await res.json().catch(() => ({}));
+      return { ok: false, status: res.status, body };
+    })();
+    compareRequestCacheRef.current = { key, promise };
+    promise.finally(() => {
+      if (compareRequestCacheRef.current.promise === promise) {
+        compareRequestCacheRef.current = { key: null, promise: null };
+      }
+    });
+    return promise;
+  };
+
   // Perform full Gap analysis (ATS Compare) & Pre-Tailoring merge (Step 7)
   const handleCompareActiveResumeToJob = async () => {
     if (!parsedResume || !jobAnalysis) return null;
@@ -2571,33 +2606,39 @@ export function AppProvider({ children }) {
       const token = session?.access_token || localStorage.getItem('access_token');
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      const compareRes = await fetch(`${apiUrl}/api/compare`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...headers
-        },
-        body: JSON.stringify(buildTailoringComparePayload({
-          resumeId: activeParsed.id,
-          resume: toRenderableResume(activeParsed),
-          job: getCanonicalJobAnalysis(),
-          selectedSections
-        }))
-      });
+      const compareKey = `${activeParsed.id || activeParsed.resume_id || ''}:${jdFingerprintRef.current || ''}:${JSON.stringify(selectedSections)}`;
+      const { ok: compareOk, status: compareStatus, body: compareBody } = await requestTailoringCompareDeduped(
+        compareKey,
+        () => ({
+          url: `${apiUrl}/api/compare`,
+          options: {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...headers
+            },
+            body: JSON.stringify(buildTailoringComparePayload({
+              resumeId: activeParsed.id,
+              resume: toRenderableResume(activeParsed),
+              job: getCanonicalJobAnalysis(),
+              selectedSections
+            }))
+          }
+        })
+      );
 
-      if (!compareRes.ok) {
-        const errorBody = await compareRes.json().catch(() => ({}));
-        const message = typeof errorBody?.detail === 'object'
-          ? errorBody.detail.message
-          : (errorBody?.detail || `Comparison failed (${compareRes.status})`);
+      if (!compareOk) {
+        const message = typeof compareBody?.detail === 'object'
+          ? compareBody.detail.message
+          : (compareBody?.detail || `Comparison failed (${compareStatus})`);
         console.error("[JD-EXTRACTION][FRONTEND] Resume comparison failed", {
-          status: compareRes.status,
+          status: compareStatus,
           message
         });
         setApiError(typeof message === "string" ? message : "Resume comparison failed.");
         return null;
       }
-      const compResult = await compareRes.json();
+      const compResult = compareBody;
       setComparison({
         ...compResult,
         _baseline_resume_id: activeParsed.id || activeParsed.resume_id || null,
@@ -2707,31 +2748,37 @@ export function AppProvider({ children }) {
       const token = session?.access_token || localStorage.getItem('access_token');
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      const compareRes = await fetch(`${apiUrl}/api/compare`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...headers
-        },
-        body: JSON.stringify(buildTailoringComparePayload({
-          resumeId: activeParsed.id,
-          resume: toRenderableResume(activeParsed),
-          job: getCanonicalJobAnalysis(),
-          selectedSections
-        }))
-      });
+      const compareKey = `${activeParsed.id || activeParsed.resume_id || ''}:${jdFingerprintRef.current || ''}:${JSON.stringify(selectedSections)}`;
+      const { ok: compareOk, status: compareStatus, body: compareBody } = await requestTailoringCompareDeduped(
+        compareKey,
+        () => ({
+          url: `${apiUrl}/api/compare`,
+          options: {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...headers
+            },
+            body: JSON.stringify(buildTailoringComparePayload({
+              resumeId: activeParsed.id,
+              resume: toRenderableResume(activeParsed),
+              job: getCanonicalJobAnalysis(),
+              selectedSections
+            }))
+          }
+        })
+      );
 
-      if (!compareRes.ok) {
-        const failure = await compareRes.json().catch(() => ({}));
-        const detail = failure?.detail;
+      if (!compareOk) {
+        const detail = compareBody?.detail;
         throw new Error(
           typeof detail === 'object'
             ? (detail.message || 'Your tailored resume generation limit has been reached.')
-            : `Comparison error: ${detail || compareRes.status}`
+            : `Comparison error: ${detail || compareStatus}`
         );
       }
 
-      const compResult = await compareRes.json();
+      const compResult = compareBody;
       const baselineResumeId = activeParsed.id || activeParsed.resume_id || null;
       const baselineFingerprint = jdFingerprintRef.current || null;
 
@@ -2755,19 +2802,25 @@ export function AppProvider({ children }) {
         _baseline_resume_id: baselineResumeId,
         _baseline_jd_fingerprint: baselineFingerprint
       });
-      try {
-        const usedRes = await fetch(`${apiUrl}/api/v1/resumes/${activeParsed.id}/mark-used`, {
-          method: "POST",
-          headers: token ? { "Authorization": `Bearer ${token}` } : {}
-        });
-        if (usedRes.ok) {
-          const usedRecord = await usedRes.json();
-          persistParsedResume(normalizeResumeRecord(usedRecord));
-          await fetchResumesList();
+      // Fire-and-forget: this is usage bookkeeping (last-used timestamp +
+      // resume list refresh), not part of the tailoring result the user is
+      // waiting on. Awaiting it here delayed navigation to /review-changes
+      // by a full extra request round-trip for no visible benefit.
+      (async () => {
+        try {
+          const usedRes = await fetch(`${apiUrl}/api/v1/resumes/${activeParsed.id}/mark-used`, {
+            method: "POST",
+            headers: token ? { "Authorization": `Bearer ${token}` } : {}
+          });
+          if (usedRes.ok) {
+            const usedRecord = await usedRes.json();
+            persistParsedResume(normalizeResumeRecord(usedRecord));
+            await fetchResumesList();
+          }
+        } catch (usageErr) {
+          console.warn("Failed to update resume usage metadata:", usageErr);
         }
-      } catch (usageErr) {
-        console.warn("Failed to update resume usage metadata:", usageErr);
-      }
+      })();
 
       const list = [];
       const patch = compResult.patch;

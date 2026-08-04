@@ -116,6 +116,19 @@ def normalize_resume_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         **parsed_content
     }
 
+    # payload is the live, top-level resume object the frontend is actively
+    # editing; parsed_data/parsed_content are often stale nested snapshots
+    # captured at initial-parse time, before any layout editing happened.
+    # Merging them in AFTER payload (above) means a stale nested
+    # section_order silently overwrote whatever order the user just dragged
+    # in the live layout editor -- rendering a resume/PDF that never
+    # reflected the requested reorder, even though the request correctly
+    # carried it. Layout-editor state must always come from the live
+    # top-level object, never from a legacy nested copy.
+    for layout_field in ("section_order", "layout_model", "hidden_components", "hidden_sections"):
+        if payload.get(layout_field) not in (None, "", [], {}):
+            merged[layout_field] = payload[layout_field]
+
     try:
         from services.resume.renderable import project_renderable_resume
         projected = project_renderable_resume(merged)
@@ -763,7 +776,11 @@ async def api_render_unified_pdf(request: UnifiedRenderRequest):
         if not val_res.valid:
             logger.warning("[RENDER-PDF] Consistency warning for template=%s: %s", template, val_res.issues)
 
-    composition_plan = compose_resume_layout(
+    # compose_resume_layout is synchronous, CPU-bound layout measurement --
+    # running it inline blocks this async endpoint's event loop (and every
+    # other concurrent request on this process) for its duration.
+    composition_plan = await run_in_threadpool(
+        compose_resume_layout,
         resume=resume_dict,
         template_name=template,
         requested_section_order=resume_dict.get("section_order"),

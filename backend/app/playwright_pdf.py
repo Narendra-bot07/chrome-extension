@@ -65,7 +65,15 @@ def _open_renderer(page, route: str, query: Optional[dict] = None):
         separator = "" if candidate.lower().endswith(".html") else "/"
         url = f"{candidate}{separator}{fragment}"
         try:
-            response = page.goto(url, wait_until="domcontentloaded", timeout=8000)
+            # 8s was too tight for Render under real load (queued behind
+            # _PDF_RENDER_LOCK while other requests/renders were still using
+            # CPU, or a colder response than a synthetic benchmark) --
+            # candidates were timing out before the page even got a chance to
+            # respond, not because rendering itself is slow. domcontentloaded
+            # doesn't wait on images, so this has nothing to do with photos
+            # specifically; a resume with a photo just happened to be what
+            # was being rendered when the server was already under load.
+            response = page.goto(url, wait_until="domcontentloaded", timeout=20000)
             if response and response.status >= 400:
                 failures.append(f"{url} returned HTTP {response.status}")
                 continue

@@ -186,12 +186,18 @@ export function OverviewTab({ application, onNavigateTab }) {
 
           <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200/80 dark:border-zinc-800">
             <span className="text-[10px] text-zinc-500 uppercase font-bold block">Employment Type</span>
-            <span className="font-bold text-zinc-900 dark:text-zinc-200 truncate block mt-0.5">{application.employment_type || 'Full-time'}</span>
+            {/* Was `|| 'Full-time'` -- a hardcoded guess indistinguishable from
+                a genuinely extracted value. Since employment_type wasn't even
+                reachable from this tab until the full-record fetch was wired
+                up in JobTrackerPage, EVERY application showed "Full-time"
+                here regardless of what the JD actually said (even for this
+                exact apprenticeship listing, which isn't full-time). */}
+            <span className="font-bold text-zinc-900 dark:text-zinc-200 truncate block mt-0.5">{application.employment_type || organizedJd.job_type || 'Not specified'}</span>
           </div>
 
           <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200/80 dark:border-zinc-800">
             <span className="text-[10px] text-zinc-500 uppercase font-bold block">Seniority</span>
-            <span className="font-bold text-zinc-900 dark:text-zinc-200 truncate block mt-0.5">{application.seniority || 'Mid-Senior Level'}</span>
+            <span className="font-bold text-zinc-900 dark:text-zinc-200 truncate block mt-0.5">{application.seniority || organizedJd.seniority || 'Not specified'}</span>
           </div>
         </div>
 

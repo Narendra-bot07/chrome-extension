@@ -277,9 +277,19 @@ export default function ResumePreview({
       setShowLiveLayout(true);
       setStatusMessage('Live layout preview');
     }
+    // Each firing launches a full server-side Chromium process (~3.5-5s
+    // cold) serialized behind a process-wide render lock shared by every
+    // user's PDF renders -- and the AbortController below only cancels the
+    // frontend fetch, not the backend's already-launched Playwright work, so
+    // a burst of edits (normal during active section drag-reordering) queued
+    // multiple full renders that all still ran to completion even though
+    // only the last one's result was ever used. 650ms was nowhere near long
+    // enough to coalesce a realistic edit burst into one render; this was
+    // very likely the single largest contributor to the pipeline feeling
+    // slow "between steps" during review/editing.
     const timer = window.setTimeout(
       () => fetchUnifiedPdfArtifact(pagePreference, controller.signal),
-      interactiveLayoutMode ? 650 : 0
+      interactiveLayoutMode ? 2000 : 0
     );
     return () => {
       window.clearTimeout(timer);

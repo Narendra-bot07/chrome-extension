@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   FileText, Wand2, Download, Eye, RefreshCw, Trash2,
@@ -23,32 +23,14 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
   const [previewModalType, setPreviewModalType] = useState(null); // null | 'resume' | 'coverletter'
   const [downloadingType, setDownloadingType] = useState(null);
 
-  // The Job Tracker board's application list is deliberately lightweight
-  // (GET /api/v1/applications/) and omits resume_snapshot/cover_letter_snapshot
-  // to keep board loads fast -- so `application` here usually has neither field
-  // populated, even when this application genuinely has a tailored resume and
-  // generated cover letter saved. Without fetching the full record, this tab
-  // was falling back to the ORIGINAL (untailored) resume and a generic
-  // hardcoded placeholder cover letter, silently showing the wrong content.
-  const [fullApplication, setFullApplication] = useState(null);
-  useEffect(() => {
-    setFullApplication(null);
-    const appId = application?.id;
-    const token = session?.access_token || localStorage.getItem('access_token');
-    if (!appId || !token) return undefined;
-    let active = true;
-    fetch(`${getApiUrl()}/api/v1/applications/${appId}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(res => (res.ok ? res.json() : null))
-      .then(data => { if (active && data) setFullApplication(data); })
-      .catch(() => {});
-    return () => { active = false; };
-  }, [application?.id, session?.access_token]);
-
   if (!application) return null;
 
-  const applicationDetails = fullApplication || application;
+  // JobTrackerPage now fetches the full application record (organized_jd,
+  // resume_snapshot, cover_letter_snapshot, etc. -- all omitted from the
+  // lightweight board list) once per opened application and passes it down
+  // as `application` to every workspace tab, this one included. No separate
+  // fetch needed here anymore.
+  const applicationDetails = application;
 
   const handleDownloadResume = async () => {
     try {

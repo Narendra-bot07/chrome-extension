@@ -165,6 +165,35 @@ function JobTrackerContent() {
 
   const selectedApp = applications.find(a => a && a.id === selectedAppId);
 
+  // GET /api/v1/applications/ (used to populate `applications` above) is
+  // deliberately lightweight and omits organized_jd, resume_snapshot,
+  // cover_letter_snapshot, job_description, employment_type, and seniority --
+  // large/derived fields left out to keep the board's list load fast. Every
+  // workspace tab (Overview's "Job Intelligence Summary", Documents' resume/
+  // cover letter previews, etc.) needs those fields, so fetch the full
+  // record once per opened application and merge it over the lightweight
+  // one. Without this, OverviewTab silently fell back to hardcoded
+  // placeholder text ("Full-time" / "Mid-Senior Level") for every single
+  // application, indistinguishable from genuinely extracted JD data.
+  const [selectedAppDetails, setSelectedAppDetails] = useState(null);
+  useEffect(() => {
+    setSelectedAppDetails(null);
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!selectedAppId || !token) return undefined;
+    let active = true;
+    fetch(`${apiUrl}/api/v1/applications/${selectedAppId}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => { if (active && data) setSelectedAppDetails(data); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [selectedAppId, session?.access_token, apiUrl]);
+
+  const selectedAppFull = selectedApp
+    ? { ...selectedApp, ...(selectedAppDetails || {}) }
+    : selectedApp;
+
   const handleOpenWorkspaceModal = (appId) => {
     setSelectedAppId(appId);
     setShowWorkspaceModal(true);
@@ -773,26 +802,30 @@ function JobTrackerContent() {
 
             {/* TAB CONTENT WORKSPACE CANVAS */}
             <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain custom-scrollbar bg-zinc-50/40 dark:bg-zinc-950 p-2 md:p-4 relative">
+              {/* selectedAppFull (lightweight selectedApp merged with the fetched
+                  full record) -- these tabs need organized_jd/employment_type/
+                  seniority/resume_snapshot/cover_letter_snapshot, none of which
+                  are on the lightweight list-derived selectedApp. */}
               {workspaceTab === 'Overview' && (
-                <OverviewTab application={selectedApp} onNavigateTab={(tab) => setWorkspaceTab(tab)} />
+                <OverviewTab application={selectedAppFull} onNavigateTab={(tab) => setWorkspaceTab(tab)} />
               )}
               {workspaceTab === 'Workflow' && (
-                <WorkflowTab application={selectedApp} onUpdateStage={handleUpdateStage} />
+                <WorkflowTab application={selectedAppFull} onUpdateStage={handleUpdateStage} />
               )}
               {workspaceTab === 'Documents' && (
-                <DocumentsTab application={selectedApp} />
+                <DocumentsTab application={selectedAppFull} />
               )}
               {workspaceTab === 'Recruiter' && (
-                <RecruiterTab application={selectedApp} onSaveContacts={handleSaveContacts} />
+                <RecruiterTab application={selectedAppFull} onSaveContacts={handleSaveContacts} />
               )}
               {workspaceTab === 'Timeline' && (
-                <TimelineTab application={selectedApp} />
+                <TimelineTab application={selectedAppFull} />
               )}
               {workspaceTab === 'Notes' && (
-                <NotesTab application={selectedApp} onSaveNotesList={handleSaveNotesList} />
+                <NotesTab application={selectedAppFull} onSaveNotesList={handleSaveNotesList} />
               )}
               {workspaceTab === 'History' && (
-                <HistoryTab application={selectedApp} />
+                <HistoryTab application={selectedAppFull} />
               )}
             </div>
 

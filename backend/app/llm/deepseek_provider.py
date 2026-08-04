@@ -11,17 +11,16 @@ load_dotenv()
 
 logger = logging.getLogger("deepseek_provider")
 
-_SINGLE_AI_REQUEST_LOCK = threading.Lock()
-_LAST_AI_COMPLETED_TIME = 0.0
-_MIN_AI_SPACING_SEC = 1.5
-
-def throttle_ai_call():
-    """Enforce a minimum spacing between consecutive API calls."""
-    global _LAST_AI_COMPLETED_TIME
-    now = time.time()
-    elapsed = now - _LAST_AI_COMPLETED_TIME
-    if elapsed < _MIN_AI_SPACING_SEC:
-        time.sleep(_MIN_AI_SPACING_SEC - elapsed)
+# Was a threading.Lock() (capacity 1) held for the FULL DURATION of every
+# DeepSeek call (see invoke_structured below), not just around the spacing
+# check its name implies -- meaning every single LLM call across the whole
+# backend, for every user and every pipeline step, was fully serialized
+# process-wide. Under any real concurrent traffic this compounds badly: two
+# users' calls, or even two calls within one user's own JD-extraction ->
+# tailoring -> cover-letter pipeline, queue strictly one-at-a-time behind
+# whichever call happened to be in flight. A bounded semaphore allows real
+# concurrency up to a safety cap instead of hard-serializing everything.
+_AI_REQUEST_SEMAPHORE = threading.Semaphore(4)
 
 
 def _inline_schema_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
@@ -92,13 +91,7 @@ class DeepSeekProvider:
         """
         Invokes DeepSeek model with structured JSON response_format and validates output against Pydantic schema_cls.
         """
-        global _LAST_AI_COMPLETED_TIME
-        with _SINGLE_AI_REQUEST_LOCK:
-            now = time.time()
-            elapsed = now - _LAST_AI_COMPLETED_TIME
-            if elapsed < _MIN_AI_SPACING_SEC:
-                time.sleep(_MIN_AI_SPACING_SEC - elapsed)
-
+        with _AI_REQUEST_SEMAPHORE:
             sys_msg = system_instruction or (
                 "You are an expert AI resume strategist and ATS optimization engine. "
                 "Output valid JSON matching the specified JSON schema strictly. Ensure all JSON is well-formed."
@@ -142,13 +135,11 @@ class DeepSeekProvider:
                     messages=messages,
                     temperature=temperature
                 )
-                _LAST_AI_COMPLETED_TIME = time.time()
                 parsed_obj = self._parse_json_schema(raw_json, schema_cls)
                 return parsed_obj
             except Exception as flash_err:
                 logger.warning(f"[DEEPSEEK_FAILOVER] Primary model ({self.flash_model}) failed: {flash_err}")
                 if not escalate_on_error:
-                    _LAST_AI_COMPLETED_TIME = time.time()
                     raise flash_err
 
                 # Attempt 2: Escalation Model (deepseek-v4-pro)
@@ -160,11 +151,9 @@ class DeepSeekProvider:
                         messages=messages,
                         temperature=temperature
                     )
-                    _LAST_AI_COMPLETED_TIME = time.time()
                     parsed_obj = self._parse_json_schema(raw_json_pro, schema_cls)
                     return parsed_obj
                 except Exception as pro_err:
-                    _LAST_AI_COMPLETED_TIME = time.time()
                     logger.error(f"[DEEPSEEK_ESCALATION_FAILED] Both flash and pro models failed: {pro_err}")
                     raise pro_err
 
