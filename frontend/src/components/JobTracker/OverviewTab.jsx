@@ -11,14 +11,51 @@ export function OverviewTab({ application, onNavigateTab }) {
   const coverLetterReady = application.cover_letter_status === 'ready' || Boolean(application.cover_letter_version);
   const recruiterAdded = Boolean(application.contacts && application.contacts.length > 0) || Boolean(application.recruiter_notes);
 
-  const nextActionText = application.next_action || (
-    application.current_stage === 'Ready To Apply' ? 'Tailor resume & submit application' :
-    application.current_stage === 'Applied' ? 'Follow up in 5–7 days' :
-    application.current_stage === 'Assessment' ? 'Complete assessment / code test' :
-    application.current_stage === 'Recruiter Contact' ? 'Schedule recruiter call' :
-    application.current_stage === 'Interview' ? 'Prepare interview notes & questions' :
-    'Review next application steps'
-  );
+  // Previously a flat lookup keyed only on current_stage -- it never looked
+  // at whether the resume/cover letter were actually ready or how long the
+  // application had actually been sitting in its stage, so it kept
+  // recommending the same generic action (e.g. "Tailor resume & submit
+  // application") even for an application that already had both documents
+  // ready, or "Follow up in 5-7 days" whether that was said the day of
+  // applying or three weeks later. Weighs the real signals already computed
+  // above (resumeReady/coverLetterReady/recruiterAdded) plus elapsed time
+  // since the stage's last activity, so the recommendation reflects this
+  // specific application's actual state.
+  const daysSince = (() => {
+    const raw = application.last_activity || application.updated_at || application.created_at;
+    if (!raw) return null;
+    const then = new Date(raw).getTime();
+    if (Number.isNaN(then)) return null;
+    return Math.max(0, Math.floor((Date.now() - then) / 86400000));
+  })();
+
+  const computedNextAction = (() => {
+    switch (application.current_stage) {
+      case 'Ready To Apply':
+        if (!resumeReady) return 'Tailor your resume for this role';
+        if (!coverLetterReady) return 'Add a cover letter, then submit your application';
+        return 'Submit your application -- resume and cover letter are ready';
+      case 'Applied':
+        if (daysSince == null) return 'Follow up in 5–7 days';
+        if (daysSince >= 7 && !recruiterAdded) return `Applied ${daysSince} day${daysSince === 1 ? '' : 's'} ago -- add a recruiter contact for a warmer follow-up`;
+        if (daysSince >= 5) return `Follow up now -- it's been ${daysSince} day${daysSince === 1 ? '' : 's'} since you applied`;
+        return `Applied ${daysSince} day${daysSince === 1 ? '' : 's'} ago -- follow up in ${Math.max(1, 5 - daysSince)} more day${(5 - daysSince) === 1 ? '' : 's'}`;
+      case 'Assessment':
+        return application.next_action_due_at
+          ? `Complete assessment / code test by ${new Date(application.next_action_due_at).toLocaleDateString()}`
+          : 'Complete assessment / code test';
+      case 'Recruiter Contact':
+        return recruiterAdded ? 'Schedule a call with your recruiter contact' : 'Add your recruiter\'s contact details';
+      case 'Interview':
+        return application.next_action_due_at
+          ? `Prepare interview notes -- scheduled ${new Date(application.next_action_due_at).toLocaleDateString()}`
+          : 'Prepare interview notes & questions';
+      default:
+        return 'Review next application steps';
+    }
+  })();
+
+  const nextActionText = application.next_action || computedNextAction;
 
   const organizedJd = application.organized_jd || {};
   const normalizeSkills = (value) => {

@@ -502,9 +502,16 @@ export function AppProvider({ children }) {
       parsedResume,
       reviewSuggestions
     ).workingResume;
+    // "Potential" (estimated_resume, sent to the backend below) is the
+    // ceiling if every suggestion were accepted -- a fixed reference point,
+    // not a live reflection of what's currently accepted. Preserving
+    // 'rejected' status here meant Potential shrank as suggestions were
+    // rejected and collapsed to match Current once everything was rejected.
+    // Force every suggestion to 'accepted' unconditionally instead, matching
+    // the same fix in ResumeReviewView.jsx's local fallback engine.
     const potentialSuggestions = reviewSuggestions.map(suggestion => ({
       ...suggestion,
-      status: suggestion.status === 'rejected' ? 'rejected' : 'accepted'
+      status: 'accepted'
     }));
     const potentialResume = mergeReviewResume(
       parsedResume,

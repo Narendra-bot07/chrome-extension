@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 from datetime import datetime, time, timedelta, timezone
+import base64
+import io
 import logging
 
 from core.security import verify_supabase_jwt
@@ -492,3 +495,141 @@ async def generate_application_email(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate email: {str(e)}"
         )
+
+
+class StoredPdfUploadRequest(BaseModel):
+    pdf_base64: str
+
+
+def _pdf_filename(company_name: Optional[str], suffix: str) -> str:
+    clean_company = "".join(
+        c if c.isalnum() or c == "_" else "_" for c in (company_name or "Company").replace(" ", "_")
+    ) or "Company"
+    return f"{clean_company}_{suffix}.pdf"
+
+
+# The Job Tracker's "Download"/"Preview" actions (DocumentsTab.jsx) used to
+# re-run the full Playwright render on every single click -- 45-75s observed
+# in production -- even when nothing about the resume/cover letter had
+# changed since the last download, because nothing ever recorded where that
+# already-rendered PDF had been persisted. These four endpoints let the
+# frontend check Storage first and only pay the render cost once per
+# resume/cover-letter version: a GET that 404s if there's nothing usable yet
+# (missing, or the application is marked stale), and a POST the frontend
+# calls right after a render it already had to do anyway, to persist the
+# result under a deterministic, one-object-per-application path (overwritten
+# on every regeneration, mirroring the existing cover_letter_file_path
+# .txt-snapshot pattern) so the *next* request can skip rendering entirely.
+
+@router.get("/{id}/resume-pdf")
+async def get_stored_resume_pdf(
+    id: str,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ApplicationRepository = Depends(get_application_repository),
+    storage: FileService = Depends(get_storage_service),
+):
+    record = repo.get_by_id(id, user["id"])
+    if not record:
+        raise HTTPException(status_code=404, detail="Application not found.")
+
+    file_path = record.get("resume_file_path")
+    if not file_path or record.get("resume_status") == "stale":
+        raise HTTPException(status_code=404, detail="No fresh stored resume PDF for this application yet.")
+
+    try:
+        pdf_bytes = storage.download_file("generated-resumes", file_path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Stored resume PDF is missing from storage.")
+
+    filename = _pdf_filename(record.get("company_name"), "Resume")
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Access-Control-Expose-Headers": "Content-Disposition, X-Source",
+            "X-Source": "storage",
+        },
+    )
+
+
+@router.post("/{id}/resume-pdf")
+async def store_resume_pdf(
+    id: str,
+    request: StoredPdfUploadRequest,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ApplicationRepository = Depends(get_application_repository),
+    storage: FileService = Depends(get_storage_service),
+):
+    record = repo.get_by_id(id, user["id"])
+    if not record:
+        raise HTTPException(status_code=404, detail="Application not found.")
+
+    try:
+        pdf_bytes = base64.b64decode(request.pdf_base64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid pdf_base64 payload.")
+
+    file_path = f"{user['id']}/{id}.pdf"
+    storage.upload_file("generated-resumes", file_path, pdf_bytes, "application/pdf")
+    repo.update(id, user["id"], {"resume_file_path": file_path})
+    return {"status": "success", "file_path": file_path}
+
+
+@router.get("/{id}/cover-letter-pdf")
+async def get_stored_cover_letter_pdf(
+    id: str,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ApplicationRepository = Depends(get_application_repository),
+    storage: FileService = Depends(get_storage_service),
+):
+    record = repo.get_by_id(id, user["id"])
+    if not record:
+        raise HTTPException(status_code=404, detail="Application not found.")
+
+    # cover_letter_file_path previously only ever pointed at the plain-text
+    # snapshot object PUT /{id} writes (see _cover_letter_text above) -- a
+    # stored PDF always overwrites it with a .pdf path, so a .txt path here
+    # means only the old text snapshot exists, not a PDF worth serving.
+    file_path = record.get("cover_letter_file_path")
+    if not file_path or not file_path.endswith(".pdf") or record.get("cover_letter_status") == "stale":
+        raise HTTPException(status_code=404, detail="No fresh stored cover letter PDF for this application yet.")
+
+    try:
+        pdf_bytes = storage.download_file("cover-letters", file_path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Stored cover letter PDF is missing from storage.")
+
+    filename = _pdf_filename(record.get("company_name"), "Cover_Letter")
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Access-Control-Expose-Headers": "Content-Disposition, X-Source",
+            "X-Source": "storage",
+        },
+    )
+
+
+@router.post("/{id}/cover-letter-pdf")
+async def store_cover_letter_pdf(
+    id: str,
+    request: StoredPdfUploadRequest,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ApplicationRepository = Depends(get_application_repository),
+    storage: FileService = Depends(get_storage_service),
+):
+    record = repo.get_by_id(id, user["id"])
+    if not record:
+        raise HTTPException(status_code=404, detail="Application not found.")
+
+    try:
+        pdf_bytes = base64.b64decode(request.pdf_base64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid pdf_base64 payload.")
+
+    file_path = f"{user['id']}/{id}.pdf"
+    storage.upload_file("cover-letters", file_path, pdf_bytes, "application/pdf")
+    repo.update(id, user["id"], {"cover_letter_file_path": file_path})
+    return {"status": "success", "file_path": file_path}

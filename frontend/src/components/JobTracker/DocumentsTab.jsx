@@ -32,9 +32,63 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
   // fetch needed here anymore.
   const applicationDetails = application;
 
+  const authHeaders = () => (session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {});
+
+  const downloadBlobAsFile = (blob, filename) => {
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const base64ToPdfBlob = (base64) => {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    return new Blob([new Uint8Array(byteNumbers)], { type: 'application/pdf' });
+  };
+
+  const blobToBase64 = (blob) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+
+  // Fire-and-forget: the user already has their download by the time this
+  // runs, it only saves the *next* click a round trip through Playwright.
+  const persistGeneratedPdf = (kind, base64) => {
+    fetch(`${getApiUrl()}/api/v1/applications/${application.id}/${kind}-pdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ pdf_base64: base64 })
+    }).catch(err => console.warn(`Failed to persist ${kind} PDF for reuse`, err));
+  };
+
+  // Storage-first: a resume/cover letter that hasn't changed since it was
+  // last rendered doesn't need a fresh Playwright render (45-75s observed in
+  // production) on every single download click -- check for an
+  // already-rendered copy in Supabase Storage before ever regenerating.
   const handleDownloadResume = async () => {
     try {
       setDownloadingType('resume');
+
+      try {
+        const stored = await fetch(`${getApiUrl()}/api/v1/applications/${application.id}/resume-pdf`, {
+          headers: authHeaders()
+        });
+        if (stored.ok) {
+          downloadBlobAsFile(await stored.blob(), resumeFileName);
+          return;
+        }
+      } catch (storageErr) {
+        console.warn('Stored resume PDF check failed, rendering fresh', storageErr);
+      }
+
       const response = await fetch(`${getApiUrl()}/api/render-unified-pdf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -53,19 +107,8 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
       const data = await response.json();
       if (!data.pdf_base64) throw new Error('No PDF base64 payload returned');
 
-      const byteCharacters = atob(data.pdf_base64);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-      }
-      const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: 'application/pdf' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = data.filename || resumeFileName;
-      a.click();
-      window.URL.revokeObjectURL(url);
+      downloadBlobAsFile(base64ToPdfBlob(data.pdf_base64), data.filename || resumeFileName);
+      persistGeneratedPdf('resume', data.pdf_base64);
     } catch (err) {
       console.error('Direct download failed, redirecting to studio:', err);
       navigate('/download');
@@ -77,15 +120,42 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
   const handleDownloadCoverLetter = async () => {
     try {
       setDownloadingType('coverletter');
+      const filename = `${(application.company_name || 'CoverLetter').replace(/\s+/g, '_')}_CoverLetter.pdf`;
+
+      try {
+        const stored = await fetch(`${getApiUrl()}/api/v1/applications/${application.id}/cover-letter-pdf`, {
+          headers: authHeaders()
+        });
+        if (stored.ok) {
+          downloadBlobAsFile(await stored.blob(), filename);
+          return;
+        }
+      } catch (storageErr) {
+        console.warn('Stored cover letter PDF check failed, rendering fresh', storageErr);
+      }
+
+      // Previously downloaded the raw snapshot text as a .txt file -- a
+      // cover letter is meant to be submitted as a formatted PDF alongside
+      // the resume, not plain text. Render it the same way the standalone
+      // Cover Letter Studio does (POST /api/download-cover-letter-pdf).
       const text = typeof activeCoverLetterText === 'string' ? activeCoverLetterText : JSON.stringify(activeCoverLetterText);
-      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const filename = `${(application.company_name || 'CoverLetter').replace(/\s+/g, '_')}_CoverLetter.txt`;
-      a.download = filename;
-      a.click();
-      window.URL.revokeObjectURL(url);
+      const response = await fetch(`${getApiUrl()}/api/download-cover-letter-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cover_letter: text,
+          company_name: application.company_name || '',
+          job_title: application.job_title || '',
+          recipient_name: 'Hiring Manager'
+        })
+      });
+      if (!response.ok) {
+        const failure = await response.json().catch(() => ({}));
+        throw new Error(failure.detail || `Cover letter PDF generation failed with status ${response.status}`);
+      }
+      const blob = await response.blob();
+      downloadBlobAsFile(blob, filename);
+      persistGeneratedPdf('cover-letter', await blobToBase64(blob));
     } catch (err) {
       console.error('Cover letter download failed:', err);
       navigate('/cover-letter');

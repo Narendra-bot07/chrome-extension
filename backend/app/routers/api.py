@@ -629,8 +629,15 @@ async def api_ats_live_score(
         estimated_resume = (
             ResumeStructure(**normalize_resume_payload(request.estimated_resume))
             if request.estimated_resume
+            # "Potential" is the ceiling if every suggestion were accepted --
+            # a fixed reference point, not a live reflection of the caller's
+            # current accept/reject decisions. {"accepted", "pending"} left
+            # out anything the caller had marked "rejected", so Potential
+            # would shrink as suggestions were rejected. Only reached when a
+            # caller omits estimated_resume (the frontend always sends it
+            # explicitly), but should still compute the same ceiling.
             else ATSScoringEngine.apply_suggestions(
-                resume, request.suggestions, {"accepted", "pending"}
+                resume, request.suggestions, {"accepted", "pending", "rejected"}
             )
         )
     except Exception as e:

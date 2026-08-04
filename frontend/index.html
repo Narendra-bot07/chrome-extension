@@ -7,9 +7,12 @@
     <meta name="theme-color" content="#0b0f17" />
     <link rel="icon" type="image/png" href="%BASE_URL%application-logo.png" />
     <link rel="apple-touch-icon" href="%BASE_URL%application-logo.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <!-- Inter / Plus Jakarta Sans are now self-hosted (see src/styles.css)
+         instead of loaded from fonts.googleapis.com/fonts.gstatic.com --
+         the server-side PDF renderer runs this same page in headless
+         Chromium, where an external font CDN fetch is an extra network
+         dependency that could silently fail or be skipped, rendering
+         resumes in a fallback font instead of the intended one. -->
     <title>Tailr4U — AI Resume Tailoring</title>
   </head>
   <body>

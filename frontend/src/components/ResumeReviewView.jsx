@@ -745,11 +745,18 @@ function ResumeReviewView({
     ).workingResume;
     return calculateJDMatchScore(workingResume, jobAnalysis);
   }, [originalResume, parsedResume, suggestions, jobAnalysis]);
+  // "Potential" is the ceiling if every suggestion were accepted -- a fixed
+  // reference point, not a live reflection of what's currently accepted
+  // (that's "Current", above). Forcing rejected suggestions to stay
+  // 'rejected' here meant Potential shrank every time the user rejected
+  // something and collapsed to match Current once everything was rejected --
+  // directly observed: Potential ATS reading 51 (== Current) right after
+  // Reject All, then jumping to 82 after Accept All, for the identical
+  // underlying resume/JD. Force every suggestion to 'accepted' unconditionally
+  // so Potential reflects "accept everything" regardless of what the user has
+  // actually decided so far.
   const deterministicPotentialScore = useMemo(() => {
-    const potentialSuggestions = suggestions.map(s => ({
-      ...s,
-      status: s.status === 'rejected' ? 'rejected' : 'accepted'
-    }));
+    const potentialSuggestions = suggestions.map(s => ({ ...s, status: 'accepted' }));
     const workingResume = mergeReviewResume(
       originalResume || parsedResume,
       potentialSuggestions

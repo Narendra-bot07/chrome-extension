@@ -246,7 +246,11 @@ function ResumeTailoringConfigView({
             <div className="space-y-3">
               <p className="text-xs font-semibold text-amber-700 dark:text-amber-400">No active resume selected. Choose or upload a resume before tailoring.</p>
               <div className="grid grid-cols-2 gap-2">
-                <button type="button" onClick={onChooseResume} className="py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 text-xs font-extrabold flex items-center justify-center gap-2 hover:bg-zinc-50 dark:hover:bg-zinc-900">
+                <button
+                  type="button"
+                  onClick={() => (resumesList.length > 0 ? setResumeModalOpen(true) : onChooseResume())}
+                  className="py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 text-xs font-extrabold flex items-center justify-center gap-2 hover:bg-zinc-50 dark:hover:bg-zinc-900"
+                >
                   <Star size={14} /> Choose Resume
                 </button>
                 <button type="button" onClick={onUploadResume} className="py-2 rounded-xl bg-[#00bda5] text-white text-xs font-extrabold flex items-center justify-center gap-2 hover:bg-[#00a894]">

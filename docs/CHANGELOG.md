@@ -4,6 +4,44 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.14.0] - 2026-08-05
+
+### Fixed
+- **Job Tracker's "Download" always re-rendered the resume from scratch via Playwright (45-75s observed in production) instead of reusing an already-generated copy**: `DocumentsTab.jsx`'s `handleDownloadResume` called `/api/render-unified-pdf` unconditionally on every click, and nothing in the app ever recorded where a previously-rendered PDF had been persisted, even though a `generated-resumes` Storage bucket already existed (written to by a different, unrelated endpoint, `tailoring.py`'s `/download-pdf`, using a random UUID path that made its own uploads permanently unretrievable). Added `applications.resume_file_path` (migration `backend/migrate_resume_pdf_storage.py`, run against the live database) plus `GET`/`POST /api/v1/applications/{id}/resume-pdf` -- the frontend now checks Storage first (instant, no rendering) and only falls back to a fresh Playwright render when there's genuinely nothing usable yet (missing, or the application is marked `stale`), persisting the result under a deterministic, one-object-per-application path so every subsequent download skips rendering entirely.
+- **Cover letter "Download" produced a `.txt` file, not a PDF**: `handleDownloadCoverLetter` blobbed the raw snapshot text directly (`type: 'text/plain'`) -- a cover letter needs to be submitted as a formatted document alongside the resume, not plain text. Now calls the same `/api/download-cover-letter-pdf` endpoint the standalone Cover Letter Studio already used to produce a real, formatted PDF, and applies the same storage-first caching as the resume (`GET`/`POST /api/v1/applications/{id}/cover-letter-pdf`, reusing the existing `cover-letters` bucket and `cover_letter_file_path` column -- confirmed unused for retrieval anywhere else in the codebase before repurposing it to point at a `.pdf` object instead of the pre-existing `.txt` snapshot).
+- **Job Tracker's "Recommended Next Action" was a flat lookup keyed only on `current_stage`**, so it kept suggesting "Tailor resume & submit application" even once both documents were already ready, or "Follow up in 5-7 days" regardless of whether that was the day you applied or three weeks later. `OverviewTab.jsx` now factors in the actual per-application signals already computed on the same line (`resumeReady`, `coverLetterReady`, `recruiterAdded`) plus elapsed time since the application's last activity, so the recommendation reflects this specific application's real state (e.g. "Applied 9 days ago -- add a recruiter contact for a warmer follow-up" vs. "Applied 2 days ago -- follow up in 3 more days").
+
+---
+
+## [3.13.2] - 2026-08-05
+
+### Fixed
+- **Rendered resume PDFs looked like they were using a generic fallback font instead of the app's intended premium typography** ("Inter" / "Plus Jakarta Sans"). Root cause: `index.html` and `src/styles.css` loaded both fonts from `fonts.googleapis.com`/`fonts.gstatic.com` -- an external CDN request. The PDF renderer (`backend/app/playwright_pdf.py`) runs this same app in a headless Chromium on the server; that external font fetch is an extra network dependency the render has to complete before `document.fonts.ready` resolves, and under real server conditions (already known this session to be under load -- see the 3.11.0/3.12.x render-latency work) it could silently be slow or fail, leaving Chromium to fall back to a generic system font for the actual PDF snapshot instead of erroring visibly.
+  - Downloaded the 4 actual font files Google serves for the Latin/Latin-Extended subsets (each a variable font covering weights 400-900) directly from Google's own CDN and self-hosted them at `frontend/src/assets/fonts/`, replacing the CDN `@import`/`<link>` with local `@font-face` declarations.
+  - Placed them under `src/assets/` (not `public/`) specifically so Vite's asset pipeline processes and hashes them, correctly respecting `vite.config.js`'s `base: './'` -- a plain `public/`-referenced absolute path (`/fonts/...`) would have 404'd specifically when the app is loaded from the backend's `/__pdf_renderer/` subpath (the one path that matters most here), since that's a different origin path than the domain root. Verified with a real production build: the emitted CSS correctly references the fonts with relative, same-directory URLs (`./Inter-latin-*.woff2`), not absolute ones.
+  - Now both the live site and the PDF renderer load fonts from the app's own origin with zero external network dependency, so the font actually shown is guaranteed to match what was designed, every time.
+
+---
+
+## [3.13.1] - 2026-08-05
+
+### Fixed
+- **"Potential" ATS/Resume Match collapsed to match "Current" whenever suggestions were rejected**, when it's meant to be a fixed ceiling ("what if every suggestion were accepted") independent of the user's actual accept/reject decisions -- directly reported: Potential ATS read 51 (== Current) right after Reject All, then 82 after Accept All, for the identical underlying resume/JD. Root cause: the code computing "Potential" in three places all preserved a suggestion's `'rejected'` status instead of forcing it to `'accepted'` -- so Potential only ever counted suggestions that were still pending or already accepted, shrinking every time something was rejected instead of representing a fixed ceiling.
+  - `frontend/src/components/ResumeReviewView.jsx`'s `deterministicPotentialScore` (local fallback engine) and `frontend/src/context/AppContext.jsx`'s live-ATS payload builder (`estimated_resume`, sent to the backend) both now force every suggestion to `'accepted'` unconditionally, regardless of its live status.
+  - `backend/app/routers/api.py`'s `/api/ats/live-score` had the same bug in its own fallback (only reached if a caller omits `estimated_resume`, which the frontend never does, but fixed for correctness) -- `apply_suggestions(..., {"accepted", "pending"})` became `{"accepted", "pending", "rejected"}`.
+  - "Original" was already stable per the 3.12.1 fix (confirmed unaffected in the reported screenshots, 36% in both) -- this was purely a "Potential" bug.
+  - Verified with a standalone simulation: Potential now reads identically (72) whether every suggestion is rejected or accepted, while Current correctly still moves (42 -> 72) with the user's actual decisions.
+
+---
+
+## [3.13.0] - 2026-08-05
+
+### Fixed
+- **JD extraction started before confirming a resume was even active**: `JobExtractPage.jsx`'s auto-extraction effect fired purely off `jobText` being present, with no check on resume state at all -- a user with no active resume would sit through a full extraction only to land on Tailor Config and discover there was never a resume to tailor against. The effect now also requires `!loadingResume && parsedResume` (resume state has actually finished loading from the backend, and resolved to a real active resume) before starting. Added an explicit "No active resume selected" screen (with Choose/Upload actions) that takes priority over every extraction-loading state once resume loading has confirmed there isn't one, instead of silently sitting on a loader or falling through to a form that could still kick off an extraction with nowhere to go.
+- **"Choose Resume" (shown on Tailor Config when no resume is active) navigated away to a different page instead of showing available resumes**: `TailorConfigPage.jsx` wired it to `onChooseResume={() => navigate('/resume-detect')}`, while the *other* resume button on the same screen ("Change Resume", shown once a resume *is* active) already opens an in-place modal listing every available resume with a selection control and preview. "Choose Resume" now opens that same modal when the user actually has resumes to pick from (`resumesList.length > 0`), falling back to the navigate-to-upload path only when there are none yet.
+
+---
+
 ## [3.12.3] - 2026-08-04 (in progress)
 
 ### Investigating
