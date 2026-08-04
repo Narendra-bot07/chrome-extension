@@ -4,6 +4,15 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.10.2] - 2026-08-04
+
+### Fixed
+- **Uploaded profile photo missing from the downloaded PDF, despite showing correctly in the live in-app preview** (`PortfolioPro` and any other photo-enabled template): root cause was `backend/schemas/resume.py`'s `PersonalInfo`/`ResumeStructure` Pydantic models never declaring `photo_url`, `photo_position_y`, or `photo_zoom` as real fields. `backend/services/resume/renderable.py`'s `project_renderable_resume` — which every resume payload passes through en route to Playwright, via `normalize_resume_payload` in `app/routers/api.py` — allowlist-filters both the top-level resume dict and the nested `personal_info` dict down to each model's *declared* field names before validation ever runs, so the photo silently vanished with no error (the live preview never goes through this backend projection at all, which is why it looked fine there). Fixed by declaring `photo_url: str`, `photo_position_y: Optional[float]`, and `photo_zoom: Optional[float]` on both `PersonalInfo` and `ResumeStructure` — the allowlists (`RENDERABLE_FIELDS`/`PERSONAL_FIELDS`) are computed dynamically from each model's fields, so no change to `renderable.py` itself was needed. This also incidentally fixes a second, independent bug on the `/api/download-pdf` fallback path, which validates the request body directly as the `extra="forbid"` `RenderableResume` model and would have rejected any request carrying a top-level `photo_url` with a 422.
+  - Also hardened `normalize_resume_payload` (`app/routers/api.py`) against the same stale-nested-snapshot clobbering pattern already fixed for `section_order` in 3.10.0: a photo uploaded after the resume's initial parse only ever lands in the live top-level payload, never in the `parsed_data`/`parsed_content` snapshots captured before the upload — merging those snapshots in afterward could wholesale-replace `personal_info` with the photo-less stale copy. The live payload's photo fields are now always re-asserted after the merge, in both the top-level and nested locations the renderer reads.
+  - Verified with a standalone reproduction of both the projection allowlist and the merge-clobber scenario; both now correctly preserve the live photo end to end.
+
+---
+
 ## [3.10.1] - 2026-08-04
 
 ### Fixed

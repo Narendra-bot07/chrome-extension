@@ -86,6 +86,9 @@ class PersonalInfo(BaseModel):
     website: str = ""
     github: str = ""
     job_title: str = ""
+    photo_url: str = ""
+    photo_position_y: Optional[float] = None
+    photo_zoom: Optional[float] = None
 
 class ExperienceItem(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -176,6 +179,9 @@ class ResumeStructure(BaseModel):
     interests: List[str] = []
     portfolio: str = ""
     links: Dict[str, str] = {}
+    photo_url: str = ""
+    photo_position_y: Optional[float] = None
+    photo_zoom: Optional[float] = None
     section_order: Optional[List[str]] = None
     layout_level: Optional[int] = None
     layout_model: Optional[ResumeLayoutModel] = None

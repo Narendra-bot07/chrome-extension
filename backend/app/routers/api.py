@@ -129,6 +129,25 @@ def normalize_resume_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         if payload.get(layout_field) not in (None, "", [], {}):
             merged[layout_field] = payload[layout_field]
 
+    # Same stale-snapshot clobbering risk as the layout fields above: a photo
+    # uploaded after the initial resume parse only ever lands in the live
+    # top-level payload, never in the parsed_data/parsed_content snapshots
+    # captured before the upload happened. Merging those snapshots in after
+    # payload can wholesale-replace merged["personal_info"] with the
+    # photo-less stale copy, so re-assert the live photo fields (both
+    # locations, since renderer code reads either) whenever the live payload
+    # actually has one.
+    payload_personal = payload.get("personal_info") if isinstance(payload.get("personal_info"), dict) else {}
+    for photo_field in ("photo_url", "photo_position_y", "photo_zoom"):
+        live_value = payload.get(photo_field)
+        if live_value in (None, "") and photo_field in payload_personal:
+            live_value = payload_personal.get(photo_field)
+        if live_value not in (None, ""):
+            merged[photo_field] = live_value
+            merged.setdefault("personal_info", {})
+            if isinstance(merged.get("personal_info"), dict):
+                merged["personal_info"][photo_field] = live_value
+
     try:
         from services.resume.renderable import project_renderable_resume
         projected = project_renderable_resume(merged)
