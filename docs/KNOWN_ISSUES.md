@@ -6,6 +6,16 @@ This document tracks all currently identified technical issues, edge-case bugs, 
 
 ## Active Issues Register
 
+### ISSUE-013: Resume Photo Has No Server-Side Persistence
+- **Date Discovered**: 2026-08-04
+- **Severity**: Medium
+- **Component**: `components/Resume/TailorRender.tsx` (`ProfilePhotoCropModal` `onApply`), backend (no matching endpoint)
+- **Description**: After fixing "Add Photo" doing nothing (dangling references to deleted handler functions, see [CHANGELOG.md](CHANGELOG.md) 3.8.2), the crop-and-apply flow itself works, but the cropped image is only ever held as a base64 data URL in local React state (`personal_info.photo_url`) — there is no backend photo-upload endpoint at all (confirmed: no "photo" references anywhere in `backend/api/v1/*.py` or `backend/services/storage/*.py`).
+- **Current Status**: Open. The photo will render correctly for the remainder of the session but will not survive a page reload or reopening the resume later.
+- **Assigned Fix**: Add a resume/profile photo upload endpoint (persist to Supabase Storage similar to `original-resumes`/`generated-resumes` buckets) and have the crop modal's `onApply` upload the cropped image and store the returned URL instead of a raw data URL.
+
+---
+
 ### ISSUE-001: Headless Chromium Playwright Cold-Start Latency
 - **Date Discovered**: 2026-07-28
 - **Severity**: Medium

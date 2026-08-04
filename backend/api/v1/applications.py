@@ -107,11 +107,39 @@ async def list_applications(
     repo: ApplicationRepository = Depends(get_application_repository)
 ):
     try:
+        # Deliberately lightweight: excludes resume_snapshot/cover_letter_snapshot/
+        # job_description/organized_jd (large JSONB blobs) to keep the board's
+        # list load fast. GET /{id} below returns the full record including
+        # those fields -- callers needing the actual tailored resume/cover
+        # letter content for a specific application must use that route, not
+        # this one.
         return repo.list_by_user(user["id"])
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch applications: {str(e)}"
+        )
+
+@router.get("/{id}")
+async def get_application(
+    id: str,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    repo: ApplicationRepository = Depends(get_application_repository)
+):
+    """Full record including resume_snapshot/cover_letter_snapshot -- the list
+    endpoint above omits these. Use this when a specific application's actual
+    tailored resume/cover letter content is needed (e.g. document preview)."""
+    try:
+        record = repo.get_by_id(id, user["id"])
+        if not record:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found.")
+        return record
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch application: {str(e)}"
         )
 
 @router.post("/")

@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  FileText, Wand2, Download, Eye, RefreshCw, Trash2, 
+import {
+  FileText, Wand2, Download, Eye, RefreshCw, Trash2,
   ExternalLink, AlertCircle, CheckCircle2, Clock, Plus, X, Edit3
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
@@ -16,13 +16,39 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
     coverLetter,
     parsedResume,
     handleGenerateCoverLetter,
-    setJobAnalysis
+    setJobAnalysis,
+    session
   } = useApp();
 
   const [previewModalType, setPreviewModalType] = useState(null); // null | 'resume' | 'coverletter'
   const [downloadingType, setDownloadingType] = useState(null);
 
+  // The Job Tracker board's application list is deliberately lightweight
+  // (GET /api/v1/applications/) and omits resume_snapshot/cover_letter_snapshot
+  // to keep board loads fast -- so `application` here usually has neither field
+  // populated, even when this application genuinely has a tailored resume and
+  // generated cover letter saved. Without fetching the full record, this tab
+  // was falling back to the ORIGINAL (untailored) resume and a generic
+  // hardcoded placeholder cover letter, silently showing the wrong content.
+  const [fullApplication, setFullApplication] = useState(null);
+  useEffect(() => {
+    setFullApplication(null);
+    const appId = application?.id;
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!appId || !token) return undefined;
+    let active = true;
+    fetch(`${getApiUrl()}/api/v1/applications/${appId}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => { if (active && data) setFullApplication(data); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [application?.id, session?.access_token]);
+
   if (!application) return null;
+
+  const applicationDetails = fullApplication || application;
 
   const handleDownloadResume = async () => {
     try {
@@ -94,18 +120,18 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
   const isStale = application.resume_status === 'stale' || application.cover_letter_status === 'stale';
 
   const handleOpenStudio = async (docType) => {
-    const storedJob = (application.organized_jd && Object.keys(application.organized_jd).length)
-      ? application.organized_jd
+    const storedJob = (applicationDetails.organized_jd && Object.keys(applicationDetails.organized_jd).length)
+      ? applicationDetails.organized_jd
       : {
-          job_description: application.job_description || '',
-          description: application.job_description || '',
+          job_description: applicationDetails.job_description || '',
+          description: applicationDetails.job_description || '',
           job_title: application.job_title || 'Target Role',
           company_name: application.company_name || 'Hiring Company',
           location: application.location || 'Remote',
           job_url: application.job_url || ''
         };
-    const storedResume = (application.resume_snapshot && Object.keys(application.resume_snapshot).length)
-      ? application.resume_snapshot
+    const storedResume = (applicationDetails.resume_snapshot && Object.keys(applicationDetails.resume_snapshot).length)
+      ? applicationDetails.resume_snapshot
       : tailoredResume || parsedResume;
 
     if (storedJob) {
@@ -127,9 +153,9 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
     }
   };
 
-  const displayResume = (application.resume_snapshot && Object.keys(application.resume_snapshot).length)
-    ? application.resume_snapshot
-    : application.tailored_resume
+  const displayResume = (applicationDetails.resume_snapshot && Object.keys(applicationDetails.resume_snapshot).length)
+    ? applicationDetails.resume_snapshot
+    : applicationDetails.tailored_resume
     || tailoredResume
     || parsedResume
     || {
@@ -163,13 +189,20 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
     : (companyName.trim() ? `${companyName.trim().replace(/\s+/g, '_')}_Resume.pdf` : 'Tailored_Resume.pdf');
 
   const coverLetterContext = {
-    candidate: application.candidate || { name: 'Candidate Name' },
+    candidate: application.candidate || { name: rawCandidateName || 'Candidate Name' },
     job: { title: application.job_title, company: application.company_name },
     recipient: { name: 'Hiring Manager' }
   };
 
-  const activeCoverLetterText = coverLetter || application.cover_letter_snapshot || application.cover_letter_content || (
-    `Dear Hiring Manager,\n\nI am writing to express my strong interest in the ${application.job_title || 'Target Role'} position at ${application.company_name || 'Company'}. With my background in technology and proven track record, I am confident I can make an immediate contribution to your team.\n\nThank you for considering my application.\n\nSincerely,\nCandidate Name`
+  // coverLetter (AppContext, in-memory) only reflects the letter just
+  // generated THIS session -- prefer the actually-fetched full application
+  // record's snapshot first so returning to an application later still shows
+  // its real, previously-generated letter instead of this generic template.
+  const activeCoverLetterText = applicationDetails.cover_letter_snapshot
+    || applicationDetails.cover_letter_content
+    || coverLetter
+    || (
+    `Dear Hiring Manager,\n\nI am writing to express my strong interest in the ${application.job_title || 'Target Role'} position at ${application.company_name || 'Company'}. With my background in technology and proven track record, I am confident I can make an immediate contribution to your team.\n\nThank you for considering my application.\n\nSincerely,\n${rawCandidateName || 'Candidate Name'}`
   );
 
   return (

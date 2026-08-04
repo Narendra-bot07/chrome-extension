@@ -19,6 +19,8 @@ This document categorizes all active development, refactoring, testing, and oper
 
 ## 2. High Priority (P1 - Core Feature / Next Release)
 
+- [ ] **Add a resume/profile photo upload endpoint**:
+  - The crop-and-apply photo flow works client-side but has no server persistence — the cropped image is only a base64 data URL in React state and is lost on reload. See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) ISSUE-013.
 - [ ] **Multi-Template Selector Engine**:
   - Expand React template library to include 5 distinct ATS-optimized vector layouts (`Classic`, `Modern Minimal`, `Executive`, `Tech Compact`, `Creative`).
 - [ ] **Cover Letter PDF Exporter**:

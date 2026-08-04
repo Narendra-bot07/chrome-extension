@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(python -m py_compile api/v1/resume.py services/workflow/checkpoints.py services/workflow/runtime.py api/v1/workflows.py)",
-      "Bash(python -m py_compile api/v1/tailoring.py api/v1/resume.py api/dependencies.py app/routers/api.py services/resume/tailoring_service.py services/workflow/checkpoints.py services/workflow/runtime.py api/v1/workflows.py core/database.py)"
+      "Bash(python -m py_compile api/v1/tailoring.py api/v1/resume.py api/dependencies.py app/routers/api.py services/resume/tailoring_service.py services/workflow/checkpoints.py services/workflow/runtime.py api/v1/workflows.py core/database.py)",
+      "Bash(python -m py_compile repositories/tailoring_repository.py)",
+      "Bash(python -m py_compile api/v1/applications.py)"
     ]
   }
 }

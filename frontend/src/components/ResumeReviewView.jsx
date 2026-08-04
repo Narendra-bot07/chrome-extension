@@ -738,7 +738,13 @@ function ResumeReviewView({
   const rawEstimatedResumeMatch = liveATS?.estimated_resume_match
     ?? comparison?.resume_match_after
     ?? Math.min(98, originalResumeMatch + 15);
-  const estimatedResumeMatch = Math.max(originalResumeMatch, rawEstimatedResumeMatch);
+  // "Potential" is a ceiling and must never render below what's already been
+  // achieved. rawEstimatedResumeMatch is a one-time backend prediction, but
+  // currentResumeMatch is recomputed live via a different (deterministic,
+  // local) scoring pass as suggestions are accepted -- it can legitimately
+  // exceed that earlier prediction, which without this clamp showed as
+  // "Potential" being lower than "Current" (a real, visible inconsistency).
+  const estimatedResumeMatch = Math.max(originalResumeMatch, rawEstimatedResumeMatch, deterministicCurrentScore.score);
   // Never leave the previous accepted-state score on screen while waiting for
   // the backend breakdown. This engine is deterministic and runs locally in
   // the same render that applies the review decision.
@@ -750,7 +756,8 @@ function ResumeReviewView({
   const rawEstimatedATS = liveATS?.estimated_ats
     ?? comparison?.ats_score_after
     ?? Math.min(98, originalATS + 15);
-  const estimatedATS = Math.max(originalATS, rawEstimatedATS);
+  // Same ceiling guarantee as estimatedResumeMatch above.
+  const estimatedATS = Math.max(originalATS, rawEstimatedATS, deterministicCurrentScore.atsScore);
   const currentATS = deterministicCurrentScore.atsScore;
 
   const breakdownBefore = liveATS?.breakdown_before ?? comparison?.breakdown_before ?? {

@@ -278,6 +278,27 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
   const [cropModalImage, setCropModalImage] = useState<string | null>(null);
   const [isCropModalOpen, setIsCropModalOpen] = useState(false);
 
+  // Restored after a prior refactor (commit 1c14df9) deleted these definitions
+  // but left the onClick/onChangePhoto call sites below intact -- clicking
+  // "Add Photo" or an existing photo threw ReferenceError: openCropModalForFile
+  // (or openCropModalForExisting) is not defined, so the crop modal never opened.
+  const openCropModalForFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setCropModalImage(reader.result);
+        setIsCropModalOpen(true);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const openCropModalForExisting = (existingUrl: string) => {
+    if (!existingUrl) return;
+    setCropModalImage(existingUrl);
+    setIsCropModalOpen(true);
+  };
+
   const {
     personal_info,
     summary,
@@ -465,9 +486,9 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     if (photoUrl) {
       return (
         <div 
-          className={`relative group ${circleSizeClass} cursor-pointer`} 
+          className={`relative group ${circleSizeClass} cursor-pointer`}
           title="Click to reposition or adjust photo"
-          onClick={openCropModalForExisting}
+          onClick={() => openCropModalForExisting(photoUrl)}
         >
           <img 
             src={photoUrl} 
