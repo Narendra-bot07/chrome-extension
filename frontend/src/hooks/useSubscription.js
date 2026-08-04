@@ -37,8 +37,15 @@ const FALLBACK_PLANS = [
 
 export function useSubscription() {
   const { apiUrl, session, subscription, setSubscription, usage, setUsage } = useApp();
-  const [plans, setPlans] = useState(FALLBACK_PLANS);
-  const [loading, setLoading] = useState(false);
+  // Start empty/loading, not pre-populated with FALLBACK_PLANS -- the page's
+  // skeleton state is gated on `loading`, which previously started `false`,
+  // so real-looking (but fake) pricing rendered on the very first paint,
+  // before refresh() below had even fired, then got swapped for a skeleton
+  // and finally the real data once the fetch landed. That flash (fake plans
+  // -> skeleton -> real plans) is the "isn't loading quickly" symptom.
+  // FALLBACK_PLANS is still used below as a genuine network-failure fallback.
+  const [plans, setPlans] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   const refresh = useCallback(async () => {
@@ -73,7 +80,7 @@ export function useSubscription() {
     refresh();
   }, [refresh]);
 
-  return { subscription, usage, plans: plans.length > 0 ? plans : FALLBACK_PLANS, loading, error, refresh };
+  return { subscription, usage, plans, loading, error, refresh };
 }
 
 export function useFeatureAccess(featureKey) {
