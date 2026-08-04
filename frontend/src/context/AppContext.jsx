@@ -518,6 +518,15 @@ export function AppProvider({ children }) {
       suggestions: reviewSuggestions
     };
     const requestKey = JSON.stringify(payload);
+    // Tags the result with exactly which suggestion selection it was computed
+    // for, so a consumer (ResumeReviewView) can tell a genuinely fresh result
+    // apart from a stale one still in the state slot while a newer request is
+    // debouncing/in flight -- displaying a stale liveATS next to freshly
+    // recomputed local numbers is what caused Original/Current/Potential to
+    // visibly disagree with each other after Select All / Undo.
+    const suggestionsFingerprint = JSON.stringify(
+      reviewSuggestions.map(s => [s.change_id || s.id, s.status])
+    );
     const requestState = liveATSRequestRef.current;
 
     if (requestState.key === requestKey) return;
@@ -557,7 +566,7 @@ export function AppProvider({ children }) {
           !controller.signal.aborted
           && liveATSRequestRef.current.sequence === sequence
         ) {
-          setLiveATS(data);
+          setLiveATS({ ...data, _suggestionsFingerprint: suggestionsFingerprint });
         }
       } catch (error) {
         if (error?.name !== 'AbortError') {
@@ -565,7 +574,11 @@ export function AppProvider({ children }) {
           // Allow the same content to be retried after a genuine failure.
           if (liveATSRequestRef.current.sequence === sequence) {
             liveATSRequestRef.current.key = '';
-            setLiveATS({ scoring_source: 'failed', error: error.message || 'LLM analysis failed at backend' });
+            setLiveATS({
+              scoring_source: 'failed',
+              error: error.message || 'LLM analysis failed at backend',
+              _suggestionsFingerprint: suggestionsFingerprint
+            });
           }
         }
       } finally {

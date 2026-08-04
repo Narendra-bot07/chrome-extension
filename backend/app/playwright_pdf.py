@@ -2,8 +2,8 @@ import os
 import json
 import re
 import hashlib
-import threading
 import functools
+import concurrent.futures
 from io import BytesIO
 from typing import Optional
 from urllib.parse import urlencode
@@ -21,21 +21,94 @@ PDF_RENDERER_URL = (
     or f"http://127.0.0.1:{_BACKEND_PORT}/__pdf_renderer/index.html"
 ).rstrip("/")
 
-# Each render launches a full, separate headless Chromium process. On a
-# memory-constrained host, concurrent renders (e.g. a user's browser retrying
-# a failed export) can stack up enough Chromium instances to exceed the
-# container's memory limit and get the whole process OOM-killed -- which
-# takes down every in-flight request, not just the PDF one. Serializing
-# renders bounds worst-case memory to one browser at a time.
-_PDF_RENDER_LOCK = threading.Lock()
+# Two independent constraints, one mechanism:
+# 1. Each render used to launch a full, separate headless Chromium process.
+#    On a memory-constrained host, concurrent renders (e.g. a user's browser
+#    retrying a failed export) could stack up enough Chromium instances to
+#    exceed the container's memory limit and get the whole process
+#    OOM-killed -- taking down every in-flight request, not just the PDF one.
+# 2. Playwright's sync API binds its internal dispatcher to whichever OS
+#    thread called sync_playwright().start() -- calling it again, or reusing
+#    the Browser/Page objects it returned, from a *different* thread raises a
+#    greenlet/threading error. Starlette's generic run_in_threadpool (used by
+#    every call site) picks an arbitrary worker thread per call, so a
+#    persistent browser (see _get_browser below) can't safely be touched from
+#    whatever thread happens to run a given request.
+# A single-worker executor solves both: every render, across every request,
+# always actually executes on that one dedicated thread, and only one runs at
+# a time.
+_playwright_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="playwright-pdf"
+)
 
 
 def _serialize_pdf_render(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        with _PDF_RENDER_LOCK:
-            return func(*args, **kwargs)
+        return _playwright_executor.submit(func, *args, **kwargs).result()
     return wrapper
+
+
+_playwright_instance = None
+_browser_instance = None
+
+
+def _get_browser():
+    """Lazily launch (and relaunch if crashed) a single persistent Chromium
+    instance shared across every render, instead of spawning and tearing down
+    a brand-new browser process on every single call. Cold Chromium startup
+    alone can take multiple seconds and gets substantially worse under
+    CPU/memory pressure on a small host -- directly eating into the
+    navigation timeout budget before page.goto is even reached, which is a
+    likely contributor to renders timing out consistently under real load.
+    Every render entry point already runs on the single dedicated thread in
+    _playwright_executor (via _serialize_pdf_render), one at a time, so
+    reusing one warm browser across calls -- a fresh Page per render, closed
+    afterward -- is safe and removes that repeated cold-start cost entirely.
+    """
+    global _playwright_instance, _browser_instance
+    if _browser_instance is not None:
+        try:
+            if _browser_instance.is_connected():
+                return _browser_instance
+        except Exception:
+            pass
+        try:
+            _browser_instance.close()
+        except Exception:
+            pass
+        _browser_instance = None
+    if _playwright_instance is None:
+        _playwright_instance = sync_playwright().start()
+    _browser_instance = _playwright_instance.chromium.launch(
+        headless=True,
+        args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+    )
+    return _browser_instance
+
+
+def _shutdown_playwright():
+    """Close the persistent browser and driver on process shutdown. Must run
+    on the same dedicated thread that created them (see _playwright_executor)."""
+    global _playwright_instance, _browser_instance
+    if _browser_instance is not None:
+        try:
+            _browser_instance.close()
+        except Exception:
+            pass
+        _browser_instance = None
+    if _playwright_instance is not None:
+        try:
+            _playwright_instance.stop()
+        except Exception:
+            pass
+        _playwright_instance = None
+
+
+def shutdown_playwright():
+    """Public entry point for app shutdown hooks (see main.py's lifespan)."""
+    _playwright_executor.submit(_shutdown_playwright).result()
+    _playwright_executor.shutdown(wait=False)
 
 
 class HyperlinkRenderingError(Exception):
@@ -65,9 +138,9 @@ def _open_renderer(page, route: str, query: Optional[dict] = None):
         separator = "" if candidate.lower().endswith(".html") else "/"
         url = f"{candidate}{separator}{fragment}"
         try:
-            # 8s was too tight for Render under real load (queued behind
-            # _PDF_RENDER_LOCK while other requests/renders were still using
-            # CPU, or a colder response than a synthetic benchmark) --
+            # 8s was too tight for Render under real load (queued behind the
+            # single-worker render executor while other requests/renders were
+            # still using CPU, or a colder response than a synthetic benchmark) --
             # candidates were timing out before the page even got a chance to
             # respond, not because rendering itself is slow. domcontentloaded
             # doesn't wait on images, so this has nothing to do with photos
@@ -92,13 +165,11 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
     navigates to the React app's print route, injects data, and generates a PDF.
     This avoids asyncio loop conflicts with Uvicorn on Windows.
     """
+    page = None
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
-            )
-            page = browser.new_page()
+        browser = _get_browser()
+        page = browser.new_page()
+        try:
             response = _open_renderer(page, "print", {"template": template_name, "format": "a4"})
             if response and response.status == 504:
                 page.wait_for_timeout(1000)
@@ -358,8 +429,9 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
             measurement_hash = hashlib.sha256(measurement_bytes).hexdigest()
             plan_copy["measurement_hash"] = measurement_hash
 
-            browser.close()
             return pdf_bytes, plan_copy, render_hash, measurement_hash
+        finally:
+            page.close()
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -367,25 +439,22 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
 
 @_serialize_pdf_render
 def generate_cover_letter_pdf_via_playwright(cover_letter_json_str: str) -> Optional[bytes]:
+    page = None
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
-            )
-            page = browser.new_page()
-            
+        browser = _get_browser()
+        page = browser.new_page()
+        try:
             _open_renderer(page, "print-cover-letter")
-            
+
             page.evaluate("data => { window.__INJECTED_COVER_LETTER_DATA__ = JSON.parse(data); }", cover_letter_json_str)
             page.evaluate("window.dispatchEvent(new Event('coverLetterDataReady'));")
-            
+
             page.wait_for_timeout(500)
             page.evaluate("document.fonts.ready")
-            
+
             # If the cover letter fits in 1 page, enforce exactly page 1
             cl_height = page.evaluate("document.querySelector('#resume-print-container') ? document.querySelector('#resume-print-container').offsetHeight : 0")
-            
+
             pdf_args = {
                 "format": "A4",
                 "print_background": True,
@@ -393,11 +462,12 @@ def generate_cover_letter_pdf_via_playwright(cover_letter_json_str: str) -> Opti
             }
             if cl_height > 0 and cl_height <= 1130:
                 pdf_args["page_ranges"] = "1"
-                
+
             pdf_bytes = page.pdf(**pdf_args)
-            
-            browser.close()
+
             return pdf_bytes
+        finally:
+            page.close()
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -410,18 +480,16 @@ def render_cover_letter_artifact(
     paper_size: str = "A4",
 ) -> tuple[bytes, int, dict]:
     """Render the single PDF artifact used by both preview and download."""
+    page = None
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
-            )
-            viewport = (
-                {"width": 816, "height": 1056}
-                if paper_size == "Letter"
-                else {"width": 794, "height": 1123}
-            )
-            page = browser.new_page(viewport=viewport, device_scale_factor=1)
+        browser = _get_browser()
+        viewport = (
+            {"width": 816, "height": 1056}
+            if paper_size == "Letter"
+            else {"width": 794, "height": 1123}
+        )
+        page = browser.new_page(viewport=viewport, device_scale_factor=1)
+        try:
             page.emulate_media(media="print")
             _open_renderer(page, "print-cover-letter")
             try:
@@ -593,8 +661,9 @@ def render_cover_letter_artifact(
                     content_block_count: blocks.length
                 };
             }""", page_count)
-            browser.close()
             return pdf_bytes, page_count, metrics
+        finally:
+            page.close()
     except Exception:
         import traceback
         traceback.print_exc()

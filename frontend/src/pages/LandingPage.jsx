@@ -234,7 +234,6 @@ export default function LandingPage() {
 
       <section className="lp-final-cta">
         <span className="lp-tech-label">YOUR NEXT APPLICATION STARTS HERE</span>
-        <h2>Make the resume fit the role.<br />Never rewrite your history.</h2>
         <button className="lp-primary-cta" onClick={openApp}>{user ? 'Continue to dashboard' : 'Build a stronger application'} <ArrowRight size={18} /></button>
       </section>
     </main>

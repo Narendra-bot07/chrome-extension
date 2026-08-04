@@ -718,11 +718,6 @@ function ResumeReviewView({
     ['Links', 'links']
   ];
 
-  // These are three independently evaluated snapshots. Never interpolate or
-  // force an increase: doing so invents a score the backend did not calculate.
-  const acceptedCount = suggestions.filter(s => s.status === 'accepted').length;
-  const acceptedRatio = suggestions.length > 0 ? acceptedCount / suggestions.length : 0;
-
   const fallbackMatch = useMemo(() => calculateJDMatchScore(parsedResume, jobAnalysis), [parsedResume, jobAnalysis]);
   const deterministicCurrentScore = useMemo(() => {
     const workingResume = mergeReviewResume(
@@ -731,91 +726,70 @@ function ResumeReviewView({
     ).workingResume;
     return calculateJDMatchScore(workingResume, jobAnalysis);
   }, [originalResume, parsedResume, suggestions, jobAnalysis]);
+  const deterministicPotentialScore = useMemo(() => {
+    const potentialSuggestions = suggestions.map(s => ({
+      ...s,
+      status: s.status === 'rejected' ? 'rejected' : 'accepted'
+    }));
+    const workingResume = mergeReviewResume(
+      originalResume || parsedResume,
+      potentialSuggestions
+    ).workingResume;
+    return calculateJDMatchScore(workingResume, jobAnalysis);
+  }, [originalResume, parsedResume, suggestions, jobAnalysis]);
 
-  const originalResumeMatch = liveATS?.original_resume_match
-    ?? comparison?.resume_match_before
-    ?? fallbackMatch.score;
-  const rawEstimatedResumeMatch = liveATS?.estimated_resume_match
-    ?? comparison?.resume_match_after
-    ?? Math.min(98, originalResumeMatch + 15);
+  // liveATS (backend ATSScoringEngine) and calculateJDMatchScore (local JS
+  // "mirror") use materially different formulas -- different weight splits,
+  // stricter/looser skill matching, years-based vs flat experience scoring.
+  // They were never guaranteed to agree on identical resume content. Mixing
+  // a freshly-recomputed local "Current" with a stale/failed backend
+  // "Original"/"Potential" (the previous approach: liveATS falling back
+  // through a one-time `comparison` snapshot from an earlier pipeline step)
+  // is exactly what produced visibly inconsistent triads after Select All /
+  // Undo -- e.g. Potential ATS reading 89, then 96, then collapsing to 51
+  // for what looked like the same review state. All three headline numbers
+  // now always come from ONE engine at a time: the backend only when its
+  // result actually corresponds to the live suggestion selection (tagged via
+  // _suggestionsFingerprint in AppContext), the local engine (self-consistent
+  // even if not numerically identical to the backend) whenever a matching
+  // backend result isn't available yet, failed, or is stale.
+  const suggestionsFingerprint = useMemo(
+    () => JSON.stringify(suggestions.map(s => [s.change_id || s.id, s.status])),
+    [suggestions]
+  );
+  const liveATSFresh = Boolean(
+    liveATS
+    && liveATS.scoring_source !== 'failed'
+    && liveATS._suggestionsFingerprint === suggestionsFingerprint
+  );
+
+  const originalResumeMatch = liveATSFresh ? liveATS.original_resume_match : fallbackMatch.score;
+  const currentResumeMatch = liveATSFresh ? liveATS.current_resume_match : deterministicCurrentScore.score;
+  const rawEstimatedResumeMatch = liveATSFresh ? liveATS.estimated_resume_match : deterministicPotentialScore.score;
   // "Potential" is a ceiling and must never render below what's already been
-  // achieved. rawEstimatedResumeMatch is a one-time backend prediction, but
-  // currentResumeMatch is recomputed live via a different (deterministic,
-  // local) scoring pass as suggestions are accepted -- it can legitimately
-  // exceed that earlier prediction, which without this clamp showed as
-  // "Potential" being lower than "Current" (a real, visible inconsistency).
-  const estimatedResumeMatch = Math.max(originalResumeMatch, rawEstimatedResumeMatch, deterministicCurrentScore.score);
-  // Never leave the previous accepted-state score on screen while waiting for
-  // the backend breakdown. This engine is deterministic and runs locally in
-  // the same render that applies the review decision.
-  const currentResumeMatch = deterministicCurrentScore.score;
+  // achieved, even across an engine swap between renders.
+  const estimatedResumeMatch = Math.max(originalResumeMatch, currentResumeMatch, rawEstimatedResumeMatch);
 
-  const originalATS = liveATS?.original_ats
-    ?? comparison?.ats_score_before
-    ?? Math.max(55, Math.min(95, Math.round(originalResumeMatch * 1.05)));
-  const rawEstimatedATS = liveATS?.estimated_ats
-    ?? comparison?.ats_score_after
-    ?? Math.min(98, originalATS + 15);
-  // Same ceiling guarantee as estimatedResumeMatch above.
-  const estimatedATS = Math.max(originalATS, rawEstimatedATS, deterministicCurrentScore.atsScore);
-  const currentATS = deterministicCurrentScore.atsScore;
+  const originalATS = liveATSFresh ? liveATS.original_ats : fallbackMatch.atsScore;
+  const currentATS = liveATSFresh ? liveATS.current_ats : deterministicCurrentScore.atsScore;
+  const rawEstimatedATS = liveATSFresh ? liveATS.estimated_ats : deterministicPotentialScore.atsScore;
+  const estimatedATS = Math.max(originalATS, currentATS, rawEstimatedATS);
 
-  const breakdownBefore = liveATS?.breakdown_before ?? comparison?.breakdown_before ?? {
-    resume_match: {
-      "Skills Match": 0, "Keyword Relevance": 0, "Experience Alignment": 0, "Role Similarity": 0, "Project Relevance": 0, "Education Fit": 0, "Certification Relevance": 0
-    },
-    ats_optimization: {
-      "ATS Parseability": 0, "Keyword Optimization": 0, "Required Skills Coverage": 0, "Formatting & Action Verbs": 0, "Section Completeness": 0, "Readability": 0, "Measurable Impact": 0, "Overall Optimization": 0
-    }
-  };
-  const breakdownEstimated = liveATS?.breakdown_estimated ?? comparison?.breakdown_after ?? breakdownBefore;
+  const breakdownBefore = liveATSFresh ? (liveATS.breakdown_before || {}) : (fallbackMatch.breakdown || {});
+  const breakdownEstimated = liveATSFresh
+    ? (liveATS.breakdown_estimated || breakdownBefore)
+    : (deterministicPotentialScore.breakdown || breakdownBefore);
+  const breakdownCurrent = liveATSFresh
+    ? (liveATS.breakdown_current || breakdownBefore)
+    : (deterministicCurrentScore.breakdown || breakdownBefore);
 
   const matchBefore = breakdownBefore.resume_match || breakdownBefore;
   const matchEstimated = breakdownEstimated.resume_match || breakdownEstimated;
+  const matchCurrent = breakdownCurrent.resume_match || matchBefore;
 
   const optBefore = breakdownBefore.ats_optimization || {};
   const optEstimated = breakdownEstimated.ats_optimization || {};
-
-  const matchCurrent = useMemo(() => {
-    if (liveATS?.breakdown_current?.resume_match) return liveATS.breakdown_current.resume_match;
-    // Prefer the live, deterministic breakdown (computed from the actual
-    // current resume content, same pass that produces the headline
-    // currentResumeMatch/currentATS above) for every field it covers.
-    // Interpolating "before"/"after" backend snapshots by acceptedRatio
-    // (below) ignores WHICH suggestions were accepted and their actual
-    // content, so it could show numbers totally disconnected from the live
-    // headline score -- e.g. Keyword Optimization at 12% next to a Current
-    // ATS that, moments later with the same resume, showed 97%. Only fall
-    // back to interpolation for fields this local engine doesn't model.
-    const liveBreakdown = deterministicCurrentScore.breakdown?.resume_match || {};
-    const res = {};
-    for (const key of Object.keys(matchBefore)) {
-      if (liveBreakdown[key] != null) {
-        res[key] = liveBreakdown[key];
-        continue;
-      }
-      const b = Number(matchBefore[key] || 0);
-      const e = Number(matchEstimated[key] ?? b);
-      res[key] = Math.round(b + (e - b) * acceptedRatio);
-    }
-    return res;
-  }, [liveATS, matchBefore, matchEstimated, acceptedRatio, deterministicCurrentScore]);
-
-  const optCurrent = useMemo(() => {
-    if (liveATS?.breakdown_current?.ats_optimization) return liveATS.breakdown_current.ats_optimization;
-    const liveBreakdown = deterministicCurrentScore.breakdown?.ats_optimization || {};
-    const res = {};
-    for (const key of Object.keys(optBefore)) {
-      if (liveBreakdown[key] != null) {
-        res[key] = liveBreakdown[key];
-        continue;
-      }
-      const b = Number(optBefore[key] || 0);
-      const e = Number(optEstimated[key] ?? b);
-      res[key] = Math.round(b + (e - b) * acceptedRatio);
-    }
-    return res;
-  }, [liveATS, optBefore, optEstimated, acceptedRatio, deterministicCurrentScore]);
+  const optCurrent = breakdownCurrent.ats_optimization || optBefore;
 
   return (
     <div className="flex-1 flex flex-col md:flex-row justify-between h-full bg-zinc-50 dark:bg-zinc-950 select-text font-sans overflow-hidden">

@@ -370,8 +370,18 @@ export default function ResumePreview({
       ?? exactFinalResume?.layout_level
       ?? 6
   );
-  const previewSectionOrder = compositionPlan?.section_order
-    || exactFinalResume?.section_order
+  // exactFinalResume.section_order reflects the user's live drag instantly --
+  // it's a plain useMemo over resumeData/sectionOrder, no backend round trip
+  // involved. compositionPlan.section_order only exists after a SUCCESSFUL
+  // /api/render-unified-pdf response, and previously took priority here: once
+  // set, it permanently shadowed every later drag until the next backend
+  // round trip completed, so a reorder appeared to do nothing until that
+  // fetch resolved -- and never took effect at all whenever the backend
+  // request failed or timed out (compositionPlan is never cleared on error).
+  // The user's explicit reorder must always win immediately; the backend
+  // plan is only a fallback for before any live resume data exists.
+  const previewSectionOrder = exactFinalResume?.section_order
+    || compositionPlan?.section_order
     || adaptiveComposition?.sectionOrder;
 
   return (
