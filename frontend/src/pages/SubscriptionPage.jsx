@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Check, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useSubscription } from '../hooks/useSubscription';
@@ -44,6 +45,7 @@ function normalizeFeatures(features) {
 
 export default function SubscriptionPage() {
   const reducedMotion = useTailr4uReducedMotion();
+  const [searchParams] = useSearchParams();
   const { apiUrl, session } = useApp();
   const [spreadCards, setSpreadCards] = useState(reducedMotion);
   const { subscription, plans, loading, error, refresh } = useSubscription();
@@ -82,11 +84,20 @@ export default function SubscriptionPage() {
     ['Resume uploads', subscription?.usage?.resume_upload]
   ];
 
+  // /verify-session is now a read-only status check -- it reports whatever
+  // the signature-verified payment webhooks have (or haven't) already
+  // written, it never activates anything itself (see KNOWN_ISSUES.md
+  // ISSUE-015). So a call here only means "the request didn't error", NOT
+  // "the plan is now active" -- only flip the modal to 'success' once the
+  // response actually shows the target plan is live. Otherwise leave the
+  // status untouched so the existing pending-poll effect (below) keeps
+  // retrying and eventually surfaces an honest "unknown" after its timeout,
+  // instead of a fabricated success for a payment that never happened.
   const handleVerifyAndActivate = useCallback(async (targetPlanCode) => {
     const token = session?.access_token || localStorage.getItem('access_token');
-    if (!token) return;
+    if (!token) return false;
     try {
-      await fetch(`${apiUrl}/api/v1/billing/verify-session`, {
+      const res = await fetch(`${apiUrl}/api/v1/billing/verify-session`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -94,31 +105,58 @@ export default function SubscriptionPage() {
         },
         body: JSON.stringify({ plan_code: targetPlanCode || 'pro' })
       });
+      const data = await res.json().catch(() => null);
       await refresh();
-      setPaymentStatusModal(prev => ({
-        ...prev,
-        status: 'success',
-        targetPlanName: targetPlanCode || prev.targetPlanName || 'Pro'
-      }));
+
+      const wantedCode = String(targetPlanCode || '').toLowerCase();
+      const activeCode = String(data?.plan?.code || data?.plan?.id || '').toLowerCase();
+      const matches = Boolean(wantedCode) && Boolean(activeCode) && activeCode === wantedCode;
+
+      if (matches) {
+        setPaymentStatusModal(prev => ({
+          ...prev,
+          status: 'success',
+          targetPlanName: data.plan?.name || targetPlanCode || prev.targetPlanName || 'Pro'
+        }));
+      }
+      return matches;
     } catch (e) {
       console.error('Session verify failed:', e);
       refresh();
+      return false;
     }
   }, [apiUrl, refresh, session?.access_token]);
 
-  // Check URL parameters & cross-tab events for payment completion
+  // Check URL parameters & cross-tab events for payment completion.
+  // `window.location.search` is ALWAYS empty here -- this whole app uses
+  // HashRouter (App.jsx), so a query string on a redirect like
+  // /#/subscription?payment=...&plan_id=... lives inside window.location.hash,
+  // not before it. Reading it via window.location.search meant this effect
+  // could never actually detect a payment redirect; the "Payment in Progress"
+  // modal then depended entirely on the 2-second polling fallback (or a
+  // cross-tab broadcast from a popup tab) to ever resolve, and could sit on
+  // "pending" far longer than necessary -- or indefinitely, if that polling
+  // call itself failed. useSearchParams() correctly reads the query string
+  // React Router parsed out of the hash.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const paymentStatus = params.get('payment');
+    const paymentStatus = searchParams.get('payment');
     if (paymentStatus === 'success' || paymentStatus?.includes('success')) {
-      handleVerifyAndActivate(params.get('plan_id') || 'pro');
+      // A redirect back with payment=success only means the checkout page
+      // itself completed (or, for the mock fallback, that there was never a
+      // real checkout to complete) -- it is NOT proof the plan is actually
+      // active, which only the signature-verified webhook can establish.
+      // Say so honestly here; handleVerifyAndActivate (and the pending-poll
+      // effect below, already wired to keep calling it) flips the modal to
+      // a real 'success' once the webhook has actually landed, or to
+      // 'unknown' if it times out without ever landing.
+      handleVerifyAndActivate(searchParams.get('plan_id') || 'pro');
       setPaymentBanner({
-        type: 'success',
-        message: 'Payment completed successfully! Your subscription features and credits are now active.'
+        type: 'info',
+        message: 'Confirming your payment…'
       });
       try {
         const bc = new BroadcastChannel('payment_channel');
-        bc.postMessage({ type: 'PAYMENT_SUCCESS', plan: params.get('plan_id') || 'pro' });
+        bc.postMessage({ type: 'PAYMENT_SUCCESS', plan: searchParams.get('plan_id') || 'pro' });
         bc.close();
       } catch (e) {}
     } else if (paymentStatus === 'cancelled') {
@@ -132,7 +170,7 @@ export default function SubscriptionPage() {
         message: 'Payment was cancelled. You can retry upgrading anytime.'
       });
     }
-  }, [handleVerifyAndActivate]);
+  }, [searchParams, handleVerifyAndActivate]);
 
   // Listen to cross-tab payment broadcasts & storage events
   useEffect(() => {
@@ -266,21 +304,24 @@ export default function SubscriptionPage() {
       // failed-live-API-call fallback branches) -- when that happens,
       // checkout_url just points back at our own /subscription route with a
       // payment=mock_..._success marker; there's no actual external checkout
-      // page to send the user to. This used to still open a brand-new tab and
-      // navigate it there via a full page load, which was fragile (the tab
-      // could be left showing its own placeholder instead of the loaded app)
-      // and pointless, since nothing external happens on this path. Handle it
-      // entirely in the current tab instead of round-tripping through one.
+      // page to send the user to, and no real payment behind it. This used to
+      // still open a brand-new tab and navigate it there via a full page
+      // load, which was fragile (the tab could be left showing its own
+      // placeholder instead of the loaded app) and pointless, since nothing
+      // external happens on this path. Handle it entirely in the current tab
+      // instead of round-tripping through one -- but do NOT assume success:
+      // the backend only actually activates a mock checkout when a developer
+      // has explicitly opted in locally (ALLOW_MOCK_BILLING_ACTIVATION, see
+      // billing.py) -- everywhere else this correctly reports "no change"
+      // (KNOWN_ISSUES.md ISSUE-015), and the pending-poll effect above will
+      // honestly surface "unknown" after its timeout since there was never a
+      // real payment for a webhook to confirm.
       const isMockCheckout = res.subscription_id === 'sub_mock_razorpay_123'
         || res.subscription_id === 'sub_mock_stripe_123'
         || String(res.checkout_url || '').includes('mock_');
       if (isMockCheckout) {
         if (checkoutTab && !checkoutTab.closed) checkoutTab.close();
         await handleVerifyAndActivate(planId);
-        setPaymentBanner({
-          type: 'success',
-          message: 'Payment completed successfully! Your subscription features and credits are now active.'
-        });
         return;
       }
 

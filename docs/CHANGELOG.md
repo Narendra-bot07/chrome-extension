@@ -4,6 +4,38 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.12.0] - 2026-08-04
+
+### Fixed
+- **Critical: `/billing/verify-session` could grant any paid plan with zero payment** ([KNOWN_ISSUES.md](KNOWN_ISSUES.md) ISSUE-015, previously flagged and deliberately deferred pending explicit go-ahead — directly observed live this session as a "Payment completed successfully!" banner for a checkout that never actually went to a payment gateway). This is a full fix, not a workaround:
+  - `POST /billing/verify-session` (`app/billing/routers/billing.py`) is now **read-only** — it reports the user's current subscription state and never activates anything. Only the signature-verified `/webhook/stripe` and `/webhook/razorpay` handlers may call `activate_subscription` now, plus one narrow, explicit local-dev opt-in (`ALLOW_MOCK_BILLING_ACTIVATION`, new setting in `core/config.py`, defaults to `false` and is never derived from `APP_ENV`, so it can't accidentally end up on in a deployed environment).
+  - Fixed the hardcoded `plan_id = "pro"` in both webhook handlers (a second bug noted alongside ISSUE-015) — they now read the actually-purchased plan from data the checkout-creation code already attaches (`stripe_provider.py`'s Checkout Session `metadata.plan_id`, `razorpay_provider.py`'s subscription `notes.plan_id`), instead of activating Pro for every successful payment regardless of what was bought.
+  - `frontend/src/pages/SubscriptionPage.jsx`'s `handleVerifyAndActivate` only declares success once the response actually confirms the target plan is active, instead of unconditionally. The existing pending-poll/timeout mechanism now surfaces an honest "couldn't confirm" instead of a fabricated success when there was never a real payment for a webhook to confirm.
+  - Verified the new read-only query shape and both webhooks' `plan_id` extraction directly against the live database.
+- **`psycopg2.errors.InvalidColumnReference: there is no unique or exclusion constraint matching the ON CONFLICT specification`**, crashing `SubscriptionService.activate_subscription()` for every provider — confirmed live: `public.subscriptions.provider_subscription_id` had no uniqueness constraint at all (an earlier migration's `CREATE TABLE ... UNIQUE NOT NULL` silently never took effect, because a *later*-running migration had already created the bare table first, making that `CREATE TABLE IF NOT EXISTS` a no-op). Added `backend/migrate_subscriptions_provider_unique_index.py` and ran it against the live database: a plain (non-partial) unique index on `provider_subscription_id`, chosen over a partial one after confirming Postgres won't accept a partial index as an `ON CONFLICT` arbiter unless the query repeats its exact `WHERE` predicate, which this codebase's query doesn't. Checked for pre-existing duplicates first (none, 103 rows); verified the fix by running a real `activate_subscription()` insert-then-upsert against the live database inside a rolled-back transaction.
+- Added `backend/test_razorpay_api.py` (mirrors the existing `test_stripe_api.py` pattern): verifies live Razorpay credentials, authentication, `create_checkout` for every real plan, and webhook signature verification/rejection.
+
+### Known issue (not fixed, requires action on the Razorpay account, not code)
+- Live Razorpay subscription creation still fails for every paid plan with a bare `"Validation failed"` from Razorpay's API. Confirmed the configured plan IDs are valid and exist on the account (`GET /v1/plans/{id}` returns 200 with live credentials), so this isn't a code-side misconfiguration — most likely the account's Subscriptions feature isn't fully activated for live mode. Stripe checkout is unaffected. Until resolved, Razorpay checkouts correctly report no active plan (per the ISSUE-015 fix above) rather than a false success.
+
+---
+
+## [3.11.4] - 2026-08-04
+
+### Fixed
+- **Subscription activation crashed with `psycopg2.errors.InvalidColumnReference: there is no unique or exclusion constraint matching the ON CONFLICT specification`**, breaking `SubscriptionService.activate_subscription()` (`app/billing/services/subscription_service.py`) for every provider (Stripe and Razorpay alike) — this would have blocked a real payment's webhook from ever actually activating the user's plan. Root cause, confirmed directly against the live database: `migrate_billing.py`'s original `CREATE TABLE public.subscriptions (... provider_subscription_id VARCHAR(100) UNIQUE NOT NULL ...)` never actually took effect — `migrate_phase6_subscriptions.py`'s own bare, column-less `CREATE TABLE IF NOT EXISTS public.subscriptions (id VARCHAR(100) PRIMARY KEY ...)` created the table first, so `migrate_billing.py`'s later `CREATE TABLE IF NOT EXISTS` silently became a no-op — including the `UNIQUE` constraint that was part of its column definition. `provider_subscription_id` ended up as a plain nullable column with zero uniqueness enforcement, which `activate_subscription()`'s `INSERT ... ON CONFLICT (provider_subscription_id) DO UPDATE` requires.
+  - Added `backend/migrate_subscriptions_provider_unique_index.py` and ran it against the live database: adds `uq_subscriptions_provider_subscription_id`, a plain (non-partial) unique index on that column. Checked first for existing duplicate values (none found, 103 subscription rows total) before creating it. A partial index (`WHERE provider_subscription_id IS NOT NULL`) was tried first and confirmed *not* to work — Postgres only accepts a partial index as an `ON CONFLICT` arbiter when the query's own `ON CONFLICT` clause repeats that exact predicate, which this codebase's query doesn't do; a plain unique index still tolerates unlimited `NULL`s without conflict, so internal/free subscriptions with no `provider_subscription_id` are unaffected.
+  - Verified end-to-end against the live database post-fix: ran `activate_subscription()` for real (insert path, then a second call to exercise the `ON CONFLICT DO UPDATE` upsert path) inside a transaction that was rolled back afterward, so nothing persisted from the verification itself.
+
+---
+
+## [3.11.3] - 2026-08-04
+
+### Fixed
+- **"Payment in Progress" modal could get stuck indefinitely after a checkout redirect back to `/subscription`**: `SubscriptionPage.jsx`'s payment-completion detection read `window.location.search` — but this whole app uses `HashRouter` (`App.jsx`), so a redirect like `/#/subscription?payment=mock_razorpay_success&plan_id=basic` carries its query string *inside* `window.location.hash`, not before it. `window.location.search` is always empty in that case, so this effect could never actually detect a payment redirect — the pending modal depended entirely on a 2-second polling fallback or a same-mock-fix-turn cross-tab broadcast to ever resolve, both of which are cheap to keep as belt-and-suspenders but shouldn't have been load-bearing for the primary path. Switched to `useSearchParams()` from `react-router-dom`, which correctly reads the query string React Router parsed out of the hash. Audited every other `location.search` usage in the frontend (`App.jsx`, `LoginPage.jsx`, `RegisterPage.jsx`, `PublicAuthPanel.jsx`, `PrintLayout.tsx`) — all of them already correctly use the `useLocation()` hook; `SubscriptionPage.jsx` was the only place reading it raw off `window`.
+
+---
+
 ## [3.11.2] - 2026-08-04
 
 ### Fixed

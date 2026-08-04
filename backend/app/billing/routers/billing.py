@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from typing import Dict, Any, List
+from core.config import settings
 from core.database import get_db_connection
 from core.security import verify_supabase_jwt
 from ..models.schemas import CheckoutRequest, CheckoutResponse, PlanSchema, BillingHistoryResponse, PaymentSchema
@@ -7,6 +8,8 @@ from ..services.billing_service import BillingService
 from ..services.subscription_service import SubscriptionService
 from ..services.credit_service import CreditService
 from app.analytics.events.tracking.analytics_service import AnalyticsService
+
+_MOCK_SUBSCRIPTION_IDS = {"sub_mock_stripe_123", "sub_mock_razorpay_123"}
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -33,7 +36,7 @@ async def create_checkout(
     plan = sub_svc.get_plan(req.plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
-        
+
     checkout_res = billing_svc.create_checkout(
         user=user,
         plan=plan,
@@ -41,6 +44,25 @@ async def create_checkout(
         currency=req.currency,
         provider_override=req.provider
     )
+
+    # The provider layer (stripe_provider.py / razorpay_provider.py) falls
+    # back to a mock, no-real-payment checkout_url whenever it has no live
+    # credentials configured or the live API call itself fails -- there is no
+    # real payment behind that URL and never will be a signature-verified
+    # webhook for it. Only ever "activate" it here, server-side, when a
+    # developer has explicitly opted in for local testing (see
+    # ALLOW_MOCK_BILLING_ACTIVATION in core/config.py) -- never reachable from
+    # a deployed environment unless someone deliberately sets that flag there.
+    # This replaces /verify-session's old behavior of activating ANY plan any
+    # caller asked for with no proof of payment at all (KNOWN_ISSUES.md
+    # ISSUE-015) -- outside this narrow opt-in, only the signature-verified
+    # webhook handlers below may ever call activate_subscription.
+    is_mock = checkout_res.get("subscription_id") in _MOCK_SUBSCRIPTION_IDS
+    if is_mock and settings.ALLOW_MOCK_BILLING_ACTIVATION:
+        sub_svc.activate_subscription(
+            user["id"], plan["id"], checkout_res["provider"], checkout_res["subscription_id"]
+        )
+
     return CheckoutResponse(
         checkout_url=checkout_res["checkout_url"],
         provider=checkout_res["provider"],
@@ -53,21 +75,24 @@ async def create_checkout(
 async def verify_checkout_session(
     req: Dict[str, Any],
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
-    sub_svc: SubscriptionService = Depends(get_subscription_service),
-    credit_svc: CreditService = Depends(get_credit_service)
+    sub_svc: SubscriptionService = Depends(get_subscription_service)
 ):
-    plan_id = (req.get("plan_id") or req.get("plan_code") or "pro").lower()
-    plan = sub_svc.get_plan(plan_id)
-    if not plan:
-        plans = sub_svc.get_all_plans()
-        plan = next((p for p in plans if p["code"].lower() == plan_id or p["id"].lower() == plan_id), None)
-        if not plan and plans:
-            plan = plans[0]
-
-    if plan:
-        sub_svc.activate_subscription(user["id"], plan["id"], "stripe", f"sub_active_{user['id']}")
-        return {"status": "success", "plan": plan}
-    return {"status": "success"}
+    """
+    Read-only status check, polled by the frontend after a checkout redirect.
+    This used to unconditionally activate whatever plan the request asked
+    for, with no proof any payment happened (KNOWN_ISSUES.md ISSUE-015) --
+    activation now only ever happens inside the signature-verified webhook
+    handlers below (or create_checkout's narrow, opt-in-only mock path
+    above), so this just reports whatever they have -- or haven't -- already
+    written.
+    """
+    current_sub = sub_svc.get_user_subscription(user["id"])
+    plan = sub_svc.get_plan(current_sub["plan_id"]) if current_sub else None
+    return {
+        "status": "active" if current_sub else "none",
+        "plan": plan,
+        "subscription": current_sub
+    }
 
 @router.get("/history", response_model=BillingHistoryResponse)
 async def get_history(
@@ -120,9 +145,11 @@ async def stripe_webhook(
         amount = session.get('amount_total', 0) / 100.0
         currency = session.get('currency', 'usd').upper()
         
-        # Try to find plan_id. In real scenarios, usually pass plan_id in metadata
-        # For simplicity, assuming PRO plan on success unless specified
-        plan_id = "pro"
+        # stripe_provider.create_checkout() sets metadata.plan_id to the actual
+        # purchased plan's id when it creates the Checkout Session -- read it
+        # back instead of hardcoding "pro" for every successful checkout
+        # regardless of what was actually bought (see KNOWN_ISSUES.md ISSUE-015).
+        plan_id = (session.get('metadata') or {}).get('plan_id') or "pro"
         
         # Log payment idempotently
         payment = sub_svc.create_payment(
@@ -185,8 +212,11 @@ async def razorpay_webhook(
             status="success"
         )
         
-        # Assuming we passed plan logic or mapped via Razorpay Plan ID
-        plan_id = "pro"
+        # razorpay_provider.create_checkout() sets notes.plan_id to the actual
+        # purchased plan's id when it creates the subscription -- read it back
+        # instead of hardcoding "pro" for every successful charge regardless
+        # of what was actually bought (see KNOWN_ISSUES.md ISSUE-015).
+        plan_id = sub_entity.get('notes', {}).get('plan_id') or "pro"
         plan = sub_svc.get_plan(plan_id)
         if plan:
             sub_svc.activate_subscription(user_id, plan_id, "razorpay", sub_entity['id'])

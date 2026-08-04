@@ -54,6 +54,14 @@ class Settings(BaseSettings):
     APP_ENV: str = Field(default="local", env="APP_ENV")
     APP_RELEASE: str = Field(default="", env="APP_RELEASE")
     SERVICE_NAME: str = Field(default="tailr4u-api", env="SERVICE_NAME")
+    # Explicit, default-OFF opt-in for local/dev testing of the paid-plan UI
+    # without real Stripe/Razorpay credentials. Deliberately NOT derived from
+    # APP_ENV (its actual value on the live deployment isn't something this
+    # code can safely assume) -- must be set to "true" by hand in a local
+    # .env to do anything, so a missing/misconfigured APP_ENV can never
+    # silently leave production able to self-grant paid plans without a real
+    # payment. See docs/KNOWN_ISSUES.md ISSUE-015.
+    ALLOW_MOCK_BILLING_ACTIVATION: bool = Field(default=False, env="ALLOW_MOCK_BILLING_ACTIVATION")
     
     SENTRY_BACKEND_DSN: str = Field(default="", env="SENTRY_BACKEND_DSN")
     SENTRY_FRONTEND_DSN: str = Field(default="", env="SENTRY_FRONTEND_DSN")
