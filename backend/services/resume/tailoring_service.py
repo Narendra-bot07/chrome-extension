@@ -34,23 +34,39 @@ class TailoringService:
         job_id: str,
         patch: Any
     ) -> Dict[str, Any]:
-        # Validate credits
+        """Convenience wrapper kept for callers (e.g. tests) that don't need
+        to control connection lifetime -- runs all three phases against
+        whichever single connection this instance's repos were built with.
+        Route handlers that hold a request-scoped connection across this
+        entire call are exactly the pool-exhaustion bug this class was split
+        to avoid; see load_context / compute_tailored_resume / persist_result."""
+        resume, job = self.load_context(user_id, resume_id, job_id)
+        computed = self.compute_tailored_resume(resume, job, patch)
+        return self.persist_result(user_id, resume_id, job_id, resume, computed)
+
+    def load_context(self, user_id: str, resume_id: str, job_id: str) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        """Pure DB reads. Callers should use a short-lived connection scoped
+        to just this call, not one held across the AI call in compute_tailored_resume."""
         credits = self.profile_repo.get_credits(user_id)
         if credits <= 0:
             raise CreditsExhaustedError()
 
-        # Retrieve entities
         resume = self.resume_repo.get_by_id(resume_id, user_id)
         job = self.job_repo.get_by_id(job_id, user_id)
         if not resume or not job:
             raise RecordNotFoundError("Resume or Job description record not found.")
+        return resume, job
 
+    def compute_tailored_resume(self, resume: Dict[str, Any], job: Dict[str, Any], patch: Any) -> Dict[str, Any]:
+        """Pure computation: AI call, merge, and preservation validation.
+        Touches no repo/DB connection at all -- safe to run in a threadpool
+        with zero pooled connection held for its (potentially multi-second) duration."""
         # Map to Pydantic objects
         resume_obj = ResumeStructure(**resume["parsed_content"])
 
         # AI Tailoring Process
         start_time = time.time()
-        
+
         job_payload = job.get("normalized_content") or job.get("parsed_content")
         if not isinstance(job_payload, dict):
             raise ValueError(
@@ -99,8 +115,35 @@ class TailoringService:
             )
         tailored_resume_obj = ResumeStructure(**preservation.lossless_resume)
         latency = int((time.time() - start_time) * 1000)
-
         ats_score = float(tailoring_report.ats_score_after)
+
+        return {
+            "tailored_resume_obj": tailored_resume_obj,
+            "ats_score": ats_score,
+            "latency": latency,
+            "tailoring_report": tailoring_report,
+            "preservation": preservation,
+            "merge_report": merge_report,
+        }
+
+    def persist_result(
+        self,
+        user_id: str,
+        resume_id: str,
+        job_id: str,
+        resume: Dict[str, Any],
+        computed: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Pure DB writes. Callers should use a fresh short-lived connection
+        for this call, separate from the one used in load_context -- there
+        must be no connection held open across compute_tailored_resume's
+        AI call in between."""
+        tailored_resume_obj = computed["tailored_resume_obj"]
+        ats_score = computed["ats_score"]
+        latency = computed["latency"]
+        tailoring_report = computed["tailoring_report"]
+        preservation = computed["preservation"]
+        merge_report = computed["merge_report"]
 
         # Log AI Generation stats
         self.audit_repo.log_ai_generation(

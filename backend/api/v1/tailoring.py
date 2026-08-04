@@ -5,7 +5,10 @@ import io
 
 from core.security import verify_supabase_jwt
 from schemas.tailoring import TailorRequest, DownloadPDFRequest, PreservationRequest
-from api.dependencies import get_tailoring_service, get_storage_service, get_audit_repository, get_tailoring_repository
+from api.dependencies import (
+    get_tailoring_service, get_storage_service, get_audit_repository, get_tailoring_repository,
+    build_tailoring_service, user_scoped_db_context,
+)
 from services.resume.tailoring_service import TailoringService
 from services.storage.file_service import FileService
 from repositories.audit_repository import AuditRepository
@@ -82,9 +85,13 @@ async def validate_resume_preservation(
 async def tailor_resume(
     request: TailorRequest,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
-    service: TailoringService = Depends(get_tailoring_service),
-    conn = Depends(get_db_connection)
 ):
+    # Deliberately NOT using Depends(get_tailoring_service)/Depends(get_db_connection)
+    # here -- FastAPI caches Depends(get_db_connection) per-request, so a connection
+    # resolved that way would be held for this entire handler, including the slow
+    # AI call in between. Each DB phase below opens (and closes) its own short-lived
+    # connection instead. See docs/KNOWN_ISSUES.md ISSUE-005 and
+    # api/dependencies.py::user_scoped_db_context.
     try:
         # We assume request has job_analysis attached if the old format had it,
         # but in the updated TailorRequest, we might need a default title for mock resolution.
@@ -92,25 +99,34 @@ async def tailor_resume(
         job_title = "Tailored Role"
         if hasattr(request, "job_analysis") and request.job_analysis:
             job_title = str(request.job_analysis.title)
+        resume_id = str(request.resume.personal_info.name)  # Mock resolution
 
         from fastapi.concurrency import run_in_threadpool
-        record = await run_in_threadpool(
-            service.execute_tailoring_flow,
-            user_id=user["id"],
-            resume_id=str(request.resume.personal_info.name),  # Mock resolution
-            job_id=job_title,
-            patch=request.patch
+
+        with user_scoped_db_context(user["id"]) as conn:
+            service = build_tailoring_service(conn)
+            resume, job = await run_in_threadpool(
+                service.load_context, user["id"], resume_id, job_title
+            )
+
+        computed = await run_in_threadpool(
+            service.compute_tailored_resume, resume, job, request.patch
         )
-        
-        # Emit event
-        AnalyticsService(conn).emit_event(
-            user_id=user["id"],
-            event_type="RESUME_TAILORED",
-            resource_type="tailoring",
-            resource_id=record["id"],
-            metadata={"job_title": job_title}
-        )
-        
+
+        with user_scoped_db_context(user["id"]) as conn:
+            service = build_tailoring_service(conn)
+            record = await run_in_threadpool(
+                service.persist_result, user["id"], resume_id, job_title, resume, computed
+            )
+            # Emit event on the same short-lived connection as the rest of the writes.
+            AnalyticsService(conn).emit_event(
+                user_id=user["id"],
+                event_type="RESUME_TAILORED",
+                resource_type="tailoring",
+                resource_id=record["id"],
+                metadata={"job_title": job_title}
+            )
+
         return record
     except ValueError as val_err:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(val_err))
@@ -123,9 +139,12 @@ async def download_pdf(
     company_name: Optional[str] = "Company",
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     storage: FileService = Depends(get_storage_service),
-    audit_repo: AuditRepository = Depends(get_audit_repository),
-    conn = Depends(get_db_connection)
 ):
+    # No Depends(get_db_connection)/Depends(get_audit_repository) here -- the only
+    # DB writes in this handler happen AFTER the Playwright render (which also
+    # queues behind _PDF_RENDER_LOCK), so a request-scoped connection would sit
+    # idle for that entire duration for no reason. Open one only once it's
+    # actually needed. See docs/KNOWN_ISSUES.md ISSUE-005.
     try:
         from app.playwright_pdf import generate_pdf_via_playwright
         from fastapi.concurrency import run_in_threadpool
@@ -160,25 +179,26 @@ async def download_pdf(
         file_path = f"{user['id']}/{uuid.uuid4()}_{company_name}_Resume.pdf".replace(" ", "_")
         storage.upload_file("generated-resumes", file_path, pdf_bytes, "application/pdf")
 
-        audit_repo.log_download(
-            user_id=user["id"],
-            tailored_resume_id=user["id"],
-            template_id=None,
-            file_type="pdf",
-            # A PDF download has no JD/resume comparison context of its own.
-            # Never fabricate an ATS score for the audit record.
-            ats_score=None,
-            company_name=company_name,
-            job_title="Software Engineer"
-        )
-        
-        AnalyticsService(conn).emit_event(
-            user_id=user["id"],
-            event_type="PDF_DOWNLOADED",
-            resource_type="pdf",
-            resource_id=file_path,
-            metadata={"company_name": company_name, "template": request.template_name}
-        )
+        with user_scoped_db_context(user["id"]) as conn:
+            AuditRepository(conn).log_download(
+                user_id=user["id"],
+                tailored_resume_id=user["id"],
+                template_id=None,
+                file_type="pdf",
+                # A PDF download has no JD/resume comparison context of its own.
+                # Never fabricate an ATS score for the audit record.
+                ats_score=None,
+                company_name=company_name,
+                job_title="Software Engineer"
+            )
+
+            AnalyticsService(conn).emit_event(
+                user_id=user["id"],
+                event_type="PDF_DOWNLOADED",
+                resource_type="pdf",
+                resource_id=file_path,
+                metadata={"company_name": company_name, "template": request.template_name}
+            )
 
         filename = f"{company_name}_Tailored_Resume.pdf"
         return StreamingResponse(

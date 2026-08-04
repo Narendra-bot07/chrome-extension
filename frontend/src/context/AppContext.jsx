@@ -252,15 +252,37 @@ export function AppProvider({ children }) {
   }, []);
 
   const logout = async (reason = 'manual_logout') => {
-    localStorage.removeItem(AUTH_STORAGE.accessToken);
-    localStorage.removeItem('refresh_token');
-    localStorage.removeItem(AUTH_STORAGE.lastActivityAt);
+    // Only auth tokens were ever cleared here -- every other per-account
+    // cache (parsed resume, resumes list, dashboard performance signature,
+    // tailoring workflow state, etc.) stayed in localStorage/sessionStorage
+    // indefinitely. On a shared browser/extension profile, a different
+    // account logging in afterward would "instant unblock" straight into
+    // the PREVIOUS account's cached data (e.g. a brand-new user seeing an
+    // ATS score and dashboard radar chart from whoever used this browser
+    // last), since none of it is scoped by user id. Clear all of it here.
+    const localStorageKeysToClear = [
+      AUTH_STORAGE.accessToken, 'refresh_token', AUTH_STORAGE.lastActivityAt,
+      'user', 'parsed_resume', 'tailored_resume', 'selected_template',
+      'resumes_list', 'tailr4u_user_profile',
+    ];
+    const sessionStorageKeysToClear = [
+      'tf_perf_signature', 'tf_dismiss_profile_banner', 'selected_sections',
+      'tailoring_intensity', 'custom_file_name', 'resume_review_session',
+      'tailr4u.profile-prompt-dismissed', 'tailr4u_auto_generate_cover_letter',
+    ];
+    localStorageKeysToClear.forEach(key => localStorage.removeItem(key));
+    sessionStorageKeysToClear.forEach(key => sessionStorage.removeItem(key));
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      chrome.storage.local.remove(['access_token', 'refresh_token']);
+      chrome.storage.local.remove([
+        'access_token', 'refresh_token', 'user', 'parsed_resume',
+        'resumes_list', 'tailoredResume',
+      ]);
     }
     setSession(null);
     setSessionVerified(false);
     setUser(null);
+    setParsedResume(null);
+    setResumesList([]);
     setHasCompletedPreferences(false);
     setHasRedirectedOnStartup(false);
     if (reason === 'manual_logout') navigate('/');

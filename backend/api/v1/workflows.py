@@ -1,5 +1,6 @@
 """Generic workflow lifecycle endpoints."""
 
+from contextlib import nullcontext
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from core.database import get_db_connection
@@ -28,7 +29,11 @@ def create_workflow(
     user=Depends(verify_supabase_jwt),
     connection=Depends(get_db_connection),
 ):
-    engine = build_workflow_engine(connection, owner_id=user["id"])
+    # PostgresCheckpointStore now takes a connection factory rather than a
+    # raw connection (see services/workflow/checkpoints.py); these routes
+    # weren't part of this pass's connection-lifetime fix, so just wrap the
+    # existing request-scoped connection to preserve current behavior exactly.
+    engine = build_workflow_engine(lambda: nullcontext(connection), owner_id=user["id"])
     try:
         state = engine.create_state(
             payload.request_id, payload.requested_nodes, owner_id=user["id"]
@@ -44,7 +49,11 @@ def get_workflow(
     user=Depends(verify_supabase_jwt),
     connection=Depends(get_db_connection),
 ):
-    engine = build_workflow_engine(connection, owner_id=user["id"])
+    # PostgresCheckpointStore now takes a connection factory rather than a
+    # raw connection (see services/workflow/checkpoints.py); these routes
+    # weren't part of this pass's connection-lifetime fix, so just wrap the
+    # existing request-scoped connection to preserve current behavior exactly.
+    engine = build_workflow_engine(lambda: nullcontext(connection), owner_id=user["id"])
     try:
         checkpoint = engine.checkpoint_store.latest(workflow_id)
     except WorkflowError as exc:
@@ -61,7 +70,11 @@ def resume_workflow(
     user=Depends(verify_supabase_jwt),
     connection=Depends(get_db_connection),
 ):
-    engine = build_workflow_engine(connection, owner_id=user["id"])
+    # PostgresCheckpointStore now takes a connection factory rather than a
+    # raw connection (see services/workflow/checkpoints.py); these routes
+    # weren't part of this pass's connection-lifetime fix, so just wrap the
+    # existing request-scoped connection to preserve current behavior exactly.
+    engine = build_workflow_engine(lambda: nullcontext(connection), owner_id=user["id"])
     try:
         return WorkflowResponse(
             workflow=engine.resume(workflow_id, checkpoint_id=checkpoint_id)
@@ -77,7 +90,11 @@ def confirm_workflow(
     user=Depends(verify_supabase_jwt),
     connection=Depends(get_db_connection),
 ):
-    engine = build_workflow_engine(connection, owner_id=user["id"])
+    # PostgresCheckpointStore now takes a connection factory rather than a
+    # raw connection (see services/workflow/checkpoints.py); these routes
+    # weren't part of this pass's connection-lifetime fix, so just wrap the
+    # existing request-scoped connection to preserve current behavior exactly.
+    engine = build_workflow_engine(lambda: nullcontext(connection), owner_id=user["id"])
     try:
         checkpoint = engine.checkpoint_store.latest(workflow_id)
         if checkpoint is None:
@@ -95,7 +112,11 @@ def cancel_workflow(
     user=Depends(verify_supabase_jwt),
     connection=Depends(get_db_connection),
 ):
-    engine = build_workflow_engine(connection, owner_id=user["id"])
+    # PostgresCheckpointStore now takes a connection factory rather than a
+    # raw connection (see services/workflow/checkpoints.py); these routes
+    # weren't part of this pass's connection-lifetime fix, so just wrap the
+    # existing request-scoped connection to preserve current behavior exactly.
+    engine = build_workflow_engine(lambda: nullcontext(connection), owner_id=user["id"])
     try:
         checkpoint = engine.checkpoint_store.latest(workflow_id)
         if checkpoint is None:

@@ -6,10 +6,6 @@ This document categorizes all active development, refactoring, testing, and oper
 
 ## 1. Critical Priority (P0 - Blocker / Immediate Action)
 
-- [ ] **Eliminate Request-Long DB Connections Around Slow AI/Playwright Work**:
-  - `TailoringService.execute_tailoring_flow` (`services/resume/tailoring_service.py`, used by `tailor_resume` in `api/v1/tailoring.py`) and `api_compare` (`app/routers/api.py`) still hold one `Depends(get_db_connection)` connection across the full request, including the LLM call — only the event-loop-blocking half was fixed (`run_in_threadpool`). Refactor to take short-lived connections (see `_db_context()` pattern already applied to `api_cover_letter` in `app/routers/api.py`) only around the actual repo reads/writes.
-  - Same issue in `download_pdf` (`api/v1/tailoring.py` — connection held through the Playwright render + `_PDF_RENDER_LOCK` queue wait), `build_selected_resume_intelligence` / `confirm_selected_resume_intelligence` (`api/v1/resume.py`), and `api_generate_cover_letter_draft` (`app/routers/api.py`).
-  - See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) ISSUE-005 for full audit findings.
 - [ ] **Playwright Browser Pool Initialization**:
   - Implement reusable browser pool context in `app/playwright_pdf.py` to eliminate cold-start PDF generation latency.
 - [ ] **Production Secret Verification**:
@@ -34,6 +30,8 @@ This document categorizes all active development, refactoring, testing, and oper
 
 ## 3. Medium Priority (P2 - System Enhancement)
 
+- [ ] **Apply the connection-factory pattern to `ResumeRepository` in the resume-intelligence endpoints**:
+  - `build_selected_resume_intelligence` / `confirm_selected_resume_intelligence` (`api/v1/resume.py`) still resolve `ResumeRepository` via the request-scoped `Depends(get_resume_repository)` chain, unlike `PostgresCheckpointStore` (fixed 2026-08-04, see [KNOWN_ISSUES.md](KNOWN_ISSUES.md) ISSUE-005). Lower priority since it's touched only once or twice per pipeline run rather than after every step — revisit if it proves to matter under load.
 - [ ] **Enhanced Rate-Limiting & Quota Management**:
   - Implement Redis-backed token bucket rate limiter middleware for free-tier users.
 - [ ] **Extension Auto-Fill Form Assistant**:

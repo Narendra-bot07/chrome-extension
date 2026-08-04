@@ -99,10 +99,20 @@ class InMemoryCheckpointStore(CheckpointStore):
 
 
 class PostgresCheckpointStore(CheckpointStore):
-    """Durable store using the application's existing psycopg2 connection."""
+    """Durable store backed by a caller-supplied connection FACTORY (a
+    zero-arg callable returning a context manager that yields a connection)
+    rather than one persistent connection. Every method below is already a
+    fully self-contained transaction (its own commit/rollback) -- nothing is
+    lost by opening a fresh short-lived connection per call instead of
+    reusing one across calls. This matters for the multi-step LLM workflows
+    that use this store: reusing one connection across the whole pipeline
+    would hold it open (and idle) for the entire multi-step, multi-second
+    duration between checkpoint writes instead of just each individual DB
+    operation. See docs/KNOWN_ISSUES.md ISSUE-005.
+    """
 
-    def __init__(self, connection, *, owner_id: str) -> None:
-        self.connection = connection
+    def __init__(self, connection_factory, *, owner_id: str) -> None:
+        self._connection_factory = connection_factory
         self.owner_id = owner_id
 
     def save(self, state: WorkflowState, *, expected_revision: int) -> Checkpoint:
@@ -114,63 +124,62 @@ class PostgresCheckpointStore(CheckpointStore):
             update={"revision": revision, "last_checkpoint_id": checkpoint_id}, deep=True
         )
         try:
-            with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(
-                    """
-                    SELECT revision FROM workflow_runs
-                    WHERE workflow_id = %s AND owner_id = %s FOR UPDATE
-                    """,
-                    (state.workflow_id, self.owner_id),
-                )
-                row = cursor.fetchone()
-                actual_revision = row["revision"] if row else 0
-                if actual_revision != expected_revision:
-                    raise VersionConflictError(
-                        f"Expected revision {expected_revision}, found {actual_revision}"
+            with self._connection_factory() as connection:
+                with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                    cursor.execute(
+                        """
+                        SELECT revision FROM workflow_runs
+                        WHERE workflow_id = %s AND owner_id = %s FOR UPDATE
+                        """,
+                        (state.workflow_id, self.owner_id),
                     )
-                cursor.execute(
-                    """
-                    INSERT INTO workflow_runs
-                        (workflow_id, owner_id, request_id, status, revision, state, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (workflow_id) DO UPDATE SET
-                        status = EXCLUDED.status,
-                        revision = EXCLUDED.revision,
-                        state = EXCLUDED.state,
-                        updated_at = EXCLUDED.updated_at
-                    WHERE workflow_runs.owner_id = EXCLUDED.owner_id
-                    """,
-                    (
-                        stored.workflow_id,
-                        self.owner_id,
-                        stored.request_id,
-                        stored.workflow_status.value,
-                        revision,
-                        Json(stored.model_dump(mode="json")),
-                        stored.created_at,
-                        stored.updated_at,
-                    ),
-                )
-                cursor.execute(
-                    """
-                    INSERT INTO workflow_checkpoints
-                        (checkpoint_id, workflow_id, node_name, revision, state)
-                    VALUES (%s, %s, %s, %s, %s)
-                    """,
-                    (
-                        checkpoint_id,
-                        stored.workflow_id,
-                        stored.last_successful_node,
-                        revision,
-                        Json(stored.model_dump(mode="json")),
-                    ),
-                )
-            self.connection.commit()
+                    row = cursor.fetchone()
+                    actual_revision = row["revision"] if row else 0
+                    if actual_revision != expected_revision:
+                        raise VersionConflictError(
+                            f"Expected revision {expected_revision}, found {actual_revision}"
+                        )
+                    cursor.execute(
+                        """
+                        INSERT INTO workflow_runs
+                            (workflow_id, owner_id, request_id, status, revision, state, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (workflow_id) DO UPDATE SET
+                            status = EXCLUDED.status,
+                            revision = EXCLUDED.revision,
+                            state = EXCLUDED.state,
+                            updated_at = EXCLUDED.updated_at
+                        WHERE workflow_runs.owner_id = EXCLUDED.owner_id
+                        """,
+                        (
+                            stored.workflow_id,
+                            self.owner_id,
+                            stored.request_id,
+                            stored.workflow_status.value,
+                            revision,
+                            Json(stored.model_dump(mode="json")),
+                            stored.created_at,
+                            stored.updated_at,
+                        ),
+                    )
+                    cursor.execute(
+                        """
+                        INSERT INTO workflow_checkpoints
+                            (checkpoint_id, workflow_id, node_name, revision, state)
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (
+                            checkpoint_id,
+                            stored.workflow_id,
+                            stored.last_successful_node,
+                            revision,
+                            Json(stored.model_dump(mode="json")),
+                        ),
+                    )
+                connection.commit()
         except VersionConflictError:
-            self.connection.rollback()
             raise
         except Exception as exc:
-            self.connection.rollback()
             raise CheckpointError("Unable to persist workflow checkpoint") from exc
         return Checkpoint(
             checkpoint_id=checkpoint_id,
@@ -210,9 +219,10 @@ class PostgresCheckpointStore(CheckpointStore):
 
     def _load(self, query: str, params: tuple) -> Checkpoint | None:
         try:
-            with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(query, params)
-                row = cursor.fetchone()
+            with self._connection_factory() as connection:
+                with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                    cursor.execute(query, params)
+                    row = cursor.fetchone()
             if not row:
                 return None
             raw_state = row["state"]
@@ -231,45 +241,45 @@ class PostgresCheckpointStore(CheckpointStore):
 
     def invalidate_after(self, workflow_id: str, revision: int) -> int:
         try:
-            with self.connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    DELETE FROM workflow_checkpoints
-                    WHERE workflow_id = %s AND revision > %s
-                      AND workflow_id IN (
-                          SELECT workflow_id FROM workflow_runs WHERE owner_id = %s
-                      )
-                    """,
-                    (workflow_id, revision, self.owner_id),
-                )
-                removed = cursor.rowcount
-                cursor.execute(
-                    """
-                    UPDATE workflow_runs
-                    SET revision = %s,
-                        state = (
-                            SELECT state FROM workflow_checkpoints
-                            WHERE workflow_id = %s AND revision = %s
+            with self._connection_factory() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        DELETE FROM workflow_checkpoints
+                        WHERE workflow_id = %s AND revision > %s
+                          AND workflow_id IN (
+                              SELECT workflow_id FROM workflow_runs WHERE owner_id = %s
+                          )
+                        """,
+                        (workflow_id, revision, self.owner_id),
+                    )
+                    removed = cursor.rowcount
+                    cursor.execute(
+                        """
+                        UPDATE workflow_runs
+                        SET revision = %s,
+                            state = (
+                                SELECT state FROM workflow_checkpoints
+                                WHERE workflow_id = %s AND revision = %s
+                            ),
+                            status = (
+                                SELECT state->>'workflow_status' FROM workflow_checkpoints
+                                WHERE workflow_id = %s AND revision = %s
+                            ),
+                            updated_at = NOW()
+                        WHERE workflow_id = %s AND owner_id = %s
+                        """,
+                        (
+                            revision,
+                            workflow_id,
+                            revision,
+                            workflow_id,
+                            revision,
+                            workflow_id,
+                            self.owner_id,
                         ),
-                        status = (
-                            SELECT state->>'workflow_status' FROM workflow_checkpoints
-                            WHERE workflow_id = %s AND revision = %s
-                        ),
-                        updated_at = NOW()
-                    WHERE workflow_id = %s AND owner_id = %s
-                    """,
-                    (
-                        revision,
-                        workflow_id,
-                        revision,
-                        workflow_id,
-                        revision,
-                        workflow_id,
-                        self.owner_id,
-                    ),
-                )
-            self.connection.commit()
-            return removed
+                    )
+                connection.commit()
+                return removed
         except Exception as exc:
-            self.connection.rollback()
             raise CheckpointError("Unable to invalidate checkpoints") from exc

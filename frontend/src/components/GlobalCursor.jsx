@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 
 export default function GlobalCursor() {
   const cursorRef = useRef(null);
+  const isInteractiveRef = useRef(false);
 
   useEffect(() => {
     // Only disable custom cursor on touch/mobile devices
@@ -11,23 +12,30 @@ export default function GlobalCursor() {
 
     document.body.classList.add('tf-global-cursor-active');
 
-    const updateCursorPosition = (clientX, clientY) => {
+    // pointermove is a superset of mousemove (also covers pen/stylus) -- a
+    // single mouse movement was firing this handler twice (once per event
+    // type registered below), doubling the per-frame work for zero benefit.
+    const handlePointerMove = (event) => {
       if (cursorRef.current) {
-        cursorRef.current.style.transform = `translate3d(${clientX}px,${clientY}px,0)`;
+        cursorRef.current.style.transform = `translate3d(${event.clientX}px,${event.clientY}px,0)`;
         cursorRef.current.style.opacity = '1';
       }
     };
 
-    const handlePointerMove = (event) => {
-      updateCursorPosition(event.clientX, event.clientY);
-    };
-
     const handlePointerOver = (event) => {
       if (!cursorRef.current || !event.target) return;
-      const interactive = event.target.closest(
+      const interactive = Boolean(event.target.closest(
         'button, a, input, textarea, select, [role="button"], [role="tab"], [data-cursor="interactive"], .cursor-pointer'
-      );
-      cursorRef.current.classList.toggle('interactive', Boolean(interactive));
+      ));
+      // pointerover fires for every DOM element boundary the pointer
+      // crosses, not just genuine enter/leave of an interactive element --
+      // writing classList unconditionally forced a style recalculation on
+      // every single crossing even when the interactive state hadn't
+      // changed. Only touch the DOM when the state actually flips.
+      if (interactive !== isInteractiveRef.current) {
+        isInteractiveRef.current = interactive;
+        cursorRef.current.classList.toggle('interactive', interactive);
+      }
     };
 
     const handleMouseLeave = () => {
@@ -36,14 +44,12 @@ export default function GlobalCursor() {
       }
     };
 
-    window.addEventListener('mousemove', handlePointerMove, { passive: true });
     window.addEventListener('pointermove', handlePointerMove, { passive: true });
     document.addEventListener('pointerover', handlePointerOver, { passive: true });
     document.documentElement.addEventListener('mouseleave', handleMouseLeave);
 
     return () => {
       document.body.classList.remove('tf-global-cursor-active');
-      window.removeEventListener('mousemove', handlePointerMove);
       window.removeEventListener('pointermove', handlePointerMove);
       document.removeEventListener('pointerover', handlePointerOver);
       document.documentElement.removeEventListener('mouseleave', handleMouseLeave);

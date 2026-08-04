@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from fastapi import Depends
 from core.database import get_db_connection
 from repositories.profile_repository import ProfileRepository
@@ -19,6 +20,24 @@ def get_user_db_connection(
     with conn.cursor() as cur:
         cur.execute("SET request.jwt.claim.sub = %s", (user["id"],))
     return conn
+
+_db_context = contextmanager(get_db_connection)
+
+@contextmanager
+def user_scoped_db_context(user_id: str):
+    """Short-lived, RLS-scoped connection for use OUTSIDE FastAPI's request-scoped
+    Depends() DI graph. FastAPI caches Depends(get_db_connection) per-request, so
+    any route that resolves repos via the Depends() chain above holds ONE pooled
+    connection for the entire request -- fine for a quick read/write, but a real
+    problem for a route that also does slow synchronous LLM/Playwright work in
+    between (see docs/KNOWN_ISSUES.md ISSUE-005). Routes doing that should instead
+    open one of these around just the DB read, run the slow work with no
+    connection held at all, then open a fresh one around the DB write. Mirrors
+    get_user_db_connection's RLS claim setup exactly."""
+    with _db_context() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SET request.jwt.claim.sub = %s", (user_id,))
+        yield conn
 
 def get_profile_repository(db = Depends(get_user_db_connection)) -> ProfileRepository:
     return ProfileRepository(db)
@@ -75,4 +94,17 @@ def get_tailoring_service(
         profile_repo=profile_repo,
         audit_repo=audit_repo,
         ai_service=ai_service
+    )
+
+def build_tailoring_service(conn) -> TailoringService:
+    """Construct a TailoringService bound to a caller-supplied connection,
+    for routes that manage connection lifetime manually via
+    user_scoped_db_context() instead of FastAPI's Depends() graph."""
+    return TailoringService(
+        tailor_repo=TailoringRepository(conn),
+        resume_repo=ResumeRepository(conn),
+        job_repo=JobRepository(conn),
+        profile_repo=ProfileRepository(conn),
+        audit_repo=AuditRepository(conn),
+        ai_service=AIService()
     )

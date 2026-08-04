@@ -273,87 +273,97 @@ async def api_analyze_job(
 async def api_compare(
     request: CompareRequest,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
-    repo: ResumeRepository = Depends(get_resume_repository),
-    ats_repo: ATSRepository = Depends(get_ats_repository),
-    conn = Depends(get_db_connection),
 ):
+    # Deliberately not using Depends(get_resume_repository)/Depends(get_ats_repository)/
+    # Depends(get_db_connection) -- those resolve to ONE connection held for this
+    # entire request. The LLM call below can take several seconds; each DB phase
+    # instead opens (and closes) its own short-lived connection so nothing is held
+    # open across it. See docs/KNOWN_ISSUES.md ISSUE-005.
     try:
-        usage = UsageService(conn)
-        usage.require_available(user["id"], "resume_generation")
         from services.resume.scoring import ATSScoringEngine
         from app.ai_service import generate_tailoring_patch, apply_tailoring_patch
+        from api.dependencies import user_scoped_db_context
         import re
 
         resume_id = request.resume_id
         jd_id = request.job.get("id")
 
-        resume_data = normalize_resume_payload(request.resume)
-        if not resume_data.get("experience") and not resume_data.get("education"):
-            db_record = repo.get_by_id(resume_id, user["id"]) if resume_id else repo.get_active(user["id"])
-            if not db_record and resume_id:
-                db_record = repo.get_active(user["id"])
-            if db_record:
-                resume_data = normalize_resume_payload(db_record)
+        # Phase 1: quick reads (usage check, resume lookup, cache lookup). May
+        # also return early entirely on a cache hit, all within this one connection.
+        with user_scoped_db_context(user["id"]) as conn:
+            repo = ResumeRepository(conn)
+            ats_repo = ATSRepository(conn)
+            usage = UsageService(conn)
+            usage.require_available(user["id"], "resume_generation")
 
-        resume = ResumeStructure(**resume_data)
-        job = JobAnalysis(**normalize_job_payload(request.job))
-        from services.resume.tailoring_cache import (
-            TAILORING_ENGINE_VERSION,
-            canonical_selected_sections,
-            tailoring_cache_matches,
-        )
-        selected_sections = canonical_selected_sections(request.selected_sections)
+            resume_data = normalize_resume_payload(request.resume)
+            if not resume_data.get("experience") and not resume_data.get("education"):
+                db_record = repo.get_by_id(resume_id, user["id"]) if resume_id else repo.get_active(user["id"])
+                if not db_record and resume_id:
+                    db_record = repo.get_active(user["id"])
+                if db_record:
+                    resume_data = normalize_resume_payload(db_record)
 
-        cached_analysis = None
-        if resume_id and jd_id:
-            try:
-                cached_analysis = ats_repo.get_cached_analysis(resume_id, jd_id, ATSScoringEngine.ENGINE_VERSION)
-            except Exception as e:
-                print(f"[ATS-CACHE][BACKEND] Failed to lookup cache: {e}")
-
-        cached_breakdown = (cached_analysis or {}).get("breakdown_json") or {}
-        if cached_analysis and tailoring_cache_matches(
-            cached_breakdown, selected_sections
-        ):
-            breakdown_json = cached_analysis.get("breakdown_json") or {}
-            resume_match_score = cached_analysis.get("resume_match_score") or 0
-            ats_score_before = cached_analysis.get("ats_score") or cached_analysis.get("overall_score") or 0
-            
-            score_after = breakdown_json.get("ats_score_after") or ats_score_before
-            resume_match_after = breakdown_json.get("resume_match_after") or resume_match_score
-            patch_data = breakdown_json.get("patch") or {}
-            changes_made = breakdown_json.get("changes_made") or []
-            
-            suggestion_impacts = []
-            try:
-                impacts = ats_repo.get_suggestion_impacts(cached_analysis["id"])
-                suggestion_impacts = [
-                    {
-                        "suggestion_id": imp["suggestion_id"],
-                        "score_delta": float(imp["score_delta"]),
-                        "category": imp["category"],
-                        "explanation": imp["explanation"]
-                    }
-                    for imp in impacts
-                ]
-            except Exception as e:
-                print(f"[ATS-CACHE][BACKEND] Failed to lookup suggestion impacts: {e}")
-
-            usage.consume_usage(user["id"], "resume_generation", metadata={"resume_id": resume_id, "job_id": jd_id, "cached": True})
-            return TailoringReport(
-                changes_made=changes_made,
-                resume_match_before=resume_match_score,
-                resume_match_after=resume_match_after,
-                ats_score_before=ats_score_before,
-                ats_score_after=score_after,
-                patch=ResumePatch(**patch_data),
-                ats_analysis_id=str(cached_analysis["id"]),
-                breakdown_before=breakdown_json.get("breakdown_before") or {},
-                breakdown_after=breakdown_json.get("breakdown_after") or {},
-                suggestion_impacts=suggestion_impacts,
-                tailoring_audit=breakdown_json.get("tailoring_audit") or {},
+            resume = ResumeStructure(**resume_data)
+            job = JobAnalysis(**normalize_job_payload(request.job))
+            from services.resume.tailoring_cache import (
+                TAILORING_ENGINE_VERSION,
+                canonical_selected_sections,
+                tailoring_cache_matches,
             )
+            selected_sections = canonical_selected_sections(request.selected_sections)
 
+            cached_analysis = None
+            if resume_id and jd_id:
+                try:
+                    cached_analysis = ats_repo.get_cached_analysis(resume_id, jd_id, ATSScoringEngine.ENGINE_VERSION)
+                except Exception as e:
+                    print(f"[ATS-CACHE][BACKEND] Failed to lookup cache: {e}")
+
+            cached_breakdown = (cached_analysis or {}).get("breakdown_json") or {}
+            if cached_analysis and tailoring_cache_matches(
+                cached_breakdown, selected_sections
+            ):
+                breakdown_json = cached_analysis.get("breakdown_json") or {}
+                resume_match_score = cached_analysis.get("resume_match_score") or 0
+                ats_score_before = cached_analysis.get("ats_score") or cached_analysis.get("overall_score") or 0
+
+                score_after = breakdown_json.get("ats_score_after") or ats_score_before
+                resume_match_after = breakdown_json.get("resume_match_after") or resume_match_score
+                patch_data = breakdown_json.get("patch") or {}
+                changes_made = breakdown_json.get("changes_made") or []
+
+                suggestion_impacts = []
+                try:
+                    impacts = ats_repo.get_suggestion_impacts(cached_analysis["id"])
+                    suggestion_impacts = [
+                        {
+                            "suggestion_id": imp["suggestion_id"],
+                            "score_delta": float(imp["score_delta"]),
+                            "category": imp["category"],
+                            "explanation": imp["explanation"]
+                        }
+                        for imp in impacts
+                    ]
+                except Exception as e:
+                    print(f"[ATS-CACHE][BACKEND] Failed to lookup suggestion impacts: {e}")
+
+                usage.consume_usage(user["id"], "resume_generation", metadata={"resume_id": resume_id, "job_id": jd_id, "cached": True})
+                return TailoringReport(
+                    changes_made=changes_made,
+                    resume_match_before=resume_match_score,
+                    resume_match_after=resume_match_after,
+                    ats_score_before=ats_score_before,
+                    ats_score_after=score_after,
+                    patch=ResumePatch(**patch_data),
+                    ats_analysis_id=str(cached_analysis["id"]),
+                    breakdown_before=breakdown_json.get("breakdown_before") or {},
+                    breakdown_after=breakdown_json.get("breakdown_after") or {},
+                    suggestion_impacts=suggestion_impacts,
+                    tailoring_audit=breakdown_json.get("tailoring_audit") or {},
+                )
+
+        # Cache miss -- LLM call runs with NO DB connection held.
         try:
             from fastapi.concurrency import run_in_threadpool
             comparison = await run_in_threadpool(
@@ -378,122 +388,52 @@ async def api_compare(
         tailored_resume = apply_tailoring_patch(resume, comparison.patch)
         res_after = ATSScoringEngine.calculate_score(tailored_resume, job)
 
+        # Phase 2: writes, on a fresh short-lived connection.
         ats_analysis_id = None
         suggestion_impacts = []
-        if resume_id and jd_id:
-            try:
-                original_score = res_before["ats_score"]
-                breakdown_data = {
-                    "breakdown_before": res_before["breakdown"],
-                    "breakdown_after": res_after["breakdown"],
-                    "resume_match_after": res_after["resume_match_score"],
-                    "ats_score_after": res_after["ats_score"],
-                    "patch": comparison.patch.model_dump(),
-                    "changes_made": comparison.changes_made,
-                    "selected_sections": selected_sections,
-                    "tailoring_engine_version": TAILORING_ENGINE_VERSION,
-                    "tailoring_generation_status": "completed",
-                    "tailoring_audit": getattr(
-                        comparison, "tailoring_audit", {}
-                    ),
-                }
-                
-                analysis_rec = ats_repo.create_analysis(
-                    user_id=user["id"],
-                    resume_id=resume_id,
-                    jd_id=jd_id,
-                    engine_version=ATSScoringEngine.ENGINE_VERSION,
-                    overall_score=res_before["ats_score"],
-                    resume_match_score=res_before["resume_match_score"],
-                    ats_score=res_before["ats_score"],
-                    breakdown=breakdown_data
-                )
-                ats_analysis_id = str(analysis_rec["id"])
+        with user_scoped_db_context(user["id"]) as conn:
+            ats_repo = ATSRepository(conn)
+            usage = UsageService(conn)
+            if resume_id and jd_id:
+                try:
+                    original_score = res_before["ats_score"]
+                    breakdown_data = {
+                        "breakdown_before": res_before["breakdown"],
+                        "breakdown_after": res_after["breakdown"],
+                        "resume_match_after": res_after["resume_match_score"],
+                        "ats_score_after": res_after["ats_score"],
+                        "patch": comparison.patch.model_dump(),
+                        "changes_made": comparison.changes_made,
+                        "selected_sections": selected_sections,
+                        "tailoring_engine_version": TAILORING_ENGINE_VERSION,
+                        "tailoring_generation_status": "completed",
+                        "tailoring_audit": getattr(
+                            comparison, "tailoring_audit", {}
+                        ),
+                    }
 
-                if comparison.patch.summary:
-                    temp = resume.model_copy(deep=True)
-                    temp.summary = comparison.patch.summary
-                    s_new = ATSScoringEngine.calculate_score(temp, job)["ats_score"]
-                    impact_rec = ats_repo.create_suggestion_impact(
-                        suggestion_id="summary:0",
-                        ats_analysis_id=ats_analysis_id,
-                        score_delta=float(s_new - original_score),
-                        category="Keyword Coverage",
-                        explanation="Integrating keywords into the summary matches the JD requirements."
+                    analysis_rec = ats_repo.create_analysis(
+                        user_id=user["id"],
+                        resume_id=resume_id,
+                        jd_id=jd_id,
+                        engine_version=ATSScoringEngine.ENGINE_VERSION,
+                        overall_score=res_before["ats_score"],
+                        resume_match_score=res_before["resume_match_score"],
+                        ats_score=res_before["ats_score"],
+                        breakdown=breakdown_data
                     )
-                    suggestion_impacts.append({
-                        "suggestion_id": impact_rec["suggestion_id"],
-                        "score_delta": float(impact_rec["score_delta"]),
-                        "category": impact_rec["category"],
-                        "explanation": impact_rec["explanation"]
-                    })
-                
-                for item_idx_str, bullets in (comparison.patch.experience or {}).items():
-                    try:
-                        item_idx = int(item_idx_str)
-                        for bullet_idx_str, updated in bullets.items():
-                            bullet_idx = int(bullet_idx_str)
-                            temp = resume.model_copy(deep=True)
-                            if 0 <= item_idx < len(temp.experience):
-                                bullets_list = temp.experience[item_idx].description
-                                if 0 <= bullet_idx < len(bullets_list):
-                                    bullets_list[bullet_idx] = updated
-                                    s_new = ATSScoringEngine.calculate_score(temp, job)["ats_score"]
-                                    impact_rec = ats_repo.create_suggestion_impact(
-                                        suggestion_id=f"experience:{item_idx}:bullet:{bullet_idx}",
-                                        ats_analysis_id=ats_analysis_id,
-                                        score_delta=float(s_new - original_score),
-                                        category="Experience Match",
-                                        explanation=f"Updating experience bullet {bullet_idx + 1} with JD keywords."
-                                    )
-                                    suggestion_impacts.append({
-                                        "suggestion_id": impact_rec["suggestion_id"],
-                                        "score_delta": float(impact_rec["score_delta"]),
-                                        "category": impact_rec["category"],
-                                        "explanation": impact_rec["explanation"]
-                                    })
-                    except Exception:
-                        pass
+                    ats_analysis_id = str(analysis_rec["id"])
 
-                for item_idx_str, bullets in (comparison.patch.projects or {}).items():
-                    try:
-                        item_idx = int(item_idx_str)
-                        for bullet_idx_str, updated in bullets.items():
-                            bullet_idx = int(bullet_idx_str)
-                            temp = resume.model_copy(deep=True)
-                            if 0 <= item_idx < len(temp.projects):
-                                bullets_list = temp.projects[item_idx].description
-                                if 0 <= bullet_idx < len(bullets_list):
-                                    bullets_list[bullet_idx] = updated
-                                    s_new = ATSScoringEngine.calculate_score(temp, job)["ats_score"]
-                                    impact_rec = ats_repo.create_suggestion_impact(
-                                        suggestion_id=f"projects:{item_idx}:bullet:{bullet_idx}",
-                                        ats_analysis_id=ats_analysis_id,
-                                        score_delta=float(s_new - original_score),
-                                        category="Projects",
-                                        explanation=f"Refining project bullet {bullet_idx + 1} with JD keywords."
-                                    )
-                                    suggestion_impacts.append({
-                                        "suggestion_id": impact_rec["suggestion_id"],
-                                        "score_delta": float(impact_rec["score_delta"]),
-                                        "category": impact_rec["category"],
-                                        "explanation": impact_rec["explanation"]
-                                    })
-                    except Exception:
-                        pass
-
-                for skill in (comparison.patch.skills_append or []):
-                    temp = resume.model_copy(deep=True)
-                    if skill not in temp.skills:
-                        temp.skills.append(skill)
+                    if comparison.patch.summary:
+                        temp = resume.model_copy(deep=True)
+                        temp.summary = comparison.patch.summary
                         s_new = ATSScoringEngine.calculate_score(temp, job)["ats_score"]
-                        clean_id = f"skills:{re.sub(r'[^a-z0-9]+', '-', skill.strip().lower())}"
                         impact_rec = ats_repo.create_suggestion_impact(
-                            suggestion_id=clean_id,
+                            suggestion_id="summary:0",
                             ats_analysis_id=ats_analysis_id,
                             score_delta=float(s_new - original_score),
-                            category="Skills Match",
-                            explanation=f"Adding required skill '{skill}'."
+                            category="Keyword Coverage",
+                            explanation="Integrating keywords into the summary matches the JD requirements."
                         )
                         suggestion_impacts.append({
                             "suggestion_id": impact_rec["suggestion_id"],
@@ -501,10 +441,85 @@ async def api_compare(
                             "category": impact_rec["category"],
                             "explanation": impact_rec["explanation"]
                         })
-            except Exception as db_err:
-                print(f"[ATS-SAVE][BACKEND] Failed to persist ATS analysis: {db_err}")
 
-        usage.consume_usage(user["id"], "resume_generation", metadata={"resume_id": resume_id, "job_id": jd_id, "cached": False})
+                    for item_idx_str, bullets in (comparison.patch.experience or {}).items():
+                        try:
+                            item_idx = int(item_idx_str)
+                            for bullet_idx_str, updated in bullets.items():
+                                bullet_idx = int(bullet_idx_str)
+                                temp = resume.model_copy(deep=True)
+                                if 0 <= item_idx < len(temp.experience):
+                                    bullets_list = temp.experience[item_idx].description
+                                    if 0 <= bullet_idx < len(bullets_list):
+                                        bullets_list[bullet_idx] = updated
+                                        s_new = ATSScoringEngine.calculate_score(temp, job)["ats_score"]
+                                        impact_rec = ats_repo.create_suggestion_impact(
+                                            suggestion_id=f"experience:{item_idx}:bullet:{bullet_idx}",
+                                            ats_analysis_id=ats_analysis_id,
+                                            score_delta=float(s_new - original_score),
+                                            category="Experience Match",
+                                            explanation=f"Updating experience bullet {bullet_idx + 1} with JD keywords."
+                                        )
+                                        suggestion_impacts.append({
+                                            "suggestion_id": impact_rec["suggestion_id"],
+                                            "score_delta": float(impact_rec["score_delta"]),
+                                            "category": impact_rec["category"],
+                                            "explanation": impact_rec["explanation"]
+                                        })
+                        except Exception:
+                            pass
+
+                    for item_idx_str, bullets in (comparison.patch.projects or {}).items():
+                        try:
+                            item_idx = int(item_idx_str)
+                            for bullet_idx_str, updated in bullets.items():
+                                bullet_idx = int(bullet_idx_str)
+                                temp = resume.model_copy(deep=True)
+                                if 0 <= item_idx < len(temp.projects):
+                                    bullets_list = temp.projects[item_idx].description
+                                    if 0 <= bullet_idx < len(bullets_list):
+                                        bullets_list[bullet_idx] = updated
+                                        s_new = ATSScoringEngine.calculate_score(temp, job)["ats_score"]
+                                        impact_rec = ats_repo.create_suggestion_impact(
+                                            suggestion_id=f"projects:{item_idx}:bullet:{bullet_idx}",
+                                            ats_analysis_id=ats_analysis_id,
+                                            score_delta=float(s_new - original_score),
+                                            category="Projects",
+                                            explanation=f"Refining project bullet {bullet_idx + 1} with JD keywords."
+                                        )
+                                        suggestion_impacts.append({
+                                            "suggestion_id": impact_rec["suggestion_id"],
+                                            "score_delta": float(impact_rec["score_delta"]),
+                                            "category": impact_rec["category"],
+                                            "explanation": impact_rec["explanation"]
+                                        })
+                        except Exception:
+                            pass
+
+                    for skill in (comparison.patch.skills_append or []):
+                        temp = resume.model_copy(deep=True)
+                        if skill not in temp.skills:
+                            temp.skills.append(skill)
+                            s_new = ATSScoringEngine.calculate_score(temp, job)["ats_score"]
+                            clean_id = f"skills:{re.sub(r'[^a-z0-9]+', '-', skill.strip().lower())}"
+                            impact_rec = ats_repo.create_suggestion_impact(
+                                suggestion_id=clean_id,
+                                ats_analysis_id=ats_analysis_id,
+                                score_delta=float(s_new - original_score),
+                                category="Skills Match",
+                                explanation=f"Adding required skill '{skill}'."
+                            )
+                            suggestion_impacts.append({
+                                "suggestion_id": impact_rec["suggestion_id"],
+                                "score_delta": float(impact_rec["score_delta"]),
+                                "category": impact_rec["category"],
+                                "explanation": impact_rec["explanation"]
+                            })
+                except Exception as db_err:
+                    print(f"[ATS-SAVE][BACKEND] Failed to persist ATS analysis: {db_err}")
+
+            usage.consume_usage(user["id"], "resume_generation", metadata={"resume_id": resume_id, "job_id": jd_id, "cached": False})
+
         return TailoringReport(
             changes_made=comparison.changes_made,
             resume_match_before=res_before["resume_match_score"],
@@ -870,17 +885,20 @@ async def api_build_cover_letter_strategy(request: CoverLetterStrategyRequest):
 async def api_generate_cover_letter_draft(
     request: CoverLetterGenerationRequest,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
-    conn = Depends(get_db_connection),
 ):
     """Phase 3 only: generate one first draft; no review, repair, chat, or export."""
+    # No Depends(get_db_connection) -- see api_cover_letter above for the same
+    # pattern: short-lived connections only around the usage check/consume,
+    # not held across the LLM call in between. See docs/KNOWN_ISSUES.md ISSUE-005.
     from fastapi.concurrency import run_in_threadpool
     try:
-        usage = UsageService(conn)
-        usage.require_available(user["id"], "cover_letter_generation")
+        with _db_context() as conn:
+            UsageService(conn).require_available(user["id"], "cover_letter_generation")
         result = await run_in_threadpool(
             generate_cover_letter_draft, request
         )
-        usage.consume_usage(user["id"], "cover_letter_generation", metadata={"source": "cover-letter/generate"})
+        with _db_context() as conn:
+            UsageService(conn).consume_usage(user["id"], "cover_letter_generation", metadata={"source": "cover-letter/generate"})
         return result
     except ValueError as exc:
         raise HTTPException(

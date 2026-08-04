@@ -9,8 +9,10 @@ from .registry import NodeRegistry
 workflow_node_registry = NodeRegistry()
 
 
-def build_workflow_engine(connection, *, owner_id: str) -> WorkflowEngine:
+def build_workflow_engine(connection_factory, *, owner_id: str) -> WorkflowEngine:
+    """connection_factory: zero-arg callable returning a context manager that
+    yields a connection -- see PostgresCheckpointStore for why."""
     return WorkflowEngine(
         registry=workflow_node_registry,
-        checkpoint_store=PostgresCheckpointStore(connection, owner_id=owner_id),
+        checkpoint_store=PostgresCheckpointStore(connection_factory, owner_id=owner_id),
     )

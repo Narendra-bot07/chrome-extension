@@ -10,7 +10,7 @@ import uuid
 
 from core.security import verify_supabase_jwt
 from core.constants import MAX_FILE_SIZE_BYTES, SUPPORTED_FILE_EXTENSIONS
-from api.dependencies import get_resume_repository, get_storage_service
+from api.dependencies import get_resume_repository, get_storage_service, user_scoped_db_context
 from repositories.resume_repository import ResumeRepository
 from services.storage.file_service import FileService
 from services.resume.parser import ResumeParser
@@ -81,15 +81,21 @@ def _resume_intelligence_service(
     user_id: str,
     repo: ResumeRepository,
     storage: FileService,
-    conn,
-    api_key: str | None = None,
 ) -> SelectedResumeIntelligenceService:
     parser_service = AIService()
     semantic_analyzer = DeepSeekSemanticAnalyzer()
     return SelectedResumeIntelligenceService(
         repository=repo,
         storage=storage,
-        checkpoint_store=PostgresCheckpointStore(conn, owner_id=user_id),
+        # PostgresCheckpointStore takes a connection FACTORY, not one bound
+        # connection: this pipeline runs multiple LLM steps and writes a
+        # checkpoint after each one, so a single persistent connection here
+        # would sit open (and idle) for the entire multi-step, multi-second
+        # duration instead of just each individual checkpoint write. See
+        # docs/KNOWN_ISSUES.md ISSUE-005.
+        checkpoint_store=PostgresCheckpointStore(
+            lambda: user_scoped_db_context(user_id), owner_id=user_id
+        ),
         structured_parser=parser_service.parse_resume,
         semantic_analyzer=semantic_analyzer,
     )
@@ -102,14 +108,11 @@ def build_selected_resume_intelligence(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository),
     storage: FileService = Depends(get_storage_service),
-    conn=Depends(get_db_connection),
 ):
     service = _resume_intelligence_service(
         user_id=user["id"],
         repo=repo,
         storage=storage,
-        conn=conn,
-        api_key=api_key,
     )
     return service.run(
         request_id=payload.request_id,
@@ -132,13 +135,11 @@ def confirm_selected_resume_intelligence(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository),
     storage: FileService = Depends(get_storage_service),
-    conn=Depends(get_db_connection),
 ):
     service = _resume_intelligence_service(
         user_id=user["id"],
         repo=repo,
         storage=storage,
-        conn=conn,
     )
     return service.confirm(
         workflow_id=workflow_id,
