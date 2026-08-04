@@ -4,6 +4,17 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.11.2] - 2026-08-04
+
+### Fixed
+- **Mock payment checkout tab visibly stuck on its own "Redirecting to Secure Checkout" placeholder, and mislabeled "with Stripe..." even when Razorpay was selected**: `PaymentModal.jsx` opens a placeholder popup tab synchronously (so the browser's popup blocker can't interfere with a later, async-derived navigation) and writes static HTML into it while the real checkout URL is being fetched. Two issues: (1) that placeholder hardcoded "with Stripe..." regardless of which provider was actually chosen — now interpolates the real provider name. (2) For the no-real-payment-provider-configured fallback path (confirmed via `test_razorpay_api.py` this session: Razorpay's live API rejects subscription creation with a bare "Validation failed" for all paid plans, so every checkout currently falls back to this path), `checkout_url` just points back at our own `/subscription` route — there's no actual external checkout page, so `SubscriptionPage.jsx` was still sending the placeholder tab through a full cross-document navigation to load the whole SPA a second time, which is exactly the failure mode that could leave that tab visibly stuck instead of showing the loaded app. `handleExecutePayment` now detects this mock-fallback case directly (by its known `sub_mock_..._123` id or a `mock_` marker in the URL) and handles it entirely in the current tab — closing the placeholder tab and calling the existing verify/activate flow in place — instead of round-tripping through a second tab navigation that never needed to happen.
+- Added `backend/test_razorpay_api.py` (mirroring the existing `test_stripe_api.py` pattern) to independently verify Razorpay credentials, live authentication, `create_checkout` for every real plan, and webhook signature verification/rejection.
+
+### Known issue (not fixed, requires action on the Razorpay account, not code)
+- Live Razorpay subscription creation currently fails for every paid plan with a bare `"Validation failed"` from Razorpay's API — confirmed the configured plan IDs are valid and exist on the account (`GET /v1/plans/{id}` returns 200), so this isn't a code-side misconfiguration. Likely the account's Subscriptions feature isn't fully activated for live mode. Until resolved, all Razorpay checkouts silently use the mock success fallback (see above) instead of taking a real payment.
+
+---
+
 ## [3.11.1] - 2026-08-04
 
 ### Fixed

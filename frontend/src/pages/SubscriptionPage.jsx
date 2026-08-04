@@ -261,6 +261,29 @@ export default function SubscriptionPage() {
         provider
       });
 
+      // Neither payment provider has real credentials fully wired up for this
+      // checkout (see backend/app/billing/providers/*.py's no-API-key or
+      // failed-live-API-call fallback branches) -- when that happens,
+      // checkout_url just points back at our own /subscription route with a
+      // payment=mock_..._success marker; there's no actual external checkout
+      // page to send the user to. This used to still open a brand-new tab and
+      // navigate it there via a full page load, which was fragile (the tab
+      // could be left showing its own placeholder instead of the loaded app)
+      // and pointless, since nothing external happens on this path. Handle it
+      // entirely in the current tab instead of round-tripping through one.
+      const isMockCheckout = res.subscription_id === 'sub_mock_razorpay_123'
+        || res.subscription_id === 'sub_mock_stripe_123'
+        || String(res.checkout_url || '').includes('mock_');
+      if (isMockCheckout) {
+        if (checkoutTab && !checkoutTab.closed) checkoutTab.close();
+        await handleVerifyAndActivate(planId);
+        setPaymentBanner({
+          type: 'success',
+          message: 'Payment completed successfully! Your subscription features and credits are now active.'
+        });
+        return;
+      }
+
       // Handle Razorpay Inline SDK Checkout in new tab or hosted checkout
       if (res.provider === 'razorpay' && res.subscription_id && (!res.checkout_url || !res.checkout_url.startsWith('http'))) {
         const rzpKey = res.key_id || 'rzp_test_TKlgFVnPx4QCdU';

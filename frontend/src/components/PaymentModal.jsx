@@ -143,7 +143,7 @@ export function PaymentModal({ isOpen, onClose, plan, onSelectPayment }) {
                 </div>
                 <div class="spinner-ring"></div>
                 <h2>Redirecting to Secure Checkout</h2>
-                <p>Establishing encrypted payment session with Stripe...</p>
+                <p>Establishing encrypted payment session with ${provider === 'razorpay' ? 'Razorpay' : 'Stripe'}...</p>
                 <div class="badge">🔒 256-Bit SSL Encrypted</div>
               </div>
             </body>
