@@ -153,6 +153,30 @@ class SessionService:
             self.conn.commit()
             return cur.rowcount > 0
 
+    def is_session_refreshable(self, session_id: str) -> bool:
+        """
+        Live authority check used by the refresh-token race fallback: is this
+        session still legitimate to issue a fresh token pair for, independent
+        of whichever refresh_token_hash currently sits on the row (a
+        concurrent request from another tab of the same session may have
+        already rotated it away by the time this check runs).
+        """
+        if not session_id:
+            return False
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT is_revoked, refresh_expires_at
+                FROM public.user_sessions
+                WHERE session_id = %s
+            """, (session_id,))
+            session = cur.fetchone()
+            if not session or session["is_revoked"]:
+                return False
+            refresh_expires_at = session["refresh_expires_at"]
+            if refresh_expires_at and refresh_expires_at.replace(tzinfo=None) <= datetime.datetime.utcnow():
+                return False
+            return True
+
     def verify_and_update_session(self, session_id: str) -> bool:
         """
         Verify if a session is valid. If valid, update last_active asynchronously if older than 5 minutes.

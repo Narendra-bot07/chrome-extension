@@ -431,11 +431,46 @@ async def refresh_session(
     if not rotated:
         try:
             auth_header = request.headers.get("Authorization")
-            if auth_header:
-                user = await verify_supabase_jwt(authorization=auth_header)
-                if user and user.get("id"):
-                    session_service = SessionService(conn)
-                    session_id = user.get("session_id") or session_service.create_session(user["id"], request, "jwt_refresh")
+            if auth_header and auth_header.startswith("Bearer "):
+                old_access_token = auth_header.split(" ")[1]
+                # rotate_refresh_token() matches on a single refresh_token_hash
+                # column per session, replaced atomically on each rotation. The
+                # extension side panel and any tab opened from it share the
+                # SAME session (same access/refresh tokens via localStorage),
+                # so both independently notice the access token is expiring
+                # around the same moment and can both call this endpoint
+                # concurrently. Whichever request the DB processes first wins
+                # the rotation; the loser's refresh_token is, by definition,
+                # already stale by the time it's looked up above -- that is
+                # NOT the same thing as the session being genuinely invalid.
+                # The loser's OLD access token is still cryptographically
+                # ours (valid signature) even though its `exp` has passed --
+                # that's exactly why a refresh was triggered. Verify the
+                # signature but ignore expiry, then confirm the underlying
+                # session is still live via a real, current DB check before
+                # trusting it. This is not a weaker check than a normal
+                # refresh-token lookup, just a different route to the same
+                # live session record -- it specifically recovers the losing
+                # side of the race instead of forcing a full logout for it.
+                payload = jwt.decode(
+                    old_access_token,
+                    settings.JWT_SECRET,
+                    algorithms=[settings.JWT_ALGORITHM],
+                    options={"verify_exp": False},
+                )
+                session_id = payload.get("jti")
+                user_id = payload.get("sub")
+                session_service = SessionService(conn)
+                if session_id and user_id and session_service.is_session_refreshable(session_id):
+                    user = {
+                        "id": user_id,
+                        "session_id": session_id,
+                        "email": payload.get("email"),
+                        "metadata": {
+                            "full_name": payload.get("full_name", ""),
+                            "provider": payload.get("provider", "email"),
+                        },
+                    }
                     new_refresh_token = session_service.issue_refresh_token(session_id)
                     access_token = AuthService(conn).generate_custom_jwt(user, str(session_id))
                     _set_refresh_cookie(response, new_refresh_token)

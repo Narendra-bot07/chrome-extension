@@ -4,6 +4,27 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.7.8] - 2026-08-04
+
+### Fixed
+- **`psycopg2.pool.PoolError: connection pool exhausted` under load, root cause of the numeric mismatch**: `core/database.py`'s `ThreadedConnectionPool` was configured with `maxconn=50`, but Supabase's own connection pooler for this project's compute tier (Nano) only grants **15** real Postgres connections total (Database Settings → Connection Pooling → "Connection pool size"). Asking psycopg2's own pool for up to 50 connections never gets more than 15 real ones — the 16th+ concurrent checkout attempt hangs/fails against Supabase's pooler instead of failing cleanly against this pool's own ceiling. `maxconn` is now `12`, leaving a small margin below Supabase's actual 15-connection limit for other clients (migrations, Supabase Studio). This complements, but does not replace, the connection-hold-time fixes in [KNOWN_ISSUES.md](KNOWN_ISSUES.md) ISSUE-005 — the two problems compound: too few real connections available, combined with several endpoints still holding one for seconds during slow LLM/Playwright work.
+
+---
+
+## [3.7.7] - 2026-08-04
+
+### Fixed
+- **"Add Photo" upload placeholder (dashed circle, camera icon) appearing in read-only resume previews for candidates who never uploaded a photo**: `TailorRender.tsx`'s `renderProfilePhoto()` intentionally shows this clickable placeholder to invite a photo upload, but only suppresses it when the caller passes `isExporting={true}` (the actual PDF export path, `PrintLayout.tsx`, already does this correctly). Several other screens render `TailorRender` purely as a **preview** of the final resume — with no photo-upload wiring of their own — but never passed `isExporting`, so the interactive placeholder leaked into contexts meant to represent the final output: the "Preview Studio" download screen (`pages/DownloadPage.jsx`), the template gallery's mini preview cards and full-size zoom modal (`components/TemplateSelectionView.jsx`), the stored-resume preview modal (`components/ResumeDetectionView.jsx`), and the Job Tracker document preview modal (`components/JobTracker/DocumentsTab.jsx`). All four now pass `isExporting`, matching the export renderer's behavior. The live "Edit with AI" review page (`pages/ResumeReviewPage.jsx`) intentionally still allows interactive photo upload/reposition and was left unchanged.
+
+---
+
+## [3.7.6] - 2026-08-04
+
+### Fixed
+- **One of two simultaneously-open extension contexts (a full tab vs. the side panel) getting logged out while the other stayed signed in**, surfacing as `POST /api/v1/auth/refresh` returning `401 Unauthorized` right after a real `401 "Session expired."` on an unrelated request: `SessionService.rotate_refresh_token` (`app/services/session_service.py`) stores exactly one `refresh_token_hash` per session row, atomically replaced on each rotation. The side panel and any tab opened from it share the *same* session (same access/refresh tokens via shared `localStorage`), so both independently notice the access token nearing/past expiry around the same moment and can call `/auth/refresh` concurrently. Whichever request the database processes first wins the rotation; the loser's refresh token is, by definition, already stale by the time it's looked up — that's a *race*, not an actually-invalid session. The endpoint's own fallback path (verify the old access token, issue a fresh refresh token) previously used the strict `verify_supabase_jwt()`, which enforces the JWT's `exp` claim — but the access token being refreshed had, by definition, already expired, so the fallback almost always failed too, permanently logging out the losing tab. Fixed by having the fallback verify the old access token's *signature* only (`jwt.decode(..., options={"verify_exp": False})`), then independently confirming the underlying session is still live via a new `SessionService.is_session_refreshable()` DB check (not revoked, refresh window not expired) before trusting it — recovering the losing side of the race instead of forcing a logout.
+
+---
+
 ## [3.7.5] - 2026-08-04
 
 ### Fixed

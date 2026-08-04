@@ -99,9 +99,10 @@ backend/
 To prevent database connection overhead and eliminate connection pool exhaustion under high concurrency, Tailr4U implements a global thread-safe `ThreadedConnectionPool` singleton.
 
 ### 3.1 Pool Characteristics
-- **Pool Size**: `minconn = 2`, `maxconn = 50` persistent connections.
+- **Pool Size**: `minconn = 2`, `maxconn = 12` persistent connections.
 - **Thread Safety**: Initialized inside a thread lock (`_pool_lock = threading.Lock()`).
 - **Pre-Warming**: Pre-warms connections during application startup in `main.py` lifespan context manager.
+- **`maxconn` must track Supabase's actual pooler ceiling, not be set independently**: Supabase's Database Settings → Connection Pooling → "Connection pool size" caps how many real Postgres connections this project's pooler will ever grant, tied to compute add-on size (15 on the default Nano tier). `maxconn` was previously hardcoded to `50` — asking psycopg2's own pool for more connections than Supabase's pooler will actually grant doesn't create more real connections; it just means the (n+1)th checkout hangs/fails against Supabase's pooler instead of failing cleanly against this pool's own ceiling, which was contributing to the `PoolError: connection pool exhausted` pattern in [KNOWN_ISSUES.md](KNOWN_ISSUES.md) ISSUE-005. `maxconn` is now `12`, a small margin below the real 15-connection limit to leave headroom for other clients (migrations, Supabase Studio). **If the Supabase compute tier changes, `core/database.py`'s `pool_maxconn` must be updated to match the new ceiling.**
 
 ### 3.2 Connection Checkout & Automatic Retry Provider
 

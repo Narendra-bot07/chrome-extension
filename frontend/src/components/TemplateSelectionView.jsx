@@ -72,7 +72,7 @@ const MiniPreview = ({ resume, templateId }) => {
         className="resume-document-light absolute top-0 left-1/2 -translate-x-1/2 w-[816px] h-[1056px] bg-white origin-top scale-[0.24] pointer-events-none select-none"
         style={{ width: '816px', height: '1056px' }}
       >
-        <TailorRender resume={resume} templateName={templateId} disablePhotoModal={true} />
+        <TailorRender resume={resume} templateName={templateId} disablePhotoModal={true} isExporting />
       </div>
       <div className="absolute inset-0 bg-black/[0.02] group-hover:bg-black/[0.04] transition-colors pointer-events-none" />
     </div>
@@ -313,7 +313,7 @@ export default function TemplateSelectionView({ onBack }) {
                 className="w-[816px] bg-white shadow-2xl ring-1 ring-zinc-200/50 shrink-0 select-none"
                 style={{ width: '816px' }}
               >
-                <TailorRender resume={displayResume} templateName={zoomModalTemplate.id} />
+                <TailorRender resume={displayResume} templateName={zoomModalTemplate.id} isExporting />
               </div>
             </div>
 

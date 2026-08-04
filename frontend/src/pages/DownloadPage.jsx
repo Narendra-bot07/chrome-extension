@@ -497,10 +497,11 @@ function DownloadPage({ onClose }) {
                   transform: `scale(${zoomLevel})`
                 }}
               >
-                <TailorRender 
-                  resume={compressedResume} 
-                  templateName={selectedTemplate || 'ExecutiveATS'} 
+                <TailorRender
+                  resume={compressedResume}
+                  templateName={selectedTemplate || 'ExecutiveATS'}
                   layoutLevel={layoutLevel}
+                  isExporting
                 />
               </div>
             </div>

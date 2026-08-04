@@ -20,14 +20,24 @@ def get_db_pool() -> ThreadedConnectionPool:
             if _db_pool is None:
                 if not settings.DATABASE_URL:
                     raise ValueError("DATABASE_URL is not set in environment settings.")
-                logger.info("[DATABASE_POOL] Pre-warming ThreadedConnectionPool (minconn=2, maxconn=50)...")
+                # maxconn must never exceed what Supabase's own pooler will actually
+                # grant this project (Database Settings -> Connection Pooling ->
+                # "Connection pool size", tied to compute add-on size -- 15 on the
+                # default Nano tier). Asking psycopg2's own pool for more than that
+                # doesn't get you more real connections; it just means the (n+1)th
+                # checkout hangs/fails against Supabase's pooler instead of failing
+                # cleanly against this pool's own ceiling. Keep a small margin below
+                # the real limit for other clients (migrations, Supabase Studio, etc).
+                # If the Supabase compute tier changes, update this to match.
+                pool_maxconn = 12
+                logger.info(f"[DATABASE_POOL] Pre-warming ThreadedConnectionPool (minconn=2, maxconn={pool_maxconn})...")
                 dsn = settings.DATABASE_URL
                 if "connect_timeout" not in dsn.lower():
                     sep = "&" if "?" in dsn else "?"
                     dsn = f"{dsn}{sep}connect_timeout=10&keepalives=1"
                 _db_pool = ThreadedConnectionPool(
                     minconn=2,
-                    maxconn=50,
+                    maxconn=pool_maxconn,
                     dsn=dsn
                 )
                 logger.info("[DATABASE_POOL] Connection pool initialized successfully.")

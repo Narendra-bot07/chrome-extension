@@ -1348,6 +1348,7 @@ export default function ResumeDetectionView({
                   <TailorRender
                     resume={previewResume.parsed_content || previewResume}
                     templateName="ExecutiveATS"
+                    isExporting
                   />
                 </div>
               </div>

@@ -391,7 +391,7 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
           <div className="flex-1 bg-zinc-100 dark:bg-zinc-950 overflow-auto p-8 flex justify-center items-start custom-scrollbar">
             <div className="w-[816px] min-h-[1056px] bg-white shadow-2xl rounded-sm p-10 md:p-14 text-zinc-900">
               {previewModalType === 'resume' ? (
-                <TailorRender resume={displayResume} templateName={application.template || 'ExecutiveATS'} />
+                <TailorRender resume={displayResume} templateName={application.template || 'ExecutiveATS'} isExporting />
               ) : (
                 <CoverLetterRender
                   coverLetter={activeCoverLetterText}
