@@ -9,7 +9,9 @@
       "Bash(node --check /tmp/validation_script_check.js)",
       "Bash(python -c ' *)",
       "Bash(node --check validation_script_check.js)",
-      "Bash(rm -f validation_script_check.js)"
+      "Bash(rm -f validation_script_check.js)",
+      "Bash(xargs grep -l \"create_bucket\\\\|storage.create\\\\|original-resumes\\\\|generated-resumes\\\\|template-previews\")",
+      "Bash(python -m py_compile api/v1/applications.py services/storage/supabase_storage.py)"
     ]
   }
 }

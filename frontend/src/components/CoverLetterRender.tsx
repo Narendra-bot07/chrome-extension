@@ -87,9 +87,17 @@ export function CoverLetterRender({
   const date = coverLetter.date || new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   const signoff = coverLetter.signoff || 'Sincerely,';
 
+  // Cover letters have accumulated three incompatible saved shapes across
+  // different generation paths: the legacy /api/cover-letter endpoint
+  // returns { cover_letter: string }, the newer Phase-3 pipeline returns
+  // { content: string }, and some call sites build a { body: string } split.
+  // A snapshot saved via one path but read with only one of these checked
+  // rendered as a totally empty body (just the hardcoded salutation/signoff
+  // defaults below) even though real generated text existed in a
+  // differently-named field.
   const rawText = typeof coverLetter === 'string'
     ? coverLetter
-    : (coverLetter?.content || coverLetter?.body || '');
+    : (coverLetter?.content || coverLetter?.body || coverLetter?.cover_letter || '');
 
   let bodyText = rawText || '';
   if (salutation && bodyText.includes(salutation)) {

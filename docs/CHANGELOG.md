@@ -4,6 +4,35 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.9.2] - 2026-08-04
+
+### Fixed
+- **`cover-letters` bucket from 3.9.0 never actually appeared in Supabase**: `supabase/migrations/20260727040000_cover_letters_storage_bucket.sql` was correct SQL, but nothing in this repo's actual deployment path applies files under `supabase/migrations/` to the live project — every other real schema/storage change here (confirmed by grepping every existing `migrate_*.py` script in `backend/`) was made by running a standalone Python script directly against `DATABASE_URL`, not through the Supabase CLI migration flow. Added `backend/migrate_cover_letters_storage.py` following that exact established pattern and ran it against the live database: the `cover-letters` bucket, its 4 RLS policies, and `applications.cover_letter_file_path` are now confirmed present (verified by querying `storage.buckets`, `pg_policies`, and `information_schema.columns` directly after running it, not just trusting the script's own success message).
+
+---
+
+## [3.9.1] - 2026-08-04
+
+### Fixed
+- **Payment Status modal stuck on "Payment in Progress" forever with no way to know it had failed to confirm**: `handleVerifyAndActivate`'s polling loop (`pages/SubscriptionPage.jsx`) retried `POST /api/v1/billing/verify-session` every 2 seconds indefinitely while the modal was open, but its `catch` block silently swallowed every failure (`console.error` only) with no cap and no user-visible fallback — a persistently failing check (network hiccup, an expiring token, a webhook that never arrives) left the modal spinning forever with zero indication anything was wrong. Polling now stops after ~2 minutes and transitions to a new "Still Confirming..." state (`components/modals/PaymentStatusModal.jsx`) with a manual "Check Again" action, instead of spinning silently forever.
+
+### ⚠️ Found, not fixed — flagging for a decision before touching payment-critical code
+- **`POST /api/v1/billing/verify-session` (`backend/app/billing/routers/billing.py`) does not verify payment with Stripe/Razorpay at all** — it unconditionally calls `activate_subscription` for whatever plan is requested and always returns `{"status": "success"}`. Since this is the exact endpoint the frontend polls immediately upon opening the payment modal (before the user has done anything in the checkout tab), as currently written it grants the requested paid plan regardless of whether payment ever completes. See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) ISSUE-015.
+- **The Stripe webhook handler (`stripe_webhook` in the same file) hardcodes `plan_id = "pro"`** on every successful `checkout.session.completed` event, regardless of which plan was actually purchased — a Basic buyer gets Pro access; an Elite buyer gets downgraded to Pro.
+
+---
+
+## [3.9.0] - 2026-08-04
+
+### Added
+- **Cover letters are now persisted as real files in Supabase Storage, not just a DB snapshot**: unlike resumes (`original-resumes`/`generated-resumes` buckets), no cover letter was ever uploaded to Storage — only a JSON snapshot in `applications.cover_letter_snapshot`. New migration `20260727040000_cover_letters_storage_bucket.sql` adds a private `cover-letters` bucket (same user-ID-prefixed-path RLS convention as the existing resume buckets) and a `cover_letter_file_path` column on `applications`. `PUT /api/v1/applications/{id}` (`api/v1/applications.py`) now uploads the letter text to `{user_id}/{application_id}.txt` (one file per application, overwritten on regeneration) whenever `cover_letter_snapshot` is included in an update, best-effort (a storage hiccup doesn't fail the save, since the DB snapshot remains the source of truth for rendering). `SupabaseStorageService.upload_file` now sets `upsert: true` so this overwrite-on-regenerate pattern doesn't fail with a "Duplicate" error (harmless for existing resume uploads, which always use a fresh UUID path).
+
+### Fixed
+- **Cover letter preview rendering completely empty** (salutation and signoff with zero body paragraphs) despite the Job Tracker showing "Ready": cover letters have accumulated three incompatible saved shapes across different generation code paths — the legacy `/api/cover-letter` endpoint returns `{ cover_letter: string }`, the newer Phase-3 pipeline returns `{ content: string }`, and some call sites expect a `{ body: string }` split. `CoverLetterRender.tsx`, `CoverLetterPage.jsx`, and `CoverLetterView.jsx` each only checked one or two of these field names, so a snapshot saved via one path but read expecting a different field name's shape rendered with a blank body — real generated text existed, just under a field name the renderer never looked at. All three now check `content`/`body`/`cover_letter` consistently. (`CoverLetterView.jsx` additionally could `TypeError` outright on `coverLetter.body.split(...)` when `.body` was undefined — it isn't currently used anywhere in the app, but is now defensive in case that changes.)
+- **Job Tracker list view fabricating a 60% match score for applications with no computed score**: `Math.round(app.resume_match_score || app.match_score || 60)` treated a genuine `0%` match the same as missing data (`||` on a falsy `0`), and silently displayed a made-up 60% — indistinguishable from a real score — for any application neither field was ever computed for. Now shows `—` when no score has actually been computed.
+
+---
+
 ## [3.8.6] - 2026-08-04
 
 ### Changed

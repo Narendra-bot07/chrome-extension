@@ -9,6 +9,7 @@ export function PaymentStatusModal({ isOpen, status, planName, onClose, onRetry,
   const isPending = status === 'pending' || status === 'processing';
   const isSuccess = status === 'success';
   const isFailed = status === 'failed' || status === 'cancelled';
+  const isUnknown = status === 'unknown';
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-zinc-950/70 backdrop-blur-md p-4 overflow-y-auto animate-in fade-in duration-200">
@@ -77,6 +78,21 @@ export function PaymentStatusModal({ isOpen, status, planName, onClose, onRetry,
           </div>
         )}
 
+        {isUnknown && (
+          <div className="text-center space-y-4 py-3">
+            <div className="w-16 h-16 mx-auto rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center shadow-lg shadow-amber-500/20">
+              <AlertCircle size={36} />
+            </div>
+            <div>
+              <h3 className="text-xl font-black text-zinc-950 dark:text-white">Still Confirming...</h3>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+                We couldn't confirm your payment yet. If you completed checkout, it may still be
+                processing — check <strong className="text-zinc-800 dark:text-zinc-200">{planName}</strong> status again in a moment, or try again if it didn't go through.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Action Controls */}
         <div className="pt-2">
           {isPending && (
@@ -108,6 +124,25 @@ export function PaymentStatusModal({ isOpen, status, planName, onClose, onRetry,
               >
                 Try Upgrade Again
               </button>
+              <button
+                onClick={onClose}
+                className="w-full rounded-xl py-2 text-xs font-bold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          )}
+
+          {isUnknown && (
+            <div className="space-y-2">
+              {onCheckStatus && (
+                <button
+                  onClick={onCheckStatus}
+                  className="w-full rounded-xl py-3 px-4 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-black text-sm shadow-md shadow-indigo-500/20 cursor-pointer transition-all"
+                >
+                  Check Again
+                </button>
+              )}
               <button
                 onClick={onClose}
                 className="w-full rounded-xl py-2 text-xs font-bold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors"

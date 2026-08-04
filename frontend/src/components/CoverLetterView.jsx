@@ -30,8 +30,11 @@ function CoverLetterView({
 
           <p className="font-bold mb-3">{coverLetter.salutation}</p>
           
-          {/* Paragraph break renderer */}
-          {coverLetter.body.split('\n\n').map((para, idx) => (
+          {/* Paragraph break renderer. Not just coverLetter.body -- that field
+              doesn't exist on either of the two actual generation shapes in
+              use (.content from the Phase-3 pipeline, .cover_letter from the
+              legacy endpoint), so this would otherwise crash on `.split`. */}
+          {(coverLetter.body || coverLetter.content || coverLetter.cover_letter || '').split('\n\n').map((para, idx) => (
             <p key={idx} className="mb-3 text-justify">{para}</p>
           ))}
           

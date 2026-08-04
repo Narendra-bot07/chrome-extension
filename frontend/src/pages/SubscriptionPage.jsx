@@ -171,7 +171,23 @@ export default function SubscriptionPage() {
     // Immediately trigger check on modal open
     handleVerifyAndActivate(paymentStatusModal.targetPlanName);
 
+    // Without a cap, a persistently failing verify call (network hiccup, a
+    // stale/expiring token, the backend never receiving the provider's
+    // webhook) left this polling forever with the modal stuck on "Payment in
+    // Progress" -- handleVerifyAndActivate's catch swallows errors silently,
+    // so there was previously no way for the user to ever see anything other
+    // than an infinite spinner. Stop after ~2 minutes and surface an honest
+    // "couldn't confirm yet" state instead.
+    const startedAt = Date.now();
+    const TIMEOUT_MS = 120000;
     const interval = setInterval(() => {
+      if (Date.now() - startedAt >= TIMEOUT_MS) {
+        clearInterval(interval);
+        setPaymentStatusModal(prev => (
+          prev.status === 'pending' ? { ...prev, status: 'unknown' } : prev
+        ));
+        return;
+      }
       handleVerifyAndActivate(paymentStatusModal.targetPlanName);
     }, 2000);
 

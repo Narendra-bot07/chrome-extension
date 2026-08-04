@@ -5,11 +5,28 @@ from datetime import datetime, time, timedelta, timezone
 import logging
 
 from core.security import verify_supabase_jwt
-from api.dependencies import get_application_repository
+from api.dependencies import get_application_repository, get_storage_service
 from repositories.application_repository import ApplicationRepository
 from app.analytics.events.tracking.analytics_service import AnalyticsService
 from core.database import get_db_connection
 from services.notifications import NotificationService
+from services.storage.file_service import FileService
+
+
+def _cover_letter_text(snapshot: Dict[str, Any]) -> str:
+    """Cover letters have accumulated three incompatible saved shapes across
+    different generation paths (legacy CoverLetterResult.cover_letter,
+    GeneratedCoverLetter.content, and a body/salutation/signoff split some
+    call sites use) -- resolve whichever is actually present into plain text
+    for storage, rather than assuming one specific shape."""
+    if not isinstance(snapshot, dict):
+        return str(snapshot or "")
+    text = snapshot.get("content") or snapshot.get("body") or snapshot.get("cover_letter") or ""
+    if not text and (snapshot.get("salutation") or snapshot.get("signoff")):
+        text = "\n\n".join(filter(None, [
+            snapshot.get("salutation"), snapshot.get("body"), snapshot.get("signoff")
+        ]))
+    return text
 
 def calculate_early_morning_reminder_time(event_date_val: str) -> datetime:
     """
@@ -218,6 +235,7 @@ async def update_application(
     request: ApplicationUpdateRequest,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ApplicationRepository = Depends(get_application_repository),
+    storage: FileService = Depends(get_storage_service),
     conn = Depends(get_db_connection)
 ):
     try:
@@ -230,6 +248,28 @@ async def update_application(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Application session not found."
             )
+
+        # Cover letters previously only ever lived as a JSON snapshot in this
+        # row -- unlike resumes (original-resumes/generated-resumes buckets),
+        # no actual file was ever persisted to Storage. Deterministic path
+        # (one object per application, not per-version) so re-saves overwrite
+        # rather than accumulate. Best-effort: a storage hiccup must not fail
+        # the application save itself, since the snapshot column above is
+        # already the source of truth for rendering.
+        if request.cover_letter_snapshot:
+            letter_text = _cover_letter_text(request.cover_letter_snapshot)
+            if letter_text.strip():
+                try:
+                    file_path = f"{user['id']}/{id}.txt"
+                    storage.upload_file(
+                        "cover-letters", file_path,
+                        letter_text.encode("utf-8"), "text/plain",
+                    )
+                    record = repo.update(id, user["id"], {"cover_letter_file_path": file_path}) or record
+                except Exception:
+                    logger.exception(
+                        "Application %s saved, but cover letter file upload failed", id
+                    )
             
         if request.current_stage:
             event_type = "APPLICATION_MOVED"

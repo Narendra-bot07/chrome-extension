@@ -7,10 +7,17 @@ class SupabaseStorageService(FileService):
         self.supabase = supabase
 
     def upload_file(self, bucket: str, path: str, data: bytes, content_type: str) -> str:
+        # upsert: without it, Supabase Storage's upload() rejects a second
+        # write to the same path with a "Duplicate" error. Existing callers
+        # (resume uploads) always use a fresh UUID-prefixed path, so this
+        # never changes their behavior -- but callers that intentionally use
+        # a deterministic, one-object-per-record path (e.g. cover letters,
+        # one file per application, overwritten on every regeneration) need
+        # re-uploads to succeed rather than fail with a conflict.
         self.supabase.storage.from_(bucket).upload(
             path=path,
             file=data,
-            file_options={"content-type": content_type}
+            file_options={"content-type": content_type, "upsert": "true"}
         )
         return path
 

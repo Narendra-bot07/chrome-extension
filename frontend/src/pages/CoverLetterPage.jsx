@@ -76,9 +76,12 @@ function CoverLetterVectorRender({ coverLetter, context, templateKey = 'classic_
   const date = coverLetter.date || new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   const signoff = coverLetter.signoff || 'Sincerely,';
 
+  // See CoverLetterRender.tsx for why all three field names are checked --
+  // cover letters have three incompatible saved shapes depending on which
+  // generation path produced them.
   const rawText = typeof coverLetter === 'string'
     ? coverLetter
-    : (coverLetter?.content || coverLetter?.body || (typeof generatedCoverLetter === 'object' ? generatedCoverLetter?.content : ''));
+    : (coverLetter?.content || coverLetter?.body || coverLetter?.cover_letter || (typeof generatedCoverLetter === 'object' ? generatedCoverLetter?.content : ''));
 
   let bodyText = rawText || '';
   if (salutation && bodyText.includes(salutation)) {

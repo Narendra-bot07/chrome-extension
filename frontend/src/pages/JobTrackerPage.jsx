@@ -673,7 +673,15 @@ function JobTrackerContent() {
                         {cReady ? <span className="text-teal-600">Ready</span> : <span className="text-zinc-400">Pending</span>}
                       </td>
                       <td className="p-4 font-bold text-zinc-900 dark:text-white">
-                        {Math.round(app.resume_match_score || app.match_score || 60)}%
+                        {(() => {
+                          // `||` treated a genuine 0% match the same as
+                          // missing data, and silently fabricated a 60% for
+                          // any application with no computed score at all --
+                          // indistinguishable from a real number. Only show
+                          // a percentage when one was actually computed.
+                          const score = app.resume_match_score ?? app.match_score;
+                          return score != null ? `${Math.round(score)}%` : '—';
+                        })()}
                       </td>
                       <td className="p-4 text-right">
                         <button

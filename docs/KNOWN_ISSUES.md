@@ -6,6 +6,28 @@ This document tracks all currently identified technical issues, edge-case bugs, 
 
 ## Active Issues Register
 
+### ISSUE-015: `/billing/verify-session` Grants Paid Plans Without Verifying Payment
+- **Date Discovered**: 2026-08-04
+- **Severity**: Critical (billing/security)
+- **Component**: `backend/app/billing/routers/billing.py::verify_checkout_session`, `backend/app/billing/services/subscription_service.py::activate_subscription`
+- **Description**: `POST /api/v1/billing/verify-session` looks up the requested plan and unconditionally calls `sub_svc.activate_subscription(user_id, plan_id, "stripe", f"sub_active_{user_id}")`, then always returns `{"status": "success"}` — there is no check against Stripe/Razorpay for whether a payment (or even a checkout session) actually exists or succeeded. The frontend (`pages/SubscriptionPage.jsx::handleVerifyAndActivate`) calls this endpoint immediately when the payment modal opens and then every 2 seconds while it's open — i.e. before the user has done anything in the separate checkout tab. As written, any authenticated user can obtain any paid plan (Basic/Pro/Elite) with zero payment by simply calling this endpoint (or just opening the upgrade modal, given the immediate poll).
+- **Related, separate bug found in the same file**: `stripe_webhook`'s handler for `checkout.session.completed` hardcodes `plan_id = "pro"` (comment: "For simplicity, assuming PRO plan on success unless specified") — the ONE genuinely signature-verified activation path in the codebase still activates the wrong plan for anyone who didn't buy exactly Pro.
+- **Current Status**: **Not fixed** — deliberately not touched without an explicit go-ahead, since this is payment-critical logic and a rushed fix risks breaking legitimate checkouts. See [CHANGELOG.md](CHANGELOG.md) 3.9.1 for what WAS fixed (the resulting stuck-modal UX symptom).
+- **Assigned Fix**: `/verify-session` should become a read-only check of the user's current subscription state (already correctly updated by the signature-verified webhook handlers), not a privileged write endpoint — mirroring how the webhook is the only trusted source of truth for "did payment succeed." Separately, thread the actual purchased `plan_id` through Stripe Checkout Session metadata so the webhook activates the correct plan instead of hardcoding `"pro"`.
+
+---
+
+### ISSUE-014: Three Incompatible Cover Letter Generation Paths
+- **Date Discovered**: 2026-08-04
+- **Severity**: Medium
+- **Component**: `frontend/src/context/AppContext.jsx` (`handleGenerateFirstCoverLetterDraft`, `handleDraftCoverLetterFromContext`, `handleGenerateCoverLetter`), `backend/app/routers/api.py` (legacy `/api/cover-letter` vs. Phase-3 `/api/cover-letter/context` → `/strategy` → `/generate`)
+- **Description**: Three separate frontend functions can produce a "generated cover letter," each backed by a different backend endpoint returning a different response shape (`{cover_letter}` vs `{content}`), and only one of the three (`handleGenerateFirstCoverLetterDraft`) actually persists the result to `applications.cover_letter_snapshot`. The rendering-side symptom (empty preview body) was fixed in [CHANGELOG.md](CHANGELOG.md) 3.9.0 by making every renderer check all known field names, but the underlying duplication remains.
+- **Also found**: `handleGenerateCoverLetter` (`AppContext.jsx` ~line 3624-3820) has an unconditional `return contextResult;` partway through, making a trailing block that PUTs `cover_letter_version`/timeline updates to the application permanently unreachable dead code. Not fixed this pass — deferred pending a fuller trace of which UI entry points call which of the three functions, to avoid an under-verified change to a large, heavily-branched context function.
+- **Current Status**: Open. Rendering-side symptom mitigated; root duplication not resolved.
+- **Assigned Fix**: Consolidate cover letter generation onto a single backend endpoint and response shape (the Phase-3 `GeneratedCoverLetter.content` shape is the more complete one — includes `word_count`, `selected_evidence`, `used_keywords`), with one frontend function that both generates and persists. Remove or wire up the dead code in `handleGenerateCoverLetter`.
+
+---
+
 ### ISSUE-013: Resume Photo Has No Server-Side Persistence
 - **Date Discovered**: 2026-08-04
 - **Severity**: Medium
