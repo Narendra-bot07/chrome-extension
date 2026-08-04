@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import time
 import hashlib
 import functools
 import concurrent.futures
@@ -32,8 +33,8 @@ PDF_RENDERER_URL = (
 #    the Browser/Page objects it returned, from a *different* thread raises a
 #    greenlet/threading error. Starlette's generic run_in_threadpool (used by
 #    every call site) picks an arbitrary worker thread per call, so a
-#    persistent browser (see _get_browser below) can't safely be touched from
-#    whatever thread happens to run a given request.
+#    persistent browser/context (see _get_context below) can't safely be
+#    touched from whatever thread happens to run a given request.
 # A single-worker executor solves both: every render, across every request,
 # always actually executes on that one dedicated thread, and only one runs at
 # a time.
@@ -51,46 +52,69 @@ def _serialize_pdf_render(func):
 
 _playwright_instance = None
 _browser_instance = None
+_context_instance = None
 
 
-def _get_browser():
+def _get_context():
     """Lazily launch (and relaunch if crashed) a single persistent Chromium
-    instance shared across every render, instead of spawning and tearing down
-    a brand-new browser process on every single call. Cold Chromium startup
-    alone can take multiple seconds and gets substantially worse under
-    CPU/memory pressure on a small host -- directly eating into the
-    navigation timeout budget before page.goto is even reached, which is a
-    likely contributor to renders timing out consistently under real load.
+    instance AND a single persistent BrowserContext shared across every
+    render, instead of spawning a brand-new browser process -- or even just a
+    brand-new isolated context via the browser.new_page() shorthand -- on
+    every single call. Cold Chromium startup alone can take multiple seconds
+    and gets substantially worse under CPU/memory pressure on a small host.
+
+    Reusing the Browser process alone (an earlier version of this function)
+    was NOT enough: browser.new_page() implicitly creates a fresh, isolated
+    BrowserContext every time, which has its own empty HTTP cache -- so even
+    with a warm browser, every render was still re-fetching the entire
+    /__pdf_renderer app shell (index.html + every JS/CSS chunk) from scratch,
+    confirmed directly from production logs showing the exact same asset URLs
+    requested on every single /api/render-unified-pdf call. Those chunks are
+    Vite's content-hashed build output -- their filenames change only when
+    the app is rebuilt -- so they are safe to actually cache. Sharing one
+    BrowserContext lets Chromium's HTTP cache persist across renders; each
+    render still gets its own fresh Page (so DOM/JS state never leaks
+    between renders), just within this one shared cache-bearing context.
     Every render entry point already runs on the single dedicated thread in
-    _playwright_executor (via _serialize_pdf_render), one at a time, so
-    reusing one warm browser across calls -- a fresh Page per render, closed
-    afterward -- is safe and removes that repeated cold-start cost entirely.
+    _playwright_executor (via _serialize_pdf_render), one at a time, so this
+    is safe -- nothing here is ever touched concurrently.
     """
-    global _playwright_instance, _browser_instance
+    global _playwright_instance, _browser_instance, _context_instance
     if _browser_instance is not None:
         try:
-            if _browser_instance.is_connected():
-                return _browser_instance
+            if not _browser_instance.is_connected():
+                raise RuntimeError("browser disconnected")
         except Exception:
-            pass
-        try:
-            _browser_instance.close()
-        except Exception:
-            pass
-        _browser_instance = None
-    if _playwright_instance is None:
-        _playwright_instance = sync_playwright().start()
-    _browser_instance = _playwright_instance.chromium.launch(
-        headless=True,
-        args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
-    )
-    return _browser_instance
+            try:
+                _browser_instance.close()
+            except Exception:
+                pass
+            _browser_instance = None
+            _context_instance = None
+    if _browser_instance is None:
+        if _playwright_instance is None:
+            _playwright_instance = sync_playwright().start()
+        _browser_instance = _playwright_instance.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+        )
+        _context_instance = None
+    if _context_instance is None:
+        _context_instance = _browser_instance.new_context()
+    return _context_instance
 
 
 def _shutdown_playwright():
-    """Close the persistent browser and driver on process shutdown. Must run
-    on the same dedicated thread that created them (see _playwright_executor)."""
-    global _playwright_instance, _browser_instance
+    """Close the persistent context/browser/driver on process shutdown. Must
+    run on the same dedicated thread that created them (see
+    _playwright_executor)."""
+    global _playwright_instance, _browser_instance, _context_instance
+    if _context_instance is not None:
+        try:
+            _context_instance.close()
+        except Exception:
+            pass
+        _context_instance = None
     if _browser_instance is not None:
         try:
             _browser_instance.close()
@@ -109,6 +133,29 @@ def shutdown_playwright():
     """Public entry point for app shutdown hooks (see main.py's lifespan)."""
     _playwright_executor.submit(_shutdown_playwright).result()
     _playwright_executor.shutdown(wait=False)
+
+
+def _timer():
+    """Returns a lap(label) function that prints elapsed time since the
+    previous lap and since the timer started. Resume renders were observed
+    taking 45-75s end to end in production (cover letters take ~2s) with no
+    way to tell which phase actually accounts for it -- navigation, the
+    client-side Auto-Fit/compression engine (wait_for_selector on
+    #resume-print-ready), the validation script, or the pagination-mismatch
+    retry loop (which can call page.pdf() up to 3 times). This instruments
+    every phase so the next slow render's logs answer that precisely instead
+    of guessing -- guessing wrong here risks "fixing" speed by cutting a
+    correctness check (e.g. the pagination retry loop) that exists
+    specifically to stop a broken/cut-off resume from silently going out.
+    """
+    state = {"start": time.time(), "last": time.time()}
+
+    def lap(label):
+        now = time.time()
+        print(f"[PDF-TIMING] {label}: {now - state['last']:.2f}s (total {now - state['start']:.2f}s)")
+        state["last"] = now
+
+    return lap
 
 
 class HyperlinkRenderingError(Exception):
@@ -166,28 +213,35 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
     This avoids asyncio loop conflicts with Uvicorn on Windows.
     """
     page = None
+    lap = _timer()
     try:
-        browser = _get_browser()
-        page = browser.new_page()
+        context = _get_context()
+        page = context.new_page()
+        lap("get_context + new_page")
         try:
             response = _open_renderer(page, "print", {"template": template_name, "format": "a4"})
+            lap("navigation (_open_renderer)")
             if response and response.status == 504:
                 page.wait_for_timeout(1000)
                 page.reload(wait_until="domcontentloaded")
-            
+                lap("504 reload")
+
             # Inject JSON safely
             page.evaluate("data => { window.__INJECTED_RESUME_DATA__ = JSON.parse(data); }", resume_json_str)
             page.evaluate("window.dispatchEvent(new Event('resumeDataReady'));")
-            
+            lap("inject resume data + dispatch event")
+
             # Wait for React to mount, run the Auto-Fit engine, and finish compression
             try:
                 page.wait_for_selector("#resume-print-ready", timeout=12000)
             except Exception:
                 # If it times out, the validation script below will catch exactly what is missing
                 pass
-                
+            lap("wait_for_selector(#resume-print-ready) [client-side Auto-Fit engine]")
+
             page.wait_for_timeout(200)
             page.evaluate("document.fonts.ready")
+            lap("200ms settle + document.fonts.ready")
             
             # Rendering Validation
             validation_script = """
@@ -336,9 +390,10 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
             """
             
             val_result = page.evaluate(validation_script)
+            lap("validation_script")
             if not val_result.get("valid"):
                 raise ValueError(f"Rendering Validation Failed: {val_result.get('error')}")
-            
+
             final_composition_plan = page.evaluate(
                 "() => window.__FINAL_COMPOSITION_PLAN__ || null"
             )
@@ -351,14 +406,16 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
             # Get the exact height of the resume container in pixels to enforce exact A4 scaling
             resume_height = page.evaluate("document.querySelector('#resume-print-container') ? document.querySelector('#resume-print-container').offsetHeight : 0")
             print(f"Playwright measured resume height: {resume_height}px")
+            lap("read composition plan + resume height")
 
             pdf_args = {
                 "format": "A4",
                 "print_background": True,
                 "margin": {"top": "0", "right": "0", "bottom": "0", "left": "0"}
             }
-            
+
             pdf_bytes = page.pdf(**pdf_args)
+            lap("page.pdf() #1")
             pdf_page_count = len(PdfReader(BytesIO(pdf_bytes)).pages)
             planned_page_count = int(final_composition_plan.get("page_count") or 0)
             if (
@@ -386,6 +443,7 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
                 )
                 if removed_breaks:
                     pdf_bytes = page.pdf(**pdf_args)
+                    lap("pagination retry #1: page.pdf()")
                     pdf_page_count = len(PdfReader(BytesIO(pdf_bytes)).pages)
                 if pdf_page_count > planned_page_count:
                     # Keep normal entries indivisible. Only when that rule has
@@ -401,6 +459,7 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
                         """
                     )
                     pdf_bytes = page.pdf(**pdf_args)
+                    lap("pagination retry #2: page.pdf()")
                     pdf_page_count = len(PdfReader(BytesIO(pdf_bytes)).pages)
                     if pdf_page_count == planned_page_count:
                         final_composition_plan.setdefault(
@@ -429,9 +488,11 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
             measurement_hash = hashlib.sha256(measurement_bytes).hexdigest()
             plan_copy["measurement_hash"] = measurement_hash
 
+            lap("hashing")
             return pdf_bytes, plan_copy, render_hash, measurement_hash
         finally:
             page.close()
+            lap("page.close()")
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -441,8 +502,8 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
 def generate_cover_letter_pdf_via_playwright(cover_letter_json_str: str) -> Optional[bytes]:
     page = None
     try:
-        browser = _get_browser()
-        page = browser.new_page()
+        context = _get_context()
+        page = context.new_page()
         try:
             _open_renderer(page, "print-cover-letter")
 
@@ -482,13 +543,19 @@ def render_cover_letter_artifact(
     """Render the single PDF artifact used by both preview and download."""
     page = None
     try:
-        browser = _get_browser()
+        context = _get_context()
         viewport = (
             {"width": 816, "height": 1056}
             if paper_size == "Letter"
             else {"width": 794, "height": 1123}
         )
-        page = browser.new_page(viewport=viewport, device_scale_factor=1)
+        # The shared context (see _get_context) has no fixed viewport of its
+        # own -- set this render's required size on the page directly.
+        # device_scale_factor=1 was passed to new_page() previously; a fresh
+        # BrowserContext already defaults to 1, so no per-page equivalent is
+        # needed here.
+        page = context.new_page()
+        page.set_viewport_size(viewport)
         try:
             page.emulate_media(media="print")
             _open_renderer(page, "print-cover-letter")

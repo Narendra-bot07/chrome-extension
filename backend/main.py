@@ -40,6 +40,18 @@ from app.routers.api import router as legacy_api_router
 
 _startup_logger = logging.getLogger("main")
 
+
+class ImmutableCachedStaticFiles(StaticFiles):
+    """StaticFiles that marks every served file as permanently cacheable.
+    Only ever mount this over a directory of content-hashed, never-reused
+    filenames (e.g. a Vite build's assets/ folder) -- see the /__pdf_renderer
+    mount below for why."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
 def _ensure_playwright_chromium() -> None:
     """
     Render's native (non-Docker) runtime does not reliably carry Playwright's
@@ -124,6 +136,22 @@ frontend_dist_dir = next(
     None,
 )
 if frontend_dist_dir:
+    assets_subdir = os.path.join(frontend_dist_dir, "assets")
+    if os.path.isdir(assets_subdir):
+        # Vite content-hashes every file under assets/ (e.g. index-CCCVkh_Y.js)
+        # -- a given filename's content never changes, only the filename
+        # itself changes on rebuild. Without an explicit Cache-Control,
+        # Starlette's StaticFiles only supports conditional revalidation
+        # (If-None-Match/304), so Playwright's renderer was still round-tripping
+        # to fetch every JS/CSS chunk on every single render (confirmed
+        # directly from production logs: identical asset requests repeating
+        # for every /api/render-unified-pdf call). Mounted before the general
+        # /__pdf_renderer mount below so this more specific path wins.
+        app.mount(
+            "/__pdf_renderer/assets",
+            ImmutableCachedStaticFiles(directory=assets_subdir),
+            name="pdf-renderer-assets",
+        )
     app.mount(
         "/__pdf_renderer",
         StaticFiles(directory=frontend_dist_dir, html=True),

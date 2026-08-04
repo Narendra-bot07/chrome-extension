@@ -718,7 +718,26 @@ function ResumeReviewView({
     ['Links', 'links']
   ];
 
-  const fallbackMatch = useMemo(() => calculateJDMatchScore(parsedResume, jobAnalysis), [parsedResume, jobAnalysis]);
+  // `parsedResume` (above) is toRenderableResume(rawParsedResume), and
+  // rawParsedResume is the `parsedResume` PROP -- which ReviewChangesPage.jsx
+  // actually passes as `reviewState.workingResume`, i.e. the CURRENT resume
+  // with accepted suggestions already merged in, not the untouched original.
+  // The real pristine baseline is the separate `originalResume` prop
+  // (ReviewChangesPage.jsx: `originalResume={reviewState.originalResume}`).
+  // Computing "Original" from `parsedResume` meant it silently tracked
+  // whatever the user had accepted/rejected so far instead of staying fixed
+  // -- visibly, "Original" reading 44% after Reject All and 80% after Accept
+  // All for the identical underlying resume, since in each case `parsedResume`
+  // happened to equal (or nearly equal) the working resume for that decision
+  // state. This is the single root cause of the reported score inconsistency.
+  const originalRenderableResume = useMemo(
+    () => toRenderableResume(originalResume) || originalResume || parsedResume,
+    [originalResume, parsedResume]
+  );
+  const fallbackMatch = useMemo(
+    () => calculateJDMatchScore(originalRenderableResume, jobAnalysis),
+    [originalRenderableResume, jobAnalysis]
+  );
   const deterministicCurrentScore = useMemo(() => {
     const workingResume = mergeReviewResume(
       originalResume || parsedResume,

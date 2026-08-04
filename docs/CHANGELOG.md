@@ -4,6 +4,31 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.12.3] - 2026-08-04 (in progress)
+
+### Investigating
+- **Resume PDF rendering takes 45-75s vs. cover letters' ~2s.** Compared `generate_pdf_via_playwright` (resume) against `generate_cover_letter_pdf_via_playwright`/`render_cover_letter_artifact` (cover letter) line by line in `backend/app/playwright_pdf.py`: they are not the same shape of work, so directly copying cover letter's approach over risks correctness, not just speed. Resume rendering has two things cover letters don't: (1) `wait_for_selector("#resume-print-ready", timeout=12000)` for a client-side "Auto-Fit" layout/compression engine that cover letters never run, vs. cover letters' fixed 500ms wait; (2) a pagination-mismatch retry loop that can call `page.pdf()` up to 3 times when Chromium's rendered page count disagrees with the JS-computed composition plan — this exists specifically to stop a broken/cut-off resume from silently going out, and blindly removing it to match cover letters' single-`page.pdf()`-call approach would reintroduce exactly that risk.
+  - Added `_timer()`/`lap()` phase-by-phase timing instrumentation (`[PDF-TIMING]` log lines) covering every stage: context/page setup, navigation, data injection, the Auto-Fit wait, the validation script, composition-plan read, each `page.pdf()` call (including pagination retries), hashing, and page cleanup — so the next slow render's logs show exactly which phase accounts for the 45-75s instead of guessing. Once that's visible, the actual bottleneck can be fixed directly instead of cargo-culting cover letter's simpler logic onto a structurally different, more complex render pipeline.
+
+---
+
+## [3.12.2] - 2026-08-04
+
+### Fixed
+- **PDF renderer re-downloaded the entire app bundle (index.html + every JS/CSS chunk) on every single render**, confirmed directly from production logs: identical `/__pdf_renderer/assets/*` requests repeating for every `/api/render-unified-pdf` call. The 3.11.0 browser-reuse fix kept one warm Chromium *process* alive across renders, but each render still called `browser.new_page()`, which implicitly creates a brand-new, isolated `BrowserContext` every time — with its own empty HTTP cache — so the shared browser process never actually got to reuse anything. Fixed in `backend/app/playwright_pdf.py`: `_get_browser()` is now `_get_context()`, returning one persistent `BrowserContext` shared across every render (relaunching both browser and context together if the browser ever disconnects/crashes); each render still gets its own fresh `Page` within it, so no DOM/JS state leaks between renders. `render_cover_letter_artifact`'s per-render custom viewport (previously passed to `browser.new_page(viewport=...)`) now applies via `page.set_viewport_size(...)` after page creation instead, since a shared context can't be created with a fixed viewport per caller.
+  - Also added actual HTTP caching for those assets: `backend/main.py` mounts `/__pdf_renderer/assets` (before the general `/__pdf_renderer` mount, so it takes priority) via a new `ImmutableCachedStaticFiles`, sending `Cache-Control: public, max-age=31536000, immutable` — safe because Vite content-hashes every filename in that folder, so a given filename's content never changes. Plain `StaticFiles` only supported conditional revalidation (a 304 round-trip), not skipping the request outright.
+  - Together these mean only the very first render after a deploy/restart pays the full asset-fetch cost; every render after that in the same process lifetime should skip it entirely.
+  - Not a full fix for the render duration itself: the same logs show `/api/render-unified-pdf` taking 45-75 seconds end to end, which is far more than the ~1-2 seconds these repeated asset fetches accounted for. That's a separate, not-yet-investigated concern — worth checking next whether it's genuine per-render work or requests queueing behind the single-worker executor (3.11.0) under concurrent load.
+
+---
+
+## [3.12.1] - 2026-08-04
+
+### Fixed
+- **"Original" ATS/Resume Match score changed depending on whether suggestions were accepted or rejected**, when it's supposed to be a fixed baseline that never moves (directly reported: Original read 44% after Reject All, 80% after Accept All, for the identical underlying resume). Root cause, traced precisely through three files: `ReviewChangesPage.jsx` passes `parsedResume={reviewState.workingResume}` to `ResumeReviewView` — i.e. the *current* resume with accepted suggestions already merged in — and passes the true untouched baseline separately as `originalResume={reviewState.originalResume}`. Inside `ResumeReviewView.jsx`, the local fallback engine's `fallbackMatch` (used for "Original" whenever the backend `liveATS` result isn't fresh — routine right after a bulk Accept All/Reject All, before the debounced backend round trip catches up) was computed from the `parsedResume` prop — which, per the naming above, is actually the *working* resume, not the original. So "Original" was silently tracking whatever had just been accepted/rejected instead of staying fixed. `deterministicCurrentScore`/`deterministicPotentialScore` were already correctly using the separate `originalResume` prop as their merge base; only the "Original" baseline itself was reading the wrong variable. Fixed by computing `fallbackMatch` from a properly-converted `originalRenderableResume` (built from the `originalResume` prop) instead. Confirmed the backend live-score path (`AppContext.jsx`'s live-ATS effect) was never affected by this — it reads its own top-level `parsedResume` state directly, which is never reassigned by accept/reject actions.
+
+---
+
 ## [3.12.0] - 2026-08-04
 
 ### Fixed
