@@ -313,7 +313,11 @@ export default function TemplateSelectionView({ onBack }) {
                 className="w-[816px] bg-white shadow-2xl ring-1 ring-zinc-200/50 shrink-0 select-none"
                 style={{ width: '816px' }}
               >
-                <TailorRender resume={displayResume} templateName={zoomModalTemplate.id} isExporting />
+                {/* No isExporting here (unlike MiniPreview's thumbnail cards) --
+                    that flag suppresses TailorRender's interactive "Add Photo" /
+                    "click to adjust" affordance, which is exactly what should be
+                    available in this large Template Details preview. */}
+                <TailorRender resume={displayResume} templateName={zoomModalTemplate.id} />
               </div>
             </div>
 

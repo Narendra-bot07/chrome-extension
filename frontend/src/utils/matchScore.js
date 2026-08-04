@@ -191,6 +191,29 @@ export function calculateJDMatchScore(parsedResume, jobAnalysis) {
     matchedSkills: matchedSkillsList.slice(0, 10),
     missingSkills: missingSkillsList.slice(0, 10),
     requiredCount: jdSkills.length,
-    matchedCount: matchedSkillsList.length
+    matchedCount: matchedSkillsList.length,
+    // Sub-scores this function already computes internally, surfaced so
+    // callers can build a "current" breakdown that's actually consistent
+    // with `score`/`atsScore` above -- previously thrown away, forcing
+    // callers to fake a breakdown via linear interpolation between two
+    // unrelated backend snapshots (see ResumeReviewView.jsx), which could
+    // show numbers totally disconnected from the live headline score.
+    breakdown: {
+      resume_match: {
+        "Skills Match": Math.round(skillsScore),
+        "Keyword Relevance": Math.round(keywordScore),
+        "Experience Alignment": Math.round(experienceScore),
+        "Role Similarity": Math.round(roleSimilarityScore),
+        "Project Relevance": Math.round(projectsScore),
+        "Education Fit": Math.round(educationScore),
+        "Certification Relevance": Math.round(certScore)
+      },
+      ats_optimization: {
+        "ATS Parseability": Math.round(parseability),
+        "Keyword Optimization": Math.round(keywordScore),
+        "Required Skills Coverage": Math.round(skillsScore),
+        "Overall Optimization": atsScore
+      }
+    }
   };
 }

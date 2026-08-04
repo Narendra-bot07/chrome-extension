@@ -138,18 +138,29 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
                 const compressionLevel = compressionClass
                     ? Number(compressionClass.replace("print-compression-level-", ""))
                     : 0;
+                // A non-empty ARRAY is not the same thing as having real content --
+                // e.g. achievements: [{}] or [{title: '', description: []}] passes
+                // `.length > 0` but is exactly what the template's own hasData()-style
+                // check (see TailorRender.tsx) correctly treats as nothing to render.
+                // Using the weaker array-length check here made this validator expect
+                // a section the template had already, correctly, decided to skip --
+                // failing PDF generation for users who simply don't have that section,
+                // which is a legitimate, normal case, not a rendering bug.
+                const hasMeaningfulItems = (arr, checkItem) =>
+                    Array.isArray(arr) && arr.some(item => item && (typeof item === 'string' ? item.trim() !== '' : checkItem(item)));
+
                 const expectedSections = [];
                 if (shouldRender("summary") && data.summary && data.summary.trim() !== '') expectedSections.push("summary");
-                if (shouldRender("experience") && data.experience && data.experience.length > 0) expectedSections.push("experience");
-                if (shouldRender("projects") && data.projects && data.projects.length > 0) expectedSections.push("projects");
-                if (shouldRender("education") && data.education && data.education.length > 0) expectedSections.push("education");
-                if (shouldRender("skills") && data.skills && data.skills.length > 0) expectedSections.push("skills");
-                if (shouldRender("certifications") && data.certifications && data.certifications.length > 0) expectedSections.push("certifications");
-                if (shouldRender("achievements") && data.achievements && data.achievements.length > 0) expectedSections.push("achievements");
-                if (shouldRender("languages") && data.languages && data.languages.length > 0) expectedSections.push("languages");
-                if (shouldRender("awards") && data.awards && data.awards.length > 0) expectedSections.push("awards");
-                if (shouldRender("volunteer") && data.volunteer_experience && data.volunteer_experience.length > 0) expectedSections.push("volunteer");
-                if (shouldRender("publications") && data.publications && data.publications.length > 0) expectedSections.push("publications");
+                if (shouldRender("experience") && hasMeaningfulItems(data.experience, item => item.role || item.title || item.company || item.description)) expectedSections.push("experience");
+                if (shouldRender("projects") && hasMeaningfulItems(data.projects, item => item.name || item.title || item.description)) expectedSections.push("projects");
+                if (shouldRender("education") && hasMeaningfulItems(data.education, item => item.degree || item.institution || item.school)) expectedSections.push("education");
+                if (shouldRender("skills") && ((Array.isArray(data.skills) && data.skills.length > 0) || (data.skills_categories && Object.keys(data.skills_categories).length > 0))) expectedSections.push("skills");
+                if (shouldRender("certifications") && hasMeaningfulItems(data.certifications, item => item.title || item.name)) expectedSections.push("certifications");
+                if (shouldRender("achievements") && hasMeaningfulItems(data.achievements, item => item.title || item.name || item.description)) expectedSections.push("achievements");
+                if (shouldRender("languages") && hasMeaningfulItems(data.languages, item => item.language)) expectedSections.push("languages");
+                if (shouldRender("awards") && hasMeaningfulItems(data.awards, item => item.title)) expectedSections.push("awards");
+                if (shouldRender("volunteer") && hasMeaningfulItems(data.volunteer_experience, item => item.role || item.organization)) expectedSections.push("volunteer");
+                if (shouldRender("publications") && hasMeaningfulItems(data.publications, item => item.title || item.name)) expectedSections.push("publications");
                 
                 const missingSections = [];
                 const sectionHeadingAliases = {

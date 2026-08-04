@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import SuccessView from '../components/SuccessView';
 import ResumeEditorView from '../components/Resume/ResumeEditorView';
@@ -67,6 +67,7 @@ function DownloadPage({ onClose }) {
     updateFinalizedWorkflowResume,
     parsedResume,
     tailoredResume,
+    setTailoredResume,
     workflowResume,
     selectedTemplate,
     handleDownloadFinalPDF,
@@ -74,6 +75,23 @@ function DownloadPage({ onClose }) {
     customFileName,
     setCustomFileName
   } = useApp();
+
+  // updateFinalizedWorkflowResume only persists into the workflow-recovery
+  // slot (`finalizedTailoredResume`), a DIFFERENT state than what actually
+  // drives this page's preview (`sourceResume` below reads tailoredResume /
+  // workflowResume / parsedResume, never finalizedTailoredResume). Layout
+  // edits made in ResumeEditorView (section drag-reorder, column moves) were
+  // saved correctly but invisible in the preview because of that mismatch.
+  // Keep the existing persistence call, but also sync the live tailoredResume
+  // state so the preview actually reflects the edit.
+  const updateActiveResumeLayout = useCallback((updater) => {
+    return updateFinalizedWorkflowResume(updater).then(saved => {
+      if (saved?.finalizedTailoredResume) {
+        setTailoredResume(saved.finalizedTailoredResume);
+      }
+      return saved;
+    });
+  }, [updateFinalizedWorkflowResume, setTailoredResume]);
 
   const [downloadSuccess, setDownloadSuccess] = useState(false);
   const [syncedApplication, setSyncedApplication] = useState(null);
@@ -379,7 +397,7 @@ function DownloadPage({ onClose }) {
         <div className="flex-1 overflow-y-auto">
           <ResumeEditorView
             parsedResume={activeResume}
-            setParsedResume={updateFinalizedWorkflowResume}
+            setParsedResume={updateActiveResumeLayout}
             onLooksGood={handleFinalLooksGood}
             onUploadDifferent={() => navigate('/templates')}
             loading={loading}

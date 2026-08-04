@@ -778,25 +778,44 @@ function ResumeReviewView({
 
   const matchCurrent = useMemo(() => {
     if (liveATS?.breakdown_current?.resume_match) return liveATS.breakdown_current.resume_match;
+    // Prefer the live, deterministic breakdown (computed from the actual
+    // current resume content, same pass that produces the headline
+    // currentResumeMatch/currentATS above) for every field it covers.
+    // Interpolating "before"/"after" backend snapshots by acceptedRatio
+    // (below) ignores WHICH suggestions were accepted and their actual
+    // content, so it could show numbers totally disconnected from the live
+    // headline score -- e.g. Keyword Optimization at 12% next to a Current
+    // ATS that, moments later with the same resume, showed 97%. Only fall
+    // back to interpolation for fields this local engine doesn't model.
+    const liveBreakdown = deterministicCurrentScore.breakdown?.resume_match || {};
     const res = {};
     for (const key of Object.keys(matchBefore)) {
+      if (liveBreakdown[key] != null) {
+        res[key] = liveBreakdown[key];
+        continue;
+      }
       const b = Number(matchBefore[key] || 0);
       const e = Number(matchEstimated[key] ?? b);
       res[key] = Math.round(b + (e - b) * acceptedRatio);
     }
     return res;
-  }, [liveATS, matchBefore, matchEstimated, acceptedRatio]);
+  }, [liveATS, matchBefore, matchEstimated, acceptedRatio, deterministicCurrentScore]);
 
   const optCurrent = useMemo(() => {
     if (liveATS?.breakdown_current?.ats_optimization) return liveATS.breakdown_current.ats_optimization;
+    const liveBreakdown = deterministicCurrentScore.breakdown?.ats_optimization || {};
     const res = {};
     for (const key of Object.keys(optBefore)) {
+      if (liveBreakdown[key] != null) {
+        res[key] = liveBreakdown[key];
+        continue;
+      }
       const b = Number(optBefore[key] || 0);
       const e = Number(optEstimated[key] ?? b);
       res[key] = Math.round(b + (e - b) * acceptedRatio);
     }
     return res;
-  }, [liveATS, optBefore, optEstimated, acceptedRatio]);
+  }, [liveATS, optBefore, optEstimated, acceptedRatio, deterministicCurrentScore]);
 
   return (
     <div className="flex-1 flex flex-col md:flex-row justify-between h-full bg-zinc-50 dark:bg-zinc-950 select-text font-sans overflow-hidden">

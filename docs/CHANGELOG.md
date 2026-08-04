@@ -4,6 +4,34 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.8.6] - 2026-08-04
+
+### Changed
+- **Photo upload now available directly from the Template Details preview** (`components/TemplateSelectionView.jsx`): the large zoomed template preview passed `isExporting` to `TailorRender`, which deliberately suppresses the interactive "Add Photo" / "click to adjust" affordance (intended for the small non-interactive gallery thumbnail cards, `MiniPreview`, which correctly still pass it). Removed it from this specific preview so photo-enabled templates (Portfolio Pro, Premium Executive) can have a photo added/adjusted right from the template picker, not only later in the Download/Studio editor.
+
+---
+
+## [3.8.5] - 2026-08-04
+
+### Fixed
+- **Download page "Layout Structure" drag-to-reorder (both single-column and two-column/sidebar templates) had no effect on the actual resume preview**: `DownloadPage.jsx` wired `ResumeEditorView`'s `setParsedResume` directly to `updateFinalizedWorkflowResume` (`context/AppContext.jsx`), which only persists into a separate workflow-recovery slot (`finalizedTailoredResume`). The page's actual preview (`sourceResume`/`activeResume`, feeding both `ResumeEditorView`'s own re-render and the `ResumePreview`/`TailorRender` pane) reads from `tailoredResume || workflowResume || parsedResume` — three entirely different state variables `updateFinalizedWorkflowResume` never touched. Every drag-reorder was saved correctly but invisible, because the preview was reading from state the edit never reached. Added a wrapper (`updateActiveResumeLayout`) that keeps the existing persistence call and also syncs the result into `tailoredResume`, so edits are now immediately visible.
+
+---
+
+## [3.8.4] - 2026-08-04
+
+### Fixed
+- **PDF generation failing with `Rendering Validation Failed: Missing sections in rendered HTML DOM: achievements` (or any other optional section) for users who simply don't have that section**: `app/playwright_pdf.py`'s post-render validation decided which sections it should expect to find in the rendered DOM using a weak `data.achievements.length > 0`-style check — a non-empty *array* isn't the same thing as having real content (e.g. `[{}]` or `[{title: '', description: []}]` passes that check). The actual template's own section-visibility logic (`hasData()` in `TailorRender.tsx`) correctly skips rendering a section with no meaningful content, but the validator still expected it — a legitimate "user doesn't have this section" case was being treated as a rendering bug and failing PDF generation outright. The validator's per-section checks now require actual meaningful content (a title/name/description/role/etc., matching what the template itself checks for) before expecting that section to appear, for every optional section (experience, projects, education, skills, certifications, achievements, languages, awards, volunteer, publications).
+
+---
+
+## [3.8.3] - 2026-08-04
+
+### Fixed
+- **ATS Intelligence breakdown rows showing values wildly inconsistent with the headline Current score** (e.g. Current ATS 60/100 shown alongside "Keyword Optimization 12%" in one view and the *same* Current ATS 60/100 alongside "Keyword Optimization 97%" in another): `calculateJDMatchScore` (`utils/matchScore.js`) — the deterministic, local scoring pass that produces the headline "Current" score — computed rich per-category sub-scores (skills, keywords, experience, role similarity, etc.) internally but discarded all of them, returning only the final composite numbers. With no live breakdown available, `ResumeReviewView.jsx`'s `matchCurrent`/`optCurrent` faked one by linearly interpolating the backend's one-time "before"/"after" snapshots by the *fraction* of suggestions accepted (`acceptedRatio`) — completely ignoring which specific suggestions were accepted or their actual content. That interpolation has no real relationship to what the headline score (computed independently, from the actual current resume content) reflects, so the two could tell entirely different stories at the same moment. Fixed by having `calculateJDMatchScore` return its computed sub-scores as a `breakdown` object; `matchCurrent`/`optCurrent` now use those directly for every field the local engine models (Skills Match, Keyword Relevance, Experience Alignment, Role Similarity, Project Relevance, Education Fit, Certification Relevance, ATS Parseability, Keyword Optimization, Required Skills Coverage, Overall Optimization), falling back to the old interpolation only for the handful of fields it doesn't model (Formatting & Action Verbs, Section Completeness, Readability, Measurable Impact) — those are unavoidably approximate until the local engine is extended to compute them too.
+
+---
+
 ## [3.8.2] - 2026-08-04
 
 ### Fixed
