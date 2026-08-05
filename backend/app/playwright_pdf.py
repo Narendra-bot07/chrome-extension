@@ -277,6 +277,15 @@ def generate_pdf_via_playwright(
                 page.reload(wait_until="domcontentloaded")
                 lap("504 reload")
 
+            # /print is lazy-loaded. Do not dispatch until PrintLayout has
+            # mounted its event listener; otherwise a busy instance can lose
+            # the event and validation observes only the loading shell.
+            page.wait_for_function(
+                "window.__PDF_RENDERER_ACCEPTING_DATA__ === true",
+                timeout=5000,
+            )
+            lap("wait for PrintLayout ingestion handshake")
+
             # Inject JSON safely
             page.evaluate("data => { window.__INJECTED_RESUME_DATA__ = JSON.parse(data); }", resume_json_str)
             page.evaluate("window.dispatchEvent(new Event('resumeDataReady'));")
@@ -291,9 +300,10 @@ def generate_pdf_via_playwright(
                 page.wait_for_selector(
                     "#resume-print-ready", state="attached", timeout=8000
                 )
-            except Exception:
-                # If it times out, the validation script below will catch exactly what is missing
-                pass
+            except Exception as exc:
+                raise TimeoutError(
+                    "PDF renderer did not finish Auto-Fit within 8 seconds."
+                ) from exc
             lap("wait_for_selector(#resume-print-ready) [client-side Auto-Fit engine]")
             _raise_if_superseded(client_render_id, render_revision)
 
@@ -324,6 +334,13 @@ def generate_pdf_via_playwright(
                 // section_order is presentation order, never a deletion list.
                 const shouldRender = () => true;
                 const printContainer = document.querySelector("#resume-print-container");
+                const readyMarker = document.querySelector("#resume-print-ready");
+                if (!printContainer || !readyMarker) {
+                    return {
+                        valid: false,
+                        error: "PDF renderer was not ready; refusing to validate an incomplete loading shell."
+                    };
+                }
                 const compressionClass = Array.from(printContainer?.classList || [])
                     .find(className => className.startsWith("print-compression-level-"));
                 const compressionLevel = compressionClass

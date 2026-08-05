@@ -816,6 +816,7 @@ async def api_render_unified_pdf(request: UnifiedRenderRequest):
     import base64
     import hashlib
     import json
+    import sentry_sdk
     from app.playwright_pdf import (
         SupersededPdfRender,
         generate_pdf_via_playwright,
@@ -886,6 +887,17 @@ async def api_render_unified_pdf(request: UnifiedRenderRequest):
             detail={"code": "PDF_RENDER_SUPERSEDED", "message": str(exc)},
         )
     except Exception as exc:
+        # This handled 422 is filtered by the global Sentry policy, so report
+        # the underlying renderer exception explicitly without resume content.
+        with sentry_sdk.push_scope() as scope:
+            scope.set_tag("component", "pdf_renderer")
+            scope.set_tag("template", template)
+            scope.set_context("pdf_render", {
+                "page_preference": request.page_preference,
+                "has_client_revision": bool(request.client_render_id),
+                "render_revision": request.render_revision,
+            })
+            sentry_sdk.capture_exception(exc)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Unified PDF rendering failed: {str(exc)}"

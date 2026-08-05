@@ -72,6 +72,17 @@ export function initSentry() {
   }
 }
 
+export function captureHandledException(error, context = {}) {
+  if (!SENTRY_ENABLED || !ENABLE_ERROR_MONITORING || !SENTRY_DSN) return;
+  const exception = error instanceof Error ? error : new Error(String(error));
+  Sentry.withScope((scope) => {
+    scope.setTag("handled", "true");
+    const safeContext = sanitizeObject(context);
+    Object.entries(safeContext).forEach(([key, value]) => scope.setExtra(key, value));
+    Sentry.captureException(exception);
+  });
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function sanitizeString(str) {

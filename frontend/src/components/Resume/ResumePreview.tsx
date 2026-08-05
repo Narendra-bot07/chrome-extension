@@ -8,6 +8,7 @@ import { toRenderableResume } from '../../utils/renderableResume';
 import { getTemplateComponent } from '../../templates';
 import { createCompositionPlan } from '../../utils/resumeComposition';
 import { getApiUrl } from '../../config/apiConfig';
+import { captureHandledException } from '../../observability/sentry';
 
 type ZoomMode = 'fit_width' | 'fit_page' | 'actual_size';
 type PagePreference = 'auto' | 'prefer_one_page' | 'prefer_two_pages';
@@ -283,6 +284,12 @@ export default function ResumePreview({
       }
     } catch (err) {
       if ((err as Error)?.name === 'AbortError') return;
+      captureHandledException(err, {
+        component: 'ResumePreview',
+        operation: 'render_unified_pdf',
+        template: selectedTemplate || 'ExecutiveATS',
+        page_preference: pref
+      });
       console.warn('Backend PDF recomposition fallback triggered', err);
     } finally {
       if (requestId === renderRequestIdRef.current) setLoadingPdf(false);

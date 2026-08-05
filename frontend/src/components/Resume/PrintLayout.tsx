@@ -41,7 +41,14 @@ export default function PrintLayout() {
       handleDataReady();
     }
     window.addEventListener('resumeDataReady', handleDataReady);
-    return () => window.removeEventListener('resumeDataReady', handleDataReady);
+    // Signal that this lazy route has mounted and installed its ingestion
+    // listener. Playwright waits for this before dispatching the payload.
+    window.__PDF_RENDERER_ACCEPTING_DATA__ = true;
+    window.dispatchEvent(new Event('pdfRendererReady'));
+    return () => {
+      window.__PDF_RENDERER_ACCEPTING_DATA__ = false;
+      window.removeEventListener('resumeDataReady', handleDataReady);
+    };
   }, []);
 
   // Typography has exactly one owner: TailorRender's layoutLevel. Applying a
@@ -179,7 +186,7 @@ export default function PrintLayout() {
           setFittingComplete(true);
         }
       }
-    }, 150); // Small delay to let fonts and DOM settle
+    }, 25); // Coalesce DOM updates without adding 150ms per fit iteration.
 
     return () => clearTimeout(timer);
   }, [activeResumeData, compressionLevel, fitLayoutLevel, fittingComplete, originalResumeData]);

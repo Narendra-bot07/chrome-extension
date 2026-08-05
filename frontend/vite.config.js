@@ -25,6 +25,14 @@ export default defineConfig({
           if (id.includes('framer-motion')) return 'motion'
           if (id.includes('react-router')) return 'router'
           if (/node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'react-vendor'
+          // lucide-react ships one ES module per icon. Importing icons by name
+          // across many lazy-loaded routes made Rollup's default chunking
+          // split each icon (used by 2+ routes) into its own ~300-600 byte
+          // chunk -- 60+ separate HTTP requests app-wide. That's especially
+          // costly for the headless-Chromium PDF renderer (/__pdf_renderer),
+          // which pays the full network round-trip for every chunk on every
+          // cold render. One shared chunk instead of dozens of micro-chunks.
+          if (id.includes('lucide-react')) return 'icons'
           return undefined
         },
       },
