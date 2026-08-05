@@ -89,8 +89,15 @@ jobs:
           npm run build
 
       - name: Create Chrome Extension Bundle Zip
+        # Chrome requires manifest.json at the ZIP root (both for "Load
+        # unpacked" and Web Store submission) -- zip from inside dist/ so its
+        # contents land at the root, not nested under frontend/dist/. Must
+        # NOT include backend/ -- this is a browser extension package, not a
+        # full-repo bundle, and shipping backend source in it would leak
+        # server-side code to anyone who installs/inspects the extension.
         run: |
-          zip -r chrome-extension-v3.zip manifest.json frontend/dist/ backend/
+          cd frontend/dist
+          zip -r ../../chrome-extension-v3.zip .
 
       - name: Upload Extension Artifact
         uses: actions/upload-artifact@v4

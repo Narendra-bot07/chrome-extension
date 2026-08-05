@@ -25,10 +25,14 @@
                   │ └─ Dashboards +  │
                   │    Alerting      │
                   └──────────────────┘
-                         ▲
-              /internal/metrics  (Bearer-protected)
-              scraped by Grafana Cloud Agent every 15s
+                         ▲                    ▲
+              backend pushes its own    OTLP traces pushed
+              Prometheus registry via   directly from the app
+              remote_write every 30s    (observability/tracing.py)
+              (observability/remote_write.py)
 ```
+
+Render runs the API as a single process with no sidecar, so metrics are **pushed from the app itself** on an interval rather than pulled by an external scraper — see §5.
 
 ---
 
@@ -49,7 +53,11 @@ All observability variables must be set in the backend `.env` (Render dashboard 
 | `SENTRY_PROFILES_SAMPLE_RATE` | No | `0` for prod until needed |
 | `METRICS_ENABLED` | Yes | `true` |
 | `METRICS_PATH` | No | `/internal/metrics` (default) |
-| `METRICS_BEARER_TOKEN` | Yes | Random 32-char secret, shared with Grafana Cloud Agent |
+| `METRICS_BEARER_TOKEN` | Yes | Random 32-char secret; protects the raw `/internal/metrics` pull endpoint (still available for manual `curl`/debugging even though nothing scrapes it in prod) |
+| `GRAFANA_CLOUD_PROM_REMOTE_WRITE_URL` | Yes | From Grafana Cloud → My Account → your stack → Prometheus card. Blank = push disabled. |
+| `GRAFANA_CLOUD_PROM_USERNAME` | Yes | Numeric instance ID shown on the same Prometheus card |
+| `GRAFANA_CLOUD_PROM_API_KEY` | Yes | API key generated on the same Prometheus card |
+| `GRAFANA_CLOUD_PROM_PUSH_INTERVAL_SECONDS` | No | `30` (default) |
 | `OTEL_ENABLED` | No | `false` until Grafana Tempo is wired up |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | No | Grafana Cloud OTLP endpoint when enabled |
 | `OTEL_EXPORTER_OTLP_HEADERS` | No | `Authorization=Basic <base64-creds>` |
@@ -146,14 +154,27 @@ All metrics are exported at `GET /internal/metrics` (requires `Authorization: Be
 
 ## 5. Grafana Cloud Setup Guide
 
-### 5.1 Install Grafana Agent (Alloy)
+### 5.1 Metrics ingestion — implemented approach: app pushes its own registry
 
-On Render, Grafana Agent cannot be deployed as a sidecar. Use **Grafana Cloud hosted Prometheus remote-write** with the Prometheus `remote_write` endpoint instead:
+Render runs the API as one process with no sidecar, so rather than standing up a separate always-on scraper, `observability/remote_write.py` pushes the existing Prometheus registry (`observability/metrics.py`) straight to Grafana Cloud's hosted Prometheus (Mimir) every `GRAFANA_CLOUD_PROM_PUSH_INTERVAL_SECONDS` (default 30s), via the standard `remote_write` protocol (hand-rolled protobuf + raw-block Snappy via `cramjam` — a maintained `remote_write` client library pulls in `grpcio-tools`, which force-upgrades `protobuf` to a version incompatible with this project's `google-ai-generativelanguage`/`grpcio-status` pins). Started from `main.py`'s `lifespan()` alongside the other background tickers; it's a silent no-op whenever `GRAFANA_CLOUD_PROM_REMOTE_WRITE_URL` is blank.
 
-**Option A — Grafana Alloy on a separate VPS / Docker instance (recommended for V1.5)**
+**Setup — three values from the Grafana Cloud UI, no separate agent to run:**
+
+1. [grafana.com](https://grafana.com) → log in → **My Account** → open your stack.
+2. Find the **Prometheus** card (or **Connections → Add new connection → Prometheus**) → click **"Details"** / **"Send metrics"**.
+3. Copy the **Remote Write Endpoint** URL, the **Username** (numeric instance ID), and generate an **API key** if none exists.
+4. Set on Render (and locally in `.env` for testing):
+   ```bash
+   GRAFANA_CLOUD_PROM_REMOTE_WRITE_URL=https://prometheus-prod-XX-prod-XX.grafana.net/api/prom/push
+   GRAFANA_CLOUD_PROM_USERNAME=<numeric instance ID>
+   GRAFANA_CLOUD_PROM_API_KEY=<generated API key>
+   ```
+5. Redeploy. Within ~30s, Grafana Cloud → **Explore** → Prometheus data source → query `up` or `application_info` should return data.
+
+**Alternative (not implemented, listed for reference only)**: a standalone Grafana Alloy agent pull-scraping `/internal/metrics` and forwarding via `remote_write` — decouples collection from the app process, but needs its own always-on host (Fly.io, a VPS, etc.) to run continuously, which the push-based approach above avoids entirely.
 
 ```yaml
-# alloy.river
+# alloy.river — only needed if you deliberately switch to the pull model later
 prometheus.scrape "tailr4u_backend" {
   targets = [{ __address__ = "https://your-render-url.onrender.com" }]
   metrics_path = "/internal/metrics"
@@ -167,21 +188,14 @@ prometheus.scrape "tailr4u_backend" {
 
 prometheus.remote_write "grafana_cloud" {
   endpoint {
-    url = env("GRAFANA_CLOUD_PROM_ENDPOINT")
+    url = env("GRAFANA_CLOUD_PROM_REMOTE_WRITE_URL")
     basic_auth {
-      username = env("GRAFANA_CLOUD_USER_ID")
-      password = env("GRAFANA_CLOUD_API_KEY")
+      username = env("GRAFANA_CLOUD_PROM_USERNAME")
+      password = env("GRAFANA_CLOUD_PROM_API_KEY")
     }
   }
 }
 ```
-
-**Option B — Grafana Cloud Hosted Prometheus Scraper (V1 — easiest)**
-
-1. Grafana Cloud → Connections → Add new connection → Prometheus
-2. Use **"Push metrics from my Prometheus"** flow
-3. Copy the `remote_write` config block
-4. Add `GRAFANA_CLOUD_*` secrets to Render → add a lightweight metrics forwarder script
 
 ### 5.2 Recommended Dashboard Panels
 

@@ -216,10 +216,11 @@ npm run dev
 ---
 
 ### 4. Chrome Extension Setup
-1. Open Google Chrome and navigate to `chrome://extensions/`.
-2. Enable **Developer mode** in the top-right corner.
-3. Click **Load unpacked**.
-4. Select the project root folder containing `manifest.json`.
+1. Build the extension bundle: `cd frontend && npm run build` (produces `frontend/dist/`, which contains `manifest.json` at its root alongside the built app — `manifest.json` and `background.js` live in `frontend/public/` and Vite copies them into `dist/` unchanged).
+2. Open Google Chrome and navigate to `chrome://extensions/`.
+3. Enable **Developer mode** in the top-right corner.
+4. Click **Load unpacked**.
+5. Select the `frontend/dist` folder (not the project root — there is no `manifest.json` there).
 
 ---
 

@@ -42,6 +42,7 @@ const VerifyEmailPage = React.lazy(() => import('./pages/VerifyEmailPage'));
 const EmailSentPage = React.lazy(() => import('./pages/EmailSentPage'));
 const NotificationSettingsPage = React.lazy(() => import('./pages/NotificationSettingsPage'));
 const ExtensionSetupPage = React.lazy(() => import('./pages/ExtensionSetupPage'));
+const PrivacyPolicyPage = React.lazy(() => import('./pages/PrivacyPolicyPage'));
 const AdminUsersPage = React.lazy(() => import('./pages/AdminUsersPage'));
 const NotFoundPage = React.lazy(() => import('./pages/NotFoundPage'));
 import { ReducedMotionProvider, MotionPage } from './motion/MotionSystem';
@@ -205,6 +206,7 @@ function AppRoutes() {
       <Route path="/reset-password" element={<MotionPage><ResetPasswordPage /></MotionPage>} />
       <Route path="/verify-email" element={<MotionPage><VerifyEmailPage /></MotionPage>} />
       <Route path="/extension-setup" element={<MotionPage><ExtensionSetupPage /></MotionPage>} />
+      <Route path="/privacy-policy" element={<MotionPage><PrivacyPolicyPage /></MotionPage>} />
       <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/tailor" element={<JobExtractPage />} />

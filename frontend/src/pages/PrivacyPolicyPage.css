@@ -1,0 +1,33 @@
+/* Reuses the same .landing-page background/gradient and --ink/--muted/--line/
+   --blue/--teal tokens defined in LandingPage.css (imported alongside this
+   file) -- this page shares the .landing-page root class specifically so it
+   inherits that system instead of re-declaring its own palette. */
+.pp-header{max-width:900px;margin:0 auto;padding:40px 24px 0;display:flex;align-items:center;justify-content:space-between}
+.pp-back{display:inline-flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;font-weight:750;text-decoration:none;padding:9px 14px;border:1px solid var(--line);border-radius:99px;background:rgba(255,255,255,.5);backdrop-filter:blur(10px);transition:color .2s,border-color .2s}
+.dark .pp-back{background:rgba(255,255,255,.04)}
+.pp-back:hover{color:var(--ink);border-color:var(--blue)}
+
+.pp-main{max-width:900px;margin:0 auto;padding:52px 24px 110px}
+.pp-eyebrow{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:99px;background:rgba(255,255,255,.52);font:750 11px/1 monospace;letter-spacing:.04em;text-transform:uppercase;color:#286d76}
+.dark .pp-eyebrow{background:rgba(13,24,40,.6);color:#7bd9d0}
+.pp-main h1{font-family:Georgia,'Times New Roman',serif;letter-spacing:-.045em;font-size:clamp(34px,4.4vw,52px);line-height:1.04;margin:22px 0 10px;color:var(--ink)}
+.pp-updated{color:var(--muted);font-size:12px;font-weight:650;margin-bottom:36px}
+
+.pp-card{border:1px solid var(--line);border-radius:28px;background:rgba(255,255,255,.6);backdrop-filter:blur(16px);box-shadow:0 30px 80px rgba(34,79,128,.08);padding:clamp(28px,4vw,56px)}
+.dark .pp-card{background:rgba(17,28,44,.65)}
+
+.pp-card>p.pp-intro{color:var(--muted);font-size:15px;line-height:1.75;margin:0 0 8px}
+
+.pp-section{padding:28px 0;border-top:1px solid var(--line)}
+.pp-section:first-of-type{border-top:0;padding-top:8px}
+.pp-section h2{font-size:17px;font-weight:800;color:var(--ink);margin:0 0 14px;letter-spacing:-.01em}
+.pp-section p,.pp-section li{color:var(--muted);font-size:14px;line-height:1.75}
+.pp-section ul{margin:0;padding-left:20px;display:grid;gap:10px}
+.pp-section li strong{color:var(--ink);font-weight:750}
+.pp-section a{color:var(--blue);font-weight:700;text-decoration:none}
+.pp-section a:hover{text-decoration:underline}
+
+.pp-footer{max-width:900px;margin:0 auto;padding:0 24px 60px;display:flex;align-items:center;gap:12px}
+.pp-footer span{color:var(--muted);font-size:11px}
+
+@media(max-width:640px){.pp-header{padding:26px 18px 0}.pp-main{padding:34px 18px 80px}.pp-card{border-radius:22px}.pp-footer{padding:0 18px 40px}}

@@ -30,7 +30,7 @@ from fastapi.staticfiles import StaticFiles
 import os
 from core.config import settings
 from core.exceptions import global_exception_handler
-from observability import CorrelationAndLoggingMiddleware
+from observability import CorrelationAndLoggingMiddleware, start_remote_write_ticker
 from contextlib import asynccontextmanager
 from core.observability import langsmith_status
 from core.database import get_db_pool, close_db_pool
@@ -73,6 +73,7 @@ async def lifespan(app: FastAPI):
     get_db_pool()
     start_health_ticker()
     start_notification_ticker()
+    start_remote_write_ticker()
     await asyncio.to_thread(_ensure_playwright_chromium)
     yield
     close_db_pool()

@@ -4,6 +4,35 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.15.9] - 2026-08-05
+
+### Added
+- **Privacy policy page** (`/privacy-policy`, public/unauthenticated route) — there was no privacy policy anywhere in the app, which is a hard blocker for Chrome Web Store submission (any extension handling personal data must link a live one). Content is grounded in what the codebase actually does: DeepSeek/Gemini LLM calls, Supabase, Cloudflare R2, Resend, Stripe/Razorpay, Sentry (with its existing content redaction), GA4/Clarity (explicitly disabled inside the extension context), and a plain-language breakdown of each Chrome extension permission. Worth a real legal review before relying on it for GDPR/CCPA-specific obligations.
+- `docs/CHROME_WEB_STORE_LISTING.md` — copy-paste-ready Chrome Web Store submission content: title, summary, description, single-purpose statement, per-permission justifications (written to pre-empt the most common rejection reason: unclear justification for the `*://*/*` host permission), data-usage disclosure checklist, and a graphic-assets checklist for what's still needed (screenshots, promo tiles).
+
+### Fixed
+- `SENTRY_EXTENSION_DSN` in `background.js` was an empty string, so extension errors went nowhere. Set to the real DSN; verified it's actually baked into a production build (`frontend/dist/background.js`).
+
+---
+
+## [3.15.8] - 2026-08-05
+
+### Fixed
+- **CI's Chrome extension packaging was broken.** `.github/workflows/ci.yml`'s `extension-package` job zipped `manifest.json frontend/dist/ backend/` from the repo root — `manifest.json` doesn't exist there (it's `frontend/public/manifest.json`, copied into `frontend/dist/` by the build), so that path was dead, and the job was bundling the **entire Python backend source tree** into what's supposed to be a browser extension package. Now zips from inside `frontend/dist/` so `manifest.json` lands at the archive root as Chrome requires, and no longer includes `backend/` at all.
+- **README's Chrome extension setup instructions didn't work.** Told readers to "Load unpacked" the project root folder, which has no `manifest.json`. Now says to `npm run build` first and load `frontend/dist/`.
+- **Extension version drift.** `background.js` hardcoded `EXTENSION_VERSION = "1.0.0"` while `manifest.json` had already moved to `"1.0.1"` — Sentry reports from the extension were tagging the wrong release. `background.js` isn't run through Vite (it's copied as-is from `public/`), so instead of just fixing the number once, it now reads `chrome.runtime.getManifest().version` at runtime, which can't drift again.
+
+---
+
+## [3.15.7] - 2026-08-05
+
+### Added
+- **Metrics now actually reach Grafana Cloud.** `/internal/metrics` existed but nothing was scraping it — Render runs the API as a single process with no sidecar to pull-scrape from. Added `backend/observability/remote_write.py`: pushes the existing Prometheus registry to Grafana Cloud's hosted Prometheus (Mimir) every 30s via the standard `remote_write` protocol, started as a background ticker from `main.py`'s `lifespan()` alongside the existing health/notification tickers. No-ops silently until `GRAFANA_CLOUD_PROM_REMOTE_WRITE_URL`/`_USERNAME`/`_API_KEY` are set (see `docs/OBSERVABILITY.md` §5.1 for exactly where to get those three values in the Grafana Cloud UI).
+- The `remote_write` payload encoding (protobuf `WriteRequest` + raw-block Snappy) is hand-rolled rather than using the one maintained PyPI client for this, which pulls in `grpcio-tools` and force-upgrades `protobuf` to a version incompatible with this project's existing `google-ai-generativelanguage`/`grpcio-status` pins (confirmed by trying it — it broke the install, reverted immediately). The hand-rolled encoder was verified correct with an independent decoder round-tripped against the live registry (byte-for-byte label/value/timestamp match) and end-to-end against a local mock HTTP server (headers, Basic Auth, Snappy body all verified).
+- New dependency: `cramjam` (Rust-backed Snappy compression, prebuilt wheels, no native build step, no dependency conflicts).
+
+---
+
 ## [3.15.6] - 2026-08-05
 
 ### Fixed

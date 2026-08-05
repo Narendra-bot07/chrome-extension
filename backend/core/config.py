@@ -72,7 +72,17 @@ class Settings(BaseSettings):
     METRICS_ENABLED: bool = Field(default=True, env="METRICS_ENABLED")
     METRICS_PATH: str = Field(default="/internal/metrics", env="METRICS_PATH")
     METRICS_BEARER_TOKEN: str = Field(default="", env="METRICS_BEARER_TOKEN")
-    
+
+    # Render has no sidecar/agent process to pull-scrape /internal/metrics, so
+    # instead of standing up a separate always-on scraper, the app pushes its
+    # own Prometheus registry to Grafana Cloud's hosted Prometheus (Mimir) on
+    # an interval, via the standard remote_write protocol. Blank URL = disabled
+    # (see docs/OBSERVABILITY.md for where to get these three values).
+    GRAFANA_CLOUD_PROM_REMOTE_WRITE_URL: str = Field(default="", env="GRAFANA_CLOUD_PROM_REMOTE_WRITE_URL")
+    GRAFANA_CLOUD_PROM_USERNAME: str = Field(default="", env="GRAFANA_CLOUD_PROM_USERNAME")
+    GRAFANA_CLOUD_PROM_API_KEY: str = Field(default="", env="GRAFANA_CLOUD_PROM_API_KEY")
+    GRAFANA_CLOUD_PROM_PUSH_INTERVAL_SECONDS: int = Field(default=30, env="GRAFANA_CLOUD_PROM_PUSH_INTERVAL_SECONDS")
+
     OTEL_ENABLED: bool = Field(default=False, env="OTEL_ENABLED")
     OTEL_SERVICE_NAME: str = Field(default="tailr4u-api", env="OTEL_SERVICE_NAME")
     OTEL_EXPORTER_OTLP_ENDPOINT: str = Field(default="", env="OTEL_EXPORTER_OTLP_ENDPOINT")

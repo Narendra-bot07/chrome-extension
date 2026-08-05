@@ -1,5 +1,8 @@
-const SENTRY_EXTENSION_DSN = ""; // Extension Sentry DSN (will be read from build or injected)
-const EXTENSION_VERSION = "1.0.0";
+const SENTRY_EXTENSION_DSN = "https://9f53ad2c4d9c8f8aa1b90375fcd828e0@o4511828596031488.ingest.us.sentry.io/4511842280472576";
+// Read from manifest.json at runtime instead of hardcoding -- this file isn't
+// processed by Vite (public/ is copied as-is), so a hardcoded string here
+// silently drifts from the real manifest version on every release bump.
+const EXTENSION_VERSION = chrome.runtime.getManifest().version;
 const APP_RELEASE = `tailr4u-extension@${EXTENSION_VERSION}`;
 
 // Asynchronous lightweight Sentry reporter avoiding external dependencies in Extension worker
