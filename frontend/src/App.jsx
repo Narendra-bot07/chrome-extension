@@ -42,7 +42,6 @@ const VerifyEmailPage = React.lazy(() => import('./pages/VerifyEmailPage'));
 const EmailSentPage = React.lazy(() => import('./pages/EmailSentPage'));
 const NotificationSettingsPage = React.lazy(() => import('./pages/NotificationSettingsPage'));
 const ExtensionSetupPage = React.lazy(() => import('./pages/ExtensionSetupPage'));
-const AdminObservabilityPage = React.lazy(() => import('./pages/AdminObservabilityPage'));
 const AdminUsersPage = React.lazy(() => import('./pages/AdminUsersPage'));
 const NotFoundPage = React.lazy(() => import('./pages/NotFoundPage'));
 import { ReducedMotionProvider, MotionPage } from './motion/MotionSystem';
@@ -231,7 +230,6 @@ function AppRoutes() {
         <Route path="/subscription" element={<SubscriptionPage />} />
         <Route path="/onboarding/job-preferences" element={<JobPreferencesPage />} />
         <Route path="/settings/job-preferences" element={<JobPreferencesPage />} />
-        <Route path="/admin/observability" element={<AdminObservabilityPage />} />
         <Route path="/admin/users" element={<AdminUsersPage />} />
       </Route>
       <Route path="/print" element={<PrintLayout />} />

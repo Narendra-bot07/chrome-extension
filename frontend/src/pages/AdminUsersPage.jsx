@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Activity, Ban, Crown, Search, ShieldCheck, User as UserIcon, X } from 'lucide-react';
+import { ArrowLeft, Ban, Crown, Search, ShieldCheck, User as UserIcon, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getApiUrl } from '../config/apiConfig';
 
@@ -173,12 +173,6 @@ export default function AdminUsersPage() {
             <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wide mt-0.5">{total} total accounts</p>
           </div>
         </div>
-        <button
-          onClick={() => navigate('/admin/observability')}
-          className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider border border-zinc-800 hover:border-zinc-700 text-zinc-300 transition cursor-pointer flex items-center gap-1.5"
-        >
-          <Activity size={12} /> Observability
-        </button>
       </div>
 
       <div className="relative mb-4 max-w-sm">

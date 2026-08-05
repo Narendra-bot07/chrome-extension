@@ -4,6 +4,19 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.15.6] - 2026-08-05
+
+### Fixed
+- **`GET /job-preferences/me` 500 crash for any user whose preferences were served from the Redis cache.** `serialize_preferences()` unconditionally called `.isoformat()` on `created_at`/`updated_at`, assuming a `datetime` object -- true on a fresh DB read, but `job_preferences_repository.get_by_user()` caches the row as JSON in Redis (300s TTL) and returns it back as plain strings on a cache hit, which crashed with `AttributeError: 'str' object has no attribute 'isoformat'`. Added a small `_isoformat()` helper that handles both. Verified live against a real row through both the fresh-read and cached-read paths.
+
+### Removed
+- **The in-app "Observability" admin page** (`/admin/observability`, `frontend/src/pages/AdminObservabilityPage.jsx`, backend `api/v1/admin_observability.py`). It was a stopgap web view over the same Prometheus registry `/internal/metrics` already exposes -- redundant now that Grafana Cloud is the intended destination for metrics/logs/traces (see `docs/OBSERVABILITY.md`), and it had no retention beyond the live process. Removed the nav link, route, backend router, and the now-unused in-memory request ring buffer in `observability/middleware.py` that only existed to feed that page. `/admin/users` is untouched.
+
+### Docs
+- Fixed a wrong env var name in `docs/OBSERVABILITY.md`: the frontend Sentry DSN is read from `VITE_SENTRY_DSN` (confirmed against `frontend/src/observability/sentry.js` and `.env.example`), not `VITE_SENTRY_FRONTEND_DSN` as previously documented -- setting the old name on Vercel would have silently done nothing.
+
+---
+
 ## [3.15.5] - 2026-08-05
 
 ### Added

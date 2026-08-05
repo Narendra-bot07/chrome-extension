@@ -4,6 +4,8 @@
 >
 > **Tools**: Sentry Cloud · Prometheus client · Grafana Cloud · OpenTelemetry · UptimeRobot · Structured JSON logs
 
+> **Note**: There is no in-app admin dashboard for metrics/requests — that was removed. `/admin/observability` and its backend router (`api/v1/admin_observability.py`) were a stopgap web view over the same Prometheus registry `/internal/metrics` exposes; it duplicated what Grafana is meant to own and never had retention beyond a live process. All observability now flows through Sentry, Prometheus (`/internal/metrics`), and Grafana Cloud as described below. `/admin/users` (user list/roles/suspend) is unrelated and still exists.
+
 ---
 
 ## 1. Architecture Overview
@@ -58,7 +60,7 @@ All observability variables must be set in the backend `.env` (Render dashboard 
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `VITE_SENTRY_FRONTEND_DSN` | Yes | From Sentry project (React project) |
+| `VITE_SENTRY_DSN` | Yes | From Sentry project (React project) — matches `frontend/.env.example`; the code reads this exact name, not `VITE_SENTRY_FRONTEND_DSN` |
 | `VITE_APP_ENV` | Yes | `production` |
 | `VITE_APP_RELEASE` | Yes | Set by GitHub Actions on deploy |
 
@@ -372,7 +374,7 @@ Set `APP_RELEASE` as a Render environment variable override per-deploy, or use R
 | Project | Platform | DSN env var |
 |---|---|---|
 | `tailr4u-api` | Python/FastAPI | `SENTRY_BACKEND_DSN` |
-| `tailr4u-frontend` | JavaScript/React | `VITE_SENTRY_FRONTEND_DSN` |
+| `tailr4u-frontend` | JavaScript/React | `VITE_SENTRY_DSN` |
 | `tailr4u-extension` | JavaScript/Browser | Hardcoded in `background.js` |
 
 Create each project at [sentry.io](https://sentry.io) → New Project, then paste the DSN into the appropriate environment.

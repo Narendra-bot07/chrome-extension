@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from typing import Dict, Any
+from datetime import datetime
+from typing import Dict, Any, Optional
 
 from core.security import verify_supabase_jwt
 from core.database import get_db_connection
@@ -33,6 +34,17 @@ _TEXT_FIELDS = {
 }
 
 
+def _isoformat(value: Any) -> Optional[str]:
+    """created_at/updated_at come back as datetime objects on a fresh DB read
+    but as plain strings when served from the Redis JSON cache (job_preferences_repository.py
+    get_by_user) -- handle both instead of assuming datetime."""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
 def serialize_preferences(record: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     record = record or {}
     result = {
@@ -44,8 +56,8 @@ def serialize_preferences(record: Dict[str, Any], user_id: str) -> Dict[str, Any
             and record.get("target_companies")
             and record.get("preferred_locations")
         ),
-        "created_at": record.get("created_at").isoformat() if record.get("created_at") else None,
-        "updated_at": record.get("updated_at").isoformat() if record.get("updated_at") else None,
+        "created_at": _isoformat(record.get("created_at")),
+        "updated_at": _isoformat(record.get("updated_at")),
     }
     for field in _LIST_FIELDS:
         result[field] = record.get(field) or []
