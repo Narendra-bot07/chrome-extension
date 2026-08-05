@@ -4,6 +4,16 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.15.15] - 2026-08-06
+
+### Fixed
+- **Resume Match / ATS scores were barely affected by anything except skills, despite the scoring formula having 7 weighted factors.** Root cause: the job-extraction pipeline's output (`ExtractedJob`: `job_title`, `skills`, `requirements`, `preferred_qualifications`, no `experience_required`/`ats_keywords` field at all) uses different field names than what the scoring code expects (`title`, `required_skills`, `qualifications`). The backend (`ATSScoringEngine` via `/api/ats/live-score`) had *partial* aliasing (`normalize_job_payload` in `app/routers/api.py`) but silently dropped `preferred_qualifications` entirely -- it was never merged into `qualifications`, so any "nice to have" JD content, including experience-years mentions that show up there instead of in `requirements`, never reached the experience-years regex or Education Fit. The **frontend** mirror (`utils/matchScore.js`, used for the match badge shown right after extraction, before backend scoring returns) had **no aliasing at all** -- `job.title`/`job.required_skills`/`job.qualifications` were read directly off the raw extracted object, where none of those keys exist, so Role Similarity, Skills Match, and Education Fit silently defaulted to a hollow 100% regardless of actual fit, while the separately-sourced Skills chips elsewhere in the same UI displayed the real (correctly-keyed) skills list -- explaining why the displayed skills looked right but the score next to them didn't reflect them.
+- Backend fix: `normalize_job_payload` now merges `preferred_qualifications` into `qualifications` (concatenated, not aliased-and-overwritten, so a real `requirements` list is preserved).
+- Frontend fix: added a `normalizeJob()` step to `calculateJDMatchScore` mirroring the backend's aliasing exactly (title, required_skills, preferred_skills, qualifications-merge), per the file's own header comment that it's supposed to stay in lockstep with the backend engine.
+- Verified with real `ExtractedJob`-shaped test data on both sides: a strong-match resume vs. a weak-match resume now produce genuinely different Role Similarity (100 vs 0, previously always 100) and Education Fit (100 vs 0, previously not reading real qualifications text) scores; the "5+ years" experience requirement (placed in `preferred_qualifications` in the test) is now correctly parsed (`_parse_required_years` returns `5.0`, previously `0.0`); backend and frontend now produce byte-identical scores (85, identical per-factor breakdown) for the same input, confirming the two implementations are actually in sync rather than just documented as intending to be.
+
+---
+
 ## [3.15.14] - 2026-08-06
 
 ### Reverted

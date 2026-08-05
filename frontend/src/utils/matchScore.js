@@ -64,10 +64,43 @@ const candidateYears = resume => [...asList(resume?.experience), ...asList(resum
     return total + Math.max(0.5, endYear - startYear);
   }, 0);
 
-export function calculateJDMatchScore(resume, job) {
-  if (!resume || !job) {
+// The job-extraction pipeline (ExtractedJob) uses different field names than
+// this scoring function expects (job_title vs title, skills vs
+// required_skills, requirements vs qualifications, no experience_required/
+// ats_keywords field at all) -- this function used to read job.title,
+// job.required_skills, job.qualifications directly against a raw
+// ExtractedJob object where none of those keys exist, so titleWords/jdSkills
+// silently came back empty and Role Similarity/Skills Match/Education
+// Fit/the experience-years regex all defaulted to a hollow 100 instead of
+// measuring anything -- while the Skills section elsewhere in the UI read
+// the correct field names directly, so it displayed real skills while the
+// score next to it was computed from almost none of them. Mirrors the same
+// aliasing backend/app/routers/api.py::normalize_job_payload already does
+// server-side for /api/ats/live-score, so this client-side estimate and the
+// authoritative backend score are actually measuring the same inputs.
+const normalizeJob = job => {
+  if (!job) return job;
+  const normalized = { ...job };
+  if (!normalized.title && job.job_title) normalized.title = job.job_title;
+  if ((!normalized.required_skills || !normalized.required_skills.length) && job.skills) {
+    normalized.required_skills = job.skills;
+  }
+  if ((!normalized.preferred_skills || !normalized.preferred_skills.length) && job.suggested_skills) {
+    normalized.preferred_skills = job.suggested_skills;
+  }
+  const requirements = asList(job.requirements);
+  const preferredQualifications = asList(job.preferred_qualifications);
+  if (requirements.length || preferredQualifications.length) {
+    normalized.qualifications = [...asList(normalized.qualifications), ...requirements, ...preferredQualifications];
+  }
+  return normalized;
+};
+
+export function calculateJDMatchScore(resume, rawJob) {
+  if (!resume || !rawJob) {
     return { score: 0, atsScore: 0, matchedSkills: [], missingSkills: [], requiredCount: 0, matchedCount: 0, breakdown: {} };
   }
+  const job = normalizeJob(rawJob);
 
   const resumeSkills = skillSet(resume);
   const jdSkills = jobSkillSet(job);

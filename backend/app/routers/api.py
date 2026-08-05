@@ -182,6 +182,19 @@ def normalize_job_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         if value not in (None, "", []) and job.get(target) in (None, "", []):
             job[target] = value
 
+    # "requirements" -> "qualifications" above only fires when qualifications
+    # is still empty, so it never picks up preferred_qualifications (JD's
+    # "nice to have" list) at all -- that entire field was being silently
+    # dropped from every score, including the experience-years regex search
+    # (ATSScoringEngine._parse_required_years scans qualifications +
+    # responsibilities text), even when it was the ONLY place a JD mentioned
+    # "3+ years" or similar. Merge it in rather than alias it, so a real
+    # requirements list doesn't get overwritten.
+    preferred_quals = payload.get("preferred_qualifications")
+    if isinstance(preferred_quals, list) and preferred_quals:
+        existing_quals = job.get("qualifications")
+        job["qualifications"] = [*(existing_quals or []), *preferred_quals]
+
     salary = job.get("salary")
     if hasattr(salary, "model_dump"):
         salary = salary.model_dump()
