@@ -15,7 +15,10 @@
       "Bash(python -m py_compile services/job_extraction/agents.py services/job_extraction/browser_pool.py)",
       "Bash(python -m py_compile main.py services/job_extraction/agents.py services/job_extraction/browser_pool.py api/v1/resume.py)",
       "Bash(python -m py_compile api/v1/resume.py services/job_extraction/agents.py services/job_extraction/browser_pool.py main.py api/v1/jobs.py)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(\"/c/Users/bandi/AppData/Local/Programs/Python/Python311/python.exe\" diag_connection_pool.py)",
+      "Bash(\"/c/Users/bandi/AppData/Local/Programs/Python/Python311/python.exe\" -m py_compile services/notifications/service.py services/notifications/__init__.py main.py)",
+      "Bash(\"/c/Users/bandi/AppData/Local/Programs/Python/Python311/python.exe\" -m py_compile api/v1/resume.py)"
     ]
   }
 }

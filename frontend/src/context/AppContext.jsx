@@ -1465,6 +1465,18 @@ export function AppProvider({ children }) {
     }
   };
 
+  // Self-heals "No active resume selected" whenever resumesList loads but
+  // parsedResume never got hydrated -- e.g. the one-time restore inside
+  // checkSession()'s async block never resolved (session-verification
+  // retries exhausted on a slow Render cold start) before the user reached
+  // a page like Configure Tailoring, which fetches resumesList itself but
+  // never previously fell back to selecting the active resume from it.
+  useEffect(() => {
+    if (!session?.access_token || parsedResume || !Array.isArray(resumesList) || resumesList.length === 0) return;
+    const fallback = normalizeResumeRecord(resumesList.find(resume => resume.is_active) || resumesList[0]);
+    if (fallback) persistParsedResume(fallback);
+  }, [resumesList, parsedResume, session?.access_token]);
+
   const refreshActiveResumeFromBackend = async () => {
     const token = session?.access_token || localStorage.getItem('access_token');
     if (!token) return null;

@@ -1,10 +1,14 @@
 """Event-driven notification policy and reminder scheduling."""
+import asyncio
 import json
+import logging
 from datetime import datetime, time, timedelta, timezone
 from typing import Any, Dict, Optional
 from zoneinfo import ZoneInfo
 from psycopg2.extras import RealDictCursor
 from app.services.email_service import EmailService
+
+logger = logging.getLogger(__name__)
 
 TEMPLATES: Dict[str, Dict[str, Any]] = {
     "resume.generated": {"category":"resume","type":"RESUME_GENERATED","priority":"normal","title":"Your tailored resume is ready","message":"Your tailored resume for {company} is ready.","action_label":"Preview","action_url":"/resume-review?resume={resume_id}"},
@@ -206,3 +210,57 @@ class EmailDeliveryProcessor:
             processed += 1
         self.conn.commit()
         return processed
+
+
+_notification_ticker_task = None
+
+
+async def _run_notification_ticker():
+    """Fires due reminders and drains the pending email queue every 30s.
+
+    notification_worker.py (a standalone script meant for a separate Render
+    worker service) does the same job, but nothing in this repo actually
+    deploys it as a second process -- so notification_deliveries rows for
+    channel='email' were being inserted by NotificationService.emit() and
+    then sitting at status='pending' forever. In-app notifications appeared
+    instantly (inserted synchronously in the same transaction) while emails
+    silently never went out. Running the same processors in-process here,
+    on the pool this app already manages, means email actually gets sent
+    without requiring a second deployed service.
+    """
+    from core.database import get_db_pool
+
+    pool = get_db_pool()
+
+    def _process_once():
+        conn = pool.getconn()
+        try:
+            reminder_count = ReminderScheduler(conn).run_once()
+            email_count = EmailDeliveryProcessor(conn).run_once()
+            return reminder_count, email_count
+        finally:
+            pool.putconn(conn)
+
+    while True:
+        try:
+            reminder_count, email_count = await asyncio.to_thread(_process_once)
+            if reminder_count or email_count:
+                logger.info(
+                    "[NOTIFICATION_TICKER] Processed %s due reminders, %s email deliveries",
+                    reminder_count, email_count,
+                )
+        except Exception:
+            logger.exception("[NOTIFICATION_TICKER] Ticker iteration failed")
+        await asyncio.sleep(30)
+
+
+def start_notification_ticker():
+    """Start the background reminder/email-delivery ticker. Call once from
+    the FastAPI app's lifespan, after the event loop is running."""
+    global _notification_ticker_task
+    if _notification_ticker_task is None or _notification_ticker_task.done():
+        try:
+            loop = asyncio.get_running_loop()
+            _notification_ticker_task = loop.create_task(_run_notification_ticker())
+        except RuntimeError:
+            pass

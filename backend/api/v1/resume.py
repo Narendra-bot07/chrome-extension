@@ -3,6 +3,7 @@ from fastapi.responses import Response
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from pathlib import Path
+import asyncio
 import copy
 import re
 import hashlib
@@ -249,21 +250,26 @@ async def list_resumes(
     return resumes
 
 
-@router.post("/reconcile-local")
-async def reconcile_local_resumes(
-    user: Dict[str, Any] = Depends(verify_supabase_jwt),
-    repo: ResumeRepository = Depends(get_resume_repository),
-    storage: FileService = Depends(get_storage_service),
-):
-    base_dir = getattr(storage, "base_dir", None)
-    if not base_dir:
-        return {"recovered": 0, "active_resume_id": None}
+def _scan_and_recover_local_resumes(user_id: str, user_dir: Path) -> Dict[str, Any]:
+    """Runs off the event loop via asyncio.to_thread (see the route below).
 
-    user_dir = Path(base_dir) / "original-resumes" / user["id"]
-    if not user_dir.exists():
-        return {"recovered": 0, "active_resume_id": None}
+    Scanning/hashing/parsing every local file is real disk + CPU work, and
+    the original version of this route did it directly inside `async def`
+    with no `await` anywhere -- blocking the single asyncio event loop for
+    its full duration on every call. Combined with resolving `repo` through
+    FastAPI's Depends() chain (which holds one pooled DB connection for the
+    entire request), and this endpoint being fired on nearly every
+    `fetchResumesList()` call from the frontend, concurrent hits serialized
+    behind each other (visible as stacked ~5s increments in production
+    logs, matching this route's own 5s pool-checkout-retry ceiling) while
+    holding connections the whole time -- exhausting the pool. Only the
+    fast DB reads/writes below use a connection now, opened and released
+    around just those calls (see user_scoped_db_context), never held across
+    the file I/O/hashing/parsing.
+    """
+    with user_scoped_db_context(user_id) as conn:
+        known_paths = ResumeRepository(conn).all_file_paths(user_id)
 
-    known_paths = repo.all_file_paths(user["id"])
     local_files = sorted(
         (path for path in user_dir.iterdir() if path.is_file()),
         key=lambda path: path.stat().st_mtime,
@@ -272,12 +278,12 @@ async def reconcile_local_resumes(
     known_content_hashes = {
         hashlib.sha256(path.read_bytes()).hexdigest()
         for path in local_files
-        if f"{user['id']}/{path.name}" in known_paths
+        if f"{user_id}/{path.name}" in known_paths
     }
-    recovered: list[Dict[str, Any]] = []
+    pending: list[Dict[str, Any]] = []
     logged_duplicate_hashes: set[str] = set()
     for local_file in local_files:
-        relative_path = f"{user['id']}/{local_file.name}"
+        relative_path = f"{user_id}/{local_file.name}"
         if relative_path in known_paths:
             continue
 
@@ -294,7 +300,7 @@ async def reconcile_local_resumes(
                 logger.info(
                     "[RESUME][BACKEND] Duplicate orphan file skipped "
                     "user_id=%s file_name=%s",
-                    user["id"],
+                    user_id,
                     display_name,
                 )
                 logged_duplicate_hashes.add(content_hash)
@@ -305,47 +311,73 @@ async def reconcile_local_resumes(
             logger.warning(
                 "[RESUME][BACKEND] Recovered file text extraction skipped "
                 "user_id=%s file_name=%s error=%s",
-                user["id"],
+                user_id,
                 display_name,
                 str(exc),
             )
             raw_text = ""
 
-        uploaded_at = datetime.fromtimestamp(
-            local_file.stat().st_mtime,
-            tz=timezone.utc,
-        )
-        record = repo.recover_local_file(
-            user_id=user["id"],
-            file_path=relative_path,
-            file_name=display_name,
-            file_size=len(data),
-            file_type=local_file.suffix.lstrip(".").upper() or "PDF",
-            parsed_content={"raw_text": raw_text, "parse_status": "pending"},
-            uploaded_at=uploaded_at,
-            source_fingerprint=content_hash,
-        )
-        if record:
-            recovered.append(record)
-            known_paths.add(relative_path)
-            known_content_hashes.add(content_hash)
+        known_content_hashes.add(content_hash)
+        pending.append({
+            "relative_path": relative_path,
+            "display_name": display_name,
+            "file_size": len(data),
+            "file_type": local_file.suffix.lstrip(".").upper() or "PDF",
+            "raw_text": raw_text,
+            "uploaded_at": datetime.fromtimestamp(local_file.stat().st_mtime, tz=timezone.utc),
+            "content_hash": content_hash,
+        })
 
+    recovered: list[Dict[str, Any]] = []
     active = None
-    if recovered:
-        newest = recovered[0]
-        active = repo.activate(str(newest["id"]), user["id"])
+    if pending:
+        with user_scoped_db_context(user_id) as conn:
+            repo = ResumeRepository(conn)
+            for item in pending:
+                record = repo.recover_local_file(
+                    user_id=user_id,
+                    file_path=item["relative_path"],
+                    file_name=item["display_name"],
+                    file_size=item["file_size"],
+                    file_type=item["file_type"],
+                    parsed_content={"raw_text": item["raw_text"], "parse_status": "pending"},
+                    uploaded_at=item["uploaded_at"],
+                    source_fingerprint=item["content_hash"],
+                )
+                if record:
+                    recovered.append(record)
+            if recovered:
+                active = repo.activate(str(recovered[0]["id"]), user_id)
+
+    return {
+        "recovered": len(recovered),
+        "active_resume_id": active.get("id") if active else None,
+    }
+
+
+@router.post("/reconcile-local")
+async def reconcile_local_resumes(
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    storage: FileService = Depends(get_storage_service),
+):
+    base_dir = getattr(storage, "base_dir", None)
+    if not base_dir:
+        return {"recovered": 0, "active_resume_id": None}
+
+    user_dir = Path(base_dir) / "original-resumes" / user["id"]
+    if not user_dir.exists():
+        return {"recovered": 0, "active_resume_id": None}
+
+    result = await asyncio.to_thread(_scan_and_recover_local_resumes, user["id"], user_dir)
 
     logger.info(
         "[RESUME][BACKEND] Local resume reconciliation completed "
         "user_id=%s recovered=%s active_resume_id=%s",
         user["id"],
-        len(recovered),
-        active.get("id") if active else None,
+        result["recovered"],
+        result["active_resume_id"],
     )
-    return {
-        "recovered": len(recovered),
-        "active_resume_id": active.get("id") if active else None,
-    }
+    return result
 
 
 @router.get("/active")

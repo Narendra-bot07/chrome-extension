@@ -37,6 +37,7 @@ from core.database import get_db_pool, close_db_pool
 from api.router import api_router
 from api.v1.health import router as health_router, start_health_ticker
 from app.routers.api import router as legacy_api_router
+from services.notifications import start_notification_ticker
 
 _startup_logger = logging.getLogger("main")
 
@@ -71,6 +72,7 @@ def _ensure_playwright_chromium() -> None:
 async def lifespan(app: FastAPI):
     get_db_pool()
     start_health_ticker()
+    start_notification_ticker()
     await asyncio.to_thread(_ensure_playwright_chromium)
     yield
     close_db_pool()
