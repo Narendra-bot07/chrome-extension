@@ -475,6 +475,12 @@ export function AppProvider({ children }) {
   });
   const [jobDetectionStatus, setJobDetectionStatus] = useState("idle");
   const [jobDetectionMeta, setJobDetectionMeta] = useState(null);
+  // True between the "core" partial extraction event (job title/company/
+  // location/responsibilities ready) and the "final" event (skills ready) --
+  // lets the results UI show the job details immediately while rendering a
+  // loading state specifically for the skills section, instead of the whole
+  // page blocking on the slower of the two backend calls.
+  const [skillsPending, setSkillsPending] = useState(false);
   const [reviewSuggestions, setReviewSuggestions] = useState([]);
   const [liveATS, setLiveATS] = useState(null);
   const [isRefineStreaming, setIsRefineStreaming] = useState(false);
@@ -2003,7 +2009,16 @@ export function AppProvider({ children }) {
         hasBrowserEvidence: Boolean(browserEvidence)
       });
 
-      const response = await fetch(endpoint, {
+      // Streaming variant of the extraction endpoint: the backend now runs
+      // the "core fields" and "skills" LLM calls as two independent, fully
+      // parallel steps (see docs/CHANGELOG.md 3.15.12) and emits a "core"
+      // partial event the instant whichever of the two finishes -- usually
+      // (not always; it's data-dependent) the core fields -- well before the
+      // "final" event once both are done. This lets the results screen show
+      // job details immediately, with just the skills section in a loading
+      // state, instead of the whole page blocking on the slower of the two.
+      const streamEndpoint = `${apiUrl}/api/v1/jobs/extract-url-stream`;
+      const response = await fetch(streamEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -2032,139 +2047,188 @@ export function AppProvider({ children }) {
         throw new Error(failure.message || `Backend extraction error (${response.status})`);
       }
 
-      const data = validateJDResponse(await response.json());
-      if (
+      const isStale = () => (
         activeRequestIdRef.current !== requestId
         || activeExtractionIdentityRef.current !== expectedIdentity
-      ) {
-        logExtraction('Stale extraction response discarded', {
-          requestId,
-          responseIdentity: expectedIdentity,
-          activeIdentity: activeExtractionIdentityRef.current
-        });
-        return;
-      }
-      const pageType = data.page_type;
-      const confidence = data.classification_confidence || 0;
-      logExtraction('Backend response received', {
-        requestId: data.request_id, status: response.status, success: data.success,
-        pageType, classificationConfidence: confidence,
-        hasExtractedJob: Boolean(data.extracted_job),
-        needsManualReview: Boolean(data.needs_manual_review)
-      });
-      logExtraction('Hybrid evidence decision received', {
-        requestId: data.request_id,
-        ...data.execution_summary
-      });
-      const canonicalSkills = collectJobSkills(data.extracted_job || {});
-      const compatibilitySkills = collectJobSkills(data.job || {});
-      logExtraction('Backend extraction field counts', {
-        requestId: data.request_id,
-        canonicalSkillsCount: canonicalSkills.explicit.length,
-        canonicalSuggestedSkillsCount: canonicalSkills.suggested.length,
-        compatibilitySkillsCount: compatibilitySkills.explicit.length,
-        responsibilitiesCount: data.extracted_job?.responsibilities?.length || 0,
-        requirementsCount: data.extracted_job?.requirements?.length || 0,
-        preferredQualificationsCount: data.extracted_job?.preferred_qualifications?.length || 0,
-        benefitsCount: data.extracted_job?.benefits?.length || 0
-      });
-      logExtraction('Explicit skills received', {
-        requestId: data.request_id,
-        skills: canonicalSkills.explicit
-      });
+      );
 
-      if (!data.success) {
-        const code = data.error?.code || "JD_EXTRACTION_FAILED";
-        const restriction = data.restriction || data.execution_summary?.restriction_type;
-        const restrictionStatus = {
-          login_required: 'login-required',
-          captcha: 'captcha',
-          access_denied: 'blocked',
-          rate_limited: 'rate-limited',
-          security_challenge: 'security-challenge',
-          empty_shell: 'extraction-incomplete',
-          javascript_not_rendered: 'extraction-incomplete',
-          permission_required: 'page-inaccessible'
-        }[restriction];
-        const outcomeStatus = {
-          selection_required: 'job-list',
-          non_job: 'non-job',
-          manual_review: 'manual-review',
-          insufficient_evidence: 'extraction-incomplete',
-          blocked: restrictionStatus || 'blocked'
-        }[data.status];
-        const nextStatus = outcomeStatus
-          || restrictionStatus
-          || (code === "JOB_SELECTION_REQUIRED" ? "job-list" : null)
-          || (code === "NON_JOB_PAGE" ? "non-job" : null)
-          || (code === "MANUAL_REVIEW_REQUIRED" ? "manual-review" : null)
-          || (code === "PAGE_BLOCKED" ? "blocked" : "extraction-failed");
-        setJobDetectionStatus(nextStatus);
-        setJobDetectionMeta({
-          classification: data.page_type || 'unknown',
-          confidence,
-          reason: data.error?.message || 'Job extraction did not complete.',
-          extractionMethod: 'hybrid_agentic_url',
-          pageAccessStatus: data.page_access_status,
-          readiness: data.readiness,
-          selectedSource: data.selected_source,
-          warnings: data.warnings || []
-        });
-        setApiError(data.error?.message || null);
-        return;
-      }
-
-      if (data.needs_manual_review) {
-        console.warn("[JD-EXTRACTION][FRONTEND] Manual review required", {
-          requestId: data.request_id, reviewIssues: data.review_issues || []
-        });
-        setJobDetectionStatus("manual-review");
-        setJobDetectionMeta({ classification: pageType, confidence, reason: (data.review_issues || []).join("; "), extractionMethod: "agentic_url" });
-        setApiError("The page needs manual review before tailoring.");
-      } else if (pageType === "job_detail" && data.extracted_job) {
-        const job = data.job || data.extracted_job;
+      const revealJob = async (job, data, { pending }) => {
         const { title, company, description } = job;
-        // Publish the JD and its score as one completed result. This prevents
-        // the details screen from flashing before the authoritative match.
+        // Publish the JD and its score as one result per stage. The core
+        // stage intentionally skips waiting for skills so the results
+        // screen can render immediately -- scoreJobBeforeReveal is fast
+        // (~300ms) either way and gets re-run once skills land.
         await scoreJobBeforeReveal(job);
         setJobText(description || '');
         setJobTitle(title || '');
         setCompanyName(company || '');
         setJobAnalysis(job);
+        setSkillsPending(pending);
         const displayedSkills = collectJobSkills(job);
         logExtraction('Job state prepared for rendering', {
           requestId: data.request_id,
+          stage: data.stage || 'final',
           explicitSkillsCount: displayedSkills.explicit.length,
           suggestedSkillsCount: displayedSkills.suggested.length,
           explicitSkills: displayedSkills.explicit
         });
         setJobDetectionStatus('ready');
         setJobDetectionMeta({
-          classification: pageType, confidence,
+          classification: data.page_type, confidence: data.classification_confidence || 0,
           reason: (data.classification_reasons || []).join("; "),
           extractionMethod: 'agentic_url'
         });
         setApiError(null);
-        logExtraction('Extraction success', { requestId: data.request_id, titlePresent: Boolean(title), companyPresent: Boolean(company) });
-      } else {
-        const surfaceType = data.execution_summary?.surface_type;
-        const statusName = {
-          job_list: 'job-list',
-          career_home: 'career-home',
-          login: 'login-required',
-          blocked: 'blocked',
-          non_job: 'non-job'
-        }[surfaceType] || (pageType === "job_list" ? "job-list" : "non-job");
-        setJobDetectionStatus(statusName);
-        setJobDetectionMeta({
-          classification: pageType || 'non_job', confidence,
-          reason: (data.classification_reasons || []).join("; "),
-          extractionMethod: 'agentic_url'
+      };
+
+      const processFinalEvent = async (data) => {
+        const pageType = data.page_type;
+        const confidence = data.classification_confidence || 0;
+        logExtraction('Backend response received', {
+          requestId: data.request_id, success: data.success,
+          pageType, classificationConfidence: confidence,
+          hasExtractedJob: Boolean(data.extracted_job),
+          needsManualReview: Boolean(data.needs_manual_review)
         });
-        setApiError(null);
-        console.warn(`[JD-EXTRACTION][FRONTEND] ${pageType === "job_list" ? "Job-list page" : "Non-job page"} detected`, {
-          requestId: data.request_id, url: activeUrl, confidence
+        logExtraction('Hybrid evidence decision received', {
+          requestId: data.request_id,
+          ...data.execution_summary
         });
+        const canonicalSkills = collectJobSkills(data.extracted_job || {});
+        const compatibilitySkills = collectJobSkills(data.job || {});
+        logExtraction('Backend extraction field counts', {
+          requestId: data.request_id,
+          canonicalSkillsCount: canonicalSkills.explicit.length,
+          canonicalSuggestedSkillsCount: canonicalSkills.suggested.length,
+          compatibilitySkillsCount: compatibilitySkills.explicit.length,
+          responsibilitiesCount: data.extracted_job?.responsibilities?.length || 0,
+          requirementsCount: data.extracted_job?.requirements?.length || 0,
+          preferredQualificationsCount: data.extracted_job?.preferred_qualifications?.length || 0,
+          benefitsCount: data.extracted_job?.benefits?.length || 0
+        });
+        logExtraction('Explicit skills received', {
+          requestId: data.request_id,
+          skills: canonicalSkills.explicit
+        });
+
+        if (!data.success) {
+          const code = data.error?.code || "JD_EXTRACTION_FAILED";
+          const restriction = data.restriction || data.execution_summary?.restriction_type;
+          const restrictionStatus = {
+            login_required: 'login-required',
+            captcha: 'captcha',
+            access_denied: 'blocked',
+            rate_limited: 'rate-limited',
+            security_challenge: 'security-challenge',
+            empty_shell: 'extraction-incomplete',
+            javascript_not_rendered: 'extraction-incomplete',
+            permission_required: 'page-inaccessible'
+          }[restriction];
+          const outcomeStatus = {
+            selection_required: 'job-list',
+            non_job: 'non-job',
+            manual_review: 'manual-review',
+            insufficient_evidence: 'extraction-incomplete',
+            blocked: restrictionStatus || 'blocked'
+          }[data.status];
+          const nextStatus = outcomeStatus
+            || restrictionStatus
+            || (code === "JOB_SELECTION_REQUIRED" ? "job-list" : null)
+            || (code === "NON_JOB_PAGE" ? "non-job" : null)
+            || (code === "MANUAL_REVIEW_REQUIRED" ? "manual-review" : null)
+            || (code === "PAGE_BLOCKED" ? "blocked" : "extraction-failed");
+          setSkillsPending(false);
+          setJobDetectionStatus(nextStatus);
+          setJobDetectionMeta({
+            classification: data.page_type || 'unknown',
+            confidence,
+            reason: data.error?.message || 'Job extraction did not complete.',
+            extractionMethod: 'hybrid_agentic_url',
+            pageAccessStatus: data.page_access_status,
+            readiness: data.readiness,
+            selectedSource: data.selected_source,
+            warnings: data.warnings || []
+          });
+          setApiError(data.error?.message || null);
+          return;
+        }
+
+        if (data.needs_manual_review) {
+          console.warn("[JD-EXTRACTION][FRONTEND] Manual review required", {
+            requestId: data.request_id, reviewIssues: data.review_issues || []
+          });
+          setSkillsPending(false);
+          setJobDetectionStatus("manual-review");
+          setJobDetectionMeta({ classification: pageType, confidence, reason: (data.review_issues || []).join("; "), extractionMethod: "agentic_url" });
+          setApiError("The page needs manual review before tailoring.");
+        } else if (pageType === "job_detail" && data.extracted_job) {
+          const job = data.job || data.extracted_job;
+          await revealJob(job, data, { pending: false });
+          logExtraction('Extraction success', { requestId: data.request_id, titlePresent: Boolean(job.title), companyPresent: Boolean(job.company) });
+        } else {
+          const surfaceType = data.execution_summary?.surface_type;
+          const statusName = {
+            job_list: 'job-list',
+            career_home: 'career-home',
+            login: 'login-required',
+            blocked: 'blocked',
+            non_job: 'non-job'
+          }[surfaceType] || (pageType === "job_list" ? "job-list" : "non-job");
+          setSkillsPending(false);
+          setJobDetectionStatus(statusName);
+          setJobDetectionMeta({
+            classification: pageType || 'non_job', confidence,
+            reason: (data.classification_reasons || []).join("; "),
+            extractionMethod: 'agentic_url'
+          });
+          setApiError(null);
+          console.warn(`[JD-EXTRACTION][FRONTEND] ${pageType === "job_list" ? "Job-list page" : "Non-job page"} detected`, {
+            requestId: data.request_id, url: activeUrl, confidence
+          });
+        }
+      };
+
+      const processStreamEvent = async (rawData) => {
+        const data = validateJDResponse(rawData);
+        if (isStale()) {
+          logExtraction('Stale extraction response discarded', {
+            requestId,
+            responseIdentity: expectedIdentity,
+            activeIdentity: activeExtractionIdentityRef.current
+          });
+          return;
+        }
+        if (data.stage === 'core') {
+          const job = data.job || data.extracted_job;
+          await revealJob(job, data, { pending: true });
+          return;
+        }
+        await processFinalEvent(data);
+      };
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let sseBuffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        sseBuffer += decoder.decode(value, { stream: true });
+        const chunks = sseBuffer.split('\n\n');
+        sseBuffer = chunks.pop() || '';
+        for (const chunk of chunks) {
+          const line = chunk.trim();
+          if (!line.startsWith('data:')) continue;
+          const jsonText = line.slice(5).trim();
+          if (!jsonText) continue;
+          let parsed;
+          try {
+            parsed = JSON.parse(jsonText);
+          } catch (parseErr) {
+            console.error('[JD-EXTRACTION][FRONTEND] Malformed stream chunk', { requestId, error: parseErr.message });
+            continue;
+          }
+          await processStreamEvent(parsed);
+        }
       }
     } catch (err) {
       if (err?.name === 'AbortError') {
@@ -3967,6 +4031,7 @@ export function AppProvider({ children }) {
       customFileName, setCustomFileName,
       jobDetectionStatus, setJobDetectionStatus,
       jobDetectionMeta, setJobDetectionMeta,
+      skillsPending,
       loadingProgress, setLoadingProgress,
       loadingMessage, setLoadingMessage,
       loadingType, setLoadingType,

@@ -160,7 +160,8 @@ function JobReviewView({
     lastAnalyzedUrl,
     jobDetectionMeta,
     jobAnalysis: currentJobAnalysis,
-    comparison
+    comparison,
+    skillsPending
   } = useApp();
   const [applied, setApplied] = useState(false);
   const [favourite, setFavourite] = useState(false);
@@ -492,23 +493,41 @@ function JobReviewView({
               })}
             </div>
           </div>
-        ) : (
-          allSkills.length > 0 && (
-            <div className="space-y-1.5">
-              <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100">Skills</h3>
-              <div className="flex flex-wrap gap-1.5">
-                {allSkills.map((skill, idx) => (
-                  <span 
-                    key={idx}
-                    className="text-xs bg-zinc-100 dark:bg-zinc-900 text-zinc-650 dark:text-zinc-400 px-3 py-1 rounded-lg border border-zinc-200/50 dark:border-zinc-850/50 font-bold"
-                  >
-                    {skill}
-                  </span>
-                ))}
-              </div>
+        ) : allSkills.length > 0 ? (
+          <div className="space-y-1.5">
+            <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100">Skills</h3>
+            <div className="flex flex-wrap gap-1.5">
+              {allSkills.map((skill, idx) => (
+                <span
+                  key={idx}
+                  className="text-xs bg-zinc-100 dark:bg-zinc-900 text-zinc-650 dark:text-zinc-400 px-3 py-1 rounded-lg border border-zinc-200/50 dark:border-zinc-850/50 font-bold"
+                >
+                  {skill}
+                </span>
+              ))}
             </div>
-          )
-        )}
+          </div>
+        ) : skillsPending ? (
+          // Job details (title/company/location/etc.) stream in first; skills
+          // is consistently the slower of the two backend calls to finish, so
+          // this shows while that's still in flight instead of the whole
+          // results screen blocking on it.
+          <div className="space-y-1.5">
+            <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+              Skills
+              <RefreshCw size={12} className="animate-spin text-zinc-400" />
+            </h3>
+            <div className="flex flex-wrap gap-1.5" aria-busy="true" aria-label="Analyzing required skills">
+              {[72, 96, 60, 84, 68].map((width, idx) => (
+                <span
+                  key={idx}
+                  className="h-6 rounded-lg bg-zinc-150 dark:bg-zinc-800 animate-pulse"
+                  style={{ width }}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         {/* Qualifications */}
         {qualificationsList.length > 0 && (

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 import re
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 
 
 class SalaryInfo(BaseModel):
@@ -215,6 +215,26 @@ class ExtractedJob(BaseModel):
         return "other"
 
 
+# Derived (not hand-duplicated, to avoid schema drift) from ExtractedJob minus
+# skills/suggested_skills -- used as the structured-output target for the
+# "core fields" half of extraction_agent's now-parallelized LLM calls (see
+# agents.py). The skills half uses the existing SkillDecision schema below.
+# Field-level validators (normalize_optional_lists, normalize_salary, etc.)
+# aren't carried over here since this is only an intermediate LLM-response
+# shape -- the final merged dict still goes through the real ExtractedJob
+# model_validate(), which applies every validator exactly as before.
+ExtractedJobCore = create_model(
+    "ExtractedJobCore",
+    __base__=BaseModel,
+    __module__=__name__,
+    **{
+        name: (field_info.annotation, field_info)
+        for name, field_info in ExtractedJob.model_fields.items()
+        if name not in ("skills", "suggested_skills")
+    },
+)
+
+
 class ClassificationDecision(BaseModel):
     model_config = ConfigDict(extra="ignore")
     page_type: Literal["job_detail", "job_list", "non_job"]
@@ -349,6 +369,15 @@ class JDState(BaseModel):
     classification_reasons: list[str] = Field(default_factory=list)
     evidence: dict[str, Any] = Field(default_factory=dict)
     source_scores: dict[str, float] = Field(default_factory=dict)
+    # Intermediate holding fields for the streaming extraction path (graph.py's
+    # run_job_intelligence_stream) -- extraction_core_agent and
+    # extraction_skills_agent run as separate, concurrent LangGraph nodes (both
+    # direct successors of source_builder) so the graph's own .stream() can
+    # surface the core result the moment it's ready, well before the slower
+    # skills call finishes, instead of waiting for both like a single combined
+    # node would. extraction_merge_agent combines these into extracted_job.
+    extracted_job_core: Optional[dict[str, Any]] = None
+    extracted_job_skills: Optional[dict[str, Any]] = None
     extracted_job: Optional[dict[str, Any]] = None
     review_issues: list[str] = Field(default_factory=list)
     field_issues: dict[str, list[str]] = Field(default_factory=dict)

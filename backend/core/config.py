@@ -112,7 +112,14 @@ class Settings(BaseSettings):
     LLM_CACHE_TTL_SUMMARY_SECONDS: int = Field(default=86400, env="LLM_CACHE_TTL_SUMMARY_SECONDS")
     LLM_CACHE_TTL_COVER_LETTER_SECONDS: int = Field(default=86400, env="LLM_CACHE_TTL_COVER_LETTER_SECONDS")
     LLM_CACHE_LOCK_TTL_SECONDS: int = Field(default=120, env="LLM_CACHE_LOCK_TTL_SECONDS")
-    LLM_CACHE_LOCK_WAIT_SECONDS: float = Field(default=15.0, env="LLM_CACHE_LOCK_WAIT_SECONDS")
+    # Was 15s -- far shorter than a real jd_agent_extraction/resume_patch_tailoring
+    # call actually takes (measured 28-90s in production). A waiter always gave
+    # up before the lock owner could finish, then made its own full redundant
+    # LLM call anyway -- the single-flight lock never once paid off, it just
+    # added a guaranteed extra 15s of dead wait on top of a duplicate call.
+    # Set just under LLM_CACHE_LOCK_TTL_SECONDS so a waiter can't outlast the
+    # lock itself.
+    LLM_CACHE_LOCK_WAIT_SECONDS: float = Field(default=100.0, env="LLM_CACHE_LOCK_WAIT_SECONDS")
 
     PROJECT_NAME: str = "Resume Tailor AI"
     API_V1_STR: str = "/api/v1"

@@ -4,6 +4,31 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.15.12] - 2026-08-05
+
+### Added
+- **Real streaming for JD extraction, replacing the fully-simulated progress bar.** The "Extracting details..." checklist (Reading Job Description / Extracting Company Details / Analyzing Required Skills) was a fake `setInterval` ramping a percentage on a fixed schedule, completely disconnected from backend progress. Now the results screen itself renders progressively:
+  - **Backend**: split the `extraction` graph node into two independent LangGraph nodes, `extraction_core` and `extraction_skills` (both direct successors of `source_builder`, feeding into a new `extraction_merge` node before `reviewer`). Confirmed directly with a throwaway two-node timing probe, not assumed, that LangGraph's `graph.stream(stream_mode="updates")` yields each node's output the instant *that node* finishes, not when the whole superstep does -- this is what makes early delivery possible at all. New `run_job_intelligence_stream()` in `graph.py` consumes that stream and yields a `"core"` partial event (job title/company/location/responsibilities/etc., skills empty) followed by a `"final"` event once everything, including skills and the reviewer/repair pass, completes.
+  - New endpoint `POST /jobs/extract-url-stream` (`api/v1/jobs.py`) wraps this in Server-Sent Events, running the synchronous generator on a background thread bridged to the async response via a `queue.Queue`. Quota check happens before the stream opens (so `QUOTA_EXCEEDED` still surfaces as a normal 4xx like before); usage is only consumed after a successful final event.
+  - **Frontend**: `AppContext.jsx`'s extraction flow now reads the SSE response progressively instead of one blocking `fetch()+response.json()`. A `"core"` event reveals the job details screen immediately (same reveal logic as before, including `scoreJobBeforeReveal`) with a new `skillsPending` flag; the `"final"` event updates skills and clears it. `JobReviewView.jsx`'s Skills section renders a pulsing skeleton placeholder while `skillsPending` is true, instead of the whole screen blocking on it.
+  - Verified end-to-end three times against real job postings, at both the Python-generator level and over a real HTTP request to a locally running server (confirmed valid SSE framing, correct event ordering, correct final payload). Honest finding from those tests: **which of core/skills finishes first is data-dependent, not fixed** -- in these three runs the gap between the two events ranged from milliseconds to tens of seconds. The mechanism is real and never makes the wait longer than before; how much it *feels* faster depends on the specific posting.
+
+---
+
+## [3.15.11] - 2026-08-05
+
+### Fixed
+- **LLM single-flight cache lock waited 15s, then always made a redundant call anyway.** Found directly in production logs: two concurrent requests hit the same job URL; the second waited on `execute_with_cache`'s distributed lock for exactly `LLM_CACHE_LOCK_WAIT_SECONDS` (15s), timed out, and fell through to its own full LLM call -- even though the lock's own TTL is 120s and real `jd_agent_extraction`/`resume_patch_tailoring` calls routinely take 28-90s. The wait was never long enough to actually benefit from the lock; it just added a guaranteed extra 15s before doing the redundant work anyway. Bumped default to 100s (`core/config.py`, `.env.example`) so a waiter has a real chance to reuse the first request's result instead of guaranteed-wasting both the wait and a duplicate DeepSeek call.
+
+### Changed
+- **JD extraction (`extraction_agent` in `services/job_extraction/agents.py`) now runs two LLM calls concurrently instead of one serial call.** Split `EXTRACTION_PROMPT`/`ExtractedJob` into `EXTRACTION_CORE_PROMPT` (title/company/location/responsibilities/requirements/etc., via a new `ExtractedJobCore` schema *derived* from `ExtractedJob` via `pydantic.create_model` -- not hand-duplicated, so it can't drift) and `EXTRACTION_SKILLS_PROMPT` (skills/suggested_skills, via the existing-but-previously-unused `SkillDecision` schema -- there was already a fully-built, never-wired-in `skill_intelligence_agent` for exactly this). Both run via `ThreadPoolExecutor`, each with its own cache entry (`jd_agent_extraction_core` / `jd_agent_extraction_skills`), then merge into one dict that still goes through the real `ExtractedJob.model_validate()` -- every existing field validator (workplace_type/employment_type/salary normalization, list coercion, etc.) still runs exactly as before on the merged result. Verified the merge-then-validate path directly (workplace_type `"ON-SITE"` correctly normalizes to `"onsite"` post-merge) before relying on it.
+
+### Investigated further (root cause now precisely located, not just narrowed)
+- **Ran the real, unmodified production flow twice against the exact job URL from the user's own logs** (`jobs.apple.com/.../site-reliability-engineer`) to measure the parallel-call change directly rather than estimate it. Result: the skills call's HTTP response headers came back in ~2.5s, but the response body (34 explicit + 8 suggested skills) wasn't fully generated for **75-78 more seconds** -- confirming this is DeepSeek's actual generation time for a long, carefully-atomized skill list, not network latency, not a client-side timeout/retry artifact, and not something the parallel split can fix on its own (skills was always the dominant cost; running it alongside a now-separate core call removes core's *own* time from the critical path, but doesn't make skills generation itself faster).
+- **This means 5-10s for full JD extraction (skills included) is not reachable without a product tradeoff**, given current findings: either (a) cap the number of skills requested per call (directly cuts output tokens, proportionally faster, extracts less exhaustively), or (b) return core fields immediately (now realistically fast on a cache miss, and instant on a hit) and deliver skills as a progressive/async follow-up rather than blocking the initial response on them. Neither was applied without a product decision -- flagged for the user rather than silently changed.
+
+---
+
 ## [3.15.10] - 2026-08-05
 
 ### Fixed
