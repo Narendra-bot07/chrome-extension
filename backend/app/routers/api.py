@@ -271,7 +271,18 @@ async def api_parse_resume(
 @router.post("/analyze-job", response_model=JobAnalysis)
 async def api_analyze_job(
     request: JobAnalysisRequest,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
 ):
+    # This endpoint had no auth and no quota check at all -- every
+    # manual/pasted-JD extraction went through here (its sibling
+    # /api/v1/jobs/extract-url is the only other JD-extraction path, and
+    # correctly gated jd_extraction already). Any request, from anyone,
+    # bypassed the jd_extraction limit entirely. Mirrors extract-url's
+    # pattern: a short-lived connection just for the quota check/consume,
+    # nothing held open across the LLM call in between.
+    from api.dependencies import user_scoped_db_context
+    with user_scoped_db_context(user["id"]) as conn:
+        UsageService(conn).require_available(user["id"], "jd_extraction")
     try:
         analysis = analyze_job_description(
             request.jd_text, 
@@ -294,6 +305,8 @@ async def api_analyze_job(
         if request.salary_range:
             analysis.salary = request.salary_range
         analysis.is_job_related = True
+        with user_scoped_db_context(user["id"]) as conn:
+            UsageService(conn).consume_usage(user["id"], "jd_extraction", metadata={"url": request.url})
         return analysis
     except Exception as e:
         raise HTTPException(

@@ -1,5 +1,3 @@
-import os
-
 from psycopg2.extras import RealDictCursor, Json
 from fastapi import HTTPException, status
 from .subscription_service import SubscriptionService
@@ -12,10 +10,21 @@ FEATURE_NAMES = {
     "cover_letter_generation": "cover letter generations",
 }
 
-QUOTAS_ENFORCED = os.getenv("ENFORCE_SUBSCRIPTION_QUOTAS", "false").strip().lower() in {
-    "1", "true", "yes", "on"
-}
-TESTING_UNLIMITED_FEATURES = {
+# resume_upload is a lifetime cap ("1 resume upload, ever" on the free plan),
+# not a per-billing-period one like the other three -- usage_events has no
+# separate window concept, so this set decides which features get summed
+# across all-time instead of just the current subscription period.
+LIFETIME_WINDOW_FEATURES = {"resume_upload"}
+
+# Quota enforcement previously depended on an ENFORCE_SUBSCRIPTION_QUOTAS env
+# var that defaulted to "false" in production -- meaning every account,
+# including real customers, was silently unlimited on all four core
+# features. Replaced with a per-user bypass: only accounts with
+# users.role='admin' are unlimited (today, just the product owner's account
+# -- see docs/KNOWN_ISSUES.md / admin_abuse.py's OWNER_EMAILS for how that
+# role got set). Free-tier accounts now always get the real plan_features
+# limits from the database.
+UNLIMITED_FEATURES = {
     "jd_extraction",
     "resume_upload",
     "resume_generation",
@@ -40,11 +49,24 @@ class UsageService:
     def __init__(self, conn):
         self.conn = conn
         self.subscription_service = SubscriptionService(conn)
+        self._admin_cache = {}
 
-    def get_feature_limit(self, subscription, feature_key):
-        # During product testing, retain usage telemetry but do not block workflows.
-        # Set ENFORCE_SUBSCRIPTION_QUOTAS=true when production enforcement is desired.
-        if not QUOTAS_ENFORCED and feature_key in TESTING_UNLIMITED_FEATURES:
+    def _is_admin_user(self, user_id):
+        """Admin accounts (currently just the product owner) bypass quotas
+        entirely -- checked fresh against the DB rather than trusted from
+        the session JWT, since role changes (e.g. granting another admin
+        via the admin console) must take effect without requiring re-login."""
+        if user_id in self._admin_cache:
+            return self._admin_cache[user_id]
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT role FROM public.users WHERE id = %s", (user_id,))
+            row = cur.fetchone()
+            is_admin = bool(row and row[0] == "admin")
+        self._admin_cache[user_id] = is_admin
+        return is_admin
+
+    def get_feature_limit(self, subscription, feature_key, user_id=None):
+        if user_id is not None and self._is_admin_user(user_id) and feature_key in UNLIMITED_FEATURES:
             return True, None
 
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -64,19 +86,26 @@ class UsageService:
 
     def get_usage(self, user_id, feature_key, period_start, period_end):
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("""
-                SELECT COALESCE(SUM(quantity), 0) AS used
-                FROM public.usage_events
-                WHERE user_id = %s
-                  AND feature_key = %s
-                  AND created_at >= %s
-                  AND created_at < %s
-            """, (user_id, feature_key, period_start, period_end))
+            if feature_key in LIFETIME_WINDOW_FEATURES:
+                cur.execute("""
+                    SELECT COALESCE(SUM(quantity), 0) AS used
+                    FROM public.usage_events
+                    WHERE user_id = %s AND feature_key = %s
+                """, (user_id, feature_key))
+            else:
+                cur.execute("""
+                    SELECT COALESCE(SUM(quantity), 0) AS used
+                    FROM public.usage_events
+                    WHERE user_id = %s
+                      AND feature_key = %s
+                      AND created_at >= %s
+                      AND created_at < %s
+                """, (user_id, feature_key, period_start, period_end))
             return max(int(cur.fetchone()["used"] or 0), 0)
 
     def get_current_usage(self, user_id, feature_key):
         sub = self.subscription_service.get_current_subscription(user_id)
-        enabled, limit = self.get_feature_limit(sub, feature_key)
+        enabled, limit = self.get_feature_limit(sub, feature_key, user_id=user_id)
         used = self.get_usage(user_id, feature_key, sub["current_period_start"], sub["current_period_end"])
         remaining = None if limit is None else max(limit - used, 0)
         return {
@@ -85,66 +114,18 @@ class UsageService:
             "limit": limit,
             "used": used,
             "remaining": remaining,
+            "lifetime": feature_key in LIFETIME_WINDOW_FEATURES,
             "period_start": sub["current_period_start"],
             "period_end": sub["current_period_end"],
         }
 
     def get_usage_summary(self, user_id):
-        sub = self.subscription_service.get_current_subscription(user_id)
         keys = ["jd_extraction", "resume_upload", "resume_generation", "cover_letter_generation"]
-
-        feature_limits = {}
-        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("""
-                SELECT feature_key, limit_value, enabled
-                FROM public.plan_features
-                WHERE plan_id = %s AND feature_key = ANY(%s)
-            """, (sub["plan_id"], keys))
-            for row in cur.fetchall():
-                feature_limits[row["feature_key"]] = row
-
-        usage_counts = {}
-        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("""
-                SELECT feature_key, COALESCE(SUM(quantity), 0) AS used
-                FROM public.usage_events
-                WHERE user_id = %s
-                  AND feature_key = ANY(%s)
-                  AND created_at >= %s
-                  AND created_at < %s
-                GROUP BY feature_key
-            """, (user_id, keys, sub["current_period_start"], sub["current_period_end"]))
-            for row in cur.fetchall():
-                usage_counts[row["feature_key"]] = max(int(row["used"] or 0), 0)
-
-        summary = {}
-        for feature_key in keys:
-            if not QUOTAS_ENFORCED and feature_key in TESTING_UNLIMITED_FEATURES:
-                enabled, limit = True, None
-            else:
-                feat = feature_limits.get(feature_key)
-                if not feat or not feat["enabled"]:
-                    enabled, limit = False, 0
-                elif feat["limit_value"] is not None:
-                    enabled, limit = True, feat["limit_value"]
-                elif feature_key == "jd_extraction":
-                    enabled, limit = True, sub.get("monthly_jd_limit")
-                else:
-                    enabled, limit = True, None
-
-            used = usage_counts.get(feature_key, 0)
-            remaining = None if limit is None else max(limit - used, 0)
-            summary[feature_key] = {
-                "feature_key": feature_key,
-                "enabled": enabled,
-                "limit": limit,
-                "used": used,
-                "remaining": remaining,
-                "period_start": sub["current_period_start"],
-                "period_end": sub["current_period_end"],
-            }
-
-        return summary
+        # Delegates to get_current_usage per key so the admin bypass and
+        # resume_upload's lifetime window (instead of the current billing
+        # period) are handled in exactly one place instead of being
+        # duplicated here with its own copy of the same branching.
+        return {feature_key: self.get_current_usage(user_id, feature_key) for feature_key in keys}
 
     def require_available(self, user_id, feature_key, quantity=1):
         summary = self.get_current_usage(user_id, feature_key)
@@ -162,7 +143,7 @@ class UsageService:
         try:
             with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
                 sub = self.subscription_service.get_current_subscription(user_id, lock=True)
-                enabled, limit = self.get_feature_limit(sub, feature_key)
+                enabled, limit = self.get_feature_limit(sub, feature_key, user_id=user_id)
                 if not enabled:
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Activity, AlertTriangle, ArrowLeft, Cpu, RefreshCw, Timer } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowLeft, Cpu, RefreshCw, Timer, Users } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getApiUrl } from '../config/apiConfig';
 
@@ -168,6 +168,12 @@ export default function AdminObservabilityPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate('/admin/users')}
+            className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider border border-zinc-800 hover:border-zinc-700 text-zinc-300 transition cursor-pointer flex items-center gap-1.5"
+          >
+            <Users size={12} /> Users
+          </button>
           <button
             onClick={() => setAutoRefresh(v => !v)}
             className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider border transition cursor-pointer flex items-center gap-1.5 ${

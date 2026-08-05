@@ -540,17 +540,35 @@ function Layout() {
                           <Zap size={15} className="text-tf-text-secondary" />
                           <span>Subscription & Credits</span>
                         </button>
-                        {user?.email === 'bandinarendra3333@gmail.com' && (
-                          <button
-                            onClick={() => {
-                              setProfileMenuOpen(false);
-                              navigate('/admin/observability');
-                            }}
-                            className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-medium text-tf-text hover:bg-tf-surface-2 transition cursor-pointer"
-                          >
-                            <Activity size={15} className="text-tf-text-secondary" />
-                            <span>Observability</span>
-                          </button>
+                        {/* role is now returned by /auth/session and the login
+                            responses (previously never sent to the frontend at
+                            all), so any account promoted to admin from the
+                            Users console sees these too -- not just the owner's
+                            hardcoded email, which stays as a fallback in case a
+                            cached session predates that field being added. */}
+                        {(user?.role === 'admin' || user?.email === 'bandinarendra3333@gmail.com') && (
+                          <>
+                            <button
+                              onClick={() => {
+                                setProfileMenuOpen(false);
+                                navigate('/admin/observability');
+                              }}
+                              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-medium text-tf-text hover:bg-tf-surface-2 transition cursor-pointer"
+                            >
+                              <Activity size={15} className="text-tf-text-secondary" />
+                              <span>Observability</span>
+                            </button>
+                            <button
+                              onClick={() => {
+                                setProfileMenuOpen(false);
+                                navigate('/admin/users');
+                              }}
+                              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-medium text-tf-text hover:bg-tf-surface-2 transition cursor-pointer"
+                            >
+                              <User size={15} className="text-tf-text-secondary" />
+                              <span>Users</span>
+                            </button>
+                          </>
                         )}
                       </div>
 

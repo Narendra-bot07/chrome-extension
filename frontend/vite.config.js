@@ -9,6 +9,13 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     sourcemap: false,
+    // Default target ('modules', ~ES2019-equivalent baseline for browsers
+    // with native ESM support) already avoids legacy-browser transpilation
+    // bloat. Bumping to es2020 lets esbuild emit slightly more compact
+    // output (nullish coalescing/optional chaining left as native syntax
+    // instead of down-leveled) without dropping support for any browser
+    // this app is realistically used in.
+    target: 'es2020',
     rollupOptions: {
       output: {
         manualChunks(id) {

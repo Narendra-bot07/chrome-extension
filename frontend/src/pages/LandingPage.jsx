@@ -8,10 +8,15 @@ import { ApplicationLogo } from '../components/ApplicationLogo';
 import BrandLogo from '../components/BrandLogo';
 import { useApp } from '../context/AppContext';
 import { useTailr4uReducedMotion } from '../motion/MotionSystem';
-import PublicAuthPanel from '../components/landing/PublicAuthPanel';
 import FeatureStoryStack from '../components/landing/FeatureStoryStack';
 import { applyPageMeta } from '../utils/seo';
 import './LandingPage.css';
+
+// Lazy: only fetched (and only pulls in @react-oauth/google, which loads
+// Google's Identity Services script) once the user actually navigates to
+// /login, /register, /forgot-password, or /email-sent -- not on the plain
+// homepage. See PublicAuthPanel.jsx for the matching provider scoping.
+const PublicAuthPanel = lazy(() => import('../components/landing/PublicAuthPanel'));
 
 const WorkflowSimulation = lazy(() => import('../components/landing/WorkflowSimulation'));
 
@@ -211,7 +216,11 @@ export default function LandingPage() {
         </AnimatePresence>
         <div className="lp-hero-side">
           <motion.div className="lp-product-context" animate={{ scale: authMode ? .94 : 1, opacity: authMode ? .2 : 1 }} transition={{ duration: reduced ? .08 : .22 }} aria-hidden={authMode}><HeroVisual reduced={reduced} /></motion.div>
-          <AnimatePresence>{authMode && <PublicAuthPanel />}</AnimatePresence>
+          <AnimatePresence>{authMode && (
+            <Suspense fallback={<div className="public-auth-card" aria-busy="true" aria-label="Loading sign-in form" />}>
+              <PublicAuthPanel />
+            </Suspense>
+          )}</AnimatePresence>
         </div>
       </section>
 

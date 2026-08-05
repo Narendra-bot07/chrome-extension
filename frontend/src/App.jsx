@@ -1,41 +1,50 @@
-import React, { useEffect, useRef } from 'react';
+import React, { Suspense, useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { AppProvider, useApp } from './context/AppContext';
-import Layout from './components/Layout';
-// Page Imports
-import JobExtractPage from './pages/JobExtractPage';
-import ResumeDetectPage from './pages/ResumeDetectPage';
-import ResumeParsePage from './pages/ResumeParsePage';
-import ResumeReviewPage from './pages/ResumeReviewPage';
-import TailorConfigPage from './pages/TailorConfigPage';
-import TailorProgressPage from './pages/TailorProgressPage';
-import ReviewChangesPage from './pages/ReviewChangesPage';
-import TemplatesPage from './pages/TemplatesPage';
-import DownloadPage from './pages/DownloadPage';
-import CoverLetterPage from './pages/CoverLetterPage';
-import PrintLayout from './components/Resume/PrintLayout';
-import PrintCoverLetterLayout from './pages/PrintCoverLetterLayout';
-import DashboardPage from './pages/DashboardPage';
-import ProfilePage from './pages/ProfilePage';
-import SecurityPage from './pages/SecurityPage';
-import JobTrackerPage from './pages/JobTrackerPage';
-import HelpSearchPage from './pages/HelpSearchPage';
-import FAQPage from './pages/FAQPage';
-import ContactSupportPage from './pages/ContactSupportPage';
-import NoJobDetectedPage from './pages/NoJobDetectedPage';
-import ManualJobEntryPage from './pages/ManualJobEntryPage';
-import SubscriptionPage from './pages/SubscriptionPage';
-import JobPreferencesPage from './pages/JobPreferencesPage';
-import ForgotPasswordPage from './pages/ForgotPasswordPage';
-import ResetPasswordPage from './pages/ResetPasswordPage';
-import VerifyEmailPage from './pages/VerifyEmailPage';
-import EmailSentPage from './pages/EmailSentPage';
-import NotificationSettingsPage from './pages/NotificationSettingsPage';
+// LandingPage is the only page eagerly imported -- it's the one route every
+// first-time visitor actually needs (homepage, login, register all render
+// through it). Every other route is React.lazy()'d below: previously ALL
+// ~35 page components (dashboard, job tracker, resume editor, templates,
+// PDF preview, billing, admin, security, etc.) were static imports bundled
+// into the single main chunk, so the public homepage paid for the entire
+// authenticated app on first load regardless of whether a visitor ever logs
+// in. Route-based code splitting means each is only fetched when actually
+// navigated to.
 import LandingPage from './pages/LandingPage';
-import ExtensionSetupPage from './pages/ExtensionSetupPage';
-import AdminObservabilityPage from './pages/AdminObservabilityPage';
-import NotFoundPage from './pages/NotFoundPage';
+const Layout = React.lazy(() => import('./components/Layout'));
+const JobExtractPage = React.lazy(() => import('./pages/JobExtractPage'));
+const ResumeDetectPage = React.lazy(() => import('./pages/ResumeDetectPage'));
+const ResumeParsePage = React.lazy(() => import('./pages/ResumeParsePage'));
+const ResumeReviewPage = React.lazy(() => import('./pages/ResumeReviewPage'));
+const TailorConfigPage = React.lazy(() => import('./pages/TailorConfigPage'));
+const TailorProgressPage = React.lazy(() => import('./pages/TailorProgressPage'));
+const ReviewChangesPage = React.lazy(() => import('./pages/ReviewChangesPage'));
+const TemplatesPage = React.lazy(() => import('./pages/TemplatesPage'));
+const DownloadPage = React.lazy(() => import('./pages/DownloadPage'));
+const CoverLetterPage = React.lazy(() => import('./pages/CoverLetterPage'));
+const PrintLayout = React.lazy(() => import('./components/Resume/PrintLayout'));
+const PrintCoverLetterLayout = React.lazy(() => import('./pages/PrintCoverLetterLayout'));
+const DashboardPage = React.lazy(() => import('./pages/DashboardPage'));
+const ProfilePage = React.lazy(() => import('./pages/ProfilePage'));
+const SecurityPage = React.lazy(() => import('./pages/SecurityPage'));
+const JobTrackerPage = React.lazy(() => import('./pages/JobTrackerPage'));
+const HelpSearchPage = React.lazy(() => import('./pages/HelpSearchPage'));
+const FAQPage = React.lazy(() => import('./pages/FAQPage'));
+const ContactSupportPage = React.lazy(() => import('./pages/ContactSupportPage'));
+const NoJobDetectedPage = React.lazy(() => import('./pages/NoJobDetectedPage'));
+const ManualJobEntryPage = React.lazy(() => import('./pages/ManualJobEntryPage'));
+const SubscriptionPage = React.lazy(() => import('./pages/SubscriptionPage'));
+const JobPreferencesPage = React.lazy(() => import('./pages/JobPreferencesPage'));
+const ForgotPasswordPage = React.lazy(() => import('./pages/ForgotPasswordPage'));
+const ResetPasswordPage = React.lazy(() => import('./pages/ResetPasswordPage'));
+const VerifyEmailPage = React.lazy(() => import('./pages/VerifyEmailPage'));
+const EmailSentPage = React.lazy(() => import('./pages/EmailSentPage'));
+const NotificationSettingsPage = React.lazy(() => import('./pages/NotificationSettingsPage'));
+const ExtensionSetupPage = React.lazy(() => import('./pages/ExtensionSetupPage'));
+const AdminObservabilityPage = React.lazy(() => import('./pages/AdminObservabilityPage'));
+const AdminUsersPage = React.lazy(() => import('./pages/AdminUsersPage'));
+const NotFoundPage = React.lazy(() => import('./pages/NotFoundPage'));
 import { ReducedMotionProvider, MotionPage } from './motion/MotionSystem';
 import { loginPathFor } from './utils/authRedirect';
 import GlobalCursor from './components/GlobalCursor';
@@ -185,6 +194,7 @@ function AppRoutes() {
   if (loadingAuth || (isExtension && loadingResume)) return <StartupLoader />;
 
   return (
+    <Suspense fallback={<StartupLoader label="Loading" />}>
     <Routes>
       <Route element={<MotionPage><LandingPage /></MotionPage>}>
         <Route path="/" element={null} />
@@ -222,11 +232,13 @@ function AppRoutes() {
         <Route path="/onboarding/job-preferences" element={<JobPreferencesPage />} />
         <Route path="/settings/job-preferences" element={<JobPreferencesPage />} />
         <Route path="/admin/observability" element={<AdminObservabilityPage />} />
+        <Route path="/admin/users" element={<AdminUsersPage />} />
       </Route>
       <Route path="/print" element={<PrintLayout />} />
       <Route path="/print-cover-letter" element={<PrintCoverLetterLayout />} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
+    </Suspense>
   );
 }
 

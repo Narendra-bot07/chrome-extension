@@ -36,9 +36,12 @@ export const BrandLogo = memo(function BrandLogo({
         onClick={onClick}
         role={onClick ? 'button' : undefined}
       >
-        <img 
-          src={logoSrc} 
-          alt="Tailr4U Logo" 
+        <img
+          src={logoSrc}
+          alt="Tailr4U Logo"
+          width={currentSize.iconSize}
+          height={currentSize.iconSize}
+          decoding="async"
           className="w-full h-full object-contain filter drop-shadow-xs"
         />
       </span>
@@ -53,9 +56,12 @@ export const BrandLogo = memo(function BrandLogo({
     >
       {/* 1. LOGO ICON IMAGE */}
       {showIcon && (
-        <img 
-          src={logoSrc} 
-          alt="Tailr4U Logo" 
+        <img
+          src={logoSrc}
+          alt="Tailr4U Logo"
+          width={currentSize.iconSize}
+          height={currentSize.iconSize}
+          decoding="async"
           className="object-contain shrink-0 filter drop-shadow-xs"
           style={{ width: `${currentSize.iconSize}px`, height: `${currentSize.iconSize}px` }}
         />

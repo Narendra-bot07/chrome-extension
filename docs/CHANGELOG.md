@@ -4,6 +4,19 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.15.5] - 2026-08-05
+
+### Added
+- **Real usage quotas, enforced.** `UsageService` existed and was already wired into every core AI endpoint, but quota enforcement was gated behind `ENFORCE_SUBSCRIPTION_QUOTAS`, which defaulted `false` in production -- every account, including real customers, was silently unlimited on all four core features (`jd_extraction`, `resume_upload`, `resume_generation`, `cover_letter_generation`). Replaced the env-flag bypass with a per-user one: only `users.role='admin'` accounts are unlimited (today, just the owner's). Set the free plan's real limits in `plan_features`: 5 JD extractions/month, 2 resume generations/month, 2 cover letter generations/month, and 1 resume upload -- **lifetime**, not monthly (added `LIFETIME_WINDOW_FEATURES` to `usage_service.py` since `resume_upload` needed a different accounting window than the other three, which reset each billing period).
+- **Closed the one quota bypass that mattered most**: `POST /api/analyze-job` (every manual/pasted-JD extraction) had no auth and no quota check at all -- flagged but not fixed in 3.15.0. Now requires auth and checks/consumes `jd_extraction`, mirroring its sibling `/api/v1/jobs/extract-url`.
+- **Admin console: Users** (`/admin/users`, admin-only). Search/paginated user directory (email, role, plan, status, joined, last login); click a row for a detail panel with per-feature usage against the account's real limits, a "Make Admin"/"Remove Admin" toggle, and "Suspend"/"Reactivate". Backend: `api/v1/admin_users.py` (`GET /admin/users`, `GET /admin/users/{id}`, `PATCH .../role`, `PATCH .../status`), gated by the same `verify_admin_access` every other admin router uses. Self-demotion and self-suspension are blocked. Linked from the profile menu and cross-linked with the existing Observability console.
+- **"Suspend user" now actually suspends** -- `users.is_active` existed as a column but was never checked anywhere. `login_user` and `google_login` now reject deactivated accounts (403) at sign-in.
+- **Admin role now reaches the frontend at all.** `verify_supabase_jwt` never populated `role` (only decodes the session JWT), so nothing in the UI could tell whether the logged-in user was an admin except a hardcoded email check in `Layout.jsx`. `/auth/session`, `/auth/login`, and `/auth/google` now all return the DB `role`, so any account promoted to admin via the new Users console immediately sees the admin nav links too -- not just the owner.
+- Set the owner's `users.role` to `'admin'` directly (was `'user'`, despite already having owner-only access to `admin_observability.py`/`admin_abuse.py` via a separate hardcoded `OWNER_EMAILS` allowlist). `admin_subscriptions.py`'s DB-role gate now actually recognizes the owner too, which it didn't before.
+
+### Fixed
+- Restored `App.jsx` route-based code splitting, `main.jsx`'s deferred Google Identity SDK, `vite.config.js`'s build target, and `BrandLogo.jsx`'s image attributes -- these were reverted by a sync/commit race with concurrent local work partway through the prior performance-optimization pass. Re-verified with a fresh production build (main chunk back to ~177KB from the original ~1060KB) before continuing.
+
 ## [3.15.4] - 2026-08-05
 
 ### Added

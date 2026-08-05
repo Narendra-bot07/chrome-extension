@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AlertCircle, ArrowLeft, Check, Eye, EyeOff, Loader2, Lock, Mail, Zap } from 'lucide-react';
-import { useGoogleLogin } from '@react-oauth/google';
+import { GoogleOAuthProvider, useGoogleLogin } from '@react-oauth/google';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { authDestinationFromSearch } from '../../utils/authRedirect';
@@ -11,6 +11,7 @@ import { getApiUrl } from '../../config/apiConfig';
 import { getOrCreateInstallationId } from '../../utils/installationId';
 
 const isExtension = typeof chrome !== 'undefined' && chrome.identity;
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "984139464223-rb9kbtqjseqbepu9ke8j9qhgna1gh05l.apps.googleusercontent.com";
 const scopes = ['openid', 'email', 'profile'].join(' ');
 const neutralResetMessage = 'If an account exists for this email, a reset link has been sent.';
 
@@ -54,6 +55,23 @@ function WebGoogleLoginButton({ disabled, onCredential, onError }) {
 }
 
 export default function PublicAuthPanel() {
+  // GoogleOAuthProvider (and the Google Identity Services script it injects,
+  // 80KB+) previously loaded unconditionally for every page via main.jsx.
+  // This component is already lazy-loaded and only rendered once the user
+  // is on /login, /register, etc. (see LandingPage.jsx), so scoping the
+  // provider here means that script now only loads when someone actually
+  // opens the auth panel -- never on the bare homepage. Extension mode
+  // never used this provider (it uses chrome.identity instead), so skip it
+  // there too, matching the original behavior exactly.
+  if (isExtension) return <PublicAuthPanelInner />;
+  return (
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+      <PublicAuthPanelInner />
+    </GoogleOAuthProvider>
+  );
+}
+
+function PublicAuthPanelInner() {
   const location = useLocation();
   const navigate = useNavigate();
   const reduced = useTailr4uReducedMotion();

@@ -290,7 +290,18 @@ async def login_user(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid email or password."
                 )
-            
+
+            # is_active existed as a column but was never actually checked
+            # anywhere -- the admin console's "suspend user" action would
+            # have been purely cosmetic without this.
+            if user.get("is_active") is False:
+                limiter.audit("login_blocked_inactive", user["id"], ip=client_ip, user_agent=request.headers.get("user-agent", ""))
+                conn.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="This account has been deactivated. Contact support if you believe this is a mistake."
+                )
+
             # Update last_login
             cur.execute("UPDATE public.users SET last_login = NOW() WHERE id = %s", (user["id"],))
             if user.get("password_hash") and not user["password_hash"].startswith(("$2a$", "$2b$", "$2y$")):
@@ -347,6 +358,7 @@ async def login_user(
                         "email": user["email"],
                         "full_name": user.get("full_name", ""),
                         "provider": user.get("provider", "email"),
+                        "role": user.get("role", "user"),
                         "created_at": user.get("created_at", datetime.datetime.utcnow()).isoformat() if isinstance(user.get("created_at"), datetime.datetime) else str(user.get("created_at", "")),
                         "has_completed_preferences": has_completed_preferences
                     },
@@ -394,7 +406,15 @@ async def google_login(
             locale=idinfo.get("locale", ""),
             profile_details=idinfo.get("tailr4u_profile") or {}
         )
-        
+
+        # Same is_active check as login_user -- suspending an account must
+        # block Google sign-in too, not just password login.
+        if user.get("is_active") is False:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This account has been deactivated. Contact support if you believe this is a mistake."
+            )
+
         session_service = SessionService(conn)
         session_id = session_service.create_session(user["id"], request, "google")
         refresh_token = session_service.issue_refresh_token(session_id)
@@ -439,6 +459,7 @@ async def google_login(
                     "full_name": user.get("full_name", ""),
                     "provider": user.get("provider", "google"),
                     "avatar_url": user.get("avatar_url", ""),
+                    "role": user.get("role", "user"),
                     "created_at": user.get("created_at", datetime.datetime.utcnow()).isoformat() if isinstance(user.get("created_at"), datetime.datetime) else str(user.get("created_at", "")),
                     "has_completed_preferences": has_completed_preferences
                 },
@@ -564,9 +585,17 @@ async def verify_session(
     conn = Depends(get_db_connection)
 ):
     has_completed_preferences = JobPreferencesRepository(conn).has_completed(user["id"])
+    # verify_supabase_jwt never carries role (it only decodes the session
+    # JWT, which doesn't embed it) -- fetched fresh here so the frontend can
+    # gate admin-console UI by actual role instead of a hardcoded email,
+    # letting any account the owner promotes to admin see those nav links.
+    with conn.cursor() as cur:
+        cur.execute("SELECT role FROM public.users WHERE id = %s", (user["id"],))
+        row = cur.fetchone()
+        role = row[0] if row else "user"
     return {
         "status": "authenticated",
-        "user": {**user, "has_completed_preferences": has_completed_preferences},
+        "user": {**user, "role": role, "has_completed_preferences": has_completed_preferences},
         "has_completed_preferences": has_completed_preferences
     }
 
