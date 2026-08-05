@@ -349,7 +349,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     ? [...new Set([...rawOrder, ...defaultOrder])]
     : defaultOrder;
   const layoutModel = createResumeLayoutModel(
-    { ...resume, section_order: requestedOrder },
+    { ...targetResume, section_order: requestedOrder },
     resolvedTemplateKey,
     config
   );

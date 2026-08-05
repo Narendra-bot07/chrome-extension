@@ -813,7 +813,7 @@ export default function ResumeEditorView({
             ref={provided.innerRef} 
             {...provided.draggableProps} 
             data-editor-section={section}
-            className={`bg-white border rounded-2xl overflow-hidden transition-all duration-300 group shadow-sm ${
+            className={`bg-white border rounded-2xl overflow-hidden transition-[border-color,box-shadow] duration-300 group shadow-sm ${
               isExpanded 
                 ? 'border-indigo-500 ring-4 ring-indigo-50/40 shadow-md' 
                 : 'border-slate-200 hover:border-slate-350 hover:shadow'
