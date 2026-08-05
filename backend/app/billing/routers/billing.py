@@ -75,6 +75,7 @@ async def create_checkout(
 async def verify_checkout_session(
     req: Dict[str, Any],
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
+    billing_svc: BillingService = Depends(get_billing_service),
     sub_svc: SubscriptionService = Depends(get_subscription_service)
 ):
     """
@@ -86,10 +87,49 @@ async def verify_checkout_session(
     above), so this just reports whatever they have -- or haven't -- already
     written.
     """
+    checkout_status = "pending"
+    provider = str(req.get("provider") or "").lower()
+    provider_subscription_id = str(req.get("subscription_id") or "")
+
+    # The frontend polls with the exact checkout identifier returned by this
+    # API. Query Razorpay as a fallback to asynchronous webhooks so failed,
+    # cancelled and expired checkouts do not remain visually pending. Never
+    # expose another customer's checkout: its signed provider-side notes must
+    # identify the authenticated user before its state is accepted.
+    if provider == "razorpay" and provider_subscription_id.startswith("sub_"):
+        try:
+            provider_sub = billing_svc.fetch_razorpay_subscription(provider_subscription_id)
+            notes = provider_sub.get("notes") or {}
+            if provider_sub and str(notes.get("user_id") or "") == str(user["id"]):
+                provider_status = str(provider_sub.get("status") or "").lower()
+                if provider_status in {"active", "authenticated"}:
+                    checkout_status = "success"
+                elif provider_status in {"cancelled", "expired"}:
+                    checkout_status = "cancelled"
+                elif provider_status in {"halted"}:
+                    checkout_status = "failed"
+                else:
+                    checkout_status = "pending"
+        except Exception:
+            # Webhook/database state below remains the safe fallback when the
+            # provider API is temporarily unavailable.
+            pass
+
+        recorded_payment = sub_svc.get_checkout_payment(
+            user["id"], "razorpay", provider_subscription_id
+        )
+        if recorded_payment and str(recorded_payment.get("status") or "").lower() == "failed":
+            checkout_status = "failed"
+
     current_sub = sub_svc.get_user_subscription(user["id"])
     plan = sub_svc.get_plan(current_sub["plan_id"]) if current_sub else None
+    requested_plan = str(req.get("plan_code") or "").lower()
+    active_plan = str((plan or {}).get("code") or (plan or {}).get("id") or "").lower()
+    if requested_plan and active_plan == requested_plan:
+        checkout_status = "success"
     return {
         "status": "active" if current_sub else "none",
+        "checkout_status": checkout_status,
         "plan": plan,
         "subscription": current_sub
     }
@@ -190,8 +230,43 @@ async def razorpay_webhook(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
         
-    # Example handling for Razorpay
-    if event.get('event') == 'subscription.charged':
+    event_name = event.get('event')
+
+    if event_name == 'payment.failed':
+        payment_entity = ((event.get('payload') or {}).get('payment') or {}).get('entity') or {}
+        provider_subscription_id = None
+        invoice_id = payment_entity.get('invoice_id')
+        if invoice_id:
+            try:
+                invoice = billing_svc.fetch_razorpay_invoice(invoice_id)
+                provider_subscription_id = invoice.get('subscription_id')
+            except Exception:
+                provider_subscription_id = None
+
+        if provider_subscription_id:
+            try:
+                provider_sub = billing_svc.fetch_razorpay_subscription(provider_subscription_id)
+            except Exception:
+                provider_sub = {}
+            user_id = str((provider_sub.get('notes') or {}).get('user_id') or '')
+            if user_id:
+                sub_svc.create_payment(
+                    user_id=user_id,
+                    provider="razorpay",
+                    payment_id=payment_entity.get('id') or f"failed_{provider_subscription_id}",
+                    provider_order_id=provider_subscription_id,
+                    amount=payment_entity.get('amount', 0) / 100.0,
+                    currency=payment_entity.get('currency', 'INR').upper(),
+                    status="failed"
+                )
+                analytics = AnalyticsService(conn)
+                analytics.emit_event(user_id, "PAYMENT_FAILED", metadata={
+                    "provider": "razorpay",
+                    "reason": payment_entity.get('error_reason') or payment_entity.get('error_code')
+                })
+
+    # Successful subscription charge activates access and grants credits.
+    elif event_name == 'subscription.charged':
         sub_entity = event['payload']['subscription']['entity']
         payment_entity = event['payload']['payment']['entity']
         

@@ -72,6 +72,12 @@ class BillingService:
     def verify_razorpay_webhook(self, payload: bytes, signature: str) -> Dict[str, Any]:
         return self.razorpay_provider.verify_webhook(payload, signature)
 
+    def fetch_razorpay_subscription(self, provider_subscription_id: str) -> Dict[str, Any]:
+        return self.razorpay_provider.fetch_subscription(provider_subscription_id)
+
+    def fetch_razorpay_invoice(self, invoice_id: str) -> Dict[str, Any]:
+        return self.razorpay_provider.fetch_invoice(invoice_id)
+
     def cancel_subscription(self, provider: str, provider_subscription_id: str) -> bool:
         if provider == "razorpay":
             return self.razorpay_provider.cancel_subscription(provider_subscription_id)

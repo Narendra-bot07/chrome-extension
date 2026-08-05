@@ -87,6 +87,17 @@ class RazorpayProvider(BaseProvider):
 
         return json.loads(payload.decode('utf-8'))
 
+    def fetch_subscription(self, provider_subscription_id: str) -> Dict[str, Any]:
+        """Fetch the authoritative Razorpay subscription state."""
+        if not self.client or not provider_subscription_id or provider_subscription_id.startswith("sub_mock"):
+            return {}
+        return dict(self.client.subscription.fetch(provider_subscription_id))
+
+    def fetch_invoice(self, invoice_id: str) -> Dict[str, Any]:
+        if not self.client or not invoice_id:
+            return {}
+        return dict(self.client.invoice.fetch(invoice_id))
+
     def cancel_subscription(self, provider_subscription_id: str) -> bool:
         if not self.client or provider_subscription_id.startswith("sub_mock"):
             return True

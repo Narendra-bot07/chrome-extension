@@ -61,7 +61,9 @@ export default function SubscriptionPage() {
   const [paymentStatusModal, setPaymentStatusModal] = useState({
     isOpen: false,
     status: 'pending', // 'pending' | 'success' | 'failed' | 'cancelled'
-    targetPlanName: ''
+    targetPlanName: '',
+    provider: '',
+    subscriptionId: ''
   });
 
   const jdUsage = subscription?.usage?.jd_extraction;
@@ -93,7 +95,7 @@ export default function SubscriptionPage() {
   // status untouched so the existing pending-poll effect (below) keeps
   // retrying and eventually surfaces an honest "unknown" after its timeout,
   // instead of a fabricated success for a payment that never happened.
-  const handleVerifyAndActivate = useCallback(async (targetPlanCode) => {
+  const handleVerifyAndActivate = useCallback(async (targetPlanCode, checkout = {}) => {
     const token = session?.access_token || localStorage.getItem('access_token');
     if (!token) return false;
     try {
@@ -103,7 +105,11 @@ export default function SubscriptionPage() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ plan_code: targetPlanCode || 'pro' })
+        body: JSON.stringify({
+          plan_code: targetPlanCode || 'pro',
+          provider: checkout.provider || '',
+          subscription_id: checkout.subscriptionId || ''
+        })
       });
       const data = await res.json().catch(() => null);
       await refresh();
@@ -118,6 +124,17 @@ export default function SubscriptionPage() {
           status: 'success',
           targetPlanName: data.plan?.name || targetPlanCode || prev.targetPlanName || 'Pro'
         }));
+      } else if (data?.checkout_status === 'failed' || data?.checkout_status === 'cancelled') {
+        setPaymentStatusModal(prev => ({
+          ...prev,
+          status: data.checkout_status
+        }));
+        setPaymentBanner({
+          type: 'error',
+          message: data.checkout_status === 'cancelled'
+            ? 'Payment was cancelled. You can retry anytime.'
+            : 'Payment failed. Your plan was not changed.'
+        });
       }
       return matches;
     } catch (e) {
@@ -207,7 +224,7 @@ export default function SubscriptionPage() {
     if (!paymentStatusModal.isOpen || paymentStatusModal.status !== 'pending') return undefined;
 
     // Immediately trigger check on modal open
-    handleVerifyAndActivate(paymentStatusModal.targetPlanName);
+    handleVerifyAndActivate(paymentStatusModal.targetPlanName, paymentStatusModal);
 
     // Without a cap, a persistently failing verify call (network hiccup, a
     // stale/expiring token, the backend never receiving the provider's
@@ -226,11 +243,11 @@ export default function SubscriptionPage() {
         ));
         return;
       }
-      handleVerifyAndActivate(paymentStatusModal.targetPlanName);
+      handleVerifyAndActivate(paymentStatusModal.targetPlanName, paymentStatusModal);
     }, 2000);
 
     const handleFocus = () => {
-      handleVerifyAndActivate(paymentStatusModal.targetPlanName);
+      handleVerifyAndActivate(paymentStatusModal.targetPlanName, paymentStatusModal);
     };
 
     window.addEventListener('focus', handleFocus);
@@ -238,7 +255,7 @@ export default function SubscriptionPage() {
       clearInterval(interval);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [handleVerifyAndActivate, paymentStatusModal.isOpen, paymentStatusModal.status, paymentStatusModal.targetPlanName]);
+  }, [handleVerifyAndActivate, paymentStatusModal.isOpen, paymentStatusModal.status, paymentStatusModal.targetPlanName, paymentStatusModal.provider, paymentStatusModal.subscriptionId]);
 
   // Auto-detect plan upgrade completion while status modal is pending
   useEffect(() => {
@@ -299,6 +316,12 @@ export default function SubscriptionPage() {
         provider
       });
 
+      setPaymentStatusModal(prev => ({
+        ...prev,
+        provider: res.provider || provider || '',
+        subscriptionId: res.subscription_id || ''
+      }));
+
       // Neither payment provider has real credentials fully wired up for this
       // checkout (see backend/app/billing/providers/*.py's no-API-key or
       // failed-live-API-call fallback branches) -- when that happens,
@@ -346,16 +369,15 @@ export default function SubscriptionPage() {
             description: `Upgrade to ${targetPlan?.name || 'Pro'}`,
             handler: function (response) {
               if (targetWin !== window && !targetWin.closed) targetWin.close();
-              setPaymentStatusModal({
-                isOpen: true,
-                status: 'success',
-                targetPlanName: targetPlan?.name || 'Pro'
-              });
+              setPaymentStatusModal(prev => ({ ...prev, isOpen: true, status: 'pending' }));
               setPaymentBanner({
-                type: 'success',
-                message: 'Razorpay payment authorized! Refreshing subscription status...'
+                type: 'info',
+                message: 'Razorpay authorized the payment. Confirming subscription status...'
               });
-              setTimeout(refresh, 1500);
+              handleVerifyAndActivate(planId, {
+                provider: res.provider,
+                subscriptionId: res.subscription_id
+              });
             },
             modal: {
               ondismiss: function () {
@@ -606,7 +628,10 @@ export default function SubscriptionPage() {
         status={paymentStatusModal.status}
         planName={paymentStatusModal.targetPlanName || checkoutModalPlan?.name || 'Pro'}
         onClose={() => setPaymentStatusModal(prev => ({ ...prev, isOpen: false }))}
-        onCheckStatus={() => handleVerifyAndActivate(paymentStatusModal.targetPlanName || checkoutModalPlan?.name || 'pro')}
+        onCheckStatus={() => handleVerifyAndActivate(
+          paymentStatusModal.targetPlanName || checkoutModalPlan?.name || 'pro',
+          paymentStatusModal
+        )}
         onRetry={() => {
           if (availablePlans.length > 0) {
             setCheckoutModalPlan(availablePlans[0]);

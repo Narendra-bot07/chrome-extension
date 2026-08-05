@@ -16,7 +16,7 @@ class SubscriptionService:
             cur.execute("SELECT * FROM public.plans WHERE is_active = TRUE ORDER BY price ASC")
             return cur.fetchall()
 
-    def create_payment(self, user_id: str, provider: str, payment_id: str, amount: float, currency: str, status: str) -> Dict[str, Any]:
+    def create_payment(self, user_id: str, provider: str, payment_id: str, amount: float, currency: str, status: str, provider_order_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Creates a payment record idempotently.
         """
@@ -30,15 +30,27 @@ class SubscriptionService:
             db_id = str(uuid.uuid4())
             cur.execute(
                 """
-                INSERT INTO public.payments (id, user_id, provider, provider_payment_id, amount, currency, status)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO public.payments (id, user_id, provider, provider_payment_id, provider_order_id, amount, currency, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING *
                 """,
-                (db_id, user_id, provider, payment_id, amount, currency, status)
+                (db_id, user_id, provider, payment_id, provider_order_id, amount, currency, status)
             )
             record = cur.fetchone()
             self.conn.commit()
             return dict(record)
+
+    def get_checkout_payment(self, user_id: str, provider: str, provider_order_id: str) -> Optional[Dict[str, Any]]:
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT * FROM public.payments
+                WHERE user_id = %s AND provider = %s AND provider_order_id = %s
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (user_id, provider, provider_order_id)
+            )
+            return cur.fetchone()
 
     def activate_subscription(self, user_id: str, plan_id: str, provider: str, sub_id: str) -> None:
         """
