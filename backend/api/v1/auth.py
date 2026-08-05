@@ -1,7 +1,7 @@
 import asyncio
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, status, Request, Response
 from pydantic import BaseModel
-from core.security import verify_supabase_jwt, hash_password, verify_password, validate_password
+from core.security import forget_verified_session, verify_supabase_jwt, hash_password, verify_password, validate_password
 from core.database import get_db_connection
 from schemas.auth import (
     RegisterRequest, LoginRequest, GoogleAuthRequest, ForgotPasswordRequest,
@@ -575,24 +575,34 @@ async def logout_session(
 ):
     if user.get("session_id"):
         SessionService(conn).revoke_session(user["session_id"], user["id"])
+        forget_verified_session(user["session_id"])
     response.delete_cookie(REFRESH_COOKIE, path="/api/v1/auth")
     return None
 
 
 @router.get("/session")
-async def verify_session(
+def verify_session(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn = Depends(get_db_connection)
 ):
-    has_completed_preferences = JobPreferencesRepository(conn).has_completed(user["id"])
-    # verify_supabase_jwt never carries role (it only decodes the session
-    # JWT, which doesn't embed it) -- fetched fresh here so the frontend can
-    # gate admin-console UI by actual role instead of a hardcoded email,
-    # letting any account the owner promotes to admin see those nav links.
     with conn.cursor() as cur:
-        cur.execute("SELECT role FROM public.users WHERE id = %s", (user["id"],))
+        cur.execute(
+            """
+            SELECT u.role,
+                   EXISTS (
+                       SELECT 1 FROM public.job_preferences jp
+                       WHERE jp.user_id = u.id
+                         AND jsonb_array_length(COALESCE(jp.target_roles, '[]'::jsonb)) > 0
+                         AND jsonb_array_length(COALESCE(jp.target_companies, '[]'::jsonb)) > 0
+                         AND jsonb_array_length(COALESCE(jp.preferred_locations, '[]'::jsonb)) > 0
+                   ) AS has_completed_preferences
+            FROM public.users u WHERE u.id = %s
+            """,
+            (user["id"],),
+        )
         row = cur.fetchone()
         role = row[0] if row else "user"
+        has_completed_preferences = bool(row[1]) if row else False
     return {
         "status": "authenticated",
         "user": {**user, "role": role, "has_completed_preferences": has_completed_preferences},

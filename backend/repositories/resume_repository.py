@@ -225,6 +225,7 @@ class ResumeRepository:
                 cur.execute("RELEASE SAVEPOINT resume_count_increment")
 
             # Create initial v1 Original version
+            ver_row = None
             if record:
                 cur.execute("""
                     INSERT INTO public.resume_versions (
@@ -234,11 +235,12 @@ class ResumeRepository:
                     VALUES (%s, 1, 'v1 Original', 'original', %s, %s,
                             'Original uploaded resume', '{"summary":"Original uploaded resume"}'::jsonb,
                             TRUE, %s, NOW())
-                    RETURNING id
+                    RETURNING *
                 """, (record["id"], record["id"], json.dumps(parsed_content), user_id))
                 ver_row = cur.fetchone()
                 if ver_row:
                     cur.execute("UPDATE public.resumes SET active_version_id = %s WHERE id = %s", (ver_row["id"], record["id"]))
+                    record["active_version_id"] = ver_row["id"]
 
             self.conn.commit()
             try:
@@ -247,9 +249,13 @@ class ResumeRepository:
             except Exception:
                 pass
             created = self._with_metadata_defaults(record) or {}
-            if created.get("id"):
-                with self.conn.cursor(cursor_factory=RealDictCursor) as cur2:
-                    created = self._enrich_resume_record(created, cur2)
+            # Everything needed for a newly uploaded resume is already known.
+            # Re-querying versions/counts/scores here added four remote DB
+            # round trips to every upload without changing the response.
+            created["versions_count"] = 1
+            created["current_version"] = dict(ver_row) if ver_row else None
+            created["latest_ats_score"] = None
+            created["latest_match_score"] = None
             return created
 
     def get_active(self, user_id: str) -> Optional[Dict[str, Any]]:

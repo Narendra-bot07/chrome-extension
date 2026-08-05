@@ -12,7 +12,7 @@ router = APIRouter(prefix="/subscription", tags=["subscription"])
 
 
 @router.get("/me")
-async def get_my_subscription(
+def get_my_subscription(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn = Depends(get_db_connection)
 ):
@@ -56,7 +56,7 @@ async def get_my_subscription(
 
 
 @router.post("/cancel")
-async def cancel_my_subscription(
+def cancel_my_subscription(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn = Depends(get_db_connection)
 ):
@@ -66,7 +66,7 @@ async def cancel_my_subscription(
 
 
 @router.post("/reactivate")
-async def reactivate_my_subscription(
+def reactivate_my_subscription(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn = Depends(get_db_connection)
 ):

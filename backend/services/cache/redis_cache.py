@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import requests
+import time
 from typing import Any, Optional
 from core.config import settings
 
@@ -18,6 +19,7 @@ class RedisCacheService:
         self._redis_client = None
         self._upstash_client = None
         self._memory_cache = {}
+        self._memory_expiry = {}
         self._init_connection()
 
     def _init_connection(self):
@@ -25,7 +27,12 @@ class RedisCacheService:
         if redis_url:
             try:
                 import redis
-                self._redis_client = redis.from_url(redis_url, decode_responses=True, socket_timeout=3.0)
+                self._redis_client = redis.from_url(
+                    redis_url,
+                    decode_responses=True,
+                    socket_timeout=0.5,
+                    socket_connect_timeout=0.5,
+                )
                 self._redis_client.ping()
                 logger.info("[REDIS_CACHE] Connected to Upstash Redis via TLS protocol.")
                 return
@@ -52,12 +59,23 @@ class RedisCacheService:
             logger.info("[REDIS_CACHE] Upstash Redis credentials not set. Using fallback in-memory cache.")
 
     def get(self, key: str) -> Optional[Any]:
+        # Process-local L1 avoids a network round trip for hot dashboard data.
+        # It is deliberately short-lived; Redis remains the shared L2 cache.
+        expires_at = self._memory_expiry.get(key, 0)
+        if expires_at > time.monotonic():
+            return self._memory_cache.get(key)
+        self._memory_cache.pop(key, None)
+        self._memory_expiry.pop(key, None)
+
         # 1. Try official Upstash Redis SDK
         if self._upstash_client:
             try:
                 val = self._upstash_client.get(key)
                 if val:
-                    return json.loads(val) if isinstance(val, str) else val
+                    parsed = json.loads(val) if isinstance(val, str) else val
+                    self._memory_cache[key] = parsed
+                    self._memory_expiry[key] = time.monotonic() + 30
+                    return parsed
                 return None
             except Exception as e:
                 logger.warning(f"[REDIS_CACHE] Upstash SDK get error for key '{key}': {e}")
@@ -67,7 +85,10 @@ class RedisCacheService:
             try:
                 val = self._redis_client.get(key)
                 if val:
-                    return json.loads(val)
+                    parsed = json.loads(val)
+                    self._memory_cache[key] = parsed
+                    self._memory_expiry[key] = time.monotonic() + 30
+                    return parsed
                 return None
             except Exception as e:
                 logger.warning(f"[REDIS_CACHE] Redis get error for key '{key}': {e}")
@@ -78,11 +99,14 @@ class RedisCacheService:
         if rest_url and rest_token:
             try:
                 headers = {"Authorization": f"Bearer {rest_token}"}
-                res = requests.get(f"{rest_url}/get/{key}", headers=headers, timeout=3.0)
+                res = requests.get(f"{rest_url}/get/{key}", headers=headers, timeout=0.5)
                 if res.status_code == 200:
                     result = res.json().get("result")
                     if result:
-                        return json.loads(result)
+                        parsed = json.loads(result)
+                        self._memory_cache[key] = parsed
+                        self._memory_expiry[key] = time.monotonic() + 30
+                        return parsed
             except Exception as e:
                 logger.warning(f"[REDIS_CACHE] Upstash REST get error for key '{key}': {e}")
 
@@ -91,6 +115,8 @@ class RedisCacheService:
 
     def set(self, key: str, value: Any, ttl_seconds: int = 86400) -> bool:
         serialized = json.dumps(value, default=str)
+        self._memory_cache[key] = value
+        self._memory_expiry[key] = time.monotonic() + min(ttl_seconds, 30)
 
         # 1. Try official Upstash Redis SDK
         if self._upstash_client:
@@ -114,7 +140,7 @@ class RedisCacheService:
         if rest_url and rest_token:
             try:
                 headers = {"Authorization": f"Bearer {rest_token}"}
-                res = requests.get(f"{rest_url}/set/{key}/{serialized}?EX={ttl_seconds}", headers=headers, timeout=3.0)
+                res = requests.get(f"{rest_url}/set/{key}/{serialized}?EX={ttl_seconds}", headers=headers, timeout=0.5)
                 if res.status_code == 200:
                     return True
             except Exception as e:
@@ -125,6 +151,7 @@ class RedisCacheService:
             first_k = next(iter(self._memory_cache))
             self._memory_cache.pop(first_k, None)
         self._memory_cache[key] = value
+        self._memory_expiry[key] = time.monotonic() + min(ttl_seconds, 30)
         return True
 
     def delete(self, key: str) -> bool:
@@ -139,6 +166,7 @@ class RedisCacheService:
             except Exception:
                 pass
         self._memory_cache.pop(key, None)
+        self._memory_expiry.pop(key, None)
         return True
 
     def health_check(self) -> dict:

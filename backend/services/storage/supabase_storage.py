@@ -1,6 +1,9 @@
 from supabase import Client
 from storage3.exceptions import StorageApiError
 from services.storage.file_service import FileService
+import time
+
+_signed_url_cache = {}
 
 class SupabaseStorageService(FileService):
     def __init__(self, supabase: Client):
@@ -33,3 +36,16 @@ class SupabaseStorageService(FileService):
             if "not_found" in str(exc).lower() or "404" in str(exc):
                 raise FileNotFoundError(f"Object not found in storage: {bucket}/{path}") from exc
             raise
+
+    def create_signed_download_url(self, bucket: str, path: str, expires_in: int = 60):
+        cache_key = (bucket, path)
+        cached = _signed_url_cache.get(cache_key)
+        if cached and cached[1] > time.monotonic():
+            return cached[0]
+        result = self.supabase.storage.from_(bucket).create_signed_url(path, expires_in)
+        if isinstance(result, dict):
+            url = result.get("signedURL") or result.get("signedUrl") or result.get("signed_url")
+            if url:
+                _signed_url_cache[cache_key] = (url, time.monotonic() + max(1, expires_in - 15))
+            return url
+        return None

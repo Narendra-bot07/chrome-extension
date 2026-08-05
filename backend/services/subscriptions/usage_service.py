@@ -121,11 +121,55 @@ class UsageService:
 
     def get_usage_summary(self, user_id):
         keys = ["jd_extraction", "resume_upload", "resume_generation", "cover_letter_generation"]
-        # Delegates to get_current_usage per key so the admin bypass and
-        # resume_upload's lifetime window (instead of the current billing
-        # period) are handled in exactly one place instead of being
-        # duplicated here with its own copy of the same branching.
-        return {feature_key: self.get_current_usage(user_id, feature_key) for feature_key in keys}
+        sub = self.subscription_service.get_current_subscription(user_id)
+        is_admin = self._is_admin_user(user_id)
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT feature_key, limit_value, enabled
+                FROM public.plan_features
+                WHERE plan_id = %s AND feature_key = ANY(%s)
+                """,
+                (sub["plan_id"], keys),
+            )
+            features = {row["feature_key"]: row for row in cur.fetchall()}
+            cur.execute(
+                """
+                SELECT feature_key, COALESCE(SUM(quantity), 0)::int AS used
+                FROM public.usage_events
+                WHERE user_id = %s
+                  AND feature_key = ANY(%s)
+                  AND (
+                    feature_key = 'resume_upload'
+                    OR (created_at >= %s AND created_at < %s)
+                  )
+                GROUP BY feature_key
+                """,
+                (user_id, keys, sub["current_period_start"], sub["current_period_end"]),
+            )
+            usage = {row["feature_key"]: max(int(row["used"] or 0), 0) for row in cur.fetchall()}
+
+        result = {}
+        for feature_key in keys:
+            feature = features.get(feature_key) or {}
+            enabled = bool(feature.get("enabled"))
+            limit = feature.get("limit_value")
+            if enabled and limit is None and feature_key == "jd_extraction":
+                limit = sub.get("monthly_jd_limit")
+            if is_admin and feature_key in UNLIMITED_FEATURES:
+                enabled, limit = True, None
+            used = usage.get(feature_key, 0)
+            result[feature_key] = {
+                "feature_key": feature_key,
+                "enabled": enabled,
+                "limit": limit,
+                "used": used,
+                "remaining": None if limit is None else max(limit - used, 0),
+                "lifetime": feature_key in LIFETIME_WINDOW_FEATURES,
+                "period_start": sub["current_period_start"],
+                "period_end": sub["current_period_end"],
+            }
+        return result
 
     def require_available(self, user_id, feature_key, quantity=1):
         summary = self.get_current_usage(user_id, feature_key)
@@ -138,7 +182,15 @@ class UsageService:
             quota_error(summary)
         return summary
 
-    def consume_usage(self, user_id, feature_key, quantity=1, request_id=None, metadata=None):
+    def consume_usage(
+        self,
+        user_id,
+        feature_key,
+        quantity=1,
+        request_id=None,
+        metadata=None,
+        return_summary=True,
+    ):
         metadata = metadata or {}
         try:
             with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -165,7 +217,7 @@ class UsageService:
                     existing = cur.fetchone()
                     if existing:
                         self.conn.commit()
-                        return self.get_current_usage(user_id, feature_key)
+                        return self.get_current_usage(user_id, feature_key) if return_summary else None
 
                 used = self.get_usage(user_id, feature_key, sub["current_period_start"], sub["current_period_end"])
                 summary = {
@@ -184,7 +236,7 @@ class UsageService:
                     VALUES (%s, %s, %s, %s, %s, %s)
                 """, (user_id, sub["id"], feature_key, quantity, request_id, Json(metadata)))
                 self.conn.commit()
-                return self.get_current_usage(user_id, feature_key)
+                return self.get_current_usage(user_id, feature_key) if return_summary else None
         except Exception:
             self.conn.rollback()
             raise

@@ -17,7 +17,7 @@ router = APIRouter(prefix="/admin/users", tags=["admin-users"])
 
 
 @router.get("")
-async def list_users(
+def list_users(
     search: Optional[str] = None,
     role: Optional[str] = None,
     limit: int = 50,
@@ -39,13 +39,11 @@ async def list_users(
     where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
 
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute(f"SELECT COUNT(*) AS total FROM public.users {where_clause}", params)
-        total = cur.fetchone()["total"]
-
         cur.execute(
             f"""
             SELECT id, email, full_name, role, current_plan, subscription_status,
-                   is_active, email_verified, provider, created_at, last_login
+                   is_active, email_verified, provider, created_at, last_login,
+                   COUNT(*) OVER() AS total_count
             FROM public.users
             {where_clause}
             ORDER BY created_at DESC
@@ -55,11 +53,15 @@ async def list_users(
         )
         users = cur.fetchall()
 
+    total = int(users[0]["total_count"]) if users else 0
+    for item in users:
+        item.pop("total_count", None)
+
     return {"total": total, "limit": limit, "offset": offset, "users": users}
 
 
 @router.get("/{user_id}")
-async def get_user_detail(
+def get_user_detail(
     user_id: str,
     admin_user: Dict[str, Any] = Depends(verify_admin_access),
     conn=Depends(get_db_connection),
@@ -100,7 +102,7 @@ class RoleUpdateRequest(BaseModel):
 
 
 @router.patch("/{user_id}/role")
-async def update_user_role(
+def update_user_role(
     user_id: str,
     payload: RoleUpdateRequest,
     admin_user: Dict[str, Any] = Depends(verify_admin_access),
@@ -129,7 +131,7 @@ class StatusUpdateRequest(BaseModel):
 
 
 @router.patch("/{user_id}/status")
-async def update_user_status(
+def update_user_status(
     user_id: str,
     payload: StatusUpdateRequest,
     admin_user: Dict[str, Any] = Depends(verify_admin_access),

@@ -9,7 +9,7 @@ from services.profile_validation import validate_location
 router = APIRouter(prefix="/profile", tags=["profile"])
 
 @router.get("/", response_model=ProfileResponse)
-async def get_profile(
+def get_profile(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ProfileRepository = Depends(get_profile_repository)
 ):
@@ -27,7 +27,7 @@ async def get_profile(
     return profile
 
 @router.put("/update", response_model=ProfileResponse)
-async def update_profile(
+def update_profile(
     payload: ProfileUpdate,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ProfileRepository = Depends(get_profile_repository)

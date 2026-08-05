@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, UploadFile, File, Header, HTTPException, status
-from fastapi.responses import Response
+from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, Header, HTTPException, status
+from fastapi.responses import RedirectResponse, Response
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,6 +8,7 @@ import copy
 import re
 import hashlib
 import uuid
+import threading
 
 from core.security import verify_supabase_jwt
 from core.constants import MAX_FILE_SIZE_BYTES, SUPPORTED_FILE_EXTENSIONS
@@ -42,6 +43,33 @@ from services.workflow.checkpoints import PostgresCheckpointStore
 from core.config import settings
 
 router = APIRouter(prefix="/resumes", tags=["resumes"])
+_local_reconciliation_lock = threading.Lock()
+_locally_reconciled_users: set[str] = set()
+
+
+def _extract_resume_source(content: bytes, filename: str) -> tuple[str, dict[str, str]]:
+    """CPU-bound source extraction, kept outside the asyncio event loop."""
+    return (
+        ResumeParser.extract_text(content, filename),
+        ResumeParser.extract_links(content, filename),
+    )
+
+
+def _emit_resume_uploaded_event(
+    user_id: str,
+    resume_id: str,
+    file_name: str,
+    file_size: int,
+) -> None:
+    """Persist non-critical analytics after the HTTP response is sent."""
+    with user_scoped_db_context(user_id) as analytics_conn:
+        AnalyticsService(analytics_conn).emit_event(
+            user_id=user_id,
+            event_type="RESUME_UPLOADED",
+            resource_type="resume",
+            resource_id=resume_id,
+            metadata={"file_name": file_name, "file_size": file_size},
+        )
 
 
 @router.post(
@@ -151,14 +179,13 @@ def confirm_selected_resume_intelligence(
 
 @router.post("/upload")
 async def upload_and_parse(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     resume_repo: ResumeRepository = Depends(get_resume_repository),
     storage: FileService = Depends(get_storage_service),
     conn = Depends(get_db_connection)
 ):
-    usage = UsageService(conn)
-    usage.require_available(user["id"], "resume_upload")
     ext = file.filename.split(".")[-1].upper()
     if ext not in SUPPORTED_FILE_EXTENSIONS:
         raise HTTPException(
@@ -173,11 +200,40 @@ async def upload_and_parse(
             detail="File size exceeds limits."
         )
 
-    raw_text = ResumeParser.extract_text(content, file.filename)
-    source_links = ResumeParser.extract_links(content, file.filename)
-
     unique_path = f"{user['id']}/{uuid.uuid4()}_{file.filename}"
-    stored_path = storage.upload_file("original-resumes", unique_path, content, file.content_type)
+    usage_request_id = f"resume-upload:{uuid.uuid4()}"
+    usage = UsageService(conn)
+    await asyncio.to_thread(
+        usage.consume_usage,
+        user["id"],
+        "resume_upload",
+        1,
+        usage_request_id,
+        {"file_name": file.filename},
+        False,
+    )
+
+    try:
+        (raw_text, source_links), stored_path = await asyncio.gather(
+            asyncio.to_thread(_extract_resume_source, content, file.filename),
+            asyncio.to_thread(
+                storage.upload_file,
+                "original-resumes",
+                unique_path,
+                content,
+                file.content_type,
+            ),
+        )
+    except Exception:
+        # The quota reservation must not charge a failed upload.
+        await asyncio.to_thread(
+            usage.credit_usage,
+            user["id"],
+            "resume_upload",
+            1,
+            {"reason": "resume_upload_failed", "request_id": usage_request_id},
+        )
+        raise
     logger.info(
         "[RESUME][BACKEND] Resume file stored user_id=%s file_name=%s "
         "size=%s storage_path=%s",
@@ -192,15 +248,26 @@ async def upload_and_parse(
         "links": source_links,
         "parse_status": "pending",
     }
-    record = resume_repo.create(
-        user_id=user["id"],
-        file_path=unique_path,
-        file_name=file.filename,
-        file_size=len(content),
-        file_type=ext,
-        parsed_content=parsed_res,
-        source_fingerprint=hashlib.sha256(content).hexdigest(),
-    )
+    try:
+        record = await asyncio.to_thread(
+            resume_repo.create,
+            user_id=user["id"],
+            file_path=unique_path,
+            file_name=file.filename,
+            file_size=len(content),
+            file_type=ext,
+            parsed_content=parsed_res,
+            source_fingerprint=hashlib.sha256(content).hexdigest(),
+        )
+    except Exception:
+        await asyncio.to_thread(
+            usage.credit_usage,
+            user["id"],
+            "resume_upload",
+            1,
+            {"reason": "resume_record_failed", "request_id": usage_request_id},
+        )
+        raise
     logger.info(
         "[RESUME][BACKEND] Resume upload completed user_id=%s resume_id=%s "
         "file_name=%s parsing_status=pending",
@@ -212,25 +279,19 @@ async def upload_and_parse(
     record["parsed_content"] = parsed_res
     record["parsing_status"] = "pending"
     
-    AnalyticsService(conn).emit_event(
-        user_id=user["id"],
-        event_type="RESUME_UPLOADED",
-        resource_type="resume",
-        resource_id=record["id"],
-        metadata={"file_name": file.filename, "file_size": len(content)}
-    )
-    usage.consume_usage(
+    background_tasks.add_task(
+        _emit_resume_uploaded_event,
         user["id"],
-        "resume_upload",
-        request_id=f"resume-upload:{record['id']}",
-        metadata={"resume_id": record["id"], "file_name": file.filename},
+        str(record["id"]),
+        file.filename,
+        len(content),
     )
     
     return record
 
 
 @router.get("/")
-async def list_resumes(
+def list_resumes(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository)
 ):
@@ -368,7 +429,19 @@ async def reconcile_local_resumes(
     if not user_dir.exists():
         return {"recovered": 0, "active_resume_id": None}
 
-    result = await asyncio.to_thread(_scan_and_recover_local_resumes, user["id"], user_dir)
+    with _local_reconciliation_lock:
+        if user["id"] in _locally_reconciled_users:
+            return {"recovered": 0, "active_resume_id": None}
+        # Reserve the scan before starting it so concurrent frontend views do
+        # not launch duplicate disk/hash/database recovery work.
+        _locally_reconciled_users.add(user["id"])
+
+    try:
+        result = await asyncio.to_thread(_scan_and_recover_local_resumes, user["id"], user_dir)
+    except Exception:
+        with _local_reconciliation_lock:
+            _locally_reconciled_users.discard(user["id"])
+        raise
 
     logger.info(
         "[RESUME][BACKEND] Local resume reconciliation completed "
@@ -420,7 +493,7 @@ async def get_active_resume(
 
 
 @router.get("/{resume_id}/file")
-async def get_resume_file(
+def get_resume_file(
     resume_id: str,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository),
@@ -431,6 +504,15 @@ async def get_resume_file(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Resume not found."
+        )
+    signed_url = storage.create_signed_download_url(
+        "original-resumes", record["file_path"], expires_in=60
+    )
+    if signed_url:
+        return RedirectResponse(
+            url=signed_url,
+            status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+            headers={"Cache-Control": "private, max-age=45"},
         )
     try:
         file_bytes = storage.download_file("original-resumes", record["file_path"])
@@ -448,13 +530,13 @@ async def get_resume_file(
 
 
 @router.get("/{resume_id}/preview")
-async def preview_resume_file(
+def preview_resume_file(
     resume_id: str,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository),
     storage: FileService = Depends(get_storage_service)
 ):
-    return await get_resume_file(resume_id, user, repo, storage)
+    return get_resume_file(resume_id, user, repo, storage)
 
 
 @router.post("/{resume_id}/activate")
@@ -693,7 +775,7 @@ async def recover_resume_source_details(
 # =============================================================================
 
 @router.get("/{resume_id}/versions")
-async def list_resume_versions(
+def list_resume_versions(
     resume_id: str,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository)

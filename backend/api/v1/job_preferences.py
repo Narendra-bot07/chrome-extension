@@ -67,7 +67,7 @@ def serialize_preferences(record: Dict[str, Any], user_id: str) -> Dict[str, Any
 
 
 @router.get("/me")
-async def get_my_job_preferences(
+def get_my_job_preferences(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn=Depends(get_db_connection)
 ):
@@ -77,7 +77,7 @@ async def get_my_job_preferences(
 
 
 @router.put("/me")
-async def upsert_my_job_preferences(
+def upsert_my_job_preferences(
     payload: JobPreferencesPayload,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn=Depends(get_db_connection)

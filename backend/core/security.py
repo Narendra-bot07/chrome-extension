@@ -5,10 +5,41 @@ from core.database import get_db_connection
 from core.exceptions import CredentialError
 from core.config import settings
 from app.services.session_service import SessionService
+import threading
+import time
 
 _db_context = contextmanager(get_db_connection)
+_session_validity_cache: dict[str, float] = {}
+_session_cache_lock = threading.Lock()
+_SESSION_VALIDITY_TTL_SECONDS = 5.0
 
-async def verify_supabase_jwt(
+
+def _session_recently_verified(session_id: str) -> bool:
+    now = time.monotonic()
+    with _session_cache_lock:
+        expires_at = _session_validity_cache.get(session_id, 0)
+        if expires_at > now:
+            return True
+        _session_validity_cache.pop(session_id, None)
+    return False
+
+
+def _remember_valid_session(session_id: str) -> None:
+    with _session_cache_lock:
+        if len(_session_validity_cache) >= 5000:
+            now = time.monotonic()
+            expired = [key for key, expiry in _session_validity_cache.items() if expiry <= now]
+            for key in expired[:1000]:
+                _session_validity_cache.pop(key, None)
+        _session_validity_cache[session_id] = time.monotonic() + _SESSION_VALIDITY_TTL_SECONDS
+
+
+def forget_verified_session(session_id: str) -> None:
+    with _session_cache_lock:
+        _session_validity_cache.pop(str(session_id), None)
+
+
+def verify_supabase_jwt(
     authorization: str = Header(None, description="Bearer JWT token from custom auth"),
 ) -> Dict[str, Any]:
     """
@@ -37,11 +68,12 @@ async def verify_supabase_jwt(
         
         # Verify session using SessionService
         session_id = payload.get("jti")
-        if session_id:
+        if session_id and not _session_recently_verified(str(session_id)):
             with _db_context() as conn:
                 session_service = SessionService(conn)
                 if not session_service.verify_and_update_session(session_id):
                     raise CredentialError("Session expired or revoked.")
+            _remember_valid_session(str(session_id))
 
         return {
             "id": payload["sub"],

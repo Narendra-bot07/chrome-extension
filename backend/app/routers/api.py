@@ -1,5 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Header, HTTPException, status, Depends
 from fastapi.responses import StreamingResponse
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from contextlib import contextmanager
 import io
@@ -1275,7 +1276,7 @@ async def api_refine_section_stream(
     user_id = "00000000-0000-0000-0000-000000000000"
     if authorization:
         try:
-            user_data = await verify_supabase_jwt(authorization)
+            user_data = await run_in_threadpool(verify_supabase_jwt, authorization)
             user_id = user_data.get("id", user_id)
         except Exception:
             pass

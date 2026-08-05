@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from core.security import verify_supabase_jwt
+from core.security import forget_verified_session, verify_supabase_jwt
 from core.database import get_db_connection
 from app.services.session_service import SessionService
 from app.analytics.events.tracking.analytics_service import AnalyticsService
@@ -8,7 +8,7 @@ from typing import Dict, Any
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 @router.get("/")
-async def get_sessions(
+def get_sessions(
     request: Request,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn = Depends(get_db_connection)
@@ -38,7 +38,7 @@ async def get_sessions(
     return {"status": "success", "sessions": sessions}
 
 @router.delete("/{session_id}")
-async def revoke_session(
+def revoke_session(
     session_id: str,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn = Depends(get_db_connection)
@@ -47,6 +47,7 @@ async def revoke_session(
     success = session_service.revoke_session(session_id, user["id"])
     if not success:
         raise HTTPException(status_code=404, detail="Session not found or already revoked.")
+    forget_verified_session(session_id)
         
     AnalyticsService(conn).emit_event(
         user_id=user["id"],
@@ -57,7 +58,7 @@ async def revoke_session(
     return {"status": "success", "message": "Session revoked successfully."}
 
 @router.delete("/all/others")
-async def revoke_all_other_sessions(
+def revoke_all_other_sessions(
     request: Request,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn = Depends(get_db_connection)

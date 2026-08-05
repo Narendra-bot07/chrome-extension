@@ -3,12 +3,13 @@ from typing import Dict, Any, List
 from psycopg2.extras import RealDictCursor
 from core.database import get_db_connection
 from core.security import verify_supabase_jwt
+from services.cache.redis_cache import redis_cache
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 
 @router.get("/performance-signature")
-async def get_performance_signature(
+def get_performance_signature(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn=Depends(get_db_connection),
 ):
@@ -110,12 +111,16 @@ async def get_performance_signature(
 
 
 @router.get("/trend")
-async def get_activity_trend(
+def get_activity_trend(
     days: int = Query(30, enum=[7, 30, 90]),
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn=Depends(get_db_connection),
 ):
     """Return successful JD extractions grouped by the user's local date."""
+    cache_key = f"analytics_trend:{user['id']}:{days}"
+    cached = redis_cache.get(cache_key)
+    if cached:
+        return cached
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
             """
@@ -145,6 +150,7 @@ async def get_activity_trend(
               FROM public.usage_events ue
               WHERE ue.user_id=%s
                 AND ue.feature_key = 'jd_extraction'
+                AND ue.created_at >= NOW() - (%s * INTERVAL '1 day') - INTERVAL '2 days'
                 AND (
                       ue.created_at AT TIME ZONE
                       (SELECT timezone FROM date_range)
@@ -168,13 +174,13 @@ async def get_activity_trend(
             """,
             (
                 user["id"], days,
-                user["id"],
+                user["id"], days,
             ),
         )
         rows = cur.fetchall()
         timezone = rows[0]["timezone"] if rows else "UTC"
         total_in_range = rows[0]["total_in_range"] if rows else 0
-        return {
+        result = {
             "range": f"last_{days}_days",
             "timezone": timezone,
             "total_in_range": total_in_range,
@@ -183,9 +189,11 @@ async def get_activity_trend(
                 for row in rows
             ],
         }
+        redis_cache.set(cache_key, result, ttl_seconds=30)
+        return result
 
 @router.get("/dashboard")
-async def get_dashboard_metrics(
+def get_dashboard_metrics(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn = Depends(get_db_connection)
 ):
@@ -282,7 +290,7 @@ async def get_dashboard_metrics(
         )
 
 @router.get("/activity")
-async def get_recent_activity(
+def get_recent_activity(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     conn = Depends(get_db_connection)
 ):
