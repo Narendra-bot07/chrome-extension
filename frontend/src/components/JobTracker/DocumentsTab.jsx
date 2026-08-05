@@ -69,6 +69,20 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
     }).catch(err => console.warn(`Failed to persist ${kind} PDF for reuse`, err));
   };
 
+  // A failed download used to navigate away to the standalone Resume/Cover
+  // Letter Studio pages as a "fallback" -- but those pages render from
+  // AppContext's global tailoredResume/parsedResume/coverLetter state, which
+  // has no relationship to whichever OTHER application's document a Job
+  // Tracker download was actually for. That redirect just stranded the user
+  // on an unrelated, usually-empty "nothing generated yet" screen with no
+  // indication anything had gone wrong. Surface a toast and stay put instead
+  // -- the Job Tracker is exactly where the retry button already is.
+  const notifyDownloadError = (message) => {
+    window.dispatchEvent(new CustomEvent('tailr4u-toast', {
+      detail: { message, type: 'error', title: 'Download failed' }
+    }));
+  };
+
   // Storage-first: a resume/cover letter that hasn't changed since it was
   // last rendered doesn't need a fresh Playwright render (45-75s observed in
   // production) on every single download click -- check for an
@@ -110,8 +124,8 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
       downloadBlobAsFile(base64ToPdfBlob(data.pdf_base64), data.filename || resumeFileName);
       persistGeneratedPdf('resume', data.pdf_base64);
     } catch (err) {
-      console.error('Direct download failed, redirecting to studio:', err);
-      navigate('/download');
+      console.error('Resume download failed:', err);
+      notifyDownloadError(err.message || 'Could not download the tailored resume. Please try again.');
     } finally {
       setDownloadingType(null);
     }
@@ -158,7 +172,7 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
       persistGeneratedPdf('cover-letter', await blobToBase64(blob));
     } catch (err) {
       console.error('Cover letter download failed:', err);
-      navigate('/cover-letter');
+      notifyDownloadError(err.message || 'Could not download the cover letter. Please try again.');
     } finally {
       setDownloadingType(null);
     }

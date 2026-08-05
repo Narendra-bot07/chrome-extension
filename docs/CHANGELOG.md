@@ -4,6 +4,13 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.15.2] - 2026-08-05
+
+### Fixed
+- **A failed Job Tracker document download stranded the user on an unrelated, empty "nothing generated yet" screen with no explanation.** `DocumentsTab.jsx`'s `handleDownloadResume`/`handleDownloadCoverLetter` (3.14.0) inherited a pre-existing "fall back to the standalone Studio page" pattern on any error -- but `/download` and `/cover-letter` render from `AppContext`'s *global* `tailoredResume`/`parsedResume`/`coverLetter` state, which has no relationship to whichever specific Job Tracker application the download was actually for. Any failure (network hiccup, PDF generation error, anything) silently redirected away to a page that had never seen that application's data, landing on the "Generate Tailored Cover Letter" / empty-state screen with zero indication anything had gone wrong -- reported directly as "after downloading the cover letter, it's going to this page." Replaced both fallbacks with an inline error toast (`tailr4u-toast`, the same mechanism `ResumePreview.tsx` already uses) that keeps the user on the Job Tracker, where the retry button already is.
+
+---
+
 ## [3.15.1] - 2026-08-05
 
 ### Fixed
