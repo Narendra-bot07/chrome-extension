@@ -49,7 +49,7 @@ KEY FEATURES
 PRIVACY
 Tailr4U only reads a page's content when you actively choose to extract a job description — it does not run in the background or track your general browsing. Your resume content is never used to train AI models or sold to third parties. Full privacy policy: https://tailr4u.com/#/privacy-policy
 
-Questions or feedback? support@tailr4u.com
+Questions or feedback? founder@tailr4u.com
 ```
 
 **Category**: Productivity
@@ -130,7 +130,7 @@ has a verified contact email — this is a one-time account-level step, done
 from the dashboard's left nav **Settings** page, not the item edit page:
 
 1. Left nav → **Settings** → **Publisher contact email**.
-2. Enter an email (e.g. `support@tailr4u.com`, or whatever you actually want to receive Chrome Web Store correspondence at).
+2. Enter an email — use `founder@tailr4u.com` (or whatever you actually want to receive Chrome Web Store correspondence at).
 3. Chrome sends a verification link to that inbox — click it.
 4. Once verified, the "you must verify the publisher's contact email" error clears account-wide, for this and any future items.
 

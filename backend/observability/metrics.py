@@ -12,7 +12,7 @@ registry = CollectorRegistry()
 # prometheus_client auto-registers these onto its own default REGISTRY at
 # import time, not onto a custom CollectorRegistry() like the one above.
 # Without registering them here explicitly, process_cpu_seconds_total,
-# process_resident_memory_bytes, etc. never appear in /internal/metrics —
+# process_resident_memory_bytes, etc. never appear in /metrics —
 # which is exactly why CPU/memory panels in Grafana have nothing to plot.
 ProcessCollector(registry=registry)
 PlatformCollector(registry=registry)

@@ -1,5 +1,6 @@
 import re
 import json
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Dict, Any, List, Set, Optional
 from schemas.resume import ResumeStructure
@@ -7,7 +8,7 @@ from schemas.jobs import JobAnalysis
 
 class ATSScoringEngine:
     # v1.3.0 invalidates stale single-section cached entries to enforce full-resume scoring.
-    ENGINE_VERSION = "v1.3.0-fresh-full-pipeline-v9"
+    ENGINE_VERSION = "v1.3.0-fresh-full-pipeline-v10"
 
     @classmethod
     def calculate_score(cls, resume: ResumeStructure, job: JobAnalysis) -> Dict[str, Any]:
@@ -397,7 +398,7 @@ class ATSScoringEngine:
     @classmethod
     def _calculate_candidate_years(cls, resume: ResumeStructure) -> float:
         total_years = 0.0
-        current_year = 2026 # Context reference timestamp is July 2026
+        current_year = datetime.now(timezone.utc).year
         
         experience_items = (resume.experience or [])
         # We can also add internships if present
@@ -409,7 +410,7 @@ class ATSScoringEngine:
             end_date = str(item.end_date or "").strip()
             
             # Simple regex to extract 4 digit year
-            start_years = re.findall(r"\b(19|20)\d{2}\b", start_date)
+            start_years = re.findall(r"\b(?:19|20)\d{2}\b", start_date)
             start_yr = int(start_years[0]) if start_years else None
             
             if not start_yr:
@@ -417,7 +418,7 @@ class ATSScoringEngine:
                 
             end_yr = current_year
             if end_date and not any(term in end_date.lower() for term in ["present", "current", "now"]):
-                end_years = re.findall(r"\b(19|20)\d{2}\b", end_date)
+                end_years = re.findall(r"\b(?:19|20)\d{2}\b", end_date)
                 if end_years:
                     end_yr = int(end_years[0])
             

@@ -74,7 +74,8 @@ class LLMCacheService:
         expected_schema: Optional[Type[BaseModel]] = None,
         prompt_version: str = "v1",
         provider: str = "deepseek",
-        bypass_cache: bool = False
+        bypass_cache: bool = False,
+        record_miss: bool = True,
     ) -> Optional[Tuple[Any, Dict[str, int]]]:
         """
         Fetch cached entry from Redis.
@@ -97,7 +98,11 @@ class LLMCacheService:
         try:
             raw_data = redis_cache.get(cache_key)
             if not raw_data:
-                llm_telemetry.record_request(task, "miss")
+                # Lock waiters poll this key until the owner publishes its
+                # result. Those polls are not new cache requests and must not
+                # inflate miss metrics/logs every few hundred milliseconds.
+                if record_miss:
+                    llm_telemetry.record_request(task, "miss")
                 return None
 
             # Deserialize envelope
@@ -241,9 +246,16 @@ class LLMCacheService:
                 pass
 
         # 3. Fallback memory lock
+        now = time.monotonic()
         cached_lock = redis_cache._memory_cache.get(full_lock_key)
+        lock_expiry = redis_cache._memory_expiry.get(full_lock_key, 0)
+        if cached_lock and lock_expiry <= now:
+            redis_cache._memory_cache.pop(full_lock_key, None)
+            redis_cache._memory_expiry.pop(full_lock_key, None)
+            cached_lock = None
         if not cached_lock:
             redis_cache._memory_cache[full_lock_key] = owner_id
+            redis_cache._memory_expiry[full_lock_key] = now + ttl
             return True
         return cached_lock == owner_id
 
@@ -275,6 +287,7 @@ class LLMCacheService:
 
         if redis_cache._memory_cache.get(full_lock_key) == owner_id:
             redis_cache._memory_cache.pop(full_lock_key, None)
+            redis_cache._memory_expiry.pop(full_lock_key, None)
             return True
         return False
 
@@ -311,7 +324,8 @@ class LLMCacheService:
 
         # 2. Acquire Single-Flight Distributed Lock to prevent duplicate concurrent generation
         owner_id = str(uuid.uuid4())
-        lock_acquired = self.acquire_lock(fingerprint, owner_id)
+        lock_key = f"{provider}:{task}:{fingerprint}"
+        lock_acquired = self.acquire_lock(lock_key, owner_id)
 
         if not lock_acquired:
             llm_telemetry.record_lock_contention(task)
@@ -324,7 +338,8 @@ class LLMCacheService:
                     expected_schema=expected_schema,
                     prompt_version=prompt_version,
                     provider=provider,
-                    bypass_cache=bypass_cache
+                    bypass_cache=bypass_cache,
+                    record_miss=False,
                 )
                 if cached is not None:
                     result_obj, _ = cached
@@ -352,7 +367,7 @@ class LLMCacheService:
 
         finally:
             if lock_acquired:
-                self.release_lock(fingerprint, owner_id)
+                self.release_lock(lock_key, owner_id)
 
 
 llm_cache = LLMCacheService()

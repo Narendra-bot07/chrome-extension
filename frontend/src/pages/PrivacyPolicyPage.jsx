@@ -153,7 +153,7 @@ export default function PrivacyPolicyPage() {
           <section className="pp-section">
             <h2>10. Contact Us</h2>
             <p>
-              Questions about this policy or your data? Email us at <a href="mailto:support@tailr4u.com">support@tailr4u.com</a>.
+              Questions about this policy or your data? Email us at <a href="mailto:founder@tailr4u.com">founder@tailr4u.com</a>.
             </p>
           </section>
         </div>

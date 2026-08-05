@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 from typing import Optional
 
@@ -70,10 +70,18 @@ class Settings(BaseSettings):
     SENTRY_PROFILES_SAMPLE_RATE: float = Field(default=0.0, env="SENTRY_PROFILES_SAMPLE_RATE")
     
     METRICS_ENABLED: bool = Field(default=True, env="METRICS_ENABLED")
-    METRICS_PATH: str = Field(default="/internal/metrics", env="METRICS_PATH")
+    METRICS_PATH: str = Field(default="/metrics", env="METRICS_PATH")
     METRICS_BEARER_TOKEN: str = Field(default="", env="METRICS_BEARER_TOKEN")
 
-    # Render has no sidecar/agent process to pull-scrape /internal/metrics, so
+    @field_validator("METRICS_PATH")
+    @classmethod
+    def validate_metrics_path(cls, value: str) -> str:
+        path = str(value or "").strip()
+        if not path.startswith("/") or path == "/" or "?" in path or "#" in path:
+            raise ValueError("METRICS_PATH must be an absolute path such as /metrics")
+        return path.rstrip("/")
+
+    # Render has no sidecar/agent process to pull-scrape /metrics, so
     # instead of standing up a separate always-on scraper, the app pushes its
     # own Prometheus registry to Grafana Cloud's hosted Prometheus (Mimir) on
     # an interval, via the standard remote_write protocol. Blank URL = disabled

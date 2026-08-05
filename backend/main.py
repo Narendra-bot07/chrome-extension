@@ -196,7 +196,7 @@ async def observability_status():
     """Expose configuration health without returning credentials."""
     return langsmith_status()
 
-@app.get(settings.METRICS_PATH)
+@app.get(settings.METRICS_PATH, include_in_schema=False)
 async def metrics_endpoint(request: Request):
     """Expose Prometheus/OpenMetrics formatted endpoint protected by Bearer Token."""
     import hmac

@@ -4,7 +4,7 @@
 >
 > **Tools**: Sentry Cloud · Prometheus client · Grafana Cloud · OpenTelemetry · UptimeRobot · Structured JSON logs
 
-> **Note**: There is no in-app admin dashboard for metrics/requests — that was removed. `/admin/observability` and its backend router (`api/v1/admin_observability.py`) were a stopgap web view over the same Prometheus registry `/internal/metrics` exposes; it duplicated what Grafana is meant to own and never had retention beyond a live process. All observability now flows through Sentry, Prometheus (`/internal/metrics`), and Grafana Cloud as described below. `/admin/users` (user list/roles/suspend) is unrelated and still exists.
+> **Note**: There is no in-app admin dashboard for metrics/requests — that was removed. `/admin/observability` and its backend router (`api/v1/admin_observability.py`) were a stopgap web view over the same Prometheus registry `/metrics` exposes; it duplicated what Grafana is meant to own and never had retention beyond a live process. All observability now flows through Sentry, Prometheus (`/metrics`), and Grafana Cloud as described below. `/admin/users` (user list/roles/suspend) is unrelated and still exists.
 
 ---
 
@@ -52,8 +52,8 @@ All observability variables must be set in the backend `.env` (Render dashboard 
 | `SENTRY_TRACES_SAMPLE_RATE` | No | `0.05` (5 %) for prod |
 | `SENTRY_PROFILES_SAMPLE_RATE` | No | `0` for prod until needed |
 | `METRICS_ENABLED` | Yes | `true` |
-| `METRICS_PATH` | No | `/internal/metrics` (default) |
-| `METRICS_BEARER_TOKEN` | Yes | Random 32-char secret; protects the raw `/internal/metrics` pull endpoint (still available for manual `curl`/debugging even though nothing scrapes it in prod) |
+| `METRICS_PATH` | No | `/metrics` (default and Prometheus convention) |
+| `METRICS_BEARER_TOKEN` | Yes | Random 32-char secret; protects the raw `/metrics` pull endpoint (still available for manual `curl`/debugging even though nothing scrapes it in prod) |
 | `GRAFANA_CLOUD_PROM_REMOTE_WRITE_URL` | Yes | From Grafana Cloud → My Account → your stack → Prometheus card. Blank = push disabled. |
 | `GRAFANA_CLOUD_PROM_USERNAME` | Yes | Numeric instance ID shown on the same Prometheus card |
 | `GRAFANA_CLOUD_PROM_API_KEY` | Yes | API key generated on the same Prometheus card |
@@ -86,7 +86,7 @@ The extension DSN constant is currently a hardcoded string at the top of `backgr
 | `GET /ready` | Readiness — DB + Redis + Storage reachable | None | `200` or `503` |
 | `GET /health` | High-level component status for dashboards | None | `200 {"status":"healthy",...}` |
 | `GET /api/observability/status` | LangSmith config status | None | `200 {...}` |
-| `GET /internal/metrics` | Prometheus metrics scrape | Bearer token | `200 text/plain; version=0.0.4` |
+| `GET /metrics` | Prometheus metrics scrape | Bearer token | `200 text/plain; version=0.0.4` |
 
 ### 3.1 Render Health Check Configuration
 
@@ -103,7 +103,7 @@ Failure Threshold:  3
 
 ## 4. Prometheus Metrics Catalogue
 
-All metrics are exported at `GET /internal/metrics` (requires `Authorization: Bearer <METRICS_BEARER_TOKEN>`).
+All metrics are exported at `GET /metrics` (requires `Authorization: Bearer <METRICS_BEARER_TOKEN>`).
 
 ### 4.1 HTTP Metrics
 
@@ -171,13 +171,13 @@ Render runs the API as one process with no sidecar, so rather than standing up a
    ```
 5. Redeploy. Within ~30s, Grafana Cloud → **Explore** → Prometheus data source → query `up` or `application_info` should return data.
 
-**Alternative (not implemented, listed for reference only)**: a standalone Grafana Alloy agent pull-scraping `/internal/metrics` and forwarding via `remote_write` — decouples collection from the app process, but needs its own always-on host (Fly.io, a VPS, etc.) to run continuously, which the push-based approach above avoids entirely.
+**Alternative (not implemented, listed for reference only)**: a standalone Grafana Alloy agent pull-scraping `/metrics` and forwarding via `remote_write` — decouples collection from the app process, but needs its own always-on host (Fly.io, a VPS, etc.) to run continuously, which the push-based approach above avoids entirely.
 
 ```yaml
 # alloy.river — only needed if you deliberately switch to the pull model later
 prometheus.scrape "tailr4u_backend" {
   targets = [{ __address__ = "https://your-render-url.onrender.com" }]
-  metrics_path = "/internal/metrics"
+  metrics_path = "/metrics"
   scheme       = "https"
   authorization {
     type        = "Bearer"

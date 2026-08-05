@@ -1,218 +1,176 @@
 /**
- * Unified, 100% deterministic JD Match and ATS Friendliness scoring engine across Tailr4U workflow.
- * Mirrors the exact Python algorithm from backend ATSScoringEngine.
+ * Browser mirror of backend/services/resume/scoring.py::ATSScoringEngine.
+ * Keep the weights and rules identical so optimistic review updates cannot
+ * jump when the authoritative backend response arrives.
  */
 
-export function calculateJDMatchScore(parsedResume, jobAnalysis) {
-  if (!parsedResume || !jobAnalysis) {
-    return {
-      score: 0,
-      atsScore: 0,
-      matchedSkills: [],
-      missingSkills: [],
-      reason: 'Missing resume or job details'
-    };
+const cleanText = value => String(value || '')
+  .toLowerCase()
+  .replace(/[^a-z0-9+#.]+/g, ' ')
+  .trim();
+
+const asList = value => Array.isArray(value) ? value : [];
+const descriptions = item => Array.isArray(item?.description) ? item.description : [];
+const bounded = value => Math.max(0, Math.min(100, Math.round(value)));
+
+const skillSet = resume => {
+  const result = new Set(asList(resume?.skills).map(value => String(value).toLowerCase().trim()).filter(Boolean));
+  Object.values(resume?.skills_categories || {}).forEach(values => {
+    asList(values).forEach(value => result.add(String(value).toLowerCase().trim()));
+  });
+  return result;
+};
+
+const jobSkillSet = job => {
+  const result = new Set(asList(job?.required_skills).map(value => String(value).toLowerCase().trim()).filter(Boolean));
+  if (!result.size) {
+    Object.values(job?.skills_categories || {}).forEach(values => {
+      asList(values).forEach(value => result.add(String(value).toLowerCase().trim()));
+    });
+  }
+  return result;
+};
+
+const resumeCorpus = resume => [
+  resume?.summary,
+  resume?.raw_text,
+  JSON.stringify(asList(resume?.experience)),
+  JSON.stringify(asList(resume?.projects)),
+  JSON.stringify(asList(resume?.skills)),
+  JSON.stringify(resume?.skills_categories || {}),
+  JSON.stringify(asList(resume?.certifications)),
+  JSON.stringify(asList(resume?.achievements))
+].join(' ');
+
+const requiredYears = job => {
+  const text = [
+    job?.experience_required,
+    ...asList(job?.qualifications),
+    ...asList(job?.responsibilities)
+  ].join(' ').toLowerCase();
+  const matches = [...text.matchAll(/\b(\d{1,2})\+?\s+years?\b/g)].map(match => Number(match[1]));
+  return matches.length ? Math.max(...matches) : 0;
+};
+
+const candidateYears = resume => [...asList(resume?.experience), ...asList(resume?.internships)]
+  .reduce((total, item) => {
+    const startMatch = String(item?.start_date || '').match(/\b(?:19|20)\d{2}\b/);
+    if (!startMatch) return total;
+    const startYear = Number(startMatch[0]);
+    const endText = String(item?.end_date || '');
+    const ongoing = /present|current|now/i.test(endText);
+    const endMatch = endText.match(/\b(?:19|20)\d{2}\b/);
+    const endYear = !ongoing && endMatch ? Number(endMatch[0]) : new Date().getUTCFullYear();
+    return total + Math.max(0.5, endYear - startYear);
+  }, 0);
+
+export function calculateJDMatchScore(resume, job) {
+  if (!resume || !job) {
+    return { score: 0, atsScore: 0, matchedSkills: [], missingSkills: [], requiredCount: 0, matchedCount: 0, breakdown: {} };
   }
 
-  const cleanText = (str) => String(str || '').toLowerCase().replace(/[^a-z0-9+#.]+/g, ' ').trim();
+  const resumeSkills = skillSet(resume);
+  const jdSkills = jobSkillSet(job);
+  const corpus = cleanText(resumeCorpus(resume));
+  const matchedSkills = [...jdSkills].filter(skill => resumeSkills.has(skill) || corpus.includes(cleanText(skill)));
+  const missingSkills = [...jdSkills].filter(skill => !matchedSkills.includes(skill));
+  const skillsScore = jdSkills.size ? matchedSkills.length / jdSkills.size * 100 : 100;
 
-  // 1. Candidate Skills & Text Corpus
-  const resumeSkills = new Set();
-  const extractSkills = (val) => {
-    if (!val) return;
-    if (typeof val === 'string') {
-      val.split(/[,;•|\n]/).forEach(s => {
-        const clean = s.trim().toLowerCase();
-        if (clean && clean.length < 50) resumeSkills.add(clean);
-      });
-    } else if (Array.isArray(val)) {
-      val.forEach(extractSkills);
-    } else if (typeof val === 'object') {
-      Object.values(val).forEach(extractSkills);
+  const jdKeywords = new Set([
+    ...asList(job.ats_keywords),
+    ...asList(job.keywords)
+  ].map(value => String(value).toLowerCase().trim()).filter(Boolean));
+  if (!jdKeywords.size) jdSkills.forEach(skill => jdKeywords.add(skill));
+  const matchedKeywords = [...jdKeywords].filter(keyword => corpus.includes(cleanText(keyword))).length;
+  const keywordScore = jdKeywords.size ? matchedKeywords / jdKeywords.size * 100 : 100;
+
+  const experience = asList(resume.experience);
+  const yearsRequired = requiredYears(job);
+  const experienceScore = yearsRequired === 0
+    ? (experience.length ? 100 : 50)
+    : (experience.length ? Math.min(100, candidateYears(resume) / yearsRequired * 100) : 0);
+
+  const titleWords = new Set(((String(job.title || '').toLowerCase().match(/\b[a-zA-Z0-9+#.]+\b/g)) || [])
+    .filter(word => !['and', 'or', 'of', 'in', 'the', 'a', 'an', 'for', 'with', 'to', 'at', 'by'].includes(word)));
+  let roleScore = titleWords.size ? 0 : 100;
+  experience.forEach(item => {
+    const title = String(item?.role || '').toLowerCase();
+    const matches = [...titleWords].filter(word => title.includes(word)).length;
+    roleScore = Math.max(roleScore, titleWords.size ? matches / titleWords.size * 100 : 100);
+  });
+
+  const projects = asList(resume.projects);
+  const relevantProjects = projects.filter(project => {
+    const text = descriptions(project).join(' ').toLowerCase();
+    return [...jdSkills].some(skill => text.includes(skill)) || [...jdKeywords].some(keyword => text.includes(keyword));
+  }).length;
+  const projectsScore = projects.length ? relevantProjects / projects.length * 100 : 0;
+
+  const education = asList(resume.education);
+  let educationScore = education.length ? 80 : 0;
+  if (education.length) {
+    const qualifications = asList(job.qualifications).join(' ').toLowerCase();
+    const degrees = education.map(item => item?.degree || '').join(' ').toLowerCase();
+    if (['bachelor', 'master', 'phd', 'bs', 'ms', 'ph.d', 'btech', 'mtech'].some(key => degrees.includes(key) && qualifications.includes(key))) {
+      educationScore = 100;
     }
-  };
-
-  extractSkills(parsedResume.skills);
-  extractSkills(parsedResume.skills_categories);
-  extractSkills(parsedResume.technical_skills);
-  extractSkills(parsedResume.parsed_content?.skills);
-  extractSkills(parsedResume.parsed_content?.skills_categories);
-
-  const fullResumeText = JSON.stringify(parsedResume).toLowerCase();
-  const fullResumeClean = cleanText(fullResumeText);
-
-  // 2. JD Skills & Keywords
-  const jdSkillsSet = new Set();
-  const addJDSkills = (val) => {
-    if (!val) return;
-    if (typeof val === 'string') {
-      val.split(/[,;•|\n]/).forEach(s => {
-        const clean = s.trim().toLowerCase();
-        if (clean && clean.length > 1 && clean.length < 50) jdSkillsSet.add(clean);
-      });
-    } else if (Array.isArray(val)) {
-      val.forEach(addJDSkills);
-    } else if (typeof val === 'object') {
-      Object.values(val).forEach(addJDSkills);
-    }
-  };
-
-  const reqSkills = jobAnalysis.required_skills || jobAnalysis.skills;
-  addJDSkills(reqSkills);
-
-  if (jdSkillsSet.size === 0 && jobAnalysis.skills_categories) {
-    addJDSkills(jobAnalysis.skills_categories);
   }
+  const certificationScore = asList(resume.certifications).length ? 100 : 0;
+  const score = bounded(skillsScore * .20 + keywordScore * .20 + experienceScore * .20 + roleScore * .15 + projectsScore * .10 + educationScore * .10 + certificationScore * .05);
 
-  const jdSkills = Array.from(jdSkillsSet);
-
-  // A. Skills Score (20%)
-  let matchedSkillsCount = 0;
-  let skillsScore = 100.0;
-  const matchedSkillsList = [];
-  const missingSkillsList = [];
-
-  if (jdSkills.length > 0) {
-    jdSkills.forEach(skill => {
-      const isMatched = resumeSkills.has(skill) ||
-                        Array.from(resumeSkills).some(rs => rs.includes(skill) || skill.includes(rs)) ||
-                        fullResumeClean.includes(cleanText(skill));
-      if (isMatched) {
-        matchedSkillsCount++;
-        matchedSkillsList.push(skill);
-      } else {
-        missingSkillsList.push(skill);
-      }
-    });
-    skillsScore = (matchedSkillsCount / jdSkills.length) * 100.0;
-  }
-
-  // B. Keyword Score (20%)
-  const jdKeywordsSet = new Set();
-  addJDSkills(jobAnalysis.ats_keywords);
-  addJDSkills(jobAnalysis.keywords);
-
-  const jdKeywords = Array.from(jdKeywordsSet);
-  const searchKeywords = jdKeywords.length > 0 ? jdKeywords : jdSkills;
-
-  let keywordScore = 100.0;
-  if (searchKeywords.length > 0) {
-    let matchedKwCount = 0;
-    searchKeywords.forEach(kw => {
-      if (fullResumeClean.includes(cleanText(kw))) matchedKwCount++;
-    });
-    keywordScore = (matchedKwCount / searchKeywords.length) * 100.0;
-  }
-
-  // C. Experience Alignment (20%)
-  const experienceList = parsedResume.experience || parsedResume.parsed_content?.experience || [];
-  let experienceScore = 0.0;
-  if (experienceList.length > 0) {
-    experienceScore = 80.0;
-  }
-
-  // D. Role Similarity (15%)
-  const jdTitle = (jobAnalysis.title || jobAnalysis.job_title || '').toLowerCase();
-  const jdTitleWords = new Set(
-    (jdTitle.match(/\b[a-zA-Z0-9+#.]+\b/g) || []).filter(w => !['and', 'or', 'of', 'in', 'the', 'a', 'an', 'for', 'with', 'to', 'at', 'by'].includes(w))
-  );
-
-  let roleSimilarityScore = 0.0;
-  if (jdTitleWords.size === 0) {
-    roleSimilarityScore = 100.0;
-  } else if (experienceList.length > 0) {
-    let maxMatch = 0;
-    experienceList.forEach(exp => {
-      const role = (exp.role || exp.title || '').toLowerCase();
-      let matched = 0;
-      jdTitleWords.forEach(w => {
-        if (role.includes(w)) matched++;
-      });
-      const ratio = (matched / jdTitleWords.size) * 100.0;
-      if (ratio > maxMatch) maxMatch = ratio;
-    });
-    roleSimilarityScore = maxMatch;
-  }
-
-  // E. Project Relevance (10%)
-  const projectsList = parsedResume.projects || parsedResume.parsed_content?.projects || [];
-  let projectsScore = 0.0;
-  if (projectsList.length > 0) {
-    let relevantCount = 0;
-    projectsList.forEach(p => {
-      const desc = (Array.isArray(p.description) ? p.description.join(' ') : String(p.description || '')).toLowerCase();
-      const isRel = jdSkills.some(s => desc.includes(s)) || searchKeywords.some(k => desc.includes(k));
-      if (isRel) relevantCount++;
-    });
-    projectsScore = (relevantCount / projectsList.length) * 100.0;
-  }
-
-  // F. Education Fit (10%)
-  const educationList = parsedResume.education || parsedResume.parsed_content?.education || [];
-  let educationScore = 0.0;
-  if (educationList.length > 0) {
-    educationScore = 80.0;
-  }
-
-  // G. Certification Relevance (5%)
-  const certificationsList = parsedResume.certifications || parsedResume.parsed_content?.certifications || [];
-  const certScore = certificationsList.length > 0 ? 100.0 : 0.0;
-
-  // Final Match Score
-  const rawScore = Math.round(
-    (skillsScore * 0.20) +
-    (keywordScore * 0.20) +
-    (experienceScore * 0.20) +
-    (roleSimilarityScore * 0.15) +
-    (projectsScore * 0.10) +
-    (educationScore * 0.10) +
-    (certScore * 0.05)
-  );
-
-  const score = Math.max(0, Math.min(100, rawScore));
-
-  // ATS Score (0-100)
-  let parseability = 100.0;
-  if (!parsedResume.personal_info) parseability -= 25;
-  if (experienceList.length === 0) parseability -= 25;
-  if (educationList.length === 0) parseability -= 25;
-  if (resumeSkills.size === 0) parseability -= 25;
-
-  const atsScore = Math.max(0, Math.min(100, Math.round(
-    (parseability * 0.30) +
-    (skillsScore * 0.30) +
-    (keywordScore * 0.20) +
-    (experienceScore * 0.20)
-  )));
+  let missingSections = 0;
+  if (!resume.personal_info) missingSections += 1;
+  if (!experience.length) missingSections += 1;
+  if (!education.length) missingSections += 1;
+  if (!asList(resume.skills).length) missingSections += 1;
+  const parseability = Math.max(0, 100 - missingSections * 25);
+  const keywordOptimization = jdKeywords.size
+    ? [...jdKeywords].filter(keyword => String(resume.summary || '').toLowerCase().includes(keyword) || resumeSkills.has(keyword)).length / jdKeywords.size * 100
+    : 100;
+  const skillsCoverage = jdSkills.size
+    ? [...jdSkills].filter(skill => resumeSkills.has(skill)).length / jdSkills.size * 100
+    : 100;
+  const bullets = [...experience, ...projects].flatMap(descriptions);
+  const actionVerbs = new Set(['developed', 'built', 'managed', 'designed', 'created', 'led', 'optimized', 'implemented', 'engineered', 'collaborated', 'reduced', 'increased', 'saved', 'achieved', 'delivered', 'coordinated', 'analyzed', 'resolved', 'spearheaded', 'directed', 'formulated', 'established', 'tailored', 'pioneered', 'refactored']);
+  const actionVerbScore = bullets.length
+    ? bullets.filter(bullet => actionVerbs.has((String(bullet).trim().toLowerCase().match(/\b[a-zA-Z]+\b/) || [])[0])).length / bullets.length * 100
+    : 100;
+  const info = resume.personal_info;
+  const completeness = info ? (info.email ? 30 : 0) + (info.phone ? 30 : 0) + (info.linkedin || info.github || info.website ? 40 : 0) : 0;
+  const readability = bullets.length ? bullets.filter(bullet => String(bullet).trim().length >= 30 && String(bullet).trim().length <= 180).length / bullets.length * 100 : 100;
+  const measurableImpact = bullets.length ? Math.min(100, bullets.filter(bullet => /\b\d+\b|%|\$/.test(String(bullet))).length / Math.max(1, Math.floor(bullets.length / 2)) * 100) : 100;
+  const overallOptimization = jdSkills.size + jdKeywords.size
+    ? (matchedSkills.length + matchedKeywords) / (jdSkills.size + jdKeywords.size) * 100
+    : 100;
+  const atsScore = bounded(parseability * .15 + keywordOptimization * .15 + skillsCoverage * .15 + actionVerbScore * .15 + completeness * .10 + readability * .10 + measurableImpact * .10 + overallOptimization * .10);
 
   return {
     score,
     atsScore,
-    matchedSkills: matchedSkillsList.slice(0, 10),
-    missingSkills: missingSkillsList.slice(0, 10),
-    requiredCount: jdSkills.length,
-    matchedCount: matchedSkillsList.length,
-    // Sub-scores this function already computes internally, surfaced so
-    // callers can build a "current" breakdown that's actually consistent
-    // with `score`/`atsScore` above -- previously thrown away, forcing
-    // callers to fake a breakdown via linear interpolation between two
-    // unrelated backend snapshots (see ResumeReviewView.jsx), which could
-    // show numbers totally disconnected from the live headline score.
+    matchedSkills: matchedSkills.slice(0, 10),
+    missingSkills: missingSkills.slice(0, 10),
+    requiredCount: jdSkills.size,
+    matchedCount: matchedSkills.length,
     breakdown: {
       resume_match: {
-        "Skills Match": Math.round(skillsScore),
-        "Keyword Relevance": Math.round(keywordScore),
-        "Experience Alignment": Math.round(experienceScore),
-        "Role Similarity": Math.round(roleSimilarityScore),
-        "Project Relevance": Math.round(projectsScore),
-        "Education Fit": Math.round(educationScore),
-        "Certification Relevance": Math.round(certScore)
+        'Skills Match': bounded(skillsScore),
+        'Keyword Relevance': bounded(keywordScore),
+        'Experience Alignment': bounded(experienceScore),
+        'Role Similarity': bounded(roleScore),
+        'Project Relevance': bounded(projectsScore),
+        'Education Fit': bounded(educationScore),
+        'Certification Relevance': bounded(certificationScore)
       },
       ats_optimization: {
-        "ATS Parseability": Math.round(parseability),
-        "Keyword Optimization": Math.round(keywordScore),
-        "Required Skills Coverage": Math.round(skillsScore),
-        "Overall Optimization": atsScore
+        'ATS Parseability': bounded(parseability),
+        'Keyword Optimization': bounded(keywordOptimization),
+        'Required Skills Coverage': bounded(skillsCoverage),
+        'Formatting & Action Verbs': bounded(actionVerbScore),
+        'Section Completeness': bounded(completeness),
+        'Readability': bounded(readability),
+        'Measurable Impact': bounded(measurableImpact),
+        'Overall Optimization': bounded(overallOptimization),
+        'Content Originality': 100
       }
     }
   };

@@ -780,7 +780,7 @@ function ResumeReviewView({
   // even if not numerically identical to the backend) whenever a matching
   // backend result isn't available yet, failed, or is stale.
   const suggestionsFingerprint = useMemo(
-    () => JSON.stringify(suggestions.map(s => [s.change_id || s.id, s.status])),
+    () => JSON.stringify(suggestions.map(s => [s.change_id || s.id, s.status, s.suggested])),
     [suggestions]
   );
   const liveATSFresh = Boolean(
@@ -846,7 +846,7 @@ function ResumeReviewView({
                   style={{ width: `${stats.progressPercent}%` }}
                 />
               </div>
-              <span className="text-[9px] font-black text-zinc-400 dark:text-zinc-500">{stats.progressPercent}% Completed</span>
+              <span className="text-[9px] font-black text-zinc-400 dark:text-zinc-500">{stats.progressPercent}% Reviewed</span>
             </div>
           </div>
 

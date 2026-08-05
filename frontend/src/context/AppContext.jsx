@@ -532,7 +532,7 @@ export function AppProvider({ children }) {
     // recomputed local numbers is what caused Original/Current/Potential to
     // visibly disagree with each other after Select All / Undo.
     const suggestionsFingerprint = JSON.stringify(
-      reviewSuggestions.map(s => [s.change_id || s.id, s.status])
+      reviewSuggestions.map(s => [s.change_id || s.id, s.status, s.suggested])
     );
     const requestState = liveATSRequestRef.current;
 

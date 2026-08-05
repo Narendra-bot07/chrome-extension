@@ -84,7 +84,7 @@ SENTRY_EXTENSION_DSN="https://key@sentry.io/extension-project"
 
 # --- Metrics (Prometheus, bearer-token protected) ---
 METRICS_ENABLED=true
-METRICS_PATH="/internal/metrics"
+METRICS_PATH="/metrics"
 METRICS_BEARER_TOKEN="a-long-random-token"
 ```
 
