@@ -3,17 +3,130 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Tailr4U helps job seekers tailor resumes, compare ATS alignment, and manage job applications." />
+
+    <!-- Primary SEO metadata. This is a client-rendered SPA (Vite + React,
+         HashRouter -- see docs/SEO_NOTES.md) with a single crawlable
+         document, so everything here on the one real URL (https://tailr4u.com/)
+         matters far more than it would in a multi-page app. -->
+    <title>Tailr4U – AI Resume Builder, ATS Optimizer & Job Application Tracker</title>
+    <meta name="description" content="Tailor your resume to any job description with AI, check your real ATS match score, generate matching cover letters, and track every application and follow-up in one workspace." />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://tailr4u.com/" />
+
+    <!-- Google Search Console verification. Set VITE_GOOGLE_SITE_VERIFICATION
+         in the frontend build environment; Vite substitutes percent-wrapped
+         VITE_ env var names in index.html at build time. Renders as an
+         empty, inert meta tag when unset. -->
+    <meta name="google-site-verification" content="%VITE_GOOGLE_SITE_VERIFICATION%" />
+
+    <!-- Open Graph (Facebook, LinkedIn, Slack, Discord, WhatsApp) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://tailr4u.com/" />
+    <meta property="og:site_name" content="Tailr4U" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:title" content="Tailr4U – AI Resume Builder, ATS Optimizer & Job Application Tracker" />
+    <meta property="og:description" content="Tailor your resume to any job description with AI, check your real ATS match score, generate matching cover letters, and track every application and follow-up in one workspace." />
+    <!-- Using the existing square logo as an interim social-preview image.
+         It exists (frontend/public/application-logo.png) so this renders
+         correctly today, but it is a square app icon, not a proper 1200x630
+         OG card. A dedicated wide social-preview image should be designed
+         and dropped in at frontend/public/og-image.png, then this (and the
+         twitter:image below) updated to reference it -- see the SEO summary
+         for this as an explicit manual action. -->
+    <meta property="og:image" content="https://tailr4u.com/application-logo.png" />
+    <meta property="og:image:width" content="512" />
+    <meta property="og:image:height" content="512" />
+    <meta property="og:image:alt" content="Tailr4U logo" />
+
+    <!-- Twitter / X Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Tailr4U – AI Resume Builder, ATS Optimizer & Job Application Tracker" />
+    <meta name="twitter:description" content="Tailor your resume to any job description with AI, check your real ATS match score, generate matching cover letters, and track every application and follow-up in one workspace." />
+    <meta name="twitter:image" content="https://tailr4u.com/application-logo.png" />
+
     <meta name="theme-color" content="#0b0f17" />
     <link rel="icon" type="image/png" href="%BASE_URL%application-logo.png" />
     <link rel="apple-touch-icon" href="%BASE_URL%application-logo.png" />
+
     <!-- Inter / Plus Jakarta Sans are now self-hosted (see src/styles.css)
          instead of loaded from fonts.googleapis.com/fonts.gstatic.com --
          the server-side PDF renderer runs this same page in headless
          Chromium, where an external font CDN fetch is an extra network
          dependency that could silently fail or be skipped, rendering
          resumes in a fallback font instead of the intended one. -->
-    <title>Tailr4U — AI Resume Tailoring</title>
+
+    <!-- Organization + WebSite structured data. Kept to fields that reflect
+         what's actually on the site -- no invented ratings, reviews, prices,
+         founders, or addresses. sameAs is only populated with real, existing
+         social profiles; remove/extend if that changes. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "Tailr4U",
+        "url": "https://tailr4u.com/",
+        "logo": "https://tailr4u.com/application-logo.png",
+        "description": "AI-powered resume tailoring, ATS match scoring, cover letter generation, and job application tracking."
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "Tailr4U",
+        "url": "https://tailr4u.com/"
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Tailr4U",
+        "url": "https://tailr4u.com/",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Web"
+      }
+    </script>
+
+    <!-- Google Analytics 4. Set VITE_GOOGLE_ANALYTICS_ID to enable; loads
+         nothing when unset (checked at runtime, not just build time, so an
+         empty/placeholder value never fires a request to Google). This same
+         index.html/bundle also loads inside the Chrome extension's side
+         panel (chrome-extension:// origin) -- skip entirely there. MV3's
+         default CSP (script-src 'self') would likely block the remote
+         <script> tag anyway, but injecting third-party analytics inside an
+         extension page is also worth avoiding outright for Web Store review. -->
+    <script>
+      (function () {
+        if (location.protocol === "chrome-extension:") return;
+        var GA_ID = "%VITE_GOOGLE_ANALYTICS_ID%";
+        if (!GA_ID || GA_ID.charAt(0) === "%") return;
+        var script = document.createElement("script");
+        script.async = true;
+        script.src = "https://www.googletagmanager.com/gtag/js?id=" + GA_ID;
+        document.head.appendChild(script);
+        window.dataLayer = window.dataLayer || [];
+        function gtag() { window.dataLayer.push(arguments); }
+        window.gtag = gtag;
+        gtag("js", new Date());
+        gtag("config", GA_ID);
+      })();
+    </script>
+
+    <!-- Microsoft Clarity. Set VITE_CLARITY_PROJECT_ID to enable. Same
+         extension-context guard as the Google Analytics block above. -->
+    <script>
+      (function () {
+        if (location.protocol === "chrome-extension:") return;
+        var CLARITY_ID = "%VITE_CLARITY_PROJECT_ID%";
+        if (!CLARITY_ID || CLARITY_ID.charAt(0) === "%") return;
+        (function (c, l, a, r, i, t, y) {
+          c[a] = c[a] || function () { (c[a].q = c[a].q || []).push(arguments); };
+          t = l.createElement(r); t.async = 1; t.src = "https://www.clarity.ms/tag/" + i;
+          y = l.getElementsByTagName(r)[0]; y.parentNode.insertBefore(t, y);
+        })(window, document, "clarity", "script", CLARITY_ID);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

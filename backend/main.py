@@ -98,8 +98,20 @@ app.add_exception_handler(Exception, global_exception_handler)
 app.add_middleware(CorrelationAndLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
+    # settings.FRONTEND_URL is a single canonical URL (used elsewhere for
+    # constructing absolute links -- password reset emails, the email
+    # branding logo, etc.) and was the ONLY production origin CORS ever
+    # allowed. It's set to the Vercel deployment URL, but the app is also
+    # served from the tailr4u.com custom domain -- every API call from
+    # there was being CORS-blocked (no 'Access-Control-Allow-Origin'
+    # header), breaking the dashboard and everything else for anyone
+    # visiting the custom domain. allow_origins needs every real production
+    # origin listed explicitly (CORSMiddleware requires exact matches, no
+    # wildcard subdomains), not just the one FRONTEND_URL happens to be.
     allow_origins=[
         settings.FRONTEND_URL,
+        "https://tailr4u.com",
+        "https://www.tailr4u.com",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ],

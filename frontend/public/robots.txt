@@ -1,3 +1,32 @@
 # https://www.robotstxt.org/robotstxt.html
+#
+# This is a client-rendered single-page app using HashRouter -- every route
+# (e.g. /#/dashboard, /#/login) is a URL fragment that never reaches the
+# server, so crawlers only ever see one real document: https://tailr4u.com/.
+# Disallow rules below are defensive (in case that changes, or for any crawler
+# that does attempt to fetch a path-based URL directly) rather than blocking
+# anything that's actually being indexed today.
+
 User-agent: *
-Disallow:
+Allow: /
+Disallow: /dashboard
+Disallow: /profile
+Disallow: /settings
+Disallow: /subscription
+Disallow: /job-tracker
+Disallow: /tailor
+Disallow: /resume-detect
+Disallow: /resume-parse
+Disallow: /resume-review
+Disallow: /tailor-config
+Disallow: /tailor-progress
+Disallow: /review-changes
+Disallow: /templates
+Disallow: /download
+Disallow: /cover-letter
+Disallow: /admin
+Disallow: /onboarding
+Disallow: /extension-setup
+Disallow: /api/
+
+Sitemap: https://tailr4u.com/sitemap.xml

@@ -6,6 +6,32 @@ class JobPreferencesRepository:
     def __init__(self, conn):
         self.conn = conn
 
+    # Columns beyond the original 6 (added via migrate_job_preferences_extended_fields.py
+    # for existing deployments) -- listed here too so a fresh database gets them via
+    # ensure_table() alone, and so upsert() has one place to read the full column set from.
+    EXTENDED_COLUMNS = [
+        ("primary_role", "TEXT NOT NULL DEFAULT ''"),
+        ("primary_company", "TEXT NOT NULL DEFAULT ''"),
+        ("preferred_industries", "JSONB NOT NULL DEFAULT '[]'::jsonb"),
+        ("work_modes", "JSONB NOT NULL DEFAULT '[]'::jsonb"),
+        ("relocation_preference", "TEXT NOT NULL DEFAULT ''"),
+        ("sponsorship_preference", "TEXT NOT NULL DEFAULT ''"),
+        ("current_title", "TEXT NOT NULL DEFAULT ''"),
+        ("years_experience", "TEXT NOT NULL DEFAULT ''"),
+        ("secondary_skills", "JSONB NOT NULL DEFAULT '[]'::jsonb"),
+        ("current_compensation", "TEXT NOT NULL DEFAULT ''"),
+        ("expected_compensation", "TEXT NOT NULL DEFAULT ''"),
+        ("compensation_currency", "TEXT NOT NULL DEFAULT 'USD'"),
+        ("salary_period", "TEXT NOT NULL DEFAULT 'Annual'"),
+        ("min_compensation", "TEXT NOT NULL DEFAULT ''"),
+        ("is_salary_negotiable", "BOOLEAN NOT NULL DEFAULT TRUE"),
+        ("employment_types", "JSONB NOT NULL DEFAULT '[]'::jsonb"),
+        ("notice_period", "TEXT NOT NULL DEFAULT ''"),
+        ("company_size_preferences", "JSONB NOT NULL DEFAULT '[]'::jsonb"),
+        ("seniority_preferences", "JSONB NOT NULL DEFAULT '[]'::jsonb"),
+        ("job_alert_frequency", "TEXT NOT NULL DEFAULT 'Weekly'"),
+    ]
+
     def ensure_table(self):
         with self.conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
@@ -25,6 +51,8 @@ class JobPreferencesRepository:
                 )
                 """
             )
+            for column, definition in self.EXTENDED_COLUMNS:
+                cur.execute(f"ALTER TABLE public.job_preferences ADD COLUMN IF NOT EXISTS {column} {definition}")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_job_preferences_user_id ON public.job_preferences(user_id)")
         self.conn.commit()
 
@@ -75,44 +103,52 @@ class JobPreferencesRepository:
             and prefs.get("preferred_locations")
         )
 
+    _JSON_FIELDS = {
+        "target_roles", "target_companies", "preferred_locations", "priority_skills",
+        "preferred_industries", "work_modes", "secondary_skills", "employment_types",
+        "company_size_preferences", "seniority_preferences",
+    }
+    _BOOL_FIELDS = {"is_salary_negotiable"}
+    _TEXT_DEFAULTS = {
+        "work_preference": "No Preference",
+        "experience_level": "No Preference",
+        "compensation_currency": "USD",
+        "salary_period": "Annual",
+        "job_alert_frequency": "Weekly",
+    }
+
     def upsert(self, user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         self.ensure_table()
 
-        query = """
-            INSERT INTO public.job_preferences (
-                user_id,
-                target_roles,
-                target_companies,
-                preferred_locations,
-                work_preference,
-                experience_level,
-                priority_skills
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        columns = (
+            ["target_roles", "target_companies", "preferred_locations", "work_preference",
+             "experience_level", "priority_skills"]
+            + [name for name, _ in self.EXTENDED_COLUMNS]
+        )
+        values = []
+        for column in columns:
+            raw = payload.get(column)
+            if column in self._JSON_FIELDS:
+                values.append(Json(raw or []))
+            elif column in self._BOOL_FIELDS:
+                values.append(bool(raw) if raw is not None else True)
+            else:
+                values.append(raw if raw not in (None, "") else self._TEXT_DEFAULTS.get(column, ""))
+
+        placeholders = ", ".join(["%s"] * len(columns))
+        column_list = ", ".join(columns)
+        update_clause = ", ".join(f"{column} = EXCLUDED.{column}" for column in columns)
+        query = f"""
+            INSERT INTO public.job_preferences (user_id, {column_list})
+            VALUES (%s, {placeholders})
             ON CONFLICT (user_id)
             DO UPDATE SET
-                target_roles = EXCLUDED.target_roles,
-                target_companies = EXCLUDED.target_companies,
-                preferred_locations = EXCLUDED.preferred_locations,
-                work_preference = EXCLUDED.work_preference,
-                experience_level = EXCLUDED.experience_level,
-                priority_skills = EXCLUDED.priority_skills,
+                {update_clause},
                 updated_at = NOW()
             RETURNING *
         """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                query,
-                (
-                    user_id,
-                    Json(payload.get("target_roles") or []),
-                    Json(payload.get("target_companies") or []),
-                    Json(payload.get("preferred_locations") or []),
-                    payload.get("work_preference") or "No Preference",
-                    payload.get("experience_level") or "No Preference",
-                    Json(payload.get("priority_skills") or []),
-                )
-            )
+            cur.execute(query, (user_id, *values))
             row = cur.fetchone() or {}
             self.conn.commit()
             try:

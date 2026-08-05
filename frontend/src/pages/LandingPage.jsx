@@ -10,6 +10,7 @@ import { useApp } from '../context/AppContext';
 import { useTailr4uReducedMotion } from '../motion/MotionSystem';
 import PublicAuthPanel from '../components/landing/PublicAuthPanel';
 import FeatureStoryStack from '../components/landing/FeatureStoryStack';
+import { applyPageMeta } from '../utils/seo';
 import './LandingPage.css';
 
 const WorkflowSimulation = lazy(() => import('../components/landing/WorkflowSimulation'));
@@ -127,10 +128,10 @@ export default function LandingPage() {
     document.getElementById(id)?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth' });
   };
 
-  useEffect(() => {
-    document.title = 'Tailr4U — Stronger applications, grounded in your experience';
-    return () => { document.title = 'Tailr4U'; };
-  }, []);
+  useEffect(() => applyPageMeta({
+    title: 'Tailr4U — AI Resume Builder, ATS Optimizer & Job Application Tracker',
+    description: 'Tailor your resume to any job description with AI, check your real ATS match score, generate matching cover letters, and track every application and follow-up in one workspace.'
+  }), []);
 
   useEffect(() => {
     const sections = ['home', 'how-it-works']

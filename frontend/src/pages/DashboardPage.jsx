@@ -702,6 +702,15 @@ function DashboardContent() {
 
   const recentScoredApp = sortedScoredApps[0];
 
+  // A brand-new user with no scored applications and no parsed resume score
+  // previously fell through to a hardcoded `78` here -- indistinguishable
+  // from a real score, and reported directly as "showing hardcoded values"
+  // for a new account. Every other KPI card on this dashboard (Success
+  // Rate, Interviews, Offers) already shows an honest 0/empty state when
+  // there's no real data; this one should too.
+  const hasScoredResume = Boolean(
+    recentScoredApp || (parsedResume && (parsedResume.ats_score != null || parsedResume.score != null))
+  );
   const recentResumeScore = useMemo(() => {
     if (recentScoredApp) {
       return Math.round(Number(recentScoredApp.ats_score ?? recentScoredApp.resume_match_score));
@@ -709,7 +718,7 @@ function DashboardContent() {
     if (parsedResume && (parsedResume.ats_score != null || parsedResume.score != null)) {
       return Math.round(Number(parsedResume.ats_score ?? parsedResume.score));
     }
-    return 78;
+    return 0;
   }, [recentScoredApp, parsedResume]);
 
   const recentScoreSubtitle = useMemo(() => {
@@ -760,7 +769,17 @@ function DashboardContent() {
       });
     }
 
-    if (recentResumeScore < 85) {
+    if (!hasScoredResume) {
+      items.push({
+        id: 'score-resume',
+        icon: Zap,
+        type: 'Optimizer',
+        title: 'Score your resume',
+        subtitle: 'Run a tailoring pass to see your ATS match score.',
+        actionLabel: 'Get Started',
+        onAction: () => navigate('/resume-detect')
+      });
+    } else if (recentResumeScore < 85) {
       items.push({
         id: 'optimize-resume',
         icon: Zap,
@@ -918,23 +937,28 @@ function DashboardContent() {
     const applicationsCount = Number(counts.applications) || applications.length;
     const submittedCount = Number(counts.submitted) || applications.filter(a => a && a.current_stage !== 'Ready To Apply').length;
 
-    // Instant client-side fallback metrics calculation if backend signature is loading/empty
+    // Instant client-side fallback metrics calculation if backend signature is loading/empty.
+    // These used to fall back to flattering placeholder numbers (75/80/65/70)
+    // for a brand-new user with zero real data -- presented as if computed,
+    // reported directly as "showing hardcoded values" for a new account.
+    // Interviews/Offers below already did this correctly (0 when there's
+    // nothing to compute from); made the rest consistent with that.
     const computeAtsScore = () => {
       if (db.ats_match != null && Number(db.ats_match) > 0) return Math.round(Number(db.ats_match));
       if (recentResumeScore > 0) return recentResumeScore;
-      return 75;
+      return 0;
     };
 
     const computeResumeReady = () => {
       if (db.resume_ready != null && Number(db.resume_ready) > 0) return Math.round(Number(db.resume_ready));
-      if (applications.length === 0) return 80;
+      if (applications.length === 0) return 0;
       const readyCount = applications.filter(a => a?.resume_status === 'ready' || Boolean(a?.resume_version)).length;
       return Math.round((readyCount / applications.length) * 100);
     };
 
     const computeAppProgress = () => {
       if (db.application_progress != null && Number(db.application_progress) > 0) return Math.round(Number(db.application_progress));
-      if (applications.length === 0) return 65;
+      if (applications.length === 0) return 0;
       const stageScores = applications.map(a => {
         const stg = a?.current_stage;
         if (stg === 'Offer' || stg === 'Accepted') return 100;
@@ -957,7 +981,7 @@ function DashboardContent() {
 
     const computeCoverLetters = () => {
       if (db.cover_letter_ready != null && Number(db.cover_letter_ready) > 0) return Math.round(Number(db.cover_letter_ready));
-      if (applications.length === 0) return 70;
+      if (applications.length === 0) return 0;
       const clCount = applications.filter(a => a?.cover_letter_status === 'ready' || Boolean(a?.cover_letter_version)).length;
       return Math.round((clCount / applications.length) * 100);
     };
@@ -1199,13 +1223,13 @@ function DashboardContent() {
               </div>
               <div className="flex items-center justify-between mt-4 pt-2 border-t border-orange-500/10">
                 <span className="text-[11px] font-semibold text-orange-600 dark:text-orange-400 truncate max-w-[110px]" title={recentScoreSubtitle}>
-                  {recentResumeScore >= 80 ? (recentScoreSubtitle || 'Optimized match') : '3 improvements'}
+                  {!hasScoredResume ? 'Not scored yet' : recentResumeScore >= 80 ? (recentScoreSubtitle || 'Optimized match') : '3 improvements'}
                 </span>
                 <button
                   onClick={() => navigate('/resume-detect')}
                   className="text-[11px] font-bold text-tf-accent hover:underline flex items-center gap-0.5 cursor-pointer"
                 >
-                  Improve <ArrowRight size={11} />
+                  {hasScoredResume ? 'Improve' : 'Get Started'} <ArrowRight size={11} />
                 </button>
               </div>
             </motion.div>

@@ -35,6 +35,7 @@ import NotificationSettingsPage from './pages/NotificationSettingsPage';
 import LandingPage from './pages/LandingPage';
 import ExtensionSetupPage from './pages/ExtensionSetupPage';
 import AdminObservabilityPage from './pages/AdminObservabilityPage';
+import NotFoundPage from './pages/NotFoundPage';
 import { ReducedMotionProvider, MotionPage } from './motion/MotionSystem';
 import { loginPathFor } from './utils/authRedirect';
 import GlobalCursor from './components/GlobalCursor';
@@ -224,6 +225,7 @@ function AppRoutes() {
       </Route>
       <Route path="/print" element={<PrintLayout />} />
       <Route path="/print-cover-letter" element={<PrintCoverLetterLayout />} />
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 }

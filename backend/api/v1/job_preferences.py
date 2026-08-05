@@ -9,31 +9,36 @@ from schemas.job_preferences import JobPreferencesPayload
 router = APIRouter(prefix="/job-preferences", tags=["job-preferences"])
 
 
-def serialize_preferences(record: Dict[str, Any], user_id: str) -> Dict[str, Any]:
-    if not record:
-        return {
-            "id": None,
-            "user_id": user_id,
-            "target_roles": [],
-            "target_companies": [],
-            "preferred_locations": [],
-            "work_preference": "No Preference",
-            "experience_level": "No Preference",
-            "priority_skills": [],
-            "has_completed_preferences": False,
-            "created_at": None,
-            "updated_at": None,
-        }
+_LIST_FIELDS = [
+    "target_roles", "target_companies", "preferred_locations", "priority_skills",
+    "preferred_industries", "work_modes", "secondary_skills", "employment_types",
+    "company_size_preferences", "seniority_preferences",
+]
+_TEXT_FIELDS = {
+    "work_preference": "No Preference",
+    "experience_level": "No Preference",
+    "primary_role": "",
+    "primary_company": "",
+    "relocation_preference": "",
+    "sponsorship_preference": "",
+    "current_title": "",
+    "years_experience": "",
+    "current_compensation": "",
+    "expected_compensation": "",
+    "compensation_currency": "USD",
+    "salary_period": "Annual",
+    "min_compensation": "",
+    "notice_period": "",
+    "job_alert_frequency": "Weekly",
+}
 
-    return {
+
+def serialize_preferences(record: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    record = record or {}
+    result = {
         "id": str(record.get("id")) if record.get("id") else None,
         "user_id": str(record.get("user_id") or user_id),
-        "target_roles": record.get("target_roles") or [],
-        "target_companies": record.get("target_companies") or [],
-        "preferred_locations": record.get("preferred_locations") or [],
-        "work_preference": record.get("work_preference") or "No Preference",
-        "experience_level": record.get("experience_level") or "No Preference",
-        "priority_skills": record.get("priority_skills") or [],
+        "is_salary_negotiable": record.get("is_salary_negotiable") if record.get("is_salary_negotiable") is not None else True,
         "has_completed_preferences": bool(
             record.get("target_roles")
             and record.get("target_companies")
@@ -42,6 +47,11 @@ def serialize_preferences(record: Dict[str, Any], user_id: str) -> Dict[str, Any
         "created_at": record.get("created_at").isoformat() if record.get("created_at") else None,
         "updated_at": record.get("updated_at").isoformat() if record.get("updated_at") else None,
     }
+    for field in _LIST_FIELDS:
+        result[field] = record.get(field) or []
+    for field, default in _TEXT_FIELDS.items():
+        result[field] = record.get(field) or default
+    return result
 
 
 @router.get("/me")

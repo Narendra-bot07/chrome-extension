@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  This app is a client-rendered SPA using react-router-dom's HashRouter
+  (see src/App.jsx). Every in-app route -- /dashboard, /login, /job-tracker,
+  etc. -- is addressed via a URL fragment (https://tailr4u.com/#/whatever),
+  which is never sent to the server and is not treated as a distinct,
+  indexable URL by search engines. The only real, crawlable document this
+  site currently serves is the one below.
+
+  Listing hash-fragment URLs here would be misleading (they'd all resolve
+  to the exact same server response as "/") and could read as duplicate-
+  content spam to a crawler. Expanding this sitemap requires either
+  path-based routing (BrowserRouter) for the public marketing surface, or
+  dedicated statically-served public pages -- see the SEO audit summary for
+  the tradeoffs; not done here since it's a broader routing change, not a
+  safe/minimal one.
+
+  No <lastmod> is included: this file has no reliable source of truth for
+  when the homepage's content last meaningfully changed, and fabricating a
+  timestamp would violate the "no fake timestamps" requirement.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://tailr4u.com/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>
