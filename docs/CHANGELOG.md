@@ -4,6 +4,30 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.15.14] - 2026-08-06
+
+### Reverted
+- **Fully reverted the streaming JD extraction (3.15.12) and the further skills split on top of it (3.15.13)**, at the user's explicit request after real-world use surfaced two concrete regressions: the match-score percentage visibly jumping between values (29% -> 88% -> 44% for what looked like the same/similar postings in the screenshots the user shared), and the skills section reading as slower/more broken than before, not faster. Root cause of the score jump: `scoreJobBeforeReveal` was being called twice per extraction (once on the "core" event with no skills yet, once on "final" with skills) -- two genuinely different scores for the same job, shown in sequence, which reads as a bug even though each number was individually correct at the moment it was computed.
+- Backend: `extraction_core_agent` / `extraction_skills_explicit_agent` / `extraction_skills_suggested_agent` / `extraction_merge_agent` (3 parallel LangGraph nodes) collapsed back into the original single `extraction_agent` node making one LLM call for the full `ExtractedJob` shape. `run_job_intelligence_stream()` removed from `graph.py`. `POST /jobs/extract-url-stream` removed from `api/v1/jobs.py`. Derived schemas `ExtractedJobCore`/`ExplicitSkillsOnly`/`SuggestedSkillsOnly` and the intermediate `JDState` holding fields (`extracted_job_core`, `extracted_job_skills_explicit`, `extracted_job_skills_suggested`) removed as dead code.
+- Frontend: `AppContext.jsx`'s extraction flow reverted to a single blocking `fetch()` + `response.json()` against `/jobs/extract-url`, exactly as before 3.15.12. `skillsPending` state removed. `JobReviewView.jsx`'s Skills section reverted to its original two-branch (categorized / flat list) rendering, no loading placeholder.
+- Verified the reverted single-call path directly against a real posting post-revert (`task=jd_agent_extraction` in the logs, the original unified cache key, not the split `_core`/`_skills` ones) before considering this done.
+- Left in place, deliberately not reverted: `_AI_REQUEST_SEMAPHORE` in `deepseek_provider.py` stays at 8 (raised from 4 in 3.15.13) -- higher shared LLM-call concurrency capacity is harmless and generally beneficial on its own, independent of whether any single request makes 1 or 3 concurrent calls. Also left in place: the earlier `LLM_CACHE_LOCK_WAIT_SECONDS` fix (3.15.11) -- unrelated to streaming, still a real fix for a genuine bug.
+
+---
+
+## [3.15.13] - 2026-08-06
+
+### Changed
+- **Split the "skills" extraction call again, into explicit-skills and suggested-skills as two further-independent parallel LangGraph nodes** (`extraction_skills_explicit_agent`, `extraction_skills_suggested_agent` in `agents.py`, both direct successors of `source_builder`, both feeding `extraction_merge_agent`). New derived schemas `ExplicitSkillsOnly`/`SuggestedSkillsOnly` (via `pydantic.create_model` off the existing `SkillDecision`, not hand-duplicated). Raised `_AI_REQUEST_SEMAPHORE` in `deepseek_provider.py` from 4 to 8, since a single extraction request now makes 3 concurrent DeepSeek calls instead of 1 -- at the old cap, one request alone would have exhausted most of the shared concurrency budget for every other user/feature.
+- Dropped the "suggested_skills must not repeat explicit_skills" instruction from the now-separate suggested-skills prompt, since that call can no longer see the explicit list while generating. No correctness lost: `extraction_merge_agent` already deduplicates suggested against explicit after the fact regardless of whether the model was aware of the overlap (confirmed by reading the existing merge code before making this change, not assumed).
+
+### Measured (honest result, not the hoped-for one)
+- Real end-to-end test against an unusually detailed real posting (Anthropic Fellows Program: 71 explicit skills, 24 preferred qualifications) breaking down the 3 parallel branches: `extraction_skills_suggested` 23.8s, `extraction_skills_explicit` 72.4s, `extraction_core` 77.9s. Total: 80.6s -- **essentially unchanged** from before this split.
+- **Why this split didn't move the needle much this time**: the dominant cost was never "one call doing two things" so much as "explicit-skills generation is slow when a posting genuinely has 70+ named skills to atomize," and "core generation is slow when a posting has a verbose description plus 24 preferred qualifications." Splitting parallelizes *what already existed*, but doesn't shrink either sub-task's own output size, so a posting this verbose still bottlenecks on whichever of the three branches has the most content to generate. Total latency is bounded by the slowest of the three, not their sum -- which is real and correct, but doesn't help when more than one branch is independently large.
+- **The remaining honest options to go materially further, with the user informed of the tradeoff rather than picked unilaterally**: (a) cap output size per field (e.g. top-N skills/qualifications) -- a real, direct latency win, at the cost of extracting less exhaustively; or (b) accept that full-fidelity extraction of a very detailed posting will keep taking however long DeepSeek takes to generate that much content, and lean on the streaming UI (3.15.12) so the user sees *something* well before everything is ready, rather than trying to force the underlying generation itself below some fixed ceiling.
+
+---
+
 ## [3.15.12] - 2026-08-05
 
 ### Added

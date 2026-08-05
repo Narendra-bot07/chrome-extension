@@ -1,6 +1,6 @@
 from .job_schemas import (
     ClassificationDecision,
-    EvidenceSource, ExtractedJob, ExtractedJobCore,
+    EvidenceSource, ExtractedJob,
     JDState,
     ReviewDecision,
     SalaryInfo,
@@ -8,6 +8,6 @@ from .job_schemas import (
 )
 
 __all__ = [
-    "ClassificationDecision", "EvidenceSource", "ExtractedJob", "ExtractedJobCore", "JDState",
+    "ClassificationDecision", "EvidenceSource", "ExtractedJob", "JDState",
     "ReviewDecision", "SalaryInfo", "SkillDecision",
 ]

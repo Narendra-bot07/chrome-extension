@@ -18,8 +18,8 @@ from services.cache.llm_cache import llm_cache
 from core.logging import logger
 from services.job_extraction.browser_pool import run_on_browser_pool
 from services.job_extraction.schemas import (
-    ClassificationDecision, EvidenceSource, ExtractedJob, ExtractedJobCore, JDState, ReviewDecision,
-    SkillDecision,
+    ClassificationDecision, EvidenceSource, ExtractedJob, JDState,
+    ReviewDecision, SkillDecision,
 )
 
 LOG_PREFIX = "[JD-EXTRACTION][BACKEND]"
@@ -1088,139 +1088,25 @@ INFERRED SKILL RECOMMENDATIONS (REQUIRED):
 Keep responsibilities, mandatory requirements, preferred qualifications, salary, and benefits
 separate. Deduplicate semantically equivalent items. Preserve the complete source URL."""
 
-# extraction_agent used to make ONE LLM call for the entire ExtractedJob shape
-# (measured 60-90s in production for a real posting -- generation time scales
-# with output size, and asking for every field plus a long, carefully-atomized
-# skills list in one shot is a lot of output). Split into two prompts run
-# CONCURRENTLY instead (see extraction_agent below): core fields is a much
-# smaller ask on its own, and skills -- the actual verbose part -- runs in
-# parallel rather than serially after it. Text below is copied verbatim from
-# the sections above, not rewritten, so behavior for each half stays identical
-# to what was already proven in production.
-EXTRACTION_CORE_PROMPT = """You are the evidence-grounded extraction agent for one job posting.
-Read ALL supplied primary and supplementary evidence before producing the job's core fields.
-Skills are handled by a separate specialized pass -- do not attempt them here.
-
-Never invent factual values. For collection fields (responsibilities, requirements,
-preferred_qualifications, and benefits), always return a JSON array and use [] when
-evidence is genuinely absent. Use null only for absent scalar fields.
-
-COMPANY IDENTITY:
-- company_name is the recognizable public employer brand supported by domain, metadata,
-  page content, and structured hiringOrganization evidence.
-- A job marketplace or hosting platform is not the employer merely because its brand appears
-  in the URL, document title, metadata, or page chrome. Prefer the employer named in the
-  selected job top card, hiring organization, or browser_session_hints.company_name.
-- When a posting names a legal hiring subsidiary/entity but clearly belongs to a known
-  parent/public employer brand on the same page, return the public brand.
-- Do not blindly copy legal suffixes or requisition/entity codes into company_name.
-- Do not infer a parent brand without supporting page/domain evidence.
-- company_domain is the official employer hostname only when supported by the source URL,
-  canonical URL, structured metadata, or explicit company website evidence. Return null
-  for third-party job boards or uncertainty. Never append ".com" to company_name.
-
-Keep responsibilities, mandatory requirements, preferred qualifications, salary, and benefits
-separate. Deduplicate semantically equivalent items. Preserve the complete source URL."""
-
-EXTRACTION_SKILLS_PROMPT = """You are the evidence-grounded skills-extraction agent for one job posting.
-Read ALL supplied primary and supplementary evidence before producing skills and suggested_skills.
-Never invent factual values. Always return a JSON array for both fields, using [] when
-evidence is genuinely absent.
-
-EXPLICIT SKILL COVERAGE:
-- Scan the entire description, responsibilities, mandatory qualifications, and preferred
-  qualifications for explicit skills.
-- skills includes every explicitly named language, query/scripting language, framework,
-  library, platform, cloud/service, software/tool, statistical or mathematical method,
-  scientific/analytical technique, visualization technology, data/infrastructure capability,
-  domain skill, and explicitly required professional competency.
-- Convert examples into separate concise canonical labels when they are explicitly written.
-- Do not omit a skill because it appears inside parentheses, an “e.g.” list, a responsibility,
-  or a preferred qualification.
-- Generic degrees and years of experience are requirements, not skills.
-
-INFERRED SKILL RECOMMENDATIONS (REQUIRED):
-- Always produce 4-10 atomic suggested_skills for a valid job detail page, including when
-  the employer does not provide a dedicated skills section.
-- Infer them from the complete role title, responsibilities, expected outcomes, seniority,
-  business/technical domain, requirements, and preferred qualifications.
-- Select concrete, resume-usable ATS labels that a strong candidate would reasonably need
-  to perform this exact role. Prefer specific methods, tools, platforms, technical
-  capabilities, or domain competencies over vague traits.
-- Do not invent employer requirements: suggested_skills are clearly labeled recommendations.
-- Include only high-confidence recommendations supported by the overall job context.
-- suggested_skills must NOT repeat anything in skills, even under an alias.
-- Never move an inferred recommendation into skills unless the source explicitly states it."""
-
-
-# extraction_agent used to be one node making one LLM call for the entire
-# ExtractedJob shape -- measured 60-90s in production for a real posting,
-# because generation time scales with output size and skills (a long,
-# carefully-atomized list) is the most verbose part of the ask. Split into two
-# INDEPENDENT GRAPH NODES (not just two threads inside one node) so the
-# streaming path (graph.py's run_job_intelligence_stream) can surface the core
-# result the instant it's ready via LangGraph's own per-node stream updates,
-# without waiting for skills. Both are direct successors of source_builder and
-# feed into extraction_merge_agent below, which does everything the old single
-# node used to do after both results were available (atomize_skill_labels,
-# full ExtractedJob validation, logging). Neither sub-node touches
-# execution_log -- both run concurrently off the same state snapshot, and two
-# concurrent `_event()` calls would race and silently drop one one entry;
-# the merge node logs a single combined entry instead, same content as before.
-def extraction_core_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
+def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     state = _state(value)
-    logger.info("%s Extraction (core) started request_id=%s", LOG_PREFIX, state.request_id)
+    logger.info("%s Extraction started request_id=%s", LOG_PREFIX, state.request_id)
 
     def _call_llm():
-        structured = get_llm(temperature=0).with_structured_output(ExtractedJobCore)
+        structured = get_llm(temperature=0).with_structured_output(ExtractedJob)
         return structured.invoke([
-            SystemMessage(content=EXTRACTION_CORE_PROMPT),
+            SystemMessage(content=EXTRACTION_PROMPT),
             HumanMessage(content=json.dumps(state.evidence, ensure_ascii=False)),
         ])
 
-    core_result = llm_cache.execute_with_cache(
-        task="jd_agent_extraction_core",
+    job = llm_cache.execute_with_cache(
+        task="jd_agent_extraction",
         payload_to_fingerprint=state.evidence,
         llm_callable=_call_llm,
-        expected_schema=ExtractedJobCore,
-        prompt_version="jd-agent-core-v1",
+        expected_schema=ExtractedJob,
+        prompt_version="jd-agent-v1"
     )
-    return {"extracted_job_core": ExtractedJobCore.model_validate(core_result).model_dump(mode="json")}
-
-
-def extraction_skills_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
-    state = _state(value)
-    logger.info("%s Extraction (skills) started request_id=%s", LOG_PREFIX, state.request_id)
-
-    def _call_llm():
-        structured = get_llm(temperature=0).with_structured_output(SkillDecision)
-        return structured.invoke([
-            SystemMessage(content=EXTRACTION_SKILLS_PROMPT),
-            HumanMessage(content=json.dumps(state.evidence, ensure_ascii=False)),
-        ])
-
-    skills_result = llm_cache.execute_with_cache(
-        task="jd_agent_extraction_skills",
-        payload_to_fingerprint=state.evidence,
-        llm_callable=_call_llm,
-        expected_schema=SkillDecision,
-        prompt_version="jd-agent-skills-v1",
-    )
-    return {"extracted_job_skills": SkillDecision.model_validate(skills_result).model_dump(mode="json")}
-
-
-def extraction_merge_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
-    state = _state(value)
-    merged = dict(state.extracted_job_core or {})
-    skills_decision = SkillDecision.model_validate(state.extracted_job_skills or {})
-    merged["skills"] = skills_decision.explicit_skills
-    merged["suggested_skills"] = skills_decision.suggested_skills
-
-    # Full ExtractedJob validation (workplace_type/employment_type/salary
-    # normalization, optional-string/list coercion, etc.) still runs here on
-    # the merged dict exactly as it always did on the single-call result --
-    # splitting the LLM calls does not skip any of that.
-    job_dict = ExtractedJob.model_validate(merged).model_dump(mode="json")
+    job_dict = ExtractedJob.model_validate(job).model_dump(mode="json")
     job_dict["skills"] = _atomize_skill_labels(job_dict.get("skills", []))
     explicit_keys = {skill.casefold() for skill in job_dict["skills"]}
     job_dict["suggested_skills"] = [
