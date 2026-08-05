@@ -280,9 +280,16 @@ def generate_pdf_via_playwright(
             # /print is lazy-loaded. Do not dispatch until PrintLayout has
             # mounted its event listener; otherwise a busy instance can lose
             # the event and validation observes only the loading shell.
+            # 5000ms was too tight for a cold render on Render's shared CPU --
+            # mounting this lazy route means fetching+parsing+executing several
+            # JS chunks (react-vendor, router, TailorRender, icons, ...) before
+            # this flag can even be set, which is strictly more work than the
+            # Auto-Fit wait below that already gets 8000ms for a cheaper,
+            # already-mounted computation. Confirmed via production traceback:
+            # Page.wait_for_function timing out on this exact line.
             page.wait_for_function(
                 "window.__PDF_RENDERER_ACCEPTING_DATA__ === true",
-                timeout=5000,
+                timeout=15000,
             )
             lap("wait for PrintLayout ingestion handshake")
 
