@@ -453,11 +453,41 @@ async def reconcile_local_resumes(
     return result
 
 
+def _recover_active_resume_content(resume_id: str, user_id: str, file_path: str, file_name: Optional[str]) -> None:
+    """Runs off the request path (see get_active_resume below) -- re-parses a
+    resume file via LLM to backfill parsed_content.experience when it's
+    missing. This used to run inline on every GET /resumes/active for any
+    affected record, turning what should be a fast read into a multi-second
+    (or, on repeat visits, repeatedly multi-second) LLM call. Opens its own
+    connection since the request's connection is long gone by the time a
+    background task runs after the response is sent."""
+    try:
+        storage = get_storage_service()
+        logger.info("[RESUME][BUCKET] Active resume parsed_content incomplete. Loading file from storage bucket path=%s", file_path)
+        file_bytes = storage.download_file("original-resumes", file_path)
+        raw_text = ResumeParser.extract_text(file_bytes, file_name or "resume.pdf")
+        source_links = ResumeParser.extract_links(file_bytes, file_name or "resume.pdf")
+        if not raw_text:
+            return
+
+        ai = AIService()
+        parsed_res = ai.parse_resume(raw_text)
+        updated_content = parsed_res.dict()
+        updated_content = restore_source_evidence(updated_content, raw_text, source_links)
+        updated_content["raw_text"] = raw_text
+        updated_content["parse_status"] = "parsed"
+
+        with user_scoped_db_context(user_id) as conn:
+            ResumeRepository(conn).update_parsed_content(resume_id, user_id, updated_content)
+    except Exception as exc:
+        logger.warning("[RESUME][BUCKET] Failed to auto-recover resume from storage bucket: %s", exc)
+
+
 @router.get("/active")
 async def get_active_resume(
+    background_tasks: BackgroundTasks,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     repo: ResumeRepository = Depends(get_resume_repository),
-    storage: FileService = Depends(get_storage_service)
 ):
     record = repo.get_active(user["id"])
     if not record:
@@ -468,26 +498,13 @@ async def get_active_resume(
     file_path = record.get("file_path")
 
     if not has_experience and file_path:
-        try:
-            logger.info("[RESUME][BUCKET] Active resume parsed_content incomplete. Loading file from storage bucket path=%s", file_path)
-            file_bytes = storage.download_file("original-resumes", file_path)
-            file_name = record.get("file_name") or "resume.pdf"
-            raw_text = ResumeParser.extract_text(file_bytes, file_name)
-            source_links = ResumeParser.extract_links(file_bytes, file_name)
-
-            if raw_text:
-                from fastapi.concurrency import run_in_threadpool
-                ai = AIService()
-                parsed_res = await run_in_threadpool(ai.parse_resume, raw_text)
-                updated_content = parsed_res.dict()
-                updated_content = restore_source_evidence(updated_content, raw_text, source_links)
-                updated_content["raw_text"] = raw_text
-                updated_content["parse_status"] = "parsed"
-                repo.update_parsed_content(record["id"], user["id"], updated_content)
-                record["parsed_content"] = updated_content
-                record = repo._with_metadata_defaults(record)
-        except Exception as exc:
-            logger.warning("[RESUME][BUCKET] Failed to auto-recover resume from storage bucket: %s", exc)
+        # Return the record as-is now; the recovered content lands on the
+        # NEXT read once the background task finishes, instead of blocking
+        # this one behind a multi-second LLM re-parse.
+        background_tasks.add_task(
+            _recover_active_resume_content,
+            record["id"], user["id"], file_path, record.get("file_name"),
+        )
 
     return record
 

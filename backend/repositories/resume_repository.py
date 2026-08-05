@@ -320,11 +320,20 @@ class ResumeRepository:
                     norm = normalize_resume_payload(record)
                     counts = StrictTailoringEngine.get_section_counts(norm)
                     if counts["experience"] == 0 and counts["education"] == 0:
+                        # Was unbounded (no LIMIT) -- for a user with many resumes,
+                        # every request for a still-empty/unparsed record paid the
+                        # cost of fetching AND Python-side normalizing every other
+                        # resume they own, one at a time, until a non-empty one
+                        # turned up (or the loop ran out). Measured at 3s+ for a
+                        # single get_by_id call on a real account. A handful of
+                        # the user's most recent uploads is enough for this
+                        # fallback's actual purpose.
                         cur.execute("""
                             SELECT *
                             FROM public.resumes
                             WHERE user_id = %s AND deleted_at IS NULL AND id != %s
                             ORDER BY created_at ASC
+                            LIMIT 10
                         """, (user_id, resume_id))
                         candidates = cur.fetchall()
                         for cand in candidates:
