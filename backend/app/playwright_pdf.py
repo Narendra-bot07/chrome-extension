@@ -217,6 +217,13 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
     try:
         context = _get_context()
         page = context.new_page()
+        # Every validation failure in production so far has zero client-side
+        # error info attached -- nothing was listening for browser console
+        # output or uncaught page errors, so a React crash / template lookup
+        # failure on the print route would fail completely silently from the
+        # server's point of view. Surface it.
+        page.on("console", lambda msg: print(f"[PDF-BROWSER-CONSOLE] {msg.type}: {msg.text}"))
+        page.on("pageerror", lambda exc: print(f"[PDF-BROWSER-ERROR] {exc}"))
         lap("get_context + new_page")
         try:
             response = _open_renderer(page, "print", {"template": template_name, "format": "a4"})

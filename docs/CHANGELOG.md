@@ -4,6 +4,18 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.15.10] - 2026-08-05
+
+### Fixed
+- **`GET /resumes/active` (was 4.31s avg) blocked on an inline LLM re-parse.** Any time the active resume's `parsed_content` looked incomplete (no `experience`), the handler synchronously downloaded the file and ran a full LLM parse before responding -- on every single request, for every affected record, forever (no one-time flag). Moved to a `BackgroundTasks` job: the GET returns immediately now, recovery lands on the next read.
+- **`ResumeRepository.get_by_id()` had an unbounded fallback scan.** When the requested resume "looked empty" (no parsed experience/education), it fetched *every other resume the user owns, no LIMIT*, and Python-side re-checked each one until it found a non-empty one. Measured directly at 3+ seconds for a single `get_by_id` call. Bounded to the 10 most recent. This method is used by `/resumes/{id}/file`, `/resumes/{id}/preview`, `/api/compare`, and others. Separately flagged (not changed): this fallback can silently substitute a *different* resume's `file_path` than the one explicitly requested by ID -- a correctness question, not just a performance one, that needs a product decision rather than a silent fix.
+
+### Investigated
+- **`POST /api/render-unified-pdf` is failing validation on effectively every production attempt** (422, `Missing sections in rendered HTML DOM: summary, experience, projects, education, skills, achievements`), burning 60-210+ seconds per attempt before failing -- and because rendering is forcibly serialized process-wide (`@_serialize_pdf_render`), a backlog of guaranteed-to-fail requests queues up and makes later requests in line look even worse (the escalating 63s -> 91s -> 116s -> 147s -> 184s -> 212s pattern in production logs is queue wait time stacking, not one render getting progressively slower). Root cause not yet confirmed: a real repro locally (fresh `pdf_renderer_dist` build + a real resume record with actual experience data) rendered successfully end-to-end, so it did not reproduce on the first attempt -- most likely something specific to production load/data that a single clean local run doesn't hit. Added `page.on("console")` / `page.on("pageerror")` listeners in `playwright_pdf.py` (there was previously zero visibility into client-side JS errors/warnings from the print route -- a React crash there would fail completely silently from the server's point of view). This needs to ship before the next real failure to actually see what's happening client-side, rather than guessing further.
+- **Confirmed separately, reproduced locally every time regardless of success/failure**: the client-side Auto-Fit engine's `#resume-print-ready` marker consistently takes *longer than* the 12s Python-side `wait_for_selector` timeout to appear -- even on a render that ultimately succeeds. That's a minimum ~12 wasted seconds on every single PDF render, pass or fail. Not fixed yet -- the convergence loop (`PrintLayout.tsx`'s Auto-Fit `useEffect`) is a nontrivial iterative layout algorithm and deserves its own careful pass rather than a rushed change under time pressure, per the file's own existing comment about not risking a "fix" that cuts a correctness check.
+
+---
+
 ## [3.15.9] - 2026-08-05
 
 ### Added

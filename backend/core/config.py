@@ -77,9 +77,9 @@ class Settings(BaseSettings):
     @classmethod
     def validate_metrics_path(cls, value: str) -> str:
         path = str(value or "").strip()
-        if not path.startswith("/") or path == "/" or "?" in path or "#" in path:
-            raise ValueError("METRICS_PATH must be an absolute path such as /metrics")
-        return path.rstrip("/")
+        if path.rstrip("/") != "/metrics":
+            raise ValueError("METRICS_PATH must be /metrics")
+        return "/metrics"
 
     # Render has no sidecar/agent process to pull-scrape /metrics, so
     # instead of standing up a separate always-on scraper, the app pushes its

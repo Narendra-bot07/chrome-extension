@@ -764,50 +764,27 @@ function ResumeReviewView({
     return calculateJDMatchScore(workingResume, jobAnalysis);
   }, [originalResume, parsedResume, suggestions, jobAnalysis]);
 
-  // liveATS (backend ATSScoringEngine) and calculateJDMatchScore (local JS
-  // "mirror") use materially different formulas -- different weight splits,
-  // stricter/looser skill matching, years-based vs flat experience scoring.
-  // They were never guaranteed to agree on identical resume content. Mixing
-  // a freshly-recomputed local "Current" with a stale/failed backend
-  // "Original"/"Potential" (the previous approach: liveATS falling back
-  // through a one-time `comparison` snapshot from an earlier pipeline step)
-  // is exactly what produced visibly inconsistent triads after Select All /
-  // Undo -- e.g. Potential ATS reading 89, then 96, then collapsing to 51
-  // for what looked like the same review state. All three headline numbers
-  // now always come from ONE engine at a time: the backend only when its
-  // result actually corresponds to the live suggestion selection (tagged via
-  // _suggestionsFingerprint in AppContext), the local engine (self-consistent
-  // even if not numerically identical to the backend) whenever a matching
-  // backend result isn't available yet, failed, or is stale.
-  const suggestionsFingerprint = useMemo(
-    () => JSON.stringify(suggestions.map(s => [s.change_id || s.id, s.status, s.suggested])),
-    [suggestions]
-  );
-  const liveATSFresh = Boolean(
-    liveATS
-    && liveATS.scoring_source !== 'failed'
-    && liveATS._suggestionsFingerprint === suggestionsFingerprint
-  );
-
-  const originalResumeMatch = liveATSFresh ? liveATS.original_resume_match : fallbackMatch.score;
-  const currentResumeMatch = liveATSFresh ? liveATS.current_resume_match : deterministicCurrentScore.score;
-  const rawEstimatedResumeMatch = liveATSFresh ? liveATS.estimated_resume_match : deterministicPotentialScore.score;
-  // "Potential" is a ceiling and must never render below what's already been
-  // achieved, even across an engine swap between renders.
+  // The review UI must never switch scoring engines after a click. Previously
+  // it rendered the immediate browser score, then replaced the whole triad
+  // with `/ats/live-score` when that response arrived. Even a small
+  // normalization difference made an unchanged baseline visibly jump (for
+  // example Original 43 -> 38 and Potential 58 -> 53). All displayed review
+  // values now come from this single deterministic engine. The backend can
+  // still calculate/audit scores, but an asynchronous response cannot replace
+  // the numbers the user is currently reviewing.
+  const originalResumeMatch = fallbackMatch.score;
+  const currentResumeMatch = deterministicCurrentScore.score;
+  const rawEstimatedResumeMatch = deterministicPotentialScore.score;
   const estimatedResumeMatch = Math.max(originalResumeMatch, currentResumeMatch, rawEstimatedResumeMatch);
 
-  const originalATS = liveATSFresh ? liveATS.original_ats : fallbackMatch.atsScore;
-  const currentATS = liveATSFresh ? liveATS.current_ats : deterministicCurrentScore.atsScore;
-  const rawEstimatedATS = liveATSFresh ? liveATS.estimated_ats : deterministicPotentialScore.atsScore;
+  const originalATS = fallbackMatch.atsScore;
+  const currentATS = deterministicCurrentScore.atsScore;
+  const rawEstimatedATS = deterministicPotentialScore.atsScore;
   const estimatedATS = Math.max(originalATS, currentATS, rawEstimatedATS);
 
-  const breakdownBefore = liveATSFresh ? (liveATS.breakdown_before || {}) : (fallbackMatch.breakdown || {});
-  const breakdownEstimated = liveATSFresh
-    ? (liveATS.breakdown_estimated || breakdownBefore)
-    : (deterministicPotentialScore.breakdown || breakdownBefore);
-  const breakdownCurrent = liveATSFresh
-    ? (liveATS.breakdown_current || breakdownBefore)
-    : (deterministicCurrentScore.breakdown || breakdownBefore);
+  const breakdownBefore = fallbackMatch.breakdown || {};
+  const breakdownEstimated = deterministicPotentialScore.breakdown || breakdownBefore;
+  const breakdownCurrent = deterministicCurrentScore.breakdown || breakdownBefore;
 
   const matchBefore = breakdownBefore.resume_match || breakdownBefore;
   const matchEstimated = breakdownEstimated.resume_match || breakdownEstimated;
