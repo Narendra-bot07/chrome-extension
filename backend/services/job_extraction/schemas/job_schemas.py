@@ -328,7 +328,7 @@ class JDState(BaseModel):
         "permission_required", "unknown"
     ]] = None
     browser_attempts: int = 0
-    max_browser_attempts: int = 2
+    max_browser_attempts: int = 1
     classification_attempts: int = 0
     max_classification_attempts: int = 1
     raw_html: str = ""

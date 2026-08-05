@@ -1948,6 +1948,13 @@ export function AppProvider({ children }) {
         });
       }
       const browserAssessment = assessBrowserJobEvidence(browserEvidence || {}, activeUrl);
+      if (browserEvidence && typeof browserEvidence === 'object') {
+        // Preserve the deterministic assessment already performed against the
+        // user's rendered page. The backend uses this only as a routing hint
+        // alongside the captured evidence itself; it no longer wastes a
+        // Playwright navigation for evidence this client already proved usable.
+        browserEvidence.client_assessment = browserAssessment;
+      }
       logExtraction('Browser evidence readiness assessed', {
         requestId,
         ...browserAssessment

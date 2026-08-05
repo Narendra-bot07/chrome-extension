@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import ipaddress
 import socket
-from typing import Any, Literal
+import time
+from typing import Any, Callable, Literal
 from urllib.parse import urlparse
 
 from langgraph.graph import END, START, StateGraph
 
+from core.logging import logger
 from services.job_extraction.agents import (
     block_detection_agent, browser_agent, classification_review_agent, classifier_agent,
     discovery_agent, evidence_evaluation_agent,
@@ -18,6 +20,28 @@ from services.job_extraction.agents import (
 )
 from services.job_extraction.schemas import JDState
 
+LOG_PREFIX = "[JD-EXTRACTION][GRAPH]"
+
+
+def _timed(name: str, node: Callable) -> Callable:
+    """Wrap a graph node with duration logging. Temporary-but-cheap
+    instrumentation to find which of the ~15 sequential nodes is actually
+    responsible for the 45s average on /jobs/extract-url, instead of
+    guessing -- only the browser fetch and the overall request were timed
+    before this, nothing in between (planner/classifier/extraction/reviewer
+    LLM calls included)."""
+    def wrapped(value):
+        started = time.perf_counter()
+        result = node(value)
+        duration_ms = round((time.perf_counter() - started) * 1000)
+        request_id = getattr(value, "request_id", None) or (value.get("request_id") if isinstance(value, dict) else None)
+        logger.info(
+            "%s node=%s duration_ms=%s request_id=%s",
+            LOG_PREFIX, name, duration_ms, request_id,
+        )
+        return result
+    return wrapped
+
 
 def route_after_discovery(state: JDState) -> Literal["browser", "evidence_evaluation"]:
     """Skip the Playwright fetch when the extension already captured strong
@@ -25,13 +49,21 @@ def route_after_discovery(state: JDState) -> Literal["browser", "evidence_evalua
     navigation typically costs 5-15s and is redundant when we already have a
     usable job panel or structured JobPosting JSON-LD."""
     evidence = state.extension_evidence or {}
+    client_assessment = evidence.get("client_assessment") or {}
     panel_text = str(evidence.get("selected_panel_text") or "").strip()
+    visible_text = str(evidence.get("visible_text") or "").strip()
     strong_panel = bool(panel_text) and len(panel_text) >= 200 and (
         bool((evidence.get("capture") or {}).get("portal_optimized_panel"))
         or _job_signal_score(panel_text) >= .35
     )
     has_job_jsonld = _job_signal_score(evidence.get("jsonld") or [], structured=True) >= .9
-    if strong_panel or has_job_jsonld:
+    client_ready = (
+        client_assessment.get("readiness") in {"READY", "PARTIAL"}
+        and bool(client_assessment.get("isLikelyJob"))
+        and not bool(client_assessment.get("requiresRecoveryEvaluation"))
+        and len(panel_text or visible_text) >= 200
+    )
+    if client_ready or strong_panel or has_job_jsonld:
         return "evidence_evaluation"
     return "browser"
 
@@ -44,10 +76,8 @@ def route_after_evidence(state: JDState) -> Literal["browser", "jsonld", "final_
     # and attempts remain — a single timeout on a slow-loading portal (e.g.
     # amazon.jobs) previously failed the whole extraction on the first try
     # even though max_browser_attempts budgets for a second one.
-    browser_failed = bool(state.error and state.error.get("code") == "BROWSER_FAILED")
     if state.browser_attempts < state.max_browser_attempts and (
         (state.browser_attempts == 0 and state.extraction_readiness in {"BLOCKED", "NOT_READY"})
-        or browser_failed
     ):
         return "browser"
     if state.error or state.extraction_readiness in {"BLOCKED", "NOT_READY", "MANUAL_REVIEW"}:
@@ -99,7 +129,7 @@ def build_job_intelligence_graph():
         "final_response": final_response_agent,
     }
     for name, node in nodes.items():
-        graph.add_node(name, node)
+        graph.add_node(name, _timed(name, node))
     graph.add_edge(START, "discovery")
     graph.add_conditional_edges("discovery", route_after_discovery)
     graph.add_edge("browser", "evidence_evaluation")

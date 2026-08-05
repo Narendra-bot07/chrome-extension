@@ -16,6 +16,7 @@ from services.job_extraction.agents import (
 from services.job_extraction.graph import (
     route_after_classification_review,
     route_after_classifier,
+    route_after_discovery,
     route_after_reviewer,
     route_after_evidence,
     validate_public_url,
@@ -66,6 +67,27 @@ def test_backend_login_wall_recovers_with_extension_selected_panel():
     assert result["extraction_readiness"] == "READY"
     assert "backend_playwright" in result["excluded_sources"]
     assert "Sign in to continue" not in result["raw_html"]
+
+
+def test_verified_extension_evidence_skips_backend_browser():
+    routed = state(extension_evidence={
+        "selected_panel_text": "Responsibilities Build APIs. Requirements Python and SQL. " * 8,
+        "client_assessment": {
+            "readiness": "READY",
+            "isLikelyJob": True,
+            "requiresRecoveryEvaluation": False,
+        },
+    })
+    assert route_after_discovery(routed) == "evidence_evaluation"
+
+
+def test_failed_bounded_browser_does_not_retry():
+    routed = state(
+        browser_attempts=1,
+        error={"code": "BROWSER_FAILED", "message": "navigation timed out"},
+        extraction_readiness="NOT_READY",
+    )
+    assert route_after_evidence(routed) == "final_response"
 
 
 def test_backend_challenge_recovers_with_extension_jsonld():

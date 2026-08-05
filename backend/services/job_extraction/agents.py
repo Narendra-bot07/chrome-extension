@@ -111,7 +111,10 @@ def discovery_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     return {
         "detected_portal": portal,
         "discovery": discovery,
-        "browser_strategy": {"wait_until": "domcontentloaded", "timeout_ms": 30000},
+        # Browser acquisition is a recovery path, not the extension's normal
+        # path. Bound it tightly so an inaccessible portal cannot dominate
+        # request latency for 30-45 seconds.
+        "browser_strategy": {"wait_until": "domcontentloaded", "timeout_ms": 5000},
         "execution_log": _event(state, "discovery", portal=portal),
     }
 
@@ -131,7 +134,7 @@ def _scrape_job_page(context, fetch_url: str, wait_until: str, timeout_ms: int, 
             # fully idle (analytics/chat beacons keep polling), so this
             # routinely burns its entire timeout for no extra content.
             # domcontentloaded above already guarantees the DOM we parse.
-            page.wait_for_load_state("networkidle", timeout=2000)
+            page.wait_for_load_state("networkidle", timeout=500)
         except Exception:
             pass
         matched = next((selector for selector in selectors if page.locator(selector).count()), None)
@@ -162,12 +165,8 @@ def browser_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
                 LOG_PREFIX, state.request_id, state.url, fetch_url,
             )
 
-    # Escalate the navigation timeout on retries: a page that didn't finish
-    # loading in the base window (e.g. amazon.jobs, which routinely exceeds
-    # 30s) is more likely to succeed given more time than given the exact
-    # same budget again.
-    base_timeout_ms = state.browser_strategy.get("timeout_ms", 30000)
-    timeout_ms = min(base_timeout_ms + (attempt - 1) * 15000, 60000)
+    base_timeout_ms = state.browser_strategy.get("timeout_ms", 5000)
+    timeout_ms = min(base_timeout_ms, 5000)
 
     logger.info(
         "%s Browser launch request_id=%s attempt=%s timeout_ms=%s",
@@ -1012,7 +1011,10 @@ def source_builder_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         "evidence_conflicts": state.evidence_conflicts,
         "planner_warnings": state.planner_warnings,
         "detected_sections": state.detected_sections,
-        "source_text": source[:30000],
+        # A focused 12k-character evidence window is enough for one posting
+        # while materially reducing LLM prompt ingestion latency. The source
+        # is already selected/cleaned before this node.
+        "source_text": source[:12000],
         "source_urls": list(dict.fromkeys(filter(None, [state.original_url, state.final_url, state.metadata.get("canonical_url")]))),
         "source_scores": state.source_scores,
         "field_source_hints": state.evidence.get("field_source_hints", {}),

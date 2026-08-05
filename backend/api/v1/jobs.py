@@ -1,5 +1,6 @@
 """Authenticated API integration for the single active JD intelligence engine."""
 import asyncio
+import time
 import uuid
 from contextlib import contextmanager
 from typing import Any, Dict
@@ -24,6 +25,7 @@ async def extract_job_from_provided_url(
 ):
     """Run the autonomous graph for the complete current-tab URL."""
     request_id = request.request_id or str(uuid.uuid4())
+    request_started = time.perf_counter()
     logger.info(
         "[JD-EXTRACTION][BACKEND] Request received request_id=%s url=%s "
         "extension_evidence=%s",
@@ -50,6 +52,14 @@ async def extract_job_from_provided_url(
                 request_id=request_id,
                 metadata={"url": request.url},
             )
+        logger.info(
+            "[JD-EXTRACTION][BACKEND] Request completed request_id=%s duration_ms=%s "
+            "browser_attempts=%s selected_source=%s",
+            request_id,
+            round((time.perf_counter() - request_started) * 1000),
+            (result.get("execution_summary") or {}).get("browser_attempts"),
+            result.get("selected_source"),
+        )
         return result
     except HTTPException:
         raise
