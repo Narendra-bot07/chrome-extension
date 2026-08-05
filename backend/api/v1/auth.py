@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, status, Request, Response
 from pydantic import BaseModel
 from core.security import verify_supabase_jwt, hash_password, verify_password, validate_password
@@ -87,7 +88,7 @@ async def validate_reset_token(payload: TokenRequest, conn=Depends(get_db_connec
 @router.post("/verify-turnstile")
 async def verify_turnstile(payload: TurnstileVerifyRequest, request: Request):
     ip = request.client.host if request.client else "unknown"
-    valid = verify_turnstile_token(payload.token, ip)
+    valid = await asyncio.to_thread(verify_turnstile_token, payload.token, ip)
     if not valid:
         raise HTTPException(status_code=400, detail="Turnstile challenge verification failed.")
     return {"status": "success", "valid": True}
@@ -152,16 +153,25 @@ async def register_user(
     user_agent = request.headers.get("user-agent", "")
     installation_id = payload.installation_id or request.headers.get("x-installation-id")
 
-    # 1. Rate Limiting (Upstash / DB)
+    # 1. Rate Limiting (Upstash / DB). is_rate_limited's Upstash path uses the
+    # synchronous `requests` library (up to a 3s timeout per call, two calls
+    # here) with no await -- run off the event loop so a slow/unresponsive
+    # Upstash doesn't stall every other concurrent request this process is
+    # handling (this was very likely why plain email logins felt slow too:
+    # nothing in their own path is slow, but they queue up behind whichever
+    # other request is currently blocking the loop in here).
     rate_limiter = RateLimiterService(conn)
-    if rate_limiter.is_rate_limited("signup_ip", ip, max_requests=10, window_seconds=3600):
+    if await asyncio.to_thread(rate_limiter.is_rate_limited, "signup_ip", ip, max_requests=10, window_seconds=3600):
         raise HTTPException(status_code=429, detail="Too many account signups from this network. Please try again later.")
-    if installation_id and rate_limiter.is_rate_limited("signup_device", installation_id, max_requests=5, window_seconds=3600):
+    if installation_id and await asyncio.to_thread(rate_limiter.is_rate_limited, "signup_device", installation_id, max_requests=5, window_seconds=3600):
         raise HTTPException(status_code=429, detail="Too many account signups from this device. Please try again later.")
 
-    # 2. Device Abuse Policy Evaluation
+    # 2. Device Abuse Policy Evaluation. Internally makes its own blocking
+    # Turnstile HTTPS call once a device has 3+ signups in 24h -- same
+    # event-loop-blocking concern as the rate limiter above.
     abuse_service = DeviceAbuseService(conn)
-    abuse_eval = abuse_service.evaluate_signup_attempt(
+    abuse_eval = await asyncio.to_thread(
+        abuse_service.evaluate_signup_attempt,
         installation_id=installation_id,
         ip=ip,
         user_agent=user_agent,
@@ -173,7 +183,7 @@ async def register_user(
         raise HTTPException(status_code=403, detail=abuse_eval["reason"])
 
     if abuse_eval["decision"] == AbuseDecision.REQUIRE_CHALLENGE:
-        if not payload.turnstile_token or not verify_turnstile_token(payload.turnstile_token, ip):
+        if not payload.turnstile_token or not await asyncio.to_thread(verify_turnstile_token, payload.turnstile_token, ip):
             raise HTTPException(
                 status_code=400,
                 detail={"code": "REQUIRE_CHALLENGE", "message": abuse_eval["reason"]}
@@ -289,12 +299,30 @@ async def login_user(
 
             auth_service = AuthService(conn)
             session_service = SessionService(conn)
-            
+
             session_id = session_service.create_session(user["id"], request, "email")
             refresh_token = session_service.issue_refresh_token(session_id)
             _set_refresh_cookie(response, refresh_token)
             access_token = auth_service.generate_custom_jwt(user, session_id)
             has_completed_preferences = JobPreferencesRepository(conn).has_completed(user["id"])
+
+            # Same-device, different-account notice: installation_id was
+            # already being sent by the frontend on every login (schemas/
+            # auth.py's LoginRequest has had the field for a while) but never
+            # actually used here. Record this device+account pairing and
+            # check whether any OTHER account has logged in from this same
+            # device before, so the frontend can nudge "you're already using
+            # a different account on this device."
+            other_accounts_on_device = []
+            device_hash = DeviceAbuseService.hash_device_id(payload.installation_id) if payload.installation_id else ""
+            if device_hash:
+                abuse_service = DeviceAbuseService(conn)
+                abuse_service.record_device_sighting(
+                    user["id"], device_hash,
+                    DeviceAbuseService.hash_ip(client_ip),
+                    DeviceAbuseService.hash_user_agent(request.headers.get("user-agent", "")),
+                )
+                other_accounts_on_device = abuse_service.find_other_accounts_on_device(device_hash, user["id"])
 
             # Emit Analytics Event
             analytics_service = AnalyticsService(conn)
@@ -309,6 +337,7 @@ async def login_user(
 
             return {
                 "status": "success",
+                "other_accounts_on_device": other_accounts_on_device,
                 "session": {
                     "access_token": access_token,
                     "refresh_token": refresh_token,
@@ -344,7 +373,14 @@ async def google_login(
 
     auth_service = AuthService(conn)
     try:
-        idinfo = auth_service.verify_google_token(payload.credential)
+        # verify_google_token makes up to three sequential blocking HTTPS
+        # calls (ID-token cert verification, then a userinfo/People API
+        # fallback for the access-token flow the web login button actually
+        # sends -- see auth_service.py). Run off the event loop so a slow
+        # or failing Google request doesn't stall every other concurrent
+        # request this single-process server is handling, including
+        # unrelated email/password logins.
+        idinfo = await asyncio.to_thread(auth_service.verify_google_token, payload.credential)
         
         user = auth_service.sync_oauth_user(
             provider="google",
@@ -367,7 +403,20 @@ async def google_login(
         access_token = auth_service.generate_custom_jwt(user, session_id)
         has_completed_preferences = JobPreferencesRepository(conn).has_completed(user["id"])
         profile_import = idinfo.get("tailr4u_profile") or {}
-        
+
+        # Same-device, different-account notice -- see login_user for why.
+        other_accounts_on_device = []
+        device_hash = DeviceAbuseService.hash_device_id(payload.installation_id) if payload.installation_id else ""
+        if device_hash:
+            abuse_service = DeviceAbuseService(conn)
+            client_ip = request.client.host if request.client else "unknown"
+            abuse_service.record_device_sighting(
+                user["id"], device_hash,
+                DeviceAbuseService.hash_ip(client_ip),
+                DeviceAbuseService.hash_user_agent(request.headers.get("user-agent", "")),
+            )
+            other_accounts_on_device = abuse_service.find_other_accounts_on_device(device_hash, user["id"])
+
         # Emit Analytics Event
         analytics_service = AnalyticsService(conn)
         analytics_service.emit_event(
@@ -379,6 +428,7 @@ async def google_login(
 
         return {
             "status": "success",
+            "other_accounts_on_device": other_accounts_on_device,
             "session": {
                 "access_token": access_token,
                 "refresh_token": refresh_token,

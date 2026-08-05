@@ -18,6 +18,7 @@ from api.v1.workflows import router as workflows_router
 from app.billing.routers.billing import router as billing_router
 from api.v1.notifications import router as notifications_router, reminder_router
 from api.v1.admin_abuse import router as admin_abuse_router
+from api.v1.admin_observability import router as admin_observability_router
 
 api_router = APIRouter()
 
@@ -42,3 +43,4 @@ api_router.include_router(billing_router)
 api_router.include_router(notifications_router)
 api_router.include_router(reminder_router)
 api_router.include_router(admin_abuse_router)
+api_router.include_router(admin_observability_router)

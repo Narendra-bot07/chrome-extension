@@ -20,21 +20,36 @@ class AuthService:
         client_id = os.getenv("GOOGLE_CLIENT_ID")
         if not client_id:
             raise ValueError("GOOGLE_CLIENT_ID is not configured.")
-        
-        try:
-            idinfo = id_token.verify_oauth2_token(credential, requests.Request(), client_id)
-            if idinfo['iss'] not in ['accounts.google.com', 'https://accounts.google.com']:
-                raise ValueError('Wrong issuer.')
-            return idinfo
-        except Exception:
-            # Fallback for access token (e.g., from useGoogleLogin in Chrome Extensions)
-            import requests as req
-            resp = req.get('https://www.googleapis.com/oauth2/v3/userinfo', headers={'Authorization': f'Bearer {credential}'})
-            if resp.status_code == 200:
-                identity = resp.json()
-                identity["tailr4u_profile"] = self._fetch_google_people_profile(credential)
-                return identity
-            raise ValueError("Invalid Google credential (neither ID token nor access token).")
+
+        # ID tokens are JWTs (header.payload.signature, 2 dots); OAuth access
+        # tokens (what the web login button's useGoogleLogin actually sends
+        # -- see LoginPage.jsx's WebGoogleLoginButton) are opaque strings with
+        # none. Every access-token login was previously paying for a doomed
+        # ID-token verification attempt (its own blocking HTTPS call to fetch
+        # Google's certs) before falling through to the real path below --
+        # skip straight there when the shape can't be a JWT.
+        looks_like_jwt = credential.count(".") == 2
+        if looks_like_jwt:
+            try:
+                idinfo = id_token.verify_oauth2_token(credential, requests.Request(), client_id)
+                if idinfo['iss'] not in ['accounts.google.com', 'https://accounts.google.com']:
+                    raise ValueError('Wrong issuer.')
+                return idinfo
+            except Exception:
+                pass  # Fall through to the access-token path below.
+
+        # Fallback for access token (e.g., from useGoogleLogin in Chrome Extensions)
+        import requests as req
+        resp = req.get(
+            'https://www.googleapis.com/oauth2/v3/userinfo',
+            headers={'Authorization': f'Bearer {credential}'},
+            timeout=8,
+        )
+        if resp.status_code == 200:
+            identity = resp.json()
+            identity["tailr4u_profile"] = self._fetch_google_people_profile(credential)
+            return identity
+        raise ValueError("Invalid Google credential (neither ID token nor access token).")
 
     def _fetch_google_people_profile(self, access_token: str) -> dict:
         """Best-effort People API enrichment. Missing scopes/data are non-fatal."""

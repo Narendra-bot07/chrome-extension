@@ -124,7 +124,10 @@ export default function RegisterPage() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential: credentialResponse.credential })
+        // installation_id was missing here too (same gap as LoginPage.jsx's
+        // Google handler) -- every Google sign-up went through with no
+        // device signal at all.
+        body: JSON.stringify({ credential: credentialResponse.credential, installation_id: getOrCreateInstallationId() })
       });
       if (!res.ok) {
         const errData = await res.json();
@@ -137,6 +140,9 @@ export default function RegisterPage() {
           JSON.stringify(data.google_profile_import)
         );
         console.info('[tailr4u] Google profile import', data.google_profile_import);
+      }
+      if (Array.isArray(data.other_accounts_on_device) && data.other_accounts_on_device.length > 0) {
+        try { sessionStorage.setItem('tailr4u_device_notice', JSON.stringify(data.other_accounts_on_device)); } catch (e) {}
       }
       storeAuthenticatedSession(data.session?.access_token, data.session?.refresh_token);
       window.location.hash = `#${postAuthDestination}`;

@@ -14,11 +14,25 @@ class GrantTrialOverrideRequest(BaseModel):
     user_id: str
     reason: Optional[str] = "Admin false-positive resolution override"
 
+# verify_supabase_jwt never populates role/app_metadata.role/is_superadmin
+# (it only decodes the session JWT -- see core/security.py -- which doesn't
+# carry those claims), so the checks below always fell through to the
+# @tailr4u.com domain check. The actual product owner's account uses a
+# personal Gmail address, so that check alone locked them out of every
+# admin-gated endpoint using this dependency. Listed explicitly until a
+# real role-based system exists.
+OWNER_EMAILS = {"bandinarendra3333@gmail.com"}
+
 def verify_admin_access(user: Dict[str, Any] = Depends(verify_supabase_jwt)):
     # Verify user has admin role or internal admin permissions
     role = user.get("role") or user.get("app_metadata", {}).get("role")
     email = user.get("email", "")
-    if role != "admin" and not email.endswith("@tailr4u.com") and user.get("is_superadmin") != True:
+    if (
+        role != "admin"
+        and not email.endswith("@tailr4u.com")
+        and email not in OWNER_EMAILS
+        and user.get("is_superadmin") != True
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required for device abuse operations."

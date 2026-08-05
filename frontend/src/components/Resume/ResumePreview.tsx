@@ -79,6 +79,7 @@ export default function ResumePreview({
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollWrapperRef = useRef<HTMLDivElement>(null);
   const renderRequestIdRef = useRef(0);
+  const firstPendingChangeAtRef = useRef<number | null>(null);
   const adaptiveComposition = useMemo(
     () => createCompositionPlan(resumeData, selectedTemplate || 'ExecutiveATS'),
     [resumeData, selectedTemplate]
@@ -287,10 +288,26 @@ export default function ResumePreview({
     // enough to coalesce a realistic edit burst into one render; this was
     // very likely the single largest contributor to the pipeline feeling
     // slow "between steps" during review/editing.
-    const timer = window.setTimeout(
-      () => fetchUnifiedPdfArtifact(pagePreference, controller.signal),
-      interactiveLayoutMode ? 2000 : 0
-    );
+    const MAX_DEBOUNCE_WAIT_MS = 4000;
+    const now = Date.now();
+    if (firstPendingChangeAtRef.current === null) firstPendingChangeAtRef.current = now;
+    const elapsed = now - firstPendingChangeAtRef.current;
+    const baseDelay = interactiveLayoutMode ? 2000 : 0;
+    // If exactFinalResume (or another dep) keeps getting a new reference
+    // faster than the debounce window -- an unstable upstream memo, or a
+    // rapid burst of edits -- every effect firing cancels the previous
+    // timer before it ever completes, so fetchUnifiedPdfArtifact never
+    // actually runs: the preview sits on "Optimizing..." forever with zero
+    // render requests ever sent. Once a debounce cycle has been pending for
+    // MAX_DEBOUNCE_WAIT_MS, force it through on this tick instead of
+    // deferring again, so a render always eventually happens no matter how
+    // often the inputs keep changing.
+    const delay = elapsed >= MAX_DEBOUNCE_WAIT_MS ? 0 : Math.min(baseDelay, MAX_DEBOUNCE_WAIT_MS - elapsed);
+
+    const timer = window.setTimeout(() => {
+      firstPendingChangeAtRef.current = null;
+      fetchUnifiedPdfArtifact(pagePreference, controller.signal);
+    }, delay);
     return () => {
       window.clearTimeout(timer);
       controller.abort();

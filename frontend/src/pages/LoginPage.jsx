@@ -49,6 +49,16 @@ export default function LoginPage() {
     window.location.reload();
   };
 
+  // completeAuthentication reloads the page immediately after this, which
+  // would wipe any in-memory state -- stash the notice in sessionStorage so
+  // AppContext can pick it up and show it once the app remounts.
+  const storeDeviceNotice = (otherAccountsOnDevice) => {
+    if (!Array.isArray(otherAccountsOnDevice) || otherAccountsOnDevice.length === 0) return;
+    try {
+      sessionStorage.setItem('tailr4u_device_notice', JSON.stringify(otherAccountsOnDevice));
+    } catch (e) {}
+  };
+
   // --- LOGIN STATES ---
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -80,6 +90,7 @@ export default function LoginPage() {
       }
       
       const data = await res.json();
+      storeDeviceNotice(data.other_accounts_on_device);
       completeAuthentication(data.session?.access_token, data.session?.refresh_token);
     } catch (err) {
       setLoginError(err.message || 'Authentication failed.');
@@ -97,7 +108,11 @@ export default function LoginPage() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential: credentialResponse.credential })
+        // installation_id was missing here entirely -- the backend's device
+        // check (and the existing abuse-prevention device tracking) never
+        // had any device signal to work with for Google logins, only for
+        // plain email/password ones.
+        body: JSON.stringify({ credential: credentialResponse.credential, installation_id: getOrCreateInstallationId() })
       });
       if (!res.ok) {
         const errData = await res.json();
@@ -111,6 +126,7 @@ export default function LoginPage() {
         );
         console.info('[tailr4u] Google profile import', data.google_profile_import);
       }
+      storeDeviceNotice(data.other_accounts_on_device);
       completeAuthentication(
         data.session?.access_token,
         data.session?.refresh_token

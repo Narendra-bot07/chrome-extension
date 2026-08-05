@@ -21,7 +21,16 @@
       "Bash(\"/c/Users/bandi/AppData/Local/Programs/Python/Python311/python.exe\" -m py_compile api/v1/resume.py)",
       "Bash(/c/Users/bandi/AppData/Local/Programs/Python/Python311/python.exe -c ' *)",
       "Bash(\"/c/Users/bandi/AppData/Local/Programs/Python/Python311/python.exe\" -m py_compile services/notifications/service.py)",
-      "Bash(\"/c/Users/bandi/AppData/Local/Programs/Python/Python311/python.exe\" -m py_compile app/services/email_service.py)"
+      "Bash(\"/c/Users/bandi/AppData/Local/Programs/Python/Python311/python.exe\" -m py_compile app/services/email_service.py)",
+      "Bash(\"/c/Users/bandi/AppData/Local/Programs/Python/Python311/python.exe\" -m py_compile api/v1/admin_observability.py api/v1/admin_abuse.py api/router.py observability/middleware.py)",
+      "Bash(node scripts/validate_palette.js \"#10b981,#f59e0b,#f43f5e\" --mode light)",
+      "Bash(node scripts/validate_palette.js \"#10b981,#f59e0b,#f43f5e\" --mode dark --surface \"#181b20\")",
+      "Bash(node scripts/validate_palette.js \"#059669,#d97706,#e11d48\" --mode dark --surface \"#181b20\")",
+      "Bash(node scripts/validate_palette.js \"#12A150,#B7791F,#D0342C\" --mode light --surface \"#FFFFFF\")",
+      "Bash(node scripts/validate_palette.js \"#55ad7b,#c49a5c,#c86f72\" --mode dark --surface \"#1b1e24\")",
+      "Bash(\"/c/Users/bandi/AppData/Local/Programs/Python/Python311/python.exe\" -m py_compile api/v1/auth.py app/services/auth_service.py)",
+      "Bash(\"/c/Users/bandi/AppData/Local/Programs/Python/Python311/python.exe\" -m py_compile api/v1/auth.py app/services/auth_service.py app/services/rate_limiter_service.py app/services/turnstile_service.py app/services/device_abuse_service.py)",
+      "Bash(\"/c/Users/bandi/AppData/Local/Programs/Python/Python311/python.exe\" -m py_compile api/v1/auth.py app/services/device_abuse_service.py)"
     ]
   }
 }

@@ -3,9 +3,9 @@ import { createPortal } from 'react-dom';
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { 
-  Settings, Sun, Moon, AlertCircle, X, Menu, 
-  LayoutDashboard, FileText, Briefcase, User, 
-  LogOut, Zap, Target, Search, HelpCircle, Bell, ChevronDown, Shield, LockKeyhole
+  Settings, Sun, Moon, AlertCircle, X, Menu,
+  LayoutDashboard, FileText, Briefcase, User,
+  LogOut, Zap, Target, Search, HelpCircle, Bell, ChevronDown, Shield, LockKeyhole, Activity
 } from 'lucide-react';
 
 import { Button } from './ui/Button';
@@ -540,6 +540,18 @@ function Layout() {
                           <Zap size={15} className="text-tf-text-secondary" />
                           <span>Subscription & Credits</span>
                         </button>
+                        {user?.email === 'bandinarendra3333@gmail.com' && (
+                          <button
+                            onClick={() => {
+                              setProfileMenuOpen(false);
+                              navigate('/admin/observability');
+                            }}
+                            className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-medium text-tf-text hover:bg-tf-surface-2 transition cursor-pointer"
+                          >
+                            <Activity size={15} className="text-tf-text-secondary" />
+                            <span>Observability</span>
+                          </button>
+                        )}
                       </div>
 
                       <div className="border-t border-tf-border my-1" />

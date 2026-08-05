@@ -34,6 +34,7 @@ import EmailSentPage from './pages/EmailSentPage';
 import NotificationSettingsPage from './pages/NotificationSettingsPage';
 import LandingPage from './pages/LandingPage';
 import ExtensionSetupPage from './pages/ExtensionSetupPage';
+import AdminObservabilityPage from './pages/AdminObservabilityPage';
 import { ReducedMotionProvider, MotionPage } from './motion/MotionSystem';
 import { loginPathFor } from './utils/authRedirect';
 import GlobalCursor from './components/GlobalCursor';
@@ -219,6 +220,7 @@ function AppRoutes() {
         <Route path="/subscription" element={<SubscriptionPage />} />
         <Route path="/onboarding/job-preferences" element={<JobPreferencesPage />} />
         <Route path="/settings/job-preferences" element={<JobPreferencesPage />} />
+        <Route path="/admin/observability" element={<AdminObservabilityPage />} />
       </Route>
       <Route path="/print" element={<PrintLayout />} />
       <Route path="/print-cover-letter" element={<PrintCoverLetterLayout />} />

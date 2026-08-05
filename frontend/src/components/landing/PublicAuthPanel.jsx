@@ -8,6 +8,7 @@ import { authDestinationFromSearch } from '../../utils/authRedirect';
 import { useTailr4uReducedMotion } from '../../motion/MotionSystem';
 import { storeAuthenticatedSession } from '../../services/authSession';
 import { getApiUrl } from '../../config/apiConfig';
+import { getOrCreateInstallationId } from '../../utils/installationId';
 
 const isExtension = typeof chrome !== 'undefined' && chrome.identity;
 const scopes = ['openid', 'email', 'profile'].join(' ');
@@ -64,6 +65,22 @@ export default function PublicAuthPanel() {
   const strongPassword = passwordRules.every(Boolean);
 
   const go = path => navigate(`${path}?redirect=${encodeURIComponent(destination)}`);
+
+  // Unlike LoginPage.jsx/RegisterPage.jsx (unused elsewhere in the app),
+  // this panel stays mounted through login -- no page reload -- so the
+  // same-device notice can be shown directly via the app's existing toast
+  // event instead of round-tripping through sessionStorage.
+  const notifyOtherAccountsOnDevice = otherAccounts => {
+    if (!Array.isArray(otherAccounts) || otherAccounts.length === 0) return;
+    window.dispatchEvent(new CustomEvent('tailr4u-toast', {
+      detail: {
+        type: 'warning',
+        title: 'Different account on this device',
+        message: `You're already logged in with ${otherAccounts[0]} on this device. Use that email if this wasn't intentional.`
+      }
+    }));
+  };
+
   const finishAuthentication = async (accessToken, refreshToken = null) => {
     storeAuthenticatedSession(accessToken, refreshToken);
     await adoptAuthenticatedSession(accessToken);
@@ -76,11 +93,12 @@ export default function PublicAuthPanel() {
     try {
       const response = await fetch(`${getApiUrl()}/api/v1/auth/google`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential })
+        body: JSON.stringify({ credential, installation_id: getOrCreateInstallationId() })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Google authentication failed.');
       if (data.google_profile_import) localStorage.setItem('tailr4u.google-profile-import-debug', JSON.stringify(data.google_profile_import));
+      notifyOtherAccountsOnDevice(data.other_accounts_on_device);
       await finishAuthentication(data.session?.access_token, data.session?.refresh_token);
     } catch (reason) {
       setError(reason.message || 'Google authentication failed.');
@@ -114,19 +132,33 @@ export default function PublicAuthPanel() {
       if (mode === 'register') {
         if (!strongPassword) throw new Error('Use 8+ characters with mixed case, a number, and a special character.');
         if (password !== confirmPassword) throw new Error('Passwords do not match.');
+        const installationId = getOrCreateInstallationId();
         const response = await fetch(`${getApiUrl()}/api/v1/auth/register`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password })
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Installation-Id': installationId },
+          body: JSON.stringify({ email, password, installation_id: installationId })
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || 'Account creation failed.');
         go('/login');
         return;
       }
+      // `data` was previously never assigned here (no `await response.json()`
+      // at all) -- every plain email/password login through this panel threw
+      // "data is not defined" right after the fetch resolved, surfaced to the
+      // user as that literal error message via the catch block below. This
+      // was very likely the dominant cause of "login is slow/broken": it
+      // wasn't slow, it was failing outright on every attempt.
+      const installationId = getOrCreateInstallationId();
       const response = await fetch(`${getApiUrl()}/api/v1/auth/login`, {
-        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'X-Installation-Id': installationId },
+        body: JSON.stringify({ email, password, installation_id: installationId })
       });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Invalid email or password.');
+      notifyOtherAccountsOnDevice(data.other_accounts_on_device);
       await finishAuthentication(data.session?.access_token, data.session?.refresh_token);
     } catch (reason) {
       setError(reason.message || 'Authentication failed.');

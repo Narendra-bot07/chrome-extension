@@ -176,6 +176,59 @@ class DeviceAbuseService:
                 "risk_score": 50 if count_7d >= 3 else 0
             }
 
+    @staticmethod
+    def mask_email(email: str) -> str:
+        """na***a@gm***.com -- enough for the account's owner to recognize
+        it, not enough to hand a stranger on a shared device a usable email."""
+        if not email or "@" not in email:
+            return email or ""
+        local, _, domain = email.partition("@")
+        domain_name, _, domain_rest = domain.partition(".")
+        masked_local = local[:2] + "*" * max(1, len(local) - 2) if len(local) > 2 else local[:1] + "*"
+        masked_domain = domain_name[:2] + "*" * max(1, len(domain_name) - 2) if len(domain_name) > 2 else domain_name[:1] + "*"
+        return f"{masked_local}@{masked_domain}.{domain_rest}" if domain_rest else f"{masked_local}@{masked_domain}"
+
+    def record_device_sighting(self, user_id: str, device_hash: str, ip_hash: str, user_agent_hash: str) -> None:
+        """Upserts a (device_hash, user_id) sighting on every login -- not just
+        signup, which is all record_device_registration ever covered. Without
+        this, find_other_accounts_on_device below can only ever see devices
+        that were present at REGISTER time, missing every account that
+        registered before this device_hash pairing existed or that has never
+        re-registered from this device."""
+        if not device_hash or not user_id:
+            return
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """UPDATE public.device_registrations
+                   SET last_seen_at = NOW(), signup_ip_hash = %s, user_agent_hash = %s
+                   WHERE device_hash = %s AND user_id = %s""",
+                (ip_hash, user_agent_hash, device_hash, user_id)
+            )
+            if cur.rowcount == 0:
+                cur.execute(
+                    """INSERT INTO public.device_registrations
+                       (device_hash, user_id, signup_ip_hash, user_agent_hash, first_seen_at, last_seen_at, risk_score)
+                       VALUES (%s, %s, %s, %s, NOW(), NOW(), 0)""",
+                    (device_hash, user_id, ip_hash, user_agent_hash)
+                )
+        self.conn.commit()
+
+    def find_other_accounts_on_device(self, device_hash: str, current_user_id: str) -> list:
+        """Distinct other accounts ever seen (login OR signup) on this device,
+        for the "you're already logged in with a different account here" notice."""
+        if not device_hash:
+            return []
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """SELECT DISTINCT u.email
+                   FROM public.device_registrations dr
+                   JOIN public.users u ON u.id = dr.user_id
+                   WHERE dr.device_hash = %s AND dr.user_id IS NOT NULL AND dr.user_id != %s
+                   ORDER BY u.email LIMIT 3""",
+                (device_hash, current_user_id)
+            )
+            return [self.mask_email(row["email"]) for row in cur.fetchall()]
+
     def record_device_registration(
         self,
         user_id: str,

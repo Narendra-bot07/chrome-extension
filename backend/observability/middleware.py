@@ -1,5 +1,8 @@
 import time
 import uuid
+from collections import deque
+from datetime import datetime, timezone
+from threading import Lock
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -7,6 +10,38 @@ from core.exceptions import BaseAppException
 from observability.context import set_request_id, set_trace_id, clear_context, get_request_id, get_trace_id
 from observability.logging import logger
 from observability.metrics import record_http_request
+
+# Prometheus counters/histograms (observability/metrics.py) only ever hold
+# aggregates -- there's no way to answer "show me the actual last N calls"
+# from them. This bounded in-memory ring buffer backs the admin
+# observability request log (api/v1/admin_observability.py) with real
+# per-request rows: method, route, status, latency, timestamp. Capped at
+# 1000 entries so it can't grow unbounded; resets on process restart, which
+# is fine for a live "what's happening right now" view.
+_RECENT_REQUESTS_MAXLEN = 1000
+_recent_requests: "deque[dict]" = deque(maxlen=_RECENT_REQUESTS_MAXLEN)
+_recent_requests_lock = Lock()
+
+
+def _record_recent_request(method: str, route: str, status_code: int, duration_ms: float, request_id: str) -> None:
+    with _recent_requests_lock:
+        _recent_requests.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "method": method,
+            "route": route,
+            "status_code": status_code,
+            "duration_ms": round(duration_ms, 1),
+            "request_id": request_id,
+        })
+
+
+def get_recent_requests(limit: int = 200) -> list:
+    """Most-recent-first snapshot of the last N tracked requests."""
+    with _recent_requests_lock:
+        snapshot = list(_recent_requests)
+    snapshot.reverse()
+    return snapshot[:limit]
+
 
 class CorrelationAndLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
@@ -55,6 +90,7 @@ class CorrelationAndLoggingMiddleware(BaseHTTPMiddleware):
                 status_code=response.status_code,
                 duration_sec=duration_ms / 1000.0
             )
+            _record_recent_request(request.method, route_path, response.status_code, duration_ms, request_id)
 
             # Log outbound response
             logger.info(
@@ -82,6 +118,7 @@ class CorrelationAndLoggingMiddleware(BaseHTTPMiddleware):
                 status_code=exc.status_code,
                 duration_sec=duration_ms / 1000.0
             )
+            _record_recent_request(request.method, route_path, exc.status_code, duration_ms, request_id)
 
             logger.error(
                 f"http_request_app_exception",
@@ -112,6 +149,7 @@ class CorrelationAndLoggingMiddleware(BaseHTTPMiddleware):
                 status_code=500,
                 duration_sec=duration_ms / 1000.0
             )
+            _record_recent_request(request.method, route_path, 500, duration_ms, request_id)
 
             logger.error(
                 f"http_request_unhandled_exception",
