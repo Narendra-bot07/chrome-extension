@@ -26,7 +26,7 @@ class EmailService:
         resend_key = (settings.RESEND_API_KEY or os.getenv("RESEND_API_KEY", "")).strip()
         resend_from_email = (getattr(settings, "RESEND_FROM_EMAIL", None) or os.getenv("RESEND_FROM_EMAIL", "")).strip() or "onboarding@resend.dev"
         from_email = settings.SMTP_FROM_EMAIL or "onboarding@resend.dev"
-        from_name = settings.SMTP_FROM_NAME or "tailr4u"
+        from_name = settings.SMTP_FROM_NAME or "Tailr4U"
 
         # 1. Primary Transport: Resend HTTP REST API
         if resend_key:
@@ -88,42 +88,57 @@ class EmailService:
 
     @staticmethod
     def _shell(title: str, content: str) -> str:
-        return f"""<!doctype html><html><body style="margin:0;background:#f5f7fb;font-family:Arial,sans-serif;color:#18202f">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px">
-        <table role="presentation" width="560" style="max-width:100%;background:#fff;border:1px solid #e5e9f0;border-radius:18px">
-        <tr><td style="padding:30px"><div style="font-weight:800;color:#176b62;margin-bottom:22px">tailr4u</div>
-        <h1 style="font-size:22px;margin:0 0 14px">{html.escape(title)}</h1>{content}
-        <p style="font-size:12px;color:#7a8494;margin:26px 0 0">tailr4u account security</p>
-        </td></tr></table></td></tr></table></body></html>"""
+        logo_url = f"{settings.FRONTEND_URL.rstrip('/')}/application-logo.png"
+        return f"""<!doctype html><html><body style="margin:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#0f172a">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:40px 16px">
+        <table role="presentation" width="560" style="max-width:100%;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;overflow:hidden">
+        <tr><td style="padding:26px 32px;border-bottom:1px solid #eef2f7">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+            <td style="vertical-align:middle;padding-right:10px">
+              <img src="{html.escape(logo_url)}" width="30" height="30" alt="" style="display:block;border-radius:8px">
+            </td>
+            <td style="vertical-align:middle;font-size:19px;font-weight:800;letter-spacing:-0.02em;color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif">
+              Tailr<span style="color:#2E5BFF">4U</span>
+            </td>
+          </tr></table>
+        </td></tr>
+        <tr><td style="padding:32px 32px 28px">
+          <h1 style="font-size:21px;margin:0 0 16px;color:#0f172a;font-weight:800;letter-spacing:-0.01em">{html.escape(title)}</h1>
+          {content}
+        </td></tr>
+        <tr><td style="padding:16px 32px;background:#f8fafc;border-top:1px solid #eef2f7">
+          <p style="font-size:11.5px;color:#94a3b8;margin:0;line-height:1.6">You're receiving this because you have an active Tailr4U account.</p>
+        </td></tr>
+        </table></td></tr></table></body></html>"""
 
     def send_password_reset(self, recipient: str, raw_token: str) -> bool:
         url = f"{settings.FRONTEND_URL.rstrip('/')}/#/reset-password?token={raw_token}"
         content = f"""<p style="line-height:1.6">We received a request to reset your password.</p>
-        <p><a href="{html.escape(url)}" style="display:inline-block;padding:12px 18px;background:#168b7e;color:#fff;text-decoration:none;border-radius:10px;font-weight:700">Reset password</a></p>
+        <p><a href="{html.escape(url)}" style="display:inline-block;padding:12px 18px;background:#2E5BFF;color:#fff;text-decoration:none;border-radius:10px;font-weight:700">Reset password</a></p>
         <p style="font-size:13px;line-height:1.6">This link expires in {settings.PASSWORD_RESET_MINUTES} minutes. If you did not request it, you can ignore this email.</p>
         <p style="font-size:12px;word-break:break-all;color:#687386">{html.escape(url)}</p>"""
         return self.send(
             recipient,
-            "Reset your tailr4u password",
-            f"Reset your tailr4u password: {url}\nThis link expires in {settings.PASSWORD_RESET_MINUTES} minutes. Ignore this email if you did not request it.",
+            "Reset your Tailr4U password",
+            f"Reset your Tailr4U password: {url}\nThis link expires in {settings.PASSWORD_RESET_MINUTES} minutes. Ignore this email if you did not request it.",
             self._shell("Reset your password", content),
         )
 
     def send_verification(self, recipient: str, raw_token: str) -> bool:
         url = f"{settings.FRONTEND_URL.rstrip('/')}/#/verify-email?token={raw_token}"
-        content = f"""<p style="line-height:1.6">Verify your email to finish securing your tailr4u account.</p>
-        <p><a href="{html.escape(url)}" style="display:inline-block;padding:12px 18px;background:#168b7e;color:#fff;text-decoration:none;border-radius:10px;font-weight:700">Verify email</a></p>
+        content = f"""<p style="line-height:1.6">Verify your email to finish securing your Tailr4U account.</p>
+        <p><a href="{html.escape(url)}" style="display:inline-block;padding:12px 18px;background:#2E5BFF;color:#fff;text-decoration:none;border-radius:10px;font-weight:700">Verify email</a></p>
         <p style="font-size:13px">This link expires in {settings.EMAIL_VERIFICATION_HOURS} hours.</p>
         <p style="font-size:12px;word-break:break-all;color:#687386">{html.escape(url)}</p>"""
         return self.send(
-            recipient, "Verify your tailr4u email",
-            f"Verify your tailr4u email: {url}", self._shell("Verify your email", content)
+            recipient, "Verify your Tailr4U email",
+            f"Verify your Tailr4U email: {url}", self._shell("Verify your email", content)
         )
 
     def send_password_changed(self, recipient: str) -> bool:
         return self.send(
-            recipient, "Your tailr4u password was changed",
-            "Your tailr4u password was changed. If this was not you, contact support immediately.",
+            recipient, "Your Tailr4U password was changed",
+            "Your Tailr4U password was changed. If this was not you, contact support immediately.",
             self._shell("Password changed", "<p style=\"line-height:1.6\">Your password was changed successfully. If this was not you, contact support immediately.</p>"),
         )
 
@@ -143,26 +158,26 @@ class EmailService:
             )
             content += (
                 f'<p><a href="{html.escape(absolute_url)}" '
-                'style="display:inline-block;padding:12px 18px;background:#168b7e;'
+                'style="display:inline-block;padding:12px 18px;background:#2E5BFF;'
                 'color:#fff;text-decoration:none;border-radius:10px;font-weight:700">'
                 f"{html.escape(action_label)}</a></p>"
             )
             text += f"\n\n{action_label}: {absolute_url}"
         return self.send(
             recipient,
-            f"{title} | tailr4u",
+            f"{title} | Tailr4U",
             text,
             self._shell(title, content),
         )
 
     def send_account_deletion_otp(self, recipient: str, otp_code: str) -> bool:
-        content = f"""<p style="line-height:1.6">We received a request to permanently delete your tailr4u account.</p>
+        content = f"""<p style="line-height:1.6">We received a request to permanently delete your Tailr4U account.</p>
         <p style="font-size:14px;font-weight:600">Your verification OTP code for account deletion is:</p>
         <div style="font-size:32px;font-weight:900;letter-spacing:8px;color:#dc2626;padding:16px 0;text-align:center">{html.escape(otp_code)}</div>
         <p style="font-size:13px;line-height:1.6">This code expires in 10 minutes. If you did not request account deletion, please secure your account immediately.</p>"""
         return self.send(
             recipient,
             "Confirm Account Deletion - OTP Code",
-            f"Your tailr4u account deletion OTP code is: {otp_code}\nThis code expires in 10 minutes.",
+            f"Your Tailr4U account deletion OTP code is: {otp_code}\nThis code expires in 10 minutes.",
             self._shell("Confirm Account Deletion", content),
         )

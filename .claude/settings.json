@@ -20,7 +20,8 @@
       "Bash(\"/c/Users/bandi/AppData/Local/Programs/Python/Python311/python.exe\" -m py_compile services/notifications/service.py services/notifications/__init__.py main.py)",
       "Bash(\"/c/Users/bandi/AppData/Local/Programs/Python/Python311/python.exe\" -m py_compile api/v1/resume.py)",
       "Bash(/c/Users/bandi/AppData/Local/Programs/Python/Python311/python.exe -c ' *)",
-      "Bash(\"/c/Users/bandi/AppData/Local/Programs/Python/Python311/python.exe\" -m py_compile services/notifications/service.py)"
+      "Bash(\"/c/Users/bandi/AppData/Local/Programs/Python/Python311/python.exe\" -m py_compile services/notifications/service.py)",
+      "Bash(\"/c/Users/bandi/AppData/Local/Programs/Python/Python311/python.exe\" -m py_compile app/services/email_service.py)"
     ]
   }
 }
