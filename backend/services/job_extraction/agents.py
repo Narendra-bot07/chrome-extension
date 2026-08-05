@@ -16,6 +16,7 @@ from markdownify import markdownify
 from app.ai_service import get_llm
 from services.cache.llm_cache import llm_cache
 from core.logging import logger
+from services.job_extraction.browser_pool import run_on_browser_pool
 from services.job_extraction.schemas import (
     ClassificationDecision, EvidenceSource, ExtractedJob, JDState, ReviewDecision,
     SkillDecision,
@@ -115,6 +116,33 @@ def discovery_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _scrape_job_page(context, fetch_url: str, wait_until: str, timeout_ms: int, selectors: list[str]):
+    """Runs on the dedicated browser-pool thread (see browser_pool.py) against
+    the shared, persistent BrowserContext -- gets its own fresh Page, closes
+    it when done, but never closes the context/browser themselves so the next
+    call can reuse them without paying a fresh Chromium launch."""
+    errors: list[str] = []
+    page = context.new_page()
+    try:
+        page.on("pageerror", lambda error: errors.append(str(error)[:300]))
+        page.goto(fetch_url, wait_until=wait_until, timeout=timeout_ms)
+        try:
+            # Best-effort only: JS-heavy SPAs (LinkedIn, Workday) rarely go
+            # fully idle (analytics/chat beacons keep polling), so this
+            # routinely burns its entire timeout for no extra content.
+            # domcontentloaded above already guarantees the DOM we parse.
+            page.wait_for_load_state("networkidle", timeout=2000)
+        except Exception:
+            pass
+        matched = next((selector for selector in selectors if page.locator(selector).count()), None)
+        html = page.content()
+        final_url = page.url
+        title = page.title()
+        return html, final_url, title, matched, errors
+    finally:
+        page.close()
+
+
 def browser_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     state = _state(value)
     attempt = state.browser_attempts + 1
@@ -146,40 +174,15 @@ def browser_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         LOG_PREFIX, state.request_id, attempt, timeout_ms,
     )
     started = time.perf_counter()
-    errors: list[str] = []
     try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as playwright:
-            # --disable-dev-shm-usage is required in Docker/Render-style containers:
-            # Chromium's default /dev/shm is capped at 64MB there, and a heavier page
-            # will crash the browser subprocess outright (not a catchable Python
-            # exception). Matches the hardened launch args already used in
-            # app/playwright_pdf.py.
-            browser = playwright.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
-            )
-            page = browser.new_page()
-            page.on("pageerror", lambda error: errors.append(str(error)[:300]))
-            page.goto(
-                fetch_url,
-                wait_until=state.browser_strategy.get("wait_until", "domcontentloaded"),
-                timeout=timeout_ms,
-            )
-            try:
-                # Best-effort only: JS-heavy SPAs (LinkedIn, Workday) rarely go
-                # fully idle (analytics/chat beacons keep polling), so this
-                # routinely burns its entire timeout for no extra content.
-                # domcontentloaded above already guarantees the DOM we parse.
-                page.wait_for_load_state("networkidle", timeout=2000)
-            except Exception:
-                pass
-            selectors = PORTALS.get(state.detected_portal, ("", ["main", "article"]))[1]
-            matched = next((selector for selector in selectors if page.locator(selector).count()), None)
-            html = page.content()
-            final_url = page.url
-            title = page.title()
-            browser.close()
+        selectors = PORTALS.get(state.detected_portal, ("", ["main", "article"]))[1]
+        html, final_url, title, matched, errors = run_on_browser_pool(
+            _scrape_job_page,
+            fetch_url,
+            state.browser_strategy.get("wait_until", "domcontentloaded"),
+            timeout_ms,
+            selectors,
+        )
     except Exception as exc:
         logger.exception("%s Browser failed request_id=%s attempt=%s", LOG_PREFIX, state.request_id, attempt)
         return {

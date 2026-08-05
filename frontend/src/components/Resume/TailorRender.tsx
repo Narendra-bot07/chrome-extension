@@ -734,8 +734,9 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
               <div key={cert.id} className="break-inside-avoid" style={{ breakInside: 'avoid-page', fontSize: `${params.fontSize}px`, lineHeight: 1.05, margin: 0, padding: '1px 0' }}>
                 {cert.title && <div className="font-bold text-zinc-950">{cert.title}</div>}
                 {(cert.organization || cert.date) && (
-                  <div className="font-medium text-zinc-700">
-                    {[cert.organization, cert.date].filter(Boolean).join(', ')}
+                  <div className="font-medium text-zinc-700 flex justify-between gap-2">
+                    <span>{cert.organization}</span>
+                    {cert.date && <span className="shrink-0 whitespace-nowrap">{cert.date}</span>}
                   </div>
                 )}
               </div>

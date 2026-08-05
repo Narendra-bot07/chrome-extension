@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { CoverLetterRender } from '../components/CoverLetterRender';
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import {
   FileText,
   CheckCircle2,
@@ -18,6 +19,7 @@ import {
   ChevronRight,
   ChevronDown,
   Check,
+  Loader2,
   RefreshCw,
   AlertCircle,
   X,
@@ -460,18 +462,75 @@ export default function CoverLetterPage() {
         </div>
 
         {loading ? (
-          <div className="w-full max-w-md bg-zinc-50 border border-zinc-200 p-6 rounded-2xl space-y-3 text-center shadow-xs">
+          <div className="w-full max-w-md bg-zinc-50 border border-zinc-200 p-6 rounded-2xl space-y-5 text-center shadow-xs">
             <div className="flex items-center justify-center gap-2 text-xs font-black text-zinc-800 uppercase tracking-wider">
-              <RefreshCw size={16} className="animate-spin text-[#00bda5]" />
+              <Loader2 size={16} className="animate-spin text-[#00bda5]" />
               <span>{loadingMessage || "Drafting custom cover letter prose..."}</span>
             </div>
-            <div className="w-full h-2 bg-zinc-200 rounded-full overflow-hidden">
-              <div className="h-full bg-[#00bda5] transition-all duration-300" style={{ width: `${loadingProgress || 35}%` }} />
+
+            <div className="space-y-1.5">
+              <div className="w-full h-1.5 bg-zinc-200 rounded-full overflow-hidden relative shadow-inner">
+                <motion.div
+                  className="h-full bg-[#00bda5] rounded-full shadow-[0_0_10px_#00bda5]"
+                  initial={{ width: "5%" }}
+                  animate={{ width: `${Math.max(5, Math.min(100, loadingProgress || 35))}%` }}
+                  transition={{ duration: 0.4, ease: "easeOut" }}
+                />
+              </div>
+              <span className="text-[10px] text-zinc-400 font-bold block">{loadingProgress || 35}% complete</span>
             </div>
-            <span className="text-[10px] text-zinc-400 font-bold block">{loadingProgress || 35}% complete</span>
+
+            {/* Staged checklist, mirroring ChecklistLoader.jsx's pattern
+                (already used for JD extraction) so cover letter generation
+                feels like the same polished, multi-step process instead of a
+                bare spinner + bar sitting still for however long the LLM
+                call takes. */}
+            <div className="w-full bg-white border border-zinc-200/70 rounded-2xl p-4 flex flex-col gap-3 text-left">
+              {[
+                { label: "Analyzing job requirements", progressThreshold: 25 },
+                { label: "Aligning with your resume", progressThreshold: 50 },
+                { label: "Drafting opening & body", progressThreshold: 80 },
+                { label: "Polishing tone & closing", progressThreshold: 95 },
+              ].map((item, idx, arr) => {
+                const progress = loadingProgress || 35;
+                const isDone = progress >= item.progressThreshold;
+                const isPending = !isDone && (idx === 0 || progress >= (arr[idx - 1]?.progressThreshold || 0));
+                return (
+                  <div key={item.label} className="flex items-center gap-3 py-0.5 min-h-[22px]">
+                    <div
+                      className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-all ${
+                        isDone
+                          ? 'bg-[#00bda5] text-white shadow-xs'
+                          : isPending
+                          ? 'bg-[#00bda5]/15 border-2 border-[#00bda5] text-[#00bda5]'
+                          : 'bg-zinc-100 border border-zinc-300/80 text-transparent'
+                      }`}
+                    >
+                      {isDone ? (
+                        <Check size={12} strokeWidth={3} />
+                      ) : isPending ? (
+                        <Loader2 size={11} className="animate-spin text-[#00bda5]" />
+                      ) : null}
+                    </div>
+                    <span
+                      className={`text-xs transition-colors ${
+                        isDone
+                          ? 'text-zinc-800 font-semibold'
+                          : isPending
+                          ? 'text-[#00bda5] font-extrabold'
+                          : 'text-zinc-400 font-medium'
+                      }`}
+                    >
+                      {item.label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
             <button
               onClick={cancelCoverLetterGeneration}
-              className="mt-2 px-4 py-2 rounded-xl border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 text-[10px] font-black uppercase tracking-wider cursor-pointer"
+              className="px-4 py-2 rounded-xl border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 text-[10px] font-black uppercase tracking-wider cursor-pointer"
             >
               Cancel Generation
             </button>

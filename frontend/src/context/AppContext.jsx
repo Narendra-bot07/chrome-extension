@@ -2337,7 +2337,20 @@ export function AppProvider({ children }) {
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
       let analyzedJob;
-      try {
+      {
+        // Used to call POST /api/v1/jobs/extract first and only fall back to
+        // /api/analyze-job on failure -- but /api/v1/jobs/extract was never
+        // actually registered on the backend (only /api/v1/jobs/extract-url
+        // exists, a different endpoint used by handleScanPage). Every single
+        // call here 404'd, unconditionally, then fell through to the exact
+        // same /api/analyze-job call below -- one guaranteed-to-fail network
+        // round trip wasted on every manual/pasted-JD extraction for no
+        // benefit. Calling /api/analyze-job directly also means it finally
+        // receives the richer context (url/page_title/page_company/etc.)
+        // the dead endpoint used to get -- api_analyze_job (app/routers/api.py)
+        // already has logic to use these fields (e.g. `if request.page_title:
+        // analysis.title = request.page_title`), it just never received them
+        // from the fallback call before.
         const requestId = (crypto?.randomUUID && crypto.randomUUID()) || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
         logExtraction('04 backend request payload', {
           requestId,
@@ -2348,7 +2361,7 @@ export function AppProvider({ children }) {
           classification: jobDetectionMeta?.classification || "manual"
         });
 
-        const jobRes = await fetch(`${apiUrl}/api/v1/jobs/extract`, {
+        const jobRes = await fetch(`${apiUrl}/api/analyze-job`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -2358,13 +2371,7 @@ export function AppProvider({ children }) {
             jd_text: jobText,
             url: lastAnalyzedUrl || "",
             page_title: jobTitle || "",
-            page_company: companyName || "",
-            classification: jobDetectionMeta?.classification || "manual",
-            detection_confidence: jobDetectionMeta?.confidence,
-            detection_reason: jobDetectionMeta?.reason || "",
-            extraction_method: jobDetectionMeta?.extractionMethod || (lastAnalyzedUrl ? "semantic-dom" : "manual"),
-            content_hash: jobDetectionMeta?.contentHash || "",
-            request_id: requestId
+            page_company: companyName || ""
           })
         });
         if (!jobRes.ok) {
@@ -2374,19 +2381,14 @@ export function AppProvider({ children }) {
             if (errData?.detail?.code === "QUOTA_EXCEEDED") {
               openQuotaModal(errData?.detail?.message);
             }
-            const subError = new Error(errData.detail.message || "Subscription does not allow this extraction.");
-            subError.skipLegacyFallback = true;
-            throw subError;
+            throw new Error(errData.detail.message || "Subscription does not allow this extraction.");
           }
           if (["JOB_CLASSIFICATION_REQUIRED", "INVALID_JOB_DESCRIPTION", "INVALID_JOB_TITLE"].includes(errData?.detail?.code)) {
-            const validationError = new Error(errData.detail.message || "The extracted page is not safe to tailor.");
-            validationError.skipLegacyFallback = true;
-            throw validationError;
+            throw new Error(errData.detail.message || "The extracted page is not safe to tailor.");
           }
-          throw new Error(errData?.detail?.message || errData?.detail || "V1 extract route returned error or not found");
+          throw new Error("Job analysis error: " + (errData?.detail?.message || errData?.detail || jobRes.statusText || "Request failed"));
         }
-        const jobPayload = await jobRes.json();
-        analyzedJob = jobPayload?.analysis || jobPayload?.data || jobPayload;
+        analyzedJob = await jobRes.json();
         const respDetails = analyzedJob?.analysis || analyzedJob?.normalized_content || analyzedJob;
         logExtraction('05 backend response payload', {
           requestId,
@@ -2396,25 +2398,10 @@ export function AppProvider({ children }) {
           location: respDetails?.location,
           employmentType: respDetails?.job_type
         });
-        if (jobPayload?.usage) {
-          setUsage(prev => ({ ...(prev || {}), jd_extraction: jobPayload.usage }));
+        if (analyzedJob?.usage) {
+          setUsage(prev => ({ ...(prev || {}), jd_extraction: analyzedJob.usage }));
           await fetchSubscription();
         }
-      } catch (err) {
-        if (err.skipLegacyFallback) throw err;
-        const jobResFallback = await fetch(`${apiUrl}/api/analyze-job`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...headers
-          },
-          body: JSON.stringify({ jd_text: jobText })
-        });
-        if (!jobResFallback.ok) {
-          const errData = await jobResFallback.json().catch(() => ({ detail: jobResFallback.statusText }));
-          throw new Error("Job analysis error: " + (errData.detail || "Request failed"));
-        }
-        analyzedJob = await jobResFallback.json();
       }
 
       const isValidText = (str) => typeof str === 'string' && str.trim() !== '' && str.trim().toLowerCase() !== 'not available' && str.trim().toLowerCase() !== 'n/a' && str.trim().toLowerCase() !== 'unspecified';

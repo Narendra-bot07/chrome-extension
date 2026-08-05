@@ -517,17 +517,26 @@ async def rename_resume(
 async def parse_existing_resume(
     resume_id: str,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
-    repo: ResumeRepository = Depends(get_resume_repository),
-    conn = Depends(get_db_connection),
     storage: FileService = Depends(get_storage_service),
 ):
-    record = repo.get_by_id(resume_id, user["id"])
+    # Deliberately not using Depends(get_resume_repository)/Depends(get_db_connection)
+    # -- those resolve to ONE pooled connection held for this entire request, but
+    # this handler makes an LLM call (ai.parse_resume, several seconds) in between
+    # the read and the write. Confirmed this was on the hot path for
+    # handleCompareActiveResumeToJob (frontend/src/context/AppContext.jsx), which
+    # blocks on this endpoint before it can even start the tailoring LLM call in
+    # /api/compare, and /api/compare itself already documents and avoids this
+    # exact anti-pattern (see docs/KNOWN_ISSUES.md ISSUE-005) -- this endpoint
+    # just hadn't been fixed to match. Each DB phase opens its own short-lived
+    # connection instead, so nothing sits idle in the pool across the LLM call.
+    with user_scoped_db_context(user["id"]) as read_conn:
+        record = ResumeRepository(read_conn).get_by_id(resume_id, user["id"])
     if not record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Resume not found."
         )
-    
+
     parsed_content = record.get("parsed_content") or {}
     raw_text = parsed_content.get("raw_text")
 
@@ -548,7 +557,7 @@ async def parse_existing_resume(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No raw text could be extracted from resume file in storage bucket."
         )
-        
+
     from fastapi.concurrency import run_in_threadpool
     ai = AIService()
     parsed_res = await run_in_threadpool(ai.parse_resume, raw_text)
@@ -568,21 +577,22 @@ async def parse_existing_resume(
     updated_content = restore_source_evidence(updated_content, raw_text, source_links)
     updated_content["raw_text"] = raw_text
     updated_content["parse_status"] = "parsed"
-    
-    success = repo.update_parsed_content(resume_id, user["id"], updated_content)
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update parsed resume content in database."
+
+    with user_scoped_db_context(user["id"]) as write_conn:
+        success = ResumeRepository(write_conn).update_parsed_content(resume_id, user["id"], updated_content)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update parsed resume content in database."
+            )
+        AnalyticsService(write_conn).emit_event(
+            user_id=user["id"],
+            event_type="RESUME_PARSED",
+            resource_type="resume",
+            resource_id=resume_id,
+            metadata={"source": "on-demand"}
         )
-    AnalyticsService(conn).emit_event(
-        user_id=user["id"],
-        event_type="RESUME_PARSED",
-        resource_type="resume",
-        resource_id=resume_id,
-        metadata={"source": "on-demand"}
-    )
-        
+
     record["parsed_content"] = updated_content
     return record
 

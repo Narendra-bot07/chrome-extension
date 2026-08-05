@@ -11,7 +11,11 @@
       "Bash(node --check validation_script_check.js)",
       "Bash(rm -f validation_script_check.js)",
       "Bash(xargs grep -l \"create_bucket\\\\|storage.create\\\\|original-resumes\\\\|generated-resumes\\\\|template-previews\")",
-      "Bash(python -m py_compile api/v1/applications.py services/storage/supabase_storage.py)"
+      "Bash(python -m py_compile api/v1/applications.py services/storage/supabase_storage.py)",
+      "Bash(python -m py_compile services/job_extraction/agents.py services/job_extraction/browser_pool.py)",
+      "Bash(python -m py_compile main.py services/job_extraction/agents.py services/job_extraction/browser_pool.py api/v1/resume.py)",
+      "Bash(python -m py_compile api/v1/resume.py services/job_extraction/agents.py services/job_extraction/browser_pool.py main.py api/v1/jobs.py)",
+      "Bash(node -e ' *)"
     ]
   }
 }

@@ -4,6 +4,31 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.15.1] - 2026-08-05
+
+### Fixed
+- **Profile photo upload modal appeared pushed off-screen, requiring the user to scroll down to see it**: `ProfilePhotoCropModal.jsx` was rendered as a plain nested element inside `TailorRender.tsx`, which itself sits inside `ResumePreview.tsx`'s CSS `transform: scale(...)` zoom wrapper. A `transform` on any ancestor redefines the containing block for `position: fixed` descendants (a CSS spec quirk) -- so despite using `fixed inset-0`, the modal was being positioned/clipped relative to that scaled, scrollable preview container instead of the actual viewport. Fixed by rendering it through a `createPortal` straight to `document.body`, like every other full-screen modal in the app already does.
+- **Certification year rendered stuck onto the end of the title with no separation** (e.g. "Databricks Certified Data Engineer Associate 2026" as one unbroken line): the underlying data had no separate date/year field -- the year was baked directly into the certification's title/name text, so the existing (already-correct) right-alignment logic in `TailorRender.tsx` had nothing to align, since `date` was empty. Fixed at the shared normalization layer (`frontend/src/utils/resumePresentation.js`'s `normalizeDetailedRecords`): when no structured date exists but the title ends in a bare year, it's now split out into the date field, so every template's existing right-aligned date slot picks it up automatically. Also made the compact/sidebar certifications layout (a second, narrower renderer in `TailorRender.tsx`) right-align its date the same way, for consistency.
+
+### Improved
+- **Cover letter generation loading screen**: replaced the plain spinner + progress bar with a staged checklist ("Analyzing job requirements" -> "Aligning with your resume" -> "Drafting opening & body" -> "Polishing tone & closing"), mirroring the same polished pattern `ChecklistLoader.jsx` already uses for JD extraction, so this feels like the same multi-step, premium process instead of a bare bar sitting still for however long the LLM call takes.
+
+---
+
+## [3.15.0] - 2026-08-05
+
+### Fixed
+Follow-up latency pass on the JD-extraction -> tailoring pipeline (earlier fixes this session: DeepSeek call serialization, PDF-render debounce, `compose_resume_layout` threadpooling, duplicate `/api/compare` dedup -- all confirmed still correct, not touched again). Re-investigated with fresh eyes for what those didn't cover:
+
+- **"Calculating Resume Match" could be blocked behind a full, unnecessary second LLM call while holding a pooled DB connection open the whole time.** `handleCompareActiveResumeToJob` (`frontend/src/context/AppContext.jsx`) calls `POST /api/v1/resumes/{id}/parse` first whenever a resume has no `experience` yet -- and that endpoint (`backend/api/v1/resume.py`) resolved its repository/connection via `Depends(...)`, which FastAPI holds for the entire request, across the `ai.parse_resume` LLM call in between. This is the exact anti-pattern `/api/compare` itself already documents and avoids (`docs/KNOWN_ISSUES.md` ISSUE-005) -- this sibling endpoint just hadn't been fixed to match. Rewrote it to open short-lived connections via `user_scoped_db_context` around just the read and just the write, with nothing held during the LLM call.
+- **JD-page scraping launched a brand-new Chromium process on every single extraction**, unlike the PDF renderer (already fixed earlier this session to reuse a persistent browser). The code's own comment already documented the cost: "a cold browser launch plus navigation typically costs 5-15s." Added `backend/services/job_extraction/browser_pool.py`, a persistent, thread-affine browser+context pool for `browser_agent` mirroring `playwright_pdf.py`'s pattern -- but kept as a fully independent pool (own executor, own browser process) specifically so JD scraping and PDF rendering, confirmed to not contend with each other today, don't start queueing behind one another.
+- **Every manual/pasted-JD extraction wasted one guaranteed-to-fail network round trip before the real request.** `handleExtractJob` called `POST /api/v1/jobs/extract` first -- a route that was never actually registered on the backend (only `/api/v1/jobs/extract-url` exists, a *different* endpoint used by the extension's `handleScanPage` path) -- so it 404'd on literally every call, then fell through to `/api/analyze-job`. Now calls `/api/analyze-job` directly. As a side benefit, it now actually sends the richer context (`url`, `page_title`, `page_company`) the dead endpoint used to receive -- `api_analyze_job` (`backend/app/routers/api.py`) already had logic to use these fields (e.g. filling in the title from `page_title`), it just never received them from the fallback call before.
+
+### Found, not fixed -- flagged for a decision
+- **`POST /api/analyze-job`, the endpoint every manual/pasted-JD extraction actually runs through, has no authentication and no usage/quota enforcement at all** -- confirmed directly: no `Depends(verify_supabase_jwt)`, no `UsageService.require_available` call, unlike every other AI-consuming endpoint in this codebase (including its sibling `/api/v1/jobs/extract-url`, which correctly checks `jd_extraction` quota before running). The frontend already attaches a Bearer token when calling it and has quota-exceeded handling wired up client-side, but the backend never checks it. This was surfaced purely as a byproduct of the latency fix above (removing the dead first call makes this the only path, but it was already the only path in practice, since the dead route always 404'd first) -- not touched, since it's an auth/billing-integrity change outside what was asked for this turn. Left for an explicit go-ahead, same as ISSUE-015 earlier this session.
+
+---
+
 ## [3.14.0] - 2026-08-05
 
 ### Fixed

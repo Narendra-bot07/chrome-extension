@@ -38,9 +38,32 @@ export const normalizeDetailedRecords = (items = [], kind = 'achievement') => {
         url: ''
       };
     }
-    const title = clean(
+    let title = clean(
       item?.title || item?.name || item?.achievement || item?.certification_name
     );
+    let date = cleanOptionalDetail(
+      item?.issue_date ||
+      item?.date ||
+      item?.issued_date ||
+      item?.date_issued ||
+      item?.completion_date ||
+      item?.awarded_date ||
+      item?.year ||
+      item?.metadata?.issue_date ||
+      item?.metadata?.date
+    );
+    // No structured date field extracted, but the title text itself ends in
+    // a bare year (e.g. "Databricks Certified Data Engineer Associate
+    // 2026") -- split it out so templates can render it in the right-aligned
+    // date slot like any other certification, instead of it sitting stuck
+    // at the end of the bold title with no separation at all.
+    if (!date) {
+      const trailingYear = title.match(/^(.*[^\s,])[\s,]+((?:19|20)\d{2})$/);
+      if (trailingYear) {
+        title = trailingYear[1];
+        date = trailingYear[2];
+      }
+    }
     return {
       id: item?.id || `${kind}-${index}-${fingerprint(title).slice(0, 32)}`,
       title,
@@ -57,17 +80,7 @@ export const normalizeDetailedRecords = (items = [], kind = 'achievement') => {
         item?.metadata?.organization ||
         item?.metadata?.issuer
       ),
-      date: cleanOptionalDetail(
-        item?.issue_date ||
-        item?.date ||
-        item?.issued_date ||
-        item?.date_issued ||
-        item?.completion_date ||
-        item?.awarded_date ||
-        item?.year ||
-        item?.metadata?.issue_date ||
-        item?.metadata?.date
-      ),
+      date,
       metric: cleanOptionalDetail(item?.metric),
       url: cleanOptionalDetail(item?.url || item?.link || item?.credential_url),
       links: Array.isArray(item?.links) ? item.links : []

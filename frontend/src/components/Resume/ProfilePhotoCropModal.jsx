@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowLeft, X, ZoomIn, Trash2, Camera, Check, Move } from 'lucide-react';
 
 export default function ProfilePhotoCropModal({
@@ -119,7 +120,16 @@ export default function ProfilePhotoCropModal({
     }
   };
 
-  return (
+  // TailorRender.tsx (the only caller) renders this as a plain nested
+  // element inside ResumePreview.tsx's CSS `transform: scale(...)` zoom
+  // wrapper -- a `transform` on any ancestor redefines the containing block
+  // for `position: fixed` descendants (a CSS spec quirk), so without a
+  // portal this modal was trapped inside that scaled/scrollable preview
+  // container instead of actually covering the viewport, appearing pushed
+  // down and requiring the user to scroll to see it. Portal straight to
+  // document.body to escape that ancestor entirely, like every other
+  // full-screen modal in this app already does.
+  return createPortal(
     <div className="fixed inset-0 z-[99999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200 select-none">
       <div className="w-full max-w-lg bg-zinc-950 border border-zinc-800 rounded-3xl text-white shadow-2xl overflow-hidden flex flex-col">
         {/* Header */}
@@ -267,6 +277,7 @@ export default function ProfilePhotoCropModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

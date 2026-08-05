@@ -76,6 +76,8 @@ async def lifespan(app: FastAPI):
     close_db_pool()
     from app.playwright_pdf import shutdown_playwright
     await asyncio.to_thread(shutdown_playwright)
+    from services.job_extraction.browser_pool import shutdown_browser_pool
+    await asyncio.to_thread(shutdown_browser_pool)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
