@@ -5,6 +5,7 @@ import time
 import hashlib
 import functools
 import concurrent.futures
+import threading
 from io import BytesIO
 from typing import Optional
 from urllib.parse import urlencode
@@ -41,6 +42,40 @@ PDF_RENDERER_URL = (
 _playwright_executor = concurrent.futures.ThreadPoolExecutor(
     max_workers=1, thread_name_prefix="playwright-pdf"
 )
+
+_render_revision_lock = threading.Lock()
+_latest_render_revisions: dict[str, tuple[int, float]] = {}
+
+
+class SupersededPdfRender(Exception):
+    """Raised when a newer layout revision makes this render obsolete."""
+
+
+def register_pdf_render_revision(client_render_id: str, revision: int) -> None:
+    """Record the newest layout revision before it enters the Chromium queue."""
+    if not client_render_id:
+        return
+    now = time.monotonic()
+    with _render_revision_lock:
+        previous = _latest_render_revisions.get(client_render_id)
+        if previous is None or revision > previous[0]:
+            _latest_render_revisions[client_render_id] = (revision, now)
+        if len(_latest_render_revisions) > 2000:
+            cutoff = now - 600
+            stale = [key for key, (_, touched) in _latest_render_revisions.items() if touched < cutoff]
+            for key in stale:
+                _latest_render_revisions.pop(key, None)
+
+
+def _raise_if_superseded(client_render_id: Optional[str], revision: Optional[int]) -> None:
+    if not client_render_id or revision is None:
+        return
+    with _render_revision_lock:
+        latest = _latest_render_revisions.get(client_render_id)
+    if latest is not None and revision < latest[0]:
+        raise SupersededPdfRender(
+            f"PDF render revision {revision} was superseded by revision {latest[0]}."
+        )
 
 
 def _serialize_pdf_render(func):
@@ -206,7 +241,12 @@ def _open_renderer(page, route: str, query: Optional[dict] = None):
     )
 
 @_serialize_pdf_render
-def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Optional[bytes]:
+def generate_pdf_via_playwright(
+    resume_json_str: str,
+    template_name: str,
+    client_render_id: Optional[str] = None,
+    render_revision: Optional[int] = None,
+) -> Optional[bytes]:
     """
     Spins up a headless Chromium browser using Playwright's sync API, 
     navigates to the React app's print route, injects data, and generates a PDF.
@@ -215,6 +255,9 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
     page = None
     lap = _timer()
     try:
+        # Most superseded renders are still waiting in the single Chromium
+        # queue. Drop them before allocating a Page or loading the renderer.
+        _raise_if_superseded(client_render_id, render_revision)
         context = _get_context()
         page = context.new_page()
         # Every validation failure in production so far has zero client-side
@@ -228,6 +271,7 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
         try:
             response = _open_renderer(page, "print", {"template": template_name, "format": "a4"})
             lap("navigation (_open_renderer)")
+            _raise_if_superseded(client_render_id, render_revision)
             if response and response.status == 504:
                 page.wait_for_timeout(1000)
                 page.reload(wait_until="domcontentloaded")
@@ -240,11 +284,18 @@ def generate_pdf_via_playwright(resume_json_str: str, template_name: str) -> Opt
 
             # Wait for React to mount, run the Auto-Fit engine, and finish compression
             try:
-                page.wait_for_selector("#resume-print-ready", timeout=12000)
+                # The readiness marker is intentionally display:none. The
+                # default state='visible' therefore waited the full 12s on
+                # every successful render. Attached means React completed the
+                # measured Auto-Fit plan, which is the actual readiness signal.
+                page.wait_for_selector(
+                    "#resume-print-ready", state="attached", timeout=8000
+                )
             except Exception:
                 # If it times out, the validation script below will catch exactly what is missing
                 pass
             lap("wait_for_selector(#resume-print-ready) [client-side Auto-Fit engine]")
+            _raise_if_superseded(client_render_id, render_revision)
 
             page.wait_for_timeout(200)
             page.evaluate("document.fonts.ready")

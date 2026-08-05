@@ -79,6 +79,12 @@ export default function ResumePreview({
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollWrapperRef = useRef<HTMLDivElement>(null);
   const renderRequestIdRef = useRef(0);
+  const renderClientIdRef = useRef<string>(
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `pdf-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
+  const lastSuccessfulPayloadRef = useRef<string>('');
   const firstPendingChangeAtRef = useRef<number | null>(null);
   const adaptiveComposition = useMemo(
     () => createCompositionPlan(resumeData, selectedTemplate || 'ExecutiveATS'),
@@ -206,6 +212,22 @@ export default function ResumePreview({
   ) => {
     if (!exactFinalResume) return;
     const requestId = ++renderRequestIdRef.current;
+    const requestPayload = {
+      resume: exactFinalResume,
+      original_resume: exactFinalResume,
+      template_name: selectedTemplate || 'ExecutiveATS',
+      page_preference: pref,
+      company_name: companyName,
+      client_render_id: renderClientIdRef.current,
+      render_revision: requestId
+    };
+    const payloadFingerprint = JSON.stringify({
+      ...requestPayload,
+      render_revision: undefined
+    });
+    if (lastSuccessfulPayloadRef.current === payloadFingerprint && pdfBlob && renderHash) {
+      return;
+    }
     try {
       setLoadingPdf(true);
       setStatusMessage(interactiveLayoutMode ? 'Live layout preview' : 'Recomposing resume…');
@@ -214,13 +236,7 @@ export default function ResumePreview({
       const res = await fetch(`${apiUrl}/api/render-unified-pdf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          resume: exactFinalResume,
-          original_resume: exactFinalResume,
-          template_name: selectedTemplate || 'ExecutiveATS',
-          page_preference: pref,
-          company_name: companyName
-        }),
+        body: JSON.stringify(requestPayload),
         signal
       });
 
@@ -252,6 +268,7 @@ export default function ResumePreview({
         setRenderHash(data.render_hash || '');
         setMeasurementHash(data.measurement_hash || '');
         setArtifactFilename(data.filename || '');
+        lastSuccessfulPayloadRef.current = payloadFingerprint;
         const pCount = data.page_count || 1;
         setPageCount(pCount);
 
@@ -288,11 +305,11 @@ export default function ResumePreview({
     // enough to coalesce a realistic edit burst into one render; this was
     // very likely the single largest contributor to the pipeline feeling
     // slow "between steps" during review/editing.
-    const MAX_DEBOUNCE_WAIT_MS = 4000;
+    const MAX_DEBOUNCE_WAIT_MS = 1500;
     const now = Date.now();
     if (firstPendingChangeAtRef.current === null) firstPendingChangeAtRef.current = now;
     const elapsed = now - firstPendingChangeAtRef.current;
-    const baseDelay = interactiveLayoutMode ? 2000 : 0;
+    const baseDelay = interactiveLayoutMode ? 750 : 0;
     // If exactFinalResume (or another dep) keeps getting a new reference
     // faster than the debounce window -- an unstable upstream memo, or a
     // rapid burst of edits -- every effect firing cancels the previous

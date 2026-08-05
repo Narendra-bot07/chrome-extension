@@ -808,19 +808,30 @@ class UnifiedRenderRequest(BaseModel):
     page_preference: str = "auto"
     company_name: Optional[str] = None
     expected_render_hash: Optional[str] = None
+    client_render_id: Optional[str] = None
+    render_revision: Optional[int] = None
 
 @router.post("/render-unified-pdf")
 async def api_render_unified_pdf(request: UnifiedRenderRequest):
     import base64
     import hashlib
     import json
-    from app.playwright_pdf import generate_pdf_via_playwright
+    from app.playwright_pdf import (
+        SupersededPdfRender,
+        generate_pdf_via_playwright,
+        register_pdf_render_revision,
+    )
     from fastapi.concurrency import run_in_threadpool
     from services.resume.canonical_adapter import build_canonical_snapshot, canonical_to_dict
     from services.resume.consistency_validator import validate_template_consistency
     from services.resume.composition_agent import compose_resume_layout
 
     template = request.template_name or "ExecutiveATS"
+    if request.client_render_id and request.render_revision is not None:
+        register_pdf_render_revision(
+            request.client_render_id,
+            request.render_revision,
+        )
     resume_dict = normalize_resume_payload(request.resume)
     canonical_snapshot = build_canonical_snapshot(resume_dict)
 
@@ -858,7 +869,9 @@ async def api_render_unified_pdf(request: UnifiedRenderRequest):
         render_res = await run_in_threadpool(
             generate_pdf_via_playwright,
             json.dumps(renderer_resume),
-            template
+            template,
+            request.client_render_id,
+            request.render_revision,
         )
         if isinstance(render_res, tuple):
             pdf_bytes, plan_meta, render_hash, measurement_hash = render_res
@@ -867,6 +880,11 @@ async def api_render_unified_pdf(request: UnifiedRenderRequest):
             render_hash = hashlib.sha256(pdf_bytes).hexdigest()
             measurement_hash = hashlib.sha256(json.dumps(composition_plan.model_dump(mode="json"), sort_keys=True).encode()).hexdigest()
             plan_meta = composition_plan.model_dump(mode="json")
+    except SupersededPdfRender as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "PDF_RENDER_SUPERSEDED", "message": str(exc)},
+        )
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

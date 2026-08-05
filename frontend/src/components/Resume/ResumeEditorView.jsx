@@ -909,7 +909,7 @@ export default function ResumeEditorView({
           {...provided.draggableProps}
           {...provided.dragHandleProps}
           className={`flex items-center justify-between rounded-xl border bg-white px-3 py-2.5 shadow-sm select-none cursor-grab active:cursor-grabbing
-            transition-[transform,box-shadow,border-color,opacity] duration-150 ease-out will-change-transform
+            transition-[box-shadow,border-color,opacity] duration-150 ease-out will-change-transform
             ${snapshot.isDragging
               ? 'border-teal-400 shadow-xl opacity-95 scale-[1.02]'
               : 'border-slate-200 hover:border-slate-350 hover:shadow'}`}
