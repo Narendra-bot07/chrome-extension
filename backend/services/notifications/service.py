@@ -171,7 +171,16 @@ class EmailDeliveryProcessor:
         processed = 0
         for delivery in deliveries:
             mandatory_security = delivery["category"] == "security" and delivery["priority"] == "critical"
-            if not mandatory_security and not delivery.get("email_enabled"):
+            # p.email_enabled comes from a LEFT JOIN against notification_preferences
+            # and is NULL for any user who never explicitly set a preference row for
+            # this category -- which NotificationService.emit() (the code that queued
+            # this delivery as 'pending' in the first place) treats as *enabled* by
+            # default. Checking `not delivery.get("email_enabled")` directly treated
+            # that same NULL as *disabled*, so every email for a user without a saved
+            # preference silently got marked 'cancelled' here right after being
+            # correctly queued -- must mirror emit()'s NULL-means-enabled default.
+            email_enabled = True if delivery.get("email_enabled") is None else bool(delivery.get("email_enabled"))
+            if not mandatory_security and not email_enabled:
                 with self.conn.cursor() as cur:
                     cur.execute("""update notification_deliveries set status='cancelled',
                         error_code='preference_disabled',updated_at=now() where id=%s""", (delivery["id"],))

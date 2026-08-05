@@ -102,13 +102,11 @@ function NotificationCenter({ token }) {
           {count > 0 && <motion.span key={count} initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.7 }} className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 bg-tf-danger text-white text-[9px] font-black rounded-full flex items-center justify-center border-2 border-tf-surface">{count > 99 ? '99+' : count}</motion.span>}
         </AnimatePresence>
       </button>
-      <AnimatePresence>
-        {open && createPortal(
+      {open && createPortal(
           <motion.div
             ref={portalRef}
             initial={{ opacity: 0, scale: 0.96, y: -6 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: -4 }}
             transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
             style={{ top: menuPos.top, right: menuPos.right }}
             className="bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md fixed w-[380px] max-h-[500px] flex flex-col border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl z-[10000] overflow-hidden"
@@ -172,8 +170,7 @@ function NotificationCenter({ token }) {
             </div>
           </motion.div>,
           document.body
-        )}
-      </AnimatePresence>
+      )}
     </div>
   );
 }
