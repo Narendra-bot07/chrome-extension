@@ -1,4 +1,5 @@
-import React, { Component, useCallback, useEffect, useRef, useState } from 'react';
+import React, { Component, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Bell, CheckCheck, MoreHorizontal, Archive, Clock3, Settings, Shield, Briefcase, Zap, CalendarDays, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -20,6 +21,13 @@ const relative = value => {
 function NotificationCenter({ token }) {
   const navigate = useNavigate();
   const root = useRef(null);
+  // The dropdown is portaled to document.body (see render below) so it can
+  // stack above modals rendered elsewhere in the app (e.g. the Job Tracker
+  // workspace modal, z-[9999]) instead of being trapped under the header's
+  // own z-20 stacking context. It needs its own ref for outside-click
+  // detection since it's no longer a DOM descendant of `root` once portaled.
+  const portalRef = useRef(null);
+  const [menuPos, setMenuPos] = useState({ top: 0, right: 0 });
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState(0);
   const [items, setItems] = useState([]);
@@ -52,8 +60,19 @@ function NotificationCenter({ token }) {
     return () => clearInterval(id);
   }, [token, refreshCount]);
   useEffect(() => { if (open) load(); }, [open, load]);
+  useLayoutEffect(() => {
+    if (open && root.current) {
+      const rect = root.current.getBoundingClientRect();
+      setMenuPos({ top: rect.bottom + 12, right: window.innerWidth - rect.right });
+    }
+  }, [open]);
   useEffect(() => {
-    const close = event => { if (root.current && !root.current.contains(event.target)) setOpen(false); };
+    const close = event => {
+      if (
+        root.current && !root.current.contains(event.target) &&
+        portalRef.current && !portalRef.current.contains(event.target)
+      ) setOpen(false);
+    };
     document.addEventListener('mousedown', close); return () => document.removeEventListener('mousedown', close);
   }, []);
 
@@ -84,13 +103,15 @@ function NotificationCenter({ token }) {
         </AnimatePresence>
       </button>
       <AnimatePresence>
-        {open && (
+        {open && createPortal(
           <motion.div
+            ref={portalRef}
             initial={{ opacity: 0, scale: 0.96, y: -6 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: -4 }}
             transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className="bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md absolute right-0 top-full mt-3 w-[380px] max-h-[500px] flex flex-col border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl z-[80] overflow-hidden"
+            style={{ top: menuPos.top, right: menuPos.right }}
+            className="bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md fixed w-[380px] max-h-[500px] flex flex-col border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl z-[10000] overflow-hidden"
           >
             <div className="p-3.5 flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800">
               <div>
@@ -149,7 +170,8 @@ function NotificationCenter({ token }) {
                 );
               })}
             </div>
-          </motion.div>
+          </motion.div>,
+          document.body
         )}
       </AnimatePresence>
     </div>

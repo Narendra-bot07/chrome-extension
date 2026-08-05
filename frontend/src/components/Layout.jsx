@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { 
@@ -80,10 +81,30 @@ function Layout() {
     () => sessionStorage.getItem('tailr4u.profile-prompt-dismissed') === '1'
   );
   const profileMenuRef = useRef(null);
+  // The dropdown itself is portaled to document.body (see render below) so
+  // it can escape the header's z-20 stacking context -- without that, it
+  // rendered underneath anything with a higher z-index elsewhere in the
+  // app, e.g. the Job Tracker workspace modal (z-[9999]), making it
+  // invisible/unclickable while that modal was open. Since it's no longer
+  // a DOM descendant of profileMenuRef once portaled, outside-click
+  // detection needs its own ref too, or every click inside the dropdown
+  // would register as "outside" and close it immediately.
+  const profileMenuPortalRef = useRef(null);
+  const [profileMenuPos, setProfileMenuPos] = useState({ top: 0, right: 0 });
+
+  useLayoutEffect(() => {
+    if (profileMenuOpen && profileMenuRef.current) {
+      const rect = profileMenuRef.current.getBoundingClientRect();
+      setProfileMenuPos({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
+    }
+  }, [profileMenuOpen]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
-      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target)) {
+      if (
+        profileMenuRef.current && !profileMenuRef.current.contains(e.target) &&
+        profileMenuPortalRef.current && !profileMenuPortalRef.current.contains(e.target)
+      ) {
         setProfileMenuOpen(false);
       }
     };
@@ -443,9 +464,16 @@ function Layout() {
                     <UserAvatar user={user} profile={profile} parsedResume={parsedResume} size={36} />
                   </button>
 
-                  {/* Profile Dropdown Menu */}
-                  {profileMenuOpen && (
-                    <div className="absolute right-0 top-full mt-2 w-56 bg-tf-surface border border-tf-border rounded-xl shadow-xl z-50 py-1.5 overflow-hidden select-none">
+                  {/* Profile Dropdown Menu — portaled to document.body so it can
+                      stack above modals rendered elsewhere in the app (e.g. the
+                      Job Tracker workspace modal); positioned via profileMenuPos,
+                      computed from the anchor button's on-screen position. */}
+                  {profileMenuOpen && createPortal(
+                    <div
+                      ref={profileMenuPortalRef}
+                      style={{ top: profileMenuPos.top, right: profileMenuPos.right }}
+                      className="fixed w-56 bg-tf-surface border border-tf-border rounded-xl shadow-xl z-[10000] py-1.5 overflow-hidden select-none"
+                    >
                       {/* User Info Header */}
                       <div className="px-3.5 py-2.5 border-b border-tf-border">
                         <div className="flex items-center justify-between gap-2">
@@ -527,7 +555,8 @@ function Layout() {
                         <LogOut size={15} />
                         <span>Sign Out</span>
                       </button>
-                    </div>
+                    </div>,
+                    document.body
                   )}
                 </div>
               );

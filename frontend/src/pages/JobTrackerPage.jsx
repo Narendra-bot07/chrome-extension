@@ -176,18 +176,30 @@ function JobTrackerContent() {
   // placeholder text ("Full-time" / "Mid-Senior Level") for every single
   // application, indistinguishable from genuinely extracted JD data.
   const [selectedAppDetails, setSelectedAppDetails] = useState(null);
+
+  // Shared by the effect below (runs once per opened application) AND by
+  // every mutation handler that changes a field this fetch owns (current_stage,
+  // contacts, notes_list, reminders...). Without re-running this after those
+  // mutations, selectedAppFull's merge below spreads the now-stale
+  // selectedAppDetails *over* the freshly-refetched lightweight selectedApp,
+  // so the stale value wins -- e.g. moving a Job Tracker application's stage
+  // updated the header badge (sourced straight from selectedApp) but the
+  // Workflow board (sourced from selectedAppFull) kept showing the old stage.
+  const refreshSelectedAppDetails = React.useCallback(async (appId) => {
+    const token = session?.access_token || localStorage.getItem('access_token');
+    if (!appId || !token) return;
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/applications/${appId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) setSelectedAppDetails(await res.json());
+    } catch {}
+  }, [session?.access_token, apiUrl]);
+
   useEffect(() => {
     setSelectedAppDetails(null);
-    const token = session?.access_token || localStorage.getItem('access_token');
-    if (!selectedAppId || !token) return undefined;
-    let active = true;
-    fetch(`${apiUrl}/api/v1/applications/${selectedAppId}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(res => (res.ok ? res.json() : null))
-      .then(data => { if (active && data) setSelectedAppDetails(data); })
-      .catch(() => {});
-    return () => { active = false; };
+    if (!selectedAppId) return;
+    refreshSelectedAppDetails(selectedAppId);
   }, [selectedAppId, session?.access_token, apiUrl]);
 
   const selectedAppFull = selectedApp
@@ -203,7 +215,7 @@ function JobTrackerContent() {
   const handleUpdateStage = async (appId, newStage, note = null, date = null) => {
     try {
       await updateApplicationStage(appId, newStage, note, date);
-      await fetchApplications();
+      await Promise.all([fetchApplications(), refreshSelectedAppDetails(appId)]);
     } catch (err) {
       console.error("Failed to update application stage:", err);
     }
@@ -224,7 +236,7 @@ function JobTrackerContent() {
       });
 
       if (res.ok) {
-        await fetchApplications();
+        await Promise.all([fetchApplications(), refreshSelectedAppDetails(appId)]);
       }
     } catch (err) {
       console.error("Failed to save recruiter contacts:", err);
@@ -246,7 +258,7 @@ function JobTrackerContent() {
       });
 
       if (res.ok) {
-        await fetchApplications();
+        await Promise.all([fetchApplications(), refreshSelectedAppDetails(appId)]);
       }
     } catch (err) {
       console.error("Failed to save notes:", err);
@@ -268,7 +280,7 @@ function JobTrackerContent() {
       });
 
       if (res.ok) {
-        await fetchApplications();
+        await Promise.all([fetchApplications(), refreshSelectedAppDetails(appId)]);
       }
     } catch (err) {
       console.error("Failed to save reminders:", err);
@@ -292,7 +304,7 @@ function JobTrackerContent() {
       });
 
       if (res.ok) {
-        await fetchApplications();
+        await Promise.all([fetchApplications(), refreshSelectedAppDetails(selectedApp.id)]);
         setShowEditJobModal(false);
       }
     } catch (err) {
