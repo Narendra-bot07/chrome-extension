@@ -13,6 +13,11 @@ export class RootErrorBoundary extends React.Component {
 
   componentDidCatch(error, errorInfo) {
     console.error("[RootErrorBoundary] Intercepted React crash:", error, errorInfo);
+    // Let the headless renderer fail immediately with the actual React error
+    // instead of waiting forever for a readiness marker that cannot appear.
+    if (window.location.hash.split('?')[0] === '#/print') {
+      window.__PDF_RENDER_ERROR__ = error?.message || String(error);
+    }
     // Report crash to Sentry
     Sentry.withScope((scope) => {
       scope.setExtra("errorInfo", errorInfo);

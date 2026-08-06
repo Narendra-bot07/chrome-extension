@@ -10,7 +10,7 @@ from io import BytesIO
 from typing import Optional
 from urllib.parse import urlencode
 from pypdf import PdfReader
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 # main.py binds Uvicorn to Render's dynamically-injected $PORT (hardcoding
 # 8000 there "only works by coincidence of platform configuration" per its
@@ -292,20 +292,24 @@ def generate_pdf_via_playwright(
                 page.reload(wait_until="domcontentloaded")
                 lap("504 reload")
 
-            # Wait for React to mount, run the Auto-Fit engine, and finish compression
-            try:
-                # The readiness marker is intentionally display:none. The
-                # default state='visible' therefore waited the full 12s on
-                # every successful render. Attached means React completed the
-                # measured Auto-Fit plan, which is the actual readiness signal.
-                page.wait_for_selector(
-                    "#resume-print-ready", state="attached", timeout=15000
-                )
-            except Exception as exc:
-                raise TimeoutError(
-                    "PDF renderer did not mount and finish Auto-Fit within 15 seconds."
-                ) from exc
-            lap("wait_for_selector(#resume-print-ready) [client-side Auto-Fit engine]")
+            # Wait without an overall deadline: a resource-constrained host may
+            # legitimately need longer. Polling once per second preserves
+            # latest-layout cancellation and fails immediately on React crashes,
+            # avoiding both arbitrary timeouts and an unbounded blocked queue.
+            while True:
+                _raise_if_superseded(client_render_id, render_revision)
+                try:
+                    page.wait_for_function(
+                        "document.querySelector('#resume-print-ready') || window.__PDF_RENDER_ERROR__",
+                        timeout=1000,
+                    )
+                    break
+                except PlaywrightTimeoutError:
+                    continue
+            render_error = page.evaluate("window.__PDF_RENDER_ERROR__ || null")
+            if render_error:
+                raise RuntimeError(f"PDF renderer React crash: {render_error}")
+            lap("wait for #resume-print-ready [client-side Auto-Fit engine]")
             _raise_if_superseded(client_render_id, render_revision)
 
             page.wait_for_timeout(200)

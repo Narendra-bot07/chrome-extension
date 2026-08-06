@@ -15,7 +15,7 @@ import { TEMPLATE_CONFIGS, TemplateConfig } from '../../templates/templates_conf
 import { createResumeLayoutModel } from '../../utils/resumeLayoutModel';
 import { AcademicATSTemplate } from './templates/AcademicATSTemplate';
 import { JohnsonsATSTemplate } from './templates/JohnsonsATSTemplate';
-import { useApp } from '../../context/AppContext';
+import { useOptionalApp } from '../../context/AppContextCore';
 import { selectProfileImage } from '../../services/profilePolicy';
 
 const sectionLabel = (value: string) => {
@@ -178,7 +178,12 @@ interface TailorRenderProps {
 }
 
 export default function TailorRender({ resume, templateName, sectionOrder, layoutLevel = 5, isExporting = false, disablePhotoModal = false }: TailorRenderProps) {
-  const { user, profile } = useApp();
+  // The headless PDF entry deliberately excludes the heavyweight AppProvider.
+  // Its payload already contains personal_info.photo_url; context values are
+  // only an optional interactive-app fallback.
+  const appContext = useOptionalApp();
+  const user = appContext?.user ?? null;
+  const profile = appContext?.profile ?? null;
   const resolvedTemplateKey = TEMPLATE_CONFIGS[templateName] ? templateName : 'ExecutiveATS';
   const config: TemplateConfig = TEMPLATE_CONFIGS[resolvedTemplateKey];
   const params = getParamsForLevel(layoutLevel);

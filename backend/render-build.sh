@@ -23,6 +23,8 @@ fi
   # names that must exist at frontend compile time. Explicit VITE_* settings
   # still take precedence when configured in the Render dashboard.
   export VITE_SENTRY_DSN="${VITE_SENTRY_DSN:-${SENTRY_FRONTEND_DSN:-}}"
+  export VITE_APP_ENV="${VITE_APP_ENV:-${APP_ENV:-production}}"
+  export VITE_APP_RELEASE="${VITE_APP_RELEASE:-${APP_RELEASE:-unknown}}"
   SENTRY_DSN_CONFIGURED=false
   if [[ -n "$VITE_SENTRY_DSN" ]]; then
     SENTRY_DSN_CONFIGURED=true

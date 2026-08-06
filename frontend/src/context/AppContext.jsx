@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { AppContext, useApp, useOptionalApp } from './AppContextCore';
 import { useNavigate } from 'react-router-dom';
 import { compressResumeData } from '../utils/resumeCompression';
 import { toRenderableResume } from '../utils/renderableResume';
@@ -32,8 +33,6 @@ import {
   stableEditId
 } from '../services/resumeWorkflow';
 import { skillSemanticKey } from '../utils/skillCategorizer';
-
-const AppContext = createContext();
 
 export function AppProvider({ children }) {
   const navigate = useNavigate();
@@ -4050,11 +4049,7 @@ export function AppProvider({ children }) {
   );
 }
 
-export function useApp() {
-  const context = useContext(AppContext);
-  if (!context) throw new Error("useApp must be used inside an AppProvider");
-  return context;
-}
+export { useApp, useOptionalApp };
 
 
 
