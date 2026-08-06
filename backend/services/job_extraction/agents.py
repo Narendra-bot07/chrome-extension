@@ -671,6 +671,47 @@ def jsonld_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     if not selected_is_extension:
         for item in state.extension_evidence.get("jsonld", []) or []:
             _walk_jsonld(item, all_items, jobs)
+
+    # SPA job portals frequently leave the previous posting's JSON-LD in the
+    # document after swapping the visible detail panel. Never allow that stale
+    # structured record to override the user's currently rendered job.
+    if selected_is_extension and jobs:
+        extension = state.extension_evidence or {}
+        visible_job_text = " ".join(filter(None, (
+            str(extension.get("selected_panel_text") or ""),
+            str(extension.get("visible_text") or "")[:30000],
+        )))
+        normalized_visible = re.sub(r"[^a-z0-9]+", " ", visible_job_text.casefold()).strip()
+        title_hint = str(extension.get("job_title_hint") or "").strip()
+        generic_hint = re.fullmatch(
+            r"(?:jobs?|careers?|job search|search jobs|opportunities|open positions|join us|home)",
+            title_hint,
+            re.I,
+        )
+
+        def title_is_current(job: dict[str, Any]) -> bool:
+            candidate = re.sub(
+                r"[^a-z0-9]+", " ", str(job.get("title") or "").casefold()
+            ).strip()
+            if not candidate:
+                return False
+            normalized_hint = re.sub(r"[^a-z0-9]+", " ", title_hint.casefold()).strip()
+            if normalized_hint and not generic_hint:
+                return candidate in normalized_hint or normalized_hint in candidate
+            return candidate in normalized_visible
+
+        current_jobs = [job for job in jobs if title_is_current(job)]
+        if current_jobs:
+            jobs = current_jobs
+        elif normalized_visible:
+            logger.warning(
+                "%s Rejected stale SPA JobPosting JSON-LD request_id=%s titles=%s visible_hint=%s",
+                LOG_PREFIX,
+                state.request_id,
+                [job.get("title") for job in jobs],
+                title_hint,
+            )
+            jobs = []
     extension_job_count = len(jobs) - backend_job_count
     selected_source = state.selected_evidence_source
     logger.info(
@@ -1186,10 +1227,16 @@ def _deterministic_job_from_evidence(state: JDState) -> ExtractedJob:
     if isinstance(location_value, dict):
         address = location_value.get("address") or location_value
         if isinstance(address, dict):
+            def location_part(key: str) -> str:
+                part = address.get(key)
+                if isinstance(part, dict):
+                    part = part.get("name") or part.get("value") or ""
+                return str(part or "").strip()
+
             location_value = ", ".join(
-                str(address.get(key) or "").strip()
+                location_part(key)
                 for key in ("addressLocality", "addressRegion", "addressCountry")
-                if str(address.get(key) or "").strip()
+                if location_part(key)
             )
 
     source_text = _clean_evidence_text(

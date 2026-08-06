@@ -744,7 +744,17 @@ export function AppProvider({ children }) {
       const jobHash = /job|position|opening|vacancy/i.test(parsed.hash)
         ? parsed.hash
         : '';
-      return `${parsed.hostname}:${normalizedPath}${jobHash}`;
+      // A portal whose job-id param isn't in jobIdKeys above (e.g. NVIDIA's
+      // careers SPA uses ?pid=...) previously collapsed to hostname+path
+      // alone here -- since that SPA keeps the same route across postings
+      // and only the query string changes, two completely different jobs
+      // produced the identical identity string, so the dedup guard at this
+      // function's call sites concluded "same job" and kept serving the
+      // stale extraction. Falling back to the full query string (only when
+      // the hash didn't already disambiguate) means any portal's
+      // job-selector param -- known or not -- changes the identity.
+      const queryFallback = parsed.search && !jobHash ? parsed.search : '';
+      return `${parsed.hostname}:${normalizedPath}${jobHash}${queryFallback}`;
     } catch {
       return url || '';
     }

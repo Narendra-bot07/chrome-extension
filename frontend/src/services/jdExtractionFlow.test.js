@@ -100,4 +100,6 @@ test("allows job web URLs and rejects extension-internal URLs", () => {
   assert.equal(isExtractableHttpUrl("http://localhost:3000/job"), true);
   assert.equal(isExtractableHttpUrl("chrome-extension://extension-id/index.html#/tailor"), false);
   assert.equal(isExtractableHttpUrl("chrome://settings"), false);
+  assert.equal(isExtractableHttpUrl("https://chrome.google.com/webstore/devconsole/account"), false);
+  assert.equal(isExtractableHttpUrl("https://chromewebstore.google.com/detail/example/id"), false);
 });

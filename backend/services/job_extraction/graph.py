@@ -53,6 +53,13 @@ def route_after_discovery(state: JDState) -> Literal["browser", "evidence_evalua
     usable job panel or structured JobPosting JSON-LD."""
     evidence = state.extension_evidence or {}
     client_assessment = evidence.get("client_assessment") or {}
+    if (
+        client_assessment.get("readiness") == "NOT_READY"
+        and not bool(client_assessment.get("requiresRecoveryEvaluation"))
+    ):
+        # The user's rendered page is authoritative here. A clearly non-job
+        # browser page must not trigger an unrelated backend navigation.
+        return "evidence_evaluation"
     panel_text = str(evidence.get("selected_panel_text") or "").strip()
     visible_text = str(evidence.get("visible_text") or "").strip()
     strong_panel = bool(panel_text) and len(panel_text) >= 200 and (
@@ -79,7 +86,12 @@ def route_after_evidence(state: JDState) -> Literal["browser", "jsonld", "final_
     # and attempts remain — a single timeout on a slow-loading portal (e.g.
     # amazon.jobs) previously failed the whole extraction on the first try
     # even though max_browser_attempts budgets for a second one.
-    if state.browser_attempts < state.max_browser_attempts and (
+    client_assessment = (state.extension_evidence or {}).get("client_assessment") or {}
+    client_rejected_non_job = (
+        client_assessment.get("readiness") == "NOT_READY"
+        and not bool(client_assessment.get("requiresRecoveryEvaluation"))
+    )
+    if not client_rejected_non_job and state.browser_attempts < state.max_browser_attempts and (
         (state.browser_attempts == 0 and state.extraction_readiness in {"BLOCKED", "NOT_READY"})
     ):
         return "browser"

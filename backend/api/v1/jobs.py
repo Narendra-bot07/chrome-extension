@@ -48,9 +48,35 @@ def _normalize_job_url_for_cache(url: str) -> str:
     return urlunparse(("", host, path, "", urlencode(kept_params), ""))
 
 
-def _job_extraction_cache_key(url: str) -> str:
+def _job_extraction_cache_key(url: str, browser_evidence: Dict[str, Any] | None = None) -> str:
+    """Key by URL *and rendered job identity* for SPA career portals.
+
+    Some portals keep an old/generic URL while replacing the visible job in
+    place. URL-only caching then serves a different posting. The extension's
+    DOM fingerprint makes those rendered states distinct while retaining the
+    URL-only fallback for API clients without browser evidence.
+    """
     normalized = _normalize_job_url_for_cache(url)
-    return f"jd_extraction:{hashlib.sha256(normalized.encode('utf-8')).hexdigest()}"
+    evidence = browser_evidence or {}
+    capture = evidence.get("capture") if isinstance(evidence.get("capture"), dict) else {}
+    rendered_identity = "|".join(filter(None, (
+        str(capture.get("dom_fingerprint") or "").strip(),
+        str(evidence.get("job_title_hint") or "").strip().casefold(),
+    )))
+    identity = f"{normalized}|{rendered_identity}" if rendered_identity else normalized
+    # v2 prevents old URL-only entries from contaminating SPA extractions.
+    return f"jd_extraction:v2:{hashlib.sha256(identity.encode('utf-8')).hexdigest()}"
+
+
+def _is_disallowed_extraction_target(url: str) -> bool:
+    parsed = urlparse((url or "").strip())
+    host = (parsed.hostname or "").lower()
+    path = (parsed.path or "").lower()
+    return bool(
+        (host == "chrome.google.com" and path.startswith("/webstore"))
+        or host == "chromewebstore.google.com"
+        or "/webstore/devconsole" in path
+    )
 
 
 @router.post("/extract-url")
@@ -68,7 +94,22 @@ async def extract_job_from_provided_url(
         request.url,
         bool(request.browser_evidence),
     )
-    cache_key = _job_extraction_cache_key(request.url)
+    if _is_disallowed_extraction_target(request.url):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "request_id": request_id,
+                "page_type": "non_job",
+                "classification_confidence": 1,
+                "extracted_job": None,
+                "error": {
+                    "code": "NON_JOB_PAGE",
+                    "message": "Open a public job-detail page before scanning.",
+                },
+            },
+        )
+    cache_key = _job_extraction_cache_key(request.url, request.browser_evidence)
     try:
         # A pool connection is only needed for these two quick quota checks —
         # not for the Playwright/LLM pipeline in between, which can run

@@ -3,7 +3,18 @@ export const JD_LOG_PREFIX = "[JD-EXTRACTION][FRONTEND]";
 export function isExtractableHttpUrl(value) {
   try {
     const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    const host = url.hostname.toLowerCase();
+    const path = url.pathname.toLowerCase();
+    // Browser/vendor account consoles are authenticated application surfaces,
+    // not public job pages. Sending them to the backend both wastes a browser
+    // timeout and risks capturing unrelated private dashboard text.
+    if (
+      (host === 'chrome.google.com' && path.startsWith('/webstore'))
+      || host === 'chromewebstore.google.com'
+      || path.includes('/webstore/devconsole')
+    ) return false;
+    return true;
   } catch {
     return false;
   }
@@ -95,6 +106,25 @@ export async function captureActiveTabJobEvidence(tabId) {
         }
         return '';
       };
+      const genericTitleNoise = /^(?:jobs?|careers?|job search|search jobs|opportunities|open positions|join us|home)$/i;
+      const visibleHeadingCandidates = Array.from(
+        (selected?.node || document).querySelectorAll('h1,h2,h3,[class*="job-title"],[class*="jobTitle"]')
+      ).map((node, index) => ({
+        text: cleanText(node.innerText, 220),
+        index,
+        inSelectedPanel: Boolean(selected?.node?.contains(node)),
+        headingLevel: /^H[1-3]$/.test(node.tagName) ? Number(node.tagName.slice(1)) : 4
+      })).filter(({ text }) => (
+        text.length >= 3
+        && text.length <= 180
+        && !genericTitleNoise.test(text)
+        && !/^(?:job description|qualifications|requirements|responsibilities|company)$/i.test(text)
+      )).sort((a, b) => (
+        Number(b.inSelectedPanel) - Number(a.inSelectedPanel)
+        || a.headingLevel - b.headingLevel
+        || a.index - b.index
+      ));
+      const selectedHeading = visibleHeadingCandidates[0]?.text || '';
       const jobTitleHint = location.hostname.includes('linkedin.com')
         ? firstText([
             '.job-details-jobs-unified-top-card__job-title',
@@ -102,7 +132,7 @@ export async function captureActiveTabJobEvidence(tabId) {
             '.job-details-jobs-unified-top-card__job-title h1',
             'h1'
           ])
-        : firstText(['h1', '[class*="job-title"]', '[class*="jobTitle"]']);
+        : selectedHeading;
       const companyHint = location.hostname.includes('linkedin.com')
         ? firstText([
             '.job-details-jobs-unified-top-card__company-name',
