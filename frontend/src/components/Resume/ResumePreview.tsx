@@ -227,7 +227,13 @@ export default function ResumePreview({
       render_revision: undefined
     });
     if (lastSuccessfulPayloadRef.current === payloadFingerprint && pdfBlob && renderHash) {
-      return;
+      return {
+        blob: pdfBlob,
+        url: pdfBlobUrl,
+        filename: artifactFilename,
+        renderHash,
+        compositionPlan
+      };
     }
     try {
       setLoadingPdf(true);
@@ -289,6 +295,13 @@ export default function ResumePreview({
         if (onCompositionChange) {
           onCompositionChange(data.composition_plan);
         }
+        return {
+          blob,
+          url: blobUrl,
+          filename: data.filename || '',
+          renderHash: data.render_hash || '',
+          compositionPlan: data.composition_plan
+        };
       }
     } catch (err) {
       if ((err as Error)?.name === 'AbortError') return;
@@ -305,11 +318,26 @@ export default function ResumePreview({
   };
 
   useEffect(() => {
-    const controller = new AbortController();
+    // The interactive editor already renders the exact resume DOM locally.
+    // Re-rendering a server PDF after every drag creates long-lived HTTP/2
+    // requests and a serialized Playwright backlog. Generate the binary once,
+    // on explicit download, after the user has finished editing.
     if (interactiveLayoutMode) {
       setShowLiveLayout(true);
       setStatusMessage('Live layout preview');
+      setLoadingPdf(false);
+      // Any edit invalidates the previously generated binary. The DOM preview
+      // stays instant; the next explicit download renders this latest payload.
+      if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
+      setPdfBlob(null);
+      setPdfBlobUrl(null);
+      setRenderHash('');
+      setMeasurementHash('');
+      setArtifactFilename('');
+      lastSuccessfulPayloadRef.current = '';
+      return;
     }
+    const controller = new AbortController();
     // Each firing launches a full server-side Chromium process (~3.5-5s
     // cold) serialized behind a process-wide render lock shared by every
     // user's PDF renders -- and the AbortController below only cancels the
@@ -368,26 +396,35 @@ export default function ResumePreview({
   const handleDownload = async () => {
     try {
       setIsDownloading(true);
+      const prepared = (pdfBlob && pdfBlobUrl && renderHash)
+        ? {
+            blob: pdfBlob,
+            url: pdfBlobUrl,
+            filename: artifactFilename,
+            renderHash,
+            compositionPlan
+          }
+        : await fetchUnifiedPdfArtifact(pagePreference);
 
-      if (pdfBlob && pdfBlobUrl && renderHash) {
+      if (prepared?.blob && prepared?.url && prepared?.renderHash) {
         const rawName = resumeData?.personal_info?.name || 'User';
         const cleanUser = rawName.replace(/\s+/g, '_');
         const cleanCompany = String(companyName || 'Company').replace(/\s+/g, '_');
-        const filename = artifactFilename || `${cleanUser}_${cleanCompany}_Resume.pdf`;
+        const filename = prepared.filename || `${cleanUser}_${cleanCompany}_Resume.pdf`;
 
         if (onDownloadArtifact) {
           await onDownloadArtifact({
-            blob: pdfBlob,
-            url: pdfBlobUrl,
+            blob: prepared.blob,
+            url: prepared.url,
             filename,
-            renderHash,
-            compositionPlan
+            renderHash: prepared.renderHash,
+            compositionPlan: prepared.compositionPlan
           });
           return;
         }
 
         const a = document.createElement('a');
-        a.href = pdfBlobUrl;
+        a.href = prepared.url;
         a.download = filename;
         document.body.appendChild(a);
         a.click();
@@ -596,10 +633,10 @@ export default function ResumePreview({
           <button
             className={`${btnClass} text-white bg-[#00bda5] hover:bg-[#00a894] px-4 py-2 font-black shadow-sm disabled:opacity-50`}
             onClick={handleDownload}
-            disabled={isDownloading || loadingPdf || !pdfBlob || !renderHash}
+            disabled={isDownloading || loadingPdf || !exactFinalResume}
           >
             <Download size={15} />
-            <span>{isDownloading ? 'Downloading...' : loadingPdf ? 'Optimizing...' : 'Download PDF'}</span>
+            <span>{isDownloading || loadingPdf ? 'Generating PDF...' : 'Download PDF'}</span>
           </button>
 
           <button

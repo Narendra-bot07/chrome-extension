@@ -37,7 +37,7 @@ function NotificationCenter({ token }) {
   const [menu, setMenu] = useState(null);
 
   const refreshCount = useCallback(async () => {
-    if (!token) return;
+    if (!token || (typeof navigator !== 'undefined' && !navigator.onLine) || document.hidden) return;
     try { setCount((await notificationApi.count(token)).count); } catch (_) {}
   }, [token]);
   const load = useCallback(async () => {
@@ -57,7 +57,16 @@ function NotificationCenter({ token }) {
     }
     refreshCount();
     const id = setInterval(refreshCount, 15000);
-    return () => clearInterval(id);
+    const resumePolling = () => {
+      if (!document.hidden && navigator.onLine) refreshCount();
+    };
+    window.addEventListener('online', resumePolling);
+    document.addEventListener('visibilitychange', resumePolling);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('online', resumePolling);
+      document.removeEventListener('visibilitychange', resumePolling);
+    };
   }, [token, refreshCount]);
   useEffect(() => { if (open) load(); }, [open, load]);
   useLayoutEffect(() => {
