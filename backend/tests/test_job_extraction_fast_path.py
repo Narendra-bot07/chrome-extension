@@ -1,6 +1,10 @@
 from unittest.mock import patch
 
-from services.job_extraction.agents import extraction_agent, repair_agent
+from services.job_extraction.agents import (
+    _deterministic_job_from_evidence,
+    extraction_agent,
+    repair_agent,
+)
 from services.job_extraction.schemas import JDState
 
 
@@ -67,3 +71,43 @@ def test_repair_is_deterministic_and_never_starts_second_llm_call(mock_get_llm):
     mock_get_llm.assert_not_called()
     assert len(result["extracted_job"]["suggested_skills"]) == 4
     assert result["repair_attempts"] == 1
+
+
+def test_rendered_spa_sections_survive_llm_timeout_fallback():
+    state = job_state(
+        jobposting_jsonld=[],
+        extension_evidence={
+            "job_title_hint": "Mechanical Data and PLM Specialist",
+            "company_hint": "NVIDIA",
+        },
+        markdown="""# Mechanical Data and PLM Specialist
+
+What You'll Be Doing
+- Own mechanical product lifecycle data.
+- Collaborate with engineering teams.
+
+What We Need To See
+- 6+ years of relevant experience.
+- Experience with PLM systems.
+
+Ways To Stand Out
+- Experience with enterprise data governance.
+""",
+        evidence={"source_text": "Mechanical product lifecycle role at NVIDIA."},
+    )
+
+    job = _deterministic_job_from_evidence(state)
+
+    assert job.job_title == "Mechanical Data and PLM Specialist"
+    assert job.company_name == "NVIDIA"
+    assert job.responsibilities == [
+        "Own mechanical product lifecycle data.",
+        "Collaborate with engineering teams.",
+    ]
+    assert job.requirements == [
+        "6+ years of relevant experience.",
+        "Experience with PLM systems.",
+    ]
+    assert job.preferred_qualifications == [
+        "Experience with enterprise data governance."
+    ]

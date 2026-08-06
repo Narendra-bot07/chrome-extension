@@ -447,6 +447,36 @@ def evidence_evaluation_agent(value: JDState | dict[str, Any]) -> dict[str, Any]
         "description": (soup.find("meta", attrs={"name": "description"}) or {}).get("content"),
     }
     extension_panel_text = extension.get("selected_panel_text")
+    extension_title = str(extension.get("job_title_hint") or "").casefold().strip()
+    normalized_extension_title = re.sub(r"[^a-z0-9]+", " ", extension_title).strip()
+    extension_jsonld = extension.get("jsonld") or []
+    extension_job_titles: list[str] = []
+    for item in extension_jsonld:
+        candidates: list[dict[str, Any]] = []
+        _walk_jsonld(item, candidates, candidates)
+        extension_job_titles.extend(
+            str(candidate.get("title") or "").strip()
+            for candidate in candidates
+            if candidate.get("title")
+        )
+    extension_jsonld_matches_visible = any(
+        candidate_normalized
+        and normalized_extension_title
+        and (
+            candidate_normalized in normalized_extension_title
+            or normalized_extension_title in candidate_normalized
+        )
+        for candidate_normalized in (
+            re.sub(r"[^a-z0-9]+", " ", title.casefold()).strip()
+            for title in extension_job_titles
+        )
+    )
+    stale_extension_jsonld = bool(
+        extension_job_titles
+        and normalized_extension_title
+        and not extension_jsonld_matches_visible
+    )
+    trusted_extension_jsonld = [] if stale_extension_jsonld else extension_jsonld
     extension_panel_selected = bool(
         extension_panel_text
         and (
@@ -466,7 +496,7 @@ def evidence_evaluation_agent(value: JDState | dict[str, Any]) -> dict[str, Any]
             },
         ),
         _make_evidence_source(
-            "extension_jsonld", extension.get("jsonld") or [],
+            "extension_jsonld", trusted_extension_jsonld,
             structured=True, final_url=extension.get("url", ""), source_url=state.url,
             extension_source=True,
         ),
@@ -510,6 +540,8 @@ def evidence_evaluation_agent(value: JDState | dict[str, Any]) -> dict[str, Any]
         source.source_type for source in sources
         if source.restricted or source.access_status in {"failed", "empty", "malformed", "stale"}
     ]
+    if stale_extension_jsonld:
+        excluded.append("extension_jsonld")
     restrictions = {
         source.source_type: {
             "restriction_type": source.restriction_type,
@@ -519,7 +551,6 @@ def evidence_evaluation_agent(value: JDState | dict[str, Any]) -> dict[str, Any]
         for source in sources if source.restricted or source.access_status == "failed"
     }
     conflicts: list[str] = []
-    extension_title = str(extension.get("job_title_hint") or "").casefold().strip()
     backend_title = ""
     for item in backend_jsonld:
         candidates: list[dict[str, Any]] = []
@@ -548,6 +579,10 @@ def evidence_evaluation_agent(value: JDState | dict[str, Any]) -> dict[str, Any]
         selected_job = False
         readiness = "BLOCKED" if restrictions else "NOT_READY"
     warnings = list(conflicts)
+    if stale_extension_jsonld:
+        warnings.append(
+            "Stale JobPosting JSON-LD was ignored in favor of the current rendered job panel."
+        )
     if conflicts and primary and not primary.selected_job_signal:
         readiness = "MANUAL_REVIEW"
         warnings.append("Conflicting job identity could not be resolved safely.")
@@ -1212,6 +1247,71 @@ def _suggested_skills_for(title: str, explicit: list[str]) -> list[str]:
     return suggested
 
 
+_JD_SECTION_HEADINGS = {
+    "responsibilities": (
+        "responsibilities", "key responsibilities", "what you'll do",
+        "what you will do", "what you'll be doing", "what you will be doing",
+        "your role", "the role", "job duties", "duties",
+    ),
+    "requirements": (
+        "requirements", "required qualifications", "minimum qualifications",
+        "basic qualifications", "what we need to see", "what you bring",
+        "what we're looking for", "what we are looking for", "qualifications",
+    ),
+    "preferred": (
+        "preferred qualifications", "ways to stand out", "nice to have",
+        "preferred skills", "desired qualifications",
+    ),
+    "benefits": (
+        "benefits", "what we offer", "perks", "compensation and benefits",
+    ),
+}
+
+
+def _normalize_section_heading(value: str) -> str:
+    normalized = value.casefold().replace("’", "'").replace("‘", "'")
+    return re.sub(r"[^a-z0-9']+", " ", normalized).strip()
+
+
+def _deterministic_section_items(text: str, section: str) -> list[str]:
+    """Extract list-like JD sections from extension-rendered plain text.
+
+    This is deliberately conservative: content is copied from the page, never
+    generated, and section boundaries are recognized by common heading names.
+    """
+    target_headings = set(_JD_SECTION_HEADINGS[section])
+    all_headings = {
+        heading: group
+        for group, headings in _JD_SECTION_HEADINGS.items()
+        for heading in headings
+    }
+    active = False
+    items: list[str] = []
+    seen: set[str] = set()
+    for raw_line in str(text or "").splitlines():
+        line = re.sub(r"\s+", " ", raw_line).strip(" \t\r\n#•*-–—")
+        if not line:
+            continue
+        normalized = _normalize_section_heading(line.rstrip(":"))
+        heading_group = all_headings.get(normalized)
+        if heading_group:
+            if active and heading_group != section:
+                break
+            active = normalized in target_headings
+            continue
+        if not active:
+            continue
+        if len(line) < 3 or len(line) > 700:
+            continue
+        key = line.casefold()
+        if key not in seen:
+            seen.add(key)
+            items.append(line)
+        if len(items) >= 30:
+            break
+    return items
+
+
 def _deterministic_job_from_evidence(state: JDState) -> ExtractedJob:
     """Produce a useful bounded-latency result from already-cleaned page evidence."""
     structured = next(
@@ -1272,11 +1372,21 @@ def _deterministic_job_from_evidence(state: JDState) -> ExtractedJob:
         explicit = [skill for skill in common_skills if re.search(rf"(?<!\w){re.escape(skill)}(?!\w)", source_text, re.I)]
 
     responsibilities = _clean_evidence_items(structured.get("responsibilities"))
+    if not responsibilities:
+        responsibilities = _deterministic_section_items(state.markdown, "responsibilities")
     requirements = _clean_evidence_items([
         structured.get("qualifications"),
         structured.get("educationRequirements"),
         structured.get("experienceRequirements"),
     ])
+    if not requirements:
+        requirements = _deterministic_section_items(state.markdown, "requirements")
+    preferred = _clean_evidence_items(structured.get("preferredQualifications"))
+    if not preferred:
+        preferred = _deterministic_section_items(state.markdown, "preferred")
+    benefits = _clean_evidence_items(structured.get("jobBenefits"))
+    if not benefits:
+        benefits = _deterministic_section_items(state.markdown, "benefits")
     return ExtractedJob(
         job_title=title or None,
         company_name=company,
@@ -1287,12 +1397,10 @@ def _deterministic_job_from_evidence(state: JDState) -> ExtractedJob:
         description=source_text or None,
         responsibilities=responsibilities,
         requirements=requirements,
-        preferred_qualifications=_clean_evidence_items(
-            structured.get("preferredQualifications")
-        ),
+        preferred_qualifications=preferred,
         skills=explicit,
         suggested_skills=_suggested_skills_for(title, explicit),
-        benefits=_clean_evidence_items(structured.get("jobBenefits")),
+        benefits=benefits,
         application_url=structured.get("url") or state.final_url or state.original_url,
         date_posted=structured.get("datePosted"),
         valid_through=structured.get("validThrough"),
