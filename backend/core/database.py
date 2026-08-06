@@ -9,6 +9,40 @@ import time
 _db_pool: ThreadedConnectionPool | None = None
 _pool_lock = threading.Lock()
 
+
+class BlockingThreadedConnectionPool(ThreadedConnectionPool):
+    """Thread-safe psycopg2 pool that queues callers instead of failing fast."""
+
+    def __init__(self, *args, checkout_timeout: float = 30.0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.checkout_timeout = checkout_timeout
+        self._availability = threading.Condition()
+
+    def getconn(self, key=None, timeout=None):
+        wait_timeout = self.checkout_timeout if timeout is None else timeout
+        deadline = time.monotonic() + wait_timeout
+        while True:
+            try:
+                return super().getconn(key)
+            except psycopg2.pool.PoolError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    logger.error(
+                        "[DATABASE_POOL] Checkout timed out after %.1fs (maxconn=%s)",
+                        wait_timeout,
+                        self.maxconn,
+                    )
+                    raise
+                with self._availability:
+                    self._availability.wait(timeout=min(remaining, 0.5))
+
+    def putconn(self, conn, key=None, close=False):
+        try:
+            return super().putconn(conn, key=key, close=close)
+        finally:
+            with self._availability:
+                self._availability.notify()
+
 def get_db_pool() -> ThreadedConnectionPool:
     """
     Get or create the global ThreadedConnectionPool singleton.
@@ -35,10 +69,11 @@ def get_db_pool() -> ThreadedConnectionPool:
                 if "connect_timeout" not in dsn.lower():
                     sep = "&" if "?" in dsn else "?"
                     dsn = f"{dsn}{sep}connect_timeout=10&keepalives=1"
-                _db_pool = ThreadedConnectionPool(
+                _db_pool = BlockingThreadedConnectionPool(
                     minconn=2,
                     maxconn=pool_maxconn,
-                    dsn=dsn
+                    dsn=dsn,
+                    checkout_timeout=30.0,
                 )
                 logger.info("[DATABASE_POOL] Connection pool initialized successfully.")
     return _db_pool
@@ -62,31 +97,13 @@ def get_db_connection() -> Generator[psycopg2.extensions.connection, None, None]
     """
     pool = get_db_pool()
     conn = None
-    start_time = time.time()
-    
-    # Retry checkout for up to 5 seconds if pool is temporarily saturated under high concurrency
-    while conn is None:
-        try:
-            conn = pool.getconn()
-        except psycopg2.pool.PoolError:
-            if time.time() - start_time > 5.0:
-                logger.error("[DATABASE_POOL] Connection checkout timed out after 5.0s!")
-                raise
-            time.sleep(0.05)
+    conn = pool.getconn()
 
     try:
         if conn.closed != 0:
             pool.putconn(conn, close=True)
             conn = None
-            # Checkout a fresh connection with retry
-            start_time = time.time()
-            while conn is None:
-                try:
-                    conn = pool.getconn()
-                except psycopg2.pool.PoolError:
-                    if time.time() - start_time > 5.0:
-                        raise
-                    time.sleep(0.05)
+            conn = pool.getconn()
         yield conn
     except Exception:
         if conn and conn.closed == 0:

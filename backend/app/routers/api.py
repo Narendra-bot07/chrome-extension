@@ -6,6 +6,7 @@ from contextlib import contextmanager
 import io
 import json
 import re
+import psycopg2
 from typing import Optional, List, Any, Dict
 
 from app.schemas import (
@@ -595,6 +596,16 @@ async def api_compare(
     except HTTPException:
         raise
     except Exception as e:
+        if isinstance(e, psycopg2.pool.PoolError):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "SERVICE_BUSY",
+                    "message": "Tailr4U is handling several requests right now. Please try again in a moment.",
+                    "retry_after_seconds": 2,
+                },
+                headers={"Retry-After": "2"},
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to generate tailoring patch: {str(e)}"
@@ -1437,4 +1448,23 @@ async def api_submit_support_ticket(
         "message": f"Support ticket {ticket_id} created successfully.",
         "created_at": datetime.datetime.utcnow().isoformat()
     }
+
+
+class SkillsCategorizeRequest(BaseModel):
+    skills: List[str] = []
+
+@router.post("/v1/skills/categorize")
+async def api_categorize_skills(request: SkillsCategorizeRequest):
+    """Classifies skill names into a fixed taxonomy via AI, for skills the
+    frontend's fast local rule-based categorizer (skillCategorizer.js)
+    couldn't confidently place. No auth required -- skill names carry no PII,
+    and this is also called from the headless Playwright PDF-render route,
+    which never carries a user session. Results are cached server-side per
+    skill (see skill_categorizer_service), so this is a cache hit for any
+    skill this endpoint has classified before, across every user."""
+    from app.services.skill_categorizer_service import classify_skills
+    from starlette.concurrency import run_in_threadpool
+    skills = [s for s in (request.skills or [])][:60]
+    categories = await run_in_threadpool(classify_skills, skills)
+    return {"categories": categories}
 

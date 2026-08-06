@@ -252,6 +252,10 @@ function Layout() {
     apiError.toLowerCase().includes("recruitment-related") ||
     apiError.toLowerCase().includes("not appear to contain")
   );
+  const isTransientServiceError = apiError && /connection pool|pool exhausted|too many clients|service[_ ]busy|handling several requests/i.test(String(apiError));
+  const displayedApiError = isTransientServiceError
+    ? 'Tailr4U is handling several requests right now. Your work is safe—please try again in a moment.'
+    : apiError;
 
   const getBreadcrumbTitle = () => {
     switch (currentPath) {
@@ -626,10 +630,10 @@ function Layout() {
 
         {/* ERROR TOAST */}
         {apiError && !isInvalidJdError && (
-          <div className="px-6 py-3 bg-tf-danger/10 border-b border-tf-danger/20 text-tf-danger text-xs flex justify-between items-center gap-2 shrink-0">
+          <div className={`px-6 py-3 border-b text-xs flex justify-between items-center gap-2 shrink-0 ${isTransientServiceError ? 'bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-300' : 'bg-tf-danger/10 border-tf-danger/20 text-tf-danger'}`}>
             <div className="flex items-center gap-2">
               <AlertCircle size={14} className="shrink-0" />
-              <p className="font-medium">{apiError}</p>
+              <p className="font-medium">{displayedApiError}</p>
             </div>
             <button onClick={() => setApiError(null)} className="text-tf-danger hover:opacity-75">
               <X size={14} />

@@ -15,6 +15,18 @@ export default function PrintLayout() {
   const [compressionLevel, setCompressionLevel] = useState(0);
   const [fitLayoutLevel, setFitLayoutLevel] = useState(6);
   const [fittingComplete, setFittingComplete] = useState(false);
+  // TailorRender (rendered inside TemplateComponent below) asynchronously
+  // upgrades any "Other"-bucketed skills via AI after mount. Setting a
+  // window flag alone wouldn't re-trigger the Auto-Fit effect below (React
+  // doesn't observe plain window property writes), so TailorRender also
+  // dispatches this event once it settles; bumping this tick re-runs the
+  // effect so measurement/capture never happens on a stale skills grouping.
+  const [skillsSettledTick, setSkillsSettledTick] = useState(0);
+  useEffect(() => {
+    const handleSkillsSettled = () => setSkillsSettledTick(tick => tick + 1);
+    window.addEventListener('skillsCategorizationSettled', handleSkillsSettled);
+    return () => window.removeEventListener('skillsCategorizationSettled', handleSkillsSettled);
+  }, []);
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
   const templateName = searchParams.get('template') || 'ProfessionalATS';
@@ -34,6 +46,7 @@ export default function PrintLayout() {
         ));
         blockedExpansionLevelRef.current = null;
         setFittingComplete(false);
+        (window as any).__SKILLS_CATEGORIZATION_SETTLED__ = false;
       }
     };
     
@@ -67,6 +80,11 @@ export default function PrintLayout() {
   // 2. Intelligent Auto-Fit Engine
   useEffect(() => {
     if (!activeResumeData || !containerRef.current || fittingComplete) return;
+    // Wait for TailorRender's AI skills-categorization pass to settle so a
+    // PDF export never captures skills still grouped under the rule-based
+    // "Other" bucket while the live preview would later show them
+    // AI-recategorized -- see the skillsCategorizationSettled listener above.
+    if (!(window as any).__SKILLS_CATEGORIZATION_SETTLED__) return;
 
     // Give DOM a tiny moment to render the current compression level
     const timer = setTimeout(async () => {
@@ -189,7 +207,7 @@ export default function PrintLayout() {
     }, 25); // Coalesce DOM updates without adding 150ms per fit iteration.
 
     return () => clearTimeout(timer);
-  }, [activeResumeData, compressionLevel, fitLayoutLevel, fittingComplete, originalResumeData]);
+  }, [activeResumeData, compressionLevel, fitLayoutLevel, fittingComplete, originalResumeData, skillsSettledTick]);
 
   if (!activeResumeData) {
     return <div style={{ padding: '20px' }}>Waiting for data injection...</div>;

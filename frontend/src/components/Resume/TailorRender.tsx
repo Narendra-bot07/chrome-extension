@@ -4,7 +4,8 @@ import {
   ExternalLink, Award, Briefcase, GraduationCap, Star, BookOpen, Camera, User, Upload, Trash2 
 } from 'lucide-react';
 import ProfilePhotoCropModal from './ProfilePhotoCropModal';
-import { categorizeSkills } from '../../utils/skillCategorizer';
+import { categorizeSkills, categorizeSkillsWithAI } from '../../utils/skillCategorizer';
+import { getApiUrl } from '../../config/apiConfig';
 import {
   canonicalContactIdentity,
   normalizeDetailedRecords,
@@ -323,7 +324,45 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
 
   const rawSkills = skills || resume.parsed_data?.skills || resume.technical_skills || [];
   const rawSkillCategories = skills_categories || resume.parsed_data?.skills_categories || resume.technical_skills_by_category || {};
-  const categorizedSkills = categorizeSkills(rawSkills, rawSkillCategories);
+  const localCategorizedSkills = categorizeSkills(rawSkills, rawSkillCategories);
+  // The rule-based categorizer above is instant but bounded by its regex
+  // list -- a skill it has never seen (a brand-new tool/framework name)
+  // lands in "Other" no matter how comprehensive the rules get. Upgrade just
+  // that leftover bucket via AI, keyed by its own contents (a stable string,
+  // unlike rawSkills/rawSkillCategories which are new references most
+  // renders) so this only re-fires when the actual set of unclassified
+  // skills changes, not on every unrelated render.
+  const otherSkillsKey = (localCategorizedSkills.Other || []).join('|');
+  const [aiCategorizedSkills, setAiCategorizedSkills] = useState<Record<string, string[]> | null>(null);
+  const [aiUpgradeKey, setAiUpgradeKey] = useState<string | null>(null);
+  useEffect(() => {
+    // The print pipeline's readiness gate (see PrintLayout.tsx's Auto-Fit
+    // effect) waits on this flag + event before capturing the PDF, so the
+    // export never freezes a frame with stale "Other"-bucketed skills that
+    // the live preview would later show AI-recategorized.
+    const markSettled = () => {
+      if (typeof window === 'undefined') return;
+      (window as any).__SKILLS_CATEGORIZATION_SETTLED__ = true;
+      window.dispatchEvent(new Event('skillsCategorizationSettled'));
+    };
+    if (!otherSkillsKey) {
+      markSettled();
+      return undefined;
+    }
+    let cancelled = false;
+    categorizeSkillsWithAI(rawSkills, rawSkillCategories, getApiUrl())
+      .then(upgraded => {
+        if (cancelled) return;
+        setAiCategorizedSkills(upgraded);
+        setAiUpgradeKey(otherSkillsKey);
+      })
+      .finally(() => {
+        if (!cancelled) markSettled();
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otherSkillsKey]);
+  const categorizedSkills = (aiUpgradeKey === otherSkillsKey && aiCategorizedSkills) ? aiCategorizedSkills : localCategorizedSkills;
   const rawCandidateName = personal_info?.name || personal_info?.full_name || personal_info?.candidate_name || resume?.name || resume?.full_name || (personal_info?.email ? personal_info.email.split('@')[0].replace(/[0-9_.]+/g, ' ') : '');
   const candidateName = normalizePersonName(rawCandidateName);
   const achievementRecords = normalizeDetailedRecords(achievements, 'achievement');

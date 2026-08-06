@@ -2585,13 +2585,20 @@ export function AppProvider({ children }) {
       return compareRequestCacheRef.current.promise;
     }
     const promise = (async () => {
-      const { url, options } = buildRequest();
-      const res = await fetch(url, options);
-      if (res.ok) {
-        return { ok: true, status: res.status, body: await res.json() };
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const { url, options } = buildRequest();
+        const res = await fetch(url, options);
+        if (res.ok) {
+          return { ok: true, status: res.status, body: await res.json() };
+        }
+        const body = await res.json().catch(() => ({}));
+        if (res.status === 503 && attempt === 0) {
+          await new Promise(resolve => setTimeout(resolve, 1200));
+          continue;
+        }
+        return { ok: false, status: res.status, body };
       }
-      const body = await res.json().catch(() => ({}));
-      return { ok: false, status: res.status, body };
+      return { ok: false, status: 503, body: { detail: { code: 'SERVICE_BUSY' } } };
     })();
     compareRequestCacheRef.current = { key, promise };
     promise.finally(() => {
