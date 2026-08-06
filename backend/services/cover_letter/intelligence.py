@@ -238,6 +238,11 @@ def edit_cover_letter(
     after = apply_paragraph_patches(
         request.generated_cover_letter.content, plan.patches
     )
+    if not plan.patches or after.strip() == request.generated_cover_letter.content.strip():
+        raise ValueError(
+            "AI could not produce a safe, meaningful change for that instruction. "
+            "Please identify the paragraph or wording you want changed."
+        )
     support = json.dumps({
         "context": request.context.model_dump(mode="json"),
         "strategy": request.strategy.model_dump(mode="json"),

@@ -256,6 +256,10 @@ class ExperienceEditorOutput(BaseModel):
 class ProjectEditorOutput(BaseModel):
     projects: List[ProjectItem]
 
+class BulletEditorOutput(BaseModel):
+    """Structure-preserving output for editing existing resume bullets."""
+    updated_bullets: List[str]
+
 class CoverLetterResult(BaseModel):
     cover_letter: str
     recipient_name: Optional[str] = "Hiring Manager"

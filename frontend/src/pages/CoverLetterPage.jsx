@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { CoverLetterRender } from '../components/CoverLetterRender';
 import { useNavigate } from 'react-router-dom';
@@ -25,7 +25,9 @@ import {
   X,
   Eye,
   StopCircle,
-  ArrowLeft
+  ArrowLeft,
+  ShieldCheck,
+  Target
 } from 'lucide-react';
 
 // Helper to format paragraphs cleanly
@@ -345,61 +347,58 @@ export default function CoverLetterPage() {
     };
   }, [selectedTemplate, pageSize, font, fontSize, themeColor, paragraphSpacing, lineHeight, pageMargin, density]);
 
-  // Background PDF Parity Generator
-  useEffect(() => {
-    if (!generatedCoverLetter || !coverLetterContext) return undefined;
-    const controller = new AbortController();
-    const timer = setTimeout(async () => {
-      setIsRenderingPdf(true);
-      setRenderError('');
-      try {
-        const response = await fetch(`${apiUrl}/api/cover-letter/render`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({
-            context: coverLetterContext,
-            generated_cover_letter: generatedCoverLetter,
-            settings: currentSettings
-          })
-        });
-        if (!response.ok) {
-          const failure = await response.json().catch(() => ({}));
-          const detail = failure.detail;
-          throw new Error(
-            typeof detail === 'string'
-              ? detail
-              : detail?.message
-                ? `${detail.message}${
-                    detail.issues?.length
-                      ? ` Issues: ${detail.issues.join(', ')}`
-                      : ''
-                  }`
-                : 'Cover letter PDF generation failed.'
-          );
-        }
-        const blob = await response.blob();
-        const nextUrl = URL.createObjectURL(blob);
-        setPdfBlobUrl(previous => {
-          if (previous) URL.revokeObjectURL(previous);
-          return nextUrl;
-        });
-        setPdfBlob(blob);
-      } catch (error) {
-        if (error.name !== 'AbortError') {
-          console.warn("Cover letter PDF render error:", error);
-          setRenderError(error.message);
-        }
-      } finally {
-        if (!controller.signal.aborted) setIsRenderingPdf(false);
+  const renderSelectedCoverLetter = useCallback(async () => {
+    if (!generatedCoverLetter || !coverLetterContext || isRenderingPdf) return null;
+    setIsRenderingPdf(true);
+    setRenderError('');
+    try {
+      const response = await fetch(`${apiUrl}/api/cover-letter/render`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          context: coverLetterContext,
+          generated_cover_letter: generatedCoverLetter,
+          // currentSettings contains exactly the template selected in the UI.
+          settings: currentSettings
+        })
+      });
+      if (!response.ok) {
+        const failure = await response.json().catch(() => ({}));
+        const detail = failure.detail;
+        throw new Error(
+          typeof detail === 'string'
+            ? detail
+            : detail?.message
+              ? `${detail.message}${detail.issues?.length ? ` Issues: ${detail.issues.join(', ')}` : ''}`
+              : 'Cover letter PDF generation failed.'
+        );
       }
-    }, 350);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      setPdfBlobUrl(previous => {
+        if (previous) URL.revokeObjectURL(previous);
+        return url;
+      });
+      setPdfBlob(blob);
+      return { blob, url };
+    } catch (error) {
+      console.warn("Cover letter PDF render error:", error);
+      setRenderError(error.message);
+      return null;
+    } finally {
+      setIsRenderingPdf(false);
+    }
+  }, [apiUrl, coverLetterContext, generatedCoverLetter, currentSettings, isRenderingPdf]);
 
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [apiUrl, coverLetterContext, generatedCoverLetter, currentSettings]);
+  // Template/content changes update the React preview instantly and only
+  // invalidate an older binary. Playwright runs once on explicit download.
+  useEffect(() => {
+    setPdfBlob(null);
+    setPdfBlobUrl(previous => {
+      if (previous) URL.revokeObjectURL(previous);
+      return '';
+    });
+  }, [generatedCoverLetter, currentSettings]);
 
   // Clean up blob URL on unmount
   useEffect(() => () => {
@@ -420,13 +419,16 @@ export default function CoverLetterPage() {
   }, []);
 
   // Download exact verified PDF
-  const handleDownloadExactPDF = () => {
-    if (!pdfBlobUrl && !pdfBlob) return;
+  const handleDownloadExactPDF = async () => {
+    const artifact = (pdfBlobUrl && pdfBlob)
+      ? { blob: pdfBlob, url: pdfBlobUrl }
+      : await renderSelectedCoverLetter();
+    if (!artifact?.url) return;
     const candidate = coverLetterContext?.candidate?.name || 'Candidate';
     const company = coverLetterContext?.job?.company || 'Company';
     const clean = value => String(value).replace(/[^A-Za-z0-9_-]+/g, '_');
     const link = document.createElement('a');
-    link.href = pdfBlobUrl;
+    link.href = artifact.url;
     link.download = `${clean(candidate)}_${clean(company)}_Cover_Letter.pdf`;
     document.body.appendChild(link);
     link.click();
@@ -443,106 +445,122 @@ export default function CoverLetterPage() {
   };
 
   // Quick prompt chip selection
-  const handleApplyQuickPrompt = (promptText) => {
-    setEditPrompt(promptText);
+  const handleApplyQuickPrompt = async (promptText) => {
+    if (coverLetterEditStreaming) return;
+    setEditPrompt('');
+    await handleEditCoverLetter(promptText);
   };
 
   // If letter not yet generated, render drafting pipeline step
   if (!generatedCoverLetter) {
+    const progress = Math.max(5, Math.min(100, loadingProgress || 35));
+    const stages = [
+      { label: "Analyze role", detail: "Reading requirements", threshold: 25 },
+      { label: "Match experience", detail: "Selecting evidence", threshold: 50 },
+      { label: "Draft letter", detail: "Writing tailored prose", threshold: 80 },
+      { label: "Final polish", detail: "Checking tone and clarity", threshold: 95 },
+    ];
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-8 bg-white text-zinc-900 rounded-2xl border border-zinc-200 shadow-sm max-w-3xl mx-auto my-8 text-center space-y-6">
-        <div className="w-14 h-14 rounded-2xl bg-[#00bda5]/10 border border-[#00bda5]/30 flex items-center justify-center text-[#00bda5] mx-auto">
-          <FileText size={28} />
-        </div>
-        <div className="space-y-2">
-          <h2 className="text-xl font-extrabold text-zinc-900 tracking-tight">Generate Tailored Cover Letter</h2>
-          <p className="text-xs text-zinc-500 max-w-md mx-auto leading-relaxed">
-            Craft a personalized, high-converting cover letter aligned to your active resume and the target position.
-          </p>
-        </div>
+      <div className="flex-1 min-h-[calc(100vh-96px)] p-4 sm:p-7 lg:p-10 flex items-center justify-center text-zinc-900 dark:text-zinc-100">
+        <div className="relative w-full max-w-5xl overflow-hidden rounded-[28px] border border-white/70 dark:border-zinc-800 bg-white/90 dark:bg-zinc-950/90 shadow-[0_24px_80px_rgba(30,64,175,0.12)] dark:shadow-2xl backdrop-blur-xl">
+          <div className="absolute -top-28 -left-20 h-64 w-64 rounded-full bg-[#00bda5]/10 blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-32 -right-24 h-72 w-72 rounded-full bg-blue-500/10 blur-3xl pointer-events-none" />
 
-        {loading ? (
-          <div className="w-full max-w-md bg-zinc-50 border border-zinc-200 p-6 rounded-2xl space-y-5 text-center shadow-xs">
-            <div className="flex items-center justify-center gap-2 text-xs font-black text-zinc-800 uppercase tracking-wider">
-              <Loader2 size={16} className="animate-spin text-[#00bda5]" />
-              <span>{loadingMessage || "Drafting custom cover letter prose..."}</span>
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="w-full h-1.5 bg-zinc-200 rounded-full overflow-hidden relative shadow-inner">
-                <motion.div
-                  className="h-full bg-[#00bda5] rounded-full shadow-[0_0_10px_#00bda5]"
-                  initial={{ width: "5%" }}
-                  animate={{ width: `${Math.max(5, Math.min(100, loadingProgress || 35))}%` }}
-                  transition={{ duration: 0.4, ease: "easeOut" }}
-                />
+          <div className="relative grid lg:grid-cols-[0.86fr_1.14fr]">
+            <section className="p-7 sm:p-9 lg:p-11 flex flex-col justify-center border-b lg:border-b-0 lg:border-r border-zinc-200/70 dark:border-zinc-800">
+              <div className="inline-flex w-fit items-center gap-2 rounded-full border border-[#00bda5]/20 bg-[#00bda5]/8 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-[#009e8a] dark:text-[#35d6c1]">
+                <Wand2 size={13} /> AI writing studio
               </div>
-              <span className="text-[10px] text-zinc-400 font-bold block">{loadingProgress || 35}% complete</span>
-            </div>
+              <div className="mt-6 flex h-14 w-14 items-center justify-center rounded-2xl border border-[#00bda5]/25 bg-[#00bda5]/10 text-[#00bda5] shadow-sm">
+                <FileText size={27} />
+              </div>
+              <h2 className="mt-6 text-2xl sm:text-3xl font-black tracking-tight text-zinc-950 dark:text-white leading-tight">
+                Your tailored cover letter is taking shape.
+              </h2>
+              <p className="mt-3 max-w-md text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+                We’re connecting your strongest resume evidence to the target role while keeping every claim accurate and specific.
+              </p>
+              <div className="mt-7 grid grid-cols-2 gap-3 text-left">
+                <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/70 p-3.5">
+                  <ShieldCheck size={16} className="text-[#00bda5]" />
+                  <p className="mt-2 text-[11px] font-extrabold text-zinc-800 dark:text-zinc-200">Evidence grounded</p>
+                  <p className="mt-0.5 text-[9px] leading-4 text-zinc-500">Based on your resume</p>
+                </div>
+                <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/70 p-3.5">
+                  <Target size={16} className="text-blue-500" />
+                  <p className="mt-2 text-[11px] font-extrabold text-zinc-800 dark:text-zinc-200">Role aligned</p>
+                  <p className="mt-0.5 text-[9px] leading-4 text-zinc-500">Focused on this JD</p>
+                </div>
+              </div>
+            </section>
 
-            {/* Staged checklist, mirroring ChecklistLoader.jsx's pattern
-                (already used for JD extraction) so cover letter generation
-                feels like the same polished, multi-step process instead of a
-                bare spinner + bar sitting still for however long the LLM
-                call takes. */}
-            <div className="w-full bg-white border border-zinc-200/70 rounded-2xl p-4 flex flex-col gap-3 text-left">
-              {[
-                { label: "Analyzing job requirements", progressThreshold: 25 },
-                { label: "Aligning with your resume", progressThreshold: 50 },
-                { label: "Drafting opening & body", progressThreshold: 80 },
-                { label: "Polishing tone & closing", progressThreshold: 95 },
-              ].map((item, idx, arr) => {
-                const progress = loadingProgress || 35;
-                const isDone = progress >= item.progressThreshold;
-                const isPending = !isDone && (idx === 0 || progress >= (arr[idx - 1]?.progressThreshold || 0));
-                return (
-                  <div key={item.label} className="flex items-center gap-3 py-0.5 min-h-[22px]">
-                    <div
-                      className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-all ${
-                        isDone
-                          ? 'bg-[#00bda5] text-white shadow-xs'
-                          : isPending
-                          ? 'bg-[#00bda5]/15 border-2 border-[#00bda5] text-[#00bda5]'
-                          : 'bg-zinc-100 border border-zinc-300/80 text-transparent'
-                      }`}
-                    >
-                      {isDone ? (
-                        <Check size={12} strokeWidth={3} />
-                      ) : isPending ? (
-                        <Loader2 size={11} className="animate-spin text-[#00bda5]" />
-                      ) : null}
+            <section className="p-7 sm:p-9 lg:p-11 flex items-center">
+              <div className="w-full">
+                {loading ? (
+                  <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/70 p-5 sm:p-6 shadow-sm">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.16em] text-[#00a894]">Generating draft</p>
+                        <h3 className="mt-1.5 text-base font-extrabold text-zinc-900 dark:text-white">
+                          {loadingMessage || "Writing your cover letter"}
+                        </h3>
+                        <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">You can safely leave this screen by cancelling below.</p>
+                      </div>
+                      <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800">
+                        <Loader2 size={46} strokeWidth={1.4} className="absolute animate-spin text-[#00bda5]/35" />
+                        <span className="text-[11px] font-black text-zinc-800 dark:text-zinc-100">{progress}%</span>
+                      </div>
                     </div>
-                    <span
-                      className={`text-xs transition-colors ${
-                        isDone
-                          ? 'text-zinc-800 font-semibold'
-                          : isPending
-                          ? 'text-[#00bda5] font-extrabold'
-                          : 'text-zinc-400 font-medium'
-                      }`}
-                    >
-                      {item.label}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
 
-            <button
-              onClick={cancelCoverLetterGeneration}
-              className="px-4 py-2 rounded-xl border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 text-[10px] font-black uppercase tracking-wider cursor-pointer"
-            >
-              Cancel Generation
-            </button>
+                    <div className="mt-5 h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                      <motion.div
+                        className="h-full rounded-full bg-gradient-to-r from-blue-500 to-[#00bda5]"
+                        initial={{ width: "5%" }}
+                        animate={{ width: `${progress}%` }}
+                        transition={{ duration: 0.45, ease: "easeOut" }}
+                      />
+                    </div>
+
+                    <div className="mt-6 grid sm:grid-cols-2 gap-2.5 text-left">
+                      {stages.map((item, idx) => {
+                        const isDone = progress >= item.threshold;
+                        const isCurrent = !isDone && (idx === 0 || progress >= stages[idx - 1].threshold);
+                        return (
+                          <div key={item.label} className={`flex items-center gap-3 rounded-2xl border p-3 transition-all ${
+                            isCurrent
+                              ? 'border-[#00bda5]/40 bg-[#00bda5]/8 dark:bg-[#00bda5]/10'
+                              : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/70'
+                          }`}>
+                            <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
+                              isDone ? 'bg-[#00bda5] text-white' : isCurrent ? 'bg-[#00bda5]/15 text-[#00bda5]' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400'
+                            }`}>
+                              {isDone ? <Check size={15} strokeWidth={3} /> : isCurrent ? <Loader2 size={15} className="animate-spin" /> : <span className="text-[10px] font-black">{idx + 1}</span>}
+                            </div>
+                            <div className="min-w-0">
+                              <p className={`text-[11px] font-extrabold ${isCurrent ? 'text-[#009e8a] dark:text-[#35d6c1]' : 'text-zinc-800 dark:text-zinc-200'}`}>{item.label}</p>
+                              <p className="mt-0.5 truncate text-[9px] text-zinc-400">{item.detail}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <button onClick={cancelCoverLetterGeneration} className="mt-5 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-4 py-2.5 text-[10px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 hover:border-rose-300 hover:text-rose-600 transition cursor-pointer">
+                      Cancel generation
+                    </button>
+                  </div>
+                ) : (
+                  <div className="text-center lg:text-left">
+                    <p className="text-sm leading-6 text-zinc-500 dark:text-zinc-400">Ready to create a concise, role-specific first draft from your finalized resume.</p>
+                    <button onClick={() => handleGenerateFirstCoverLetterDraft && handleGenerateFirstCoverLetterDraft()} className="mt-6 w-full sm:w-auto px-7 py-3.5 bg-[#00bda5] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl hover:bg-[#00a894] transition cursor-pointer shadow-lg shadow-[#00bda5]/20 inline-flex items-center justify-center gap-2">
+                      <Wand2 size={15} /> Draft cover letter
+                    </button>
+                  </div>
+                )}
+              </div>
+            </section>
           </div>
-        ) : (
-          <button
-            onClick={() => handleGenerateFirstCoverLetterDraft && handleGenerateFirstCoverLetterDraft()}
-            className="px-6 py-3 bg-[#00bda5] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl hover:bg-[#00a894] transition cursor-pointer shadow-lg shadow-[#00bda5]/20"
-          >
-            Draft Cover Letter Now
-          </button>
-        )}
+        </div>
       </div>
     );
   }
@@ -810,6 +828,7 @@ export default function CoverLetterPage() {
                 <button
                   key={chip}
                   onClick={() => handleApplyQuickPrompt(chip)}
+                  disabled={coverLetterEditStreaming}
                   className="px-2.5 py-1 bg-white hover:bg-indigo-100 border border-indigo-200 text-indigo-800 text-[10px] font-bold rounded-full transition cursor-pointer shadow-2xs"
                 >
                   + {chip}

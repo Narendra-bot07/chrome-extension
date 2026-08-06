@@ -253,7 +253,34 @@ function ResumeReviewView({
     setIsRefineStreaming(true);
 
     const originalSuggestions = [...suggestions];
-    const targetSuggestions = suggestions.filter(s => s.sectionType === sectionType);
+    let targetSuggestions = suggestions.filter(s => s.sectionType === sectionType);
+
+    // Work from the visible resume even when the initial tailoring pass did not
+    // create suggestions for this selected section.
+    if (['experience', 'projects'].includes(sectionType)) {
+      targetSuggestions = (parsedResume?.[sectionType] || []).flatMap((record, itemIndex) =>
+        (Array.isArray(record?.description) ? record.description : []).map((bullet, bulletIndex) =>
+          suggestions.find(item =>
+            item.sectionType === sectionType
+            && item.itemIndex === itemIndex
+            && item.bulletIndex === bulletIndex
+          ) || {
+            id: `${sectionType}:ai:${itemIndex}:${bulletIndex}`,
+            change_id: `${sectionType}:ai:${itemIndex}:${bulletIndex}`,
+            category: labelFor(sectionType),
+            status: 'pending',
+            original: String(bullet || ''),
+            suggested: String(bullet || ''),
+            reason: 'User-requested AI refinement.',
+            atsImpact: 0,
+            confidence: 'High',
+            sectionType,
+            itemIndex,
+            bulletIndex
+          }
+        )
+      );
+    }
 
     let sectionData;
     if (sectionType === 'summary') {
@@ -353,6 +380,28 @@ function ResumeReviewView({
         }
         return s;
       });
+      // Newly created targets are not present in `suggestions`; append them so
+      // experience/project edits appear immediately with Accept/Reject controls.
+      if (['experience', 'projects'].includes(sectionType)) {
+        const knownIds = new Set(finalSuggestions.map(item => item.id));
+        const lines = accumulatedText.split('\n')
+          .map(line => line.trim())
+          .filter(Boolean)
+          .map(line => line.replace(/^[-\u2022*]\s*/, ''));
+        if (lines.length !== targetSuggestions.length) {
+          throw new Error('AI changed the number of bullets, so the edit was rejected to protect resume structure.');
+        }
+        targetSuggestions.forEach((target, index) => {
+          if (!knownIds.has(target.id)) {
+            finalSuggestions.push({
+              ...target,
+              suggested: lines[index],
+              status: 'pending',
+              isTyping: false
+            });
+          }
+        });
+      }
       setReviewSuggestions(finalSuggestions);
 
       setActiveEditSection(null);

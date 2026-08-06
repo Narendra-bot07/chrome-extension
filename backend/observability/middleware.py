@@ -1,5 +1,6 @@
 import time
 import uuid
+import sentry_sdk
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -7,6 +8,36 @@ from core.exceptions import BaseAppException
 from observability.context import set_request_id, set_trace_id, clear_context, get_request_id, get_trace_id
 from observability.logging import logger
 from observability.metrics import record_http_request
+
+
+def _capture_non_2xx(method: str, route_path: str, status_code: int, duration_ms: float, request_id: str, exception: str = None) -> None:
+    """Sends every non-2xx response (3xx/4xx/5xx) to Sentry as its own event,
+    not just unhandled Python exceptions -- a route that returns a 404/400/422
+    Response directly (no exception raised) never reaches Sentry's automatic
+    exception capture at all, and the previous before_send filter dropped
+    every <500 status outright. A no-op if Sentry was never initialized
+    (missing DSN / OBSERVABILITY_ENABLED=false) -- capture_message is safe to
+    call unconditionally per the SDK's own documented behavior."""
+    if 200 <= status_code < 300:
+        return
+    level = "info" if status_code < 400 else ("warning" if status_code < 500 else "error")
+    try:
+        with sentry_sdk.push_scope() as scope:
+            scope.set_tag("http.method", method)
+            scope.set_tag("http.route", route_path)
+            scope.set_tag("http.status_code", status_code)
+            scope.set_context("http_response", {
+                "method": method,
+                "route": route_path,
+                "status_code": status_code,
+                "duration_ms": duration_ms,
+                "request_id": request_id,
+                "exception": exception
+            })
+            scope.fingerprint = ["non-2xx-response", method, route_path, str(status_code)]
+            sentry_sdk.capture_message(f"HTTP {status_code} {method} {route_path}", level=level)
+    except Exception as err:
+        logger.warning(f"[SENTRY_NON_2XX] Failed to capture non-2xx response: {err}")
 
 
 class CorrelationAndLoggingMiddleware(BaseHTTPMiddleware):
@@ -69,6 +100,7 @@ class CorrelationAndLoggingMiddleware(BaseHTTPMiddleware):
 
             # Add Request ID correlation response header
             response.headers["X-Request-ID"] = request_id
+            _capture_non_2xx(request.method, route_path, response.status_code, duration_ms, request_id)
             return response
 
         except BaseAppException as exc:
@@ -98,6 +130,7 @@ class CorrelationAndLoggingMiddleware(BaseHTTPMiddleware):
                 content={"status": "error", "detail": exc.message}
             )
             resp.headers["X-Request-ID"] = request_id
+            _capture_non_2xx(request.method, route_path, exc.status_code, duration_ms, request_id, exception=exc.message)
             return resp
 
         except Exception as unhandled:

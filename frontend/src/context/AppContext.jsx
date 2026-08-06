@@ -3696,6 +3696,7 @@ export function AppProvider({ children }) {
   const handleEditCoverLetter = async (userPrompt) => {
     const prompt = String(userPrompt || '').trim();
     if (!prompt || !generatedCoverLetter || coverLetterEditStreaming) return false;
+    const previousLetter = generatedCoverLetter;
     setCoverLetterEditStreaming(true);
     try {
       const headers = { "Content-Type": "application/json" };
@@ -3730,16 +3731,21 @@ export function AppProvider({ children }) {
           if (event.type === 'metadata') metadata = event.data;
           if (event.type === 'content_delta') {
             streamedContent += event.data;
-            setGeneratedCoverLetter(previous => ({
-              ...previous,
-              content: streamedContent
-            }));
           }
         }
         if (done) break;
       }
+      if (buffer.trim()) {
+        const event = JSON.parse(buffer);
+        if (event.type === 'metadata') metadata = event.data;
+        if (event.type === 'content_delta') streamedContent += event.data;
+      }
       if (!metadata) throw new Error("The edit stream returned no metadata.");
-      const previousLetter = generatedCoverLetter;
+      streamedContent = streamedContent.trim();
+      if (!streamedContent) throw new Error("AI returned an empty cover-letter edit.");
+      if (streamedContent === String(previousLetter.content || '').trim()) {
+        throw new Error("AI could not make a safe change for that instruction. Try a more specific edit.");
+      }
       const nextLetter = {
         ...previousLetter,
         content: streamedContent,
@@ -3752,9 +3758,12 @@ export function AppProvider({ children }) {
         after_letter: nextLetter,
         undone: false
       }]);
+      showToast("Your AI edit is ready. You can undo it at any time.", "success", "Edit Applied");
       return true;
     } catch (error) {
       console.error(error);
+      // Never leave a partially streamed document in the editor.
+      setGeneratedCoverLetter(previousLetter);
       showToast("Error editing cover letter: " + error.message, "error", "Edit Error");
       return false;
     } finally {

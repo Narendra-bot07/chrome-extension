@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from app.ai_service import refine_section_with_ai, is_prompt_out_of_scope
-from app.schemas import JobAnalysis, ScopeCheckResult
+from app.schemas import BulletEditorOutput, JobAnalysis, ScopeCheckResult
 
 def sample_job():
     return JobAnalysis(**{
@@ -53,3 +53,25 @@ def test_refine_section_raises_value_error_out_of_scope(mock_get_provider):
             job=job
         )
     assert "dedicated to improving" in str(exc.value).lower()
+
+
+@patch("app.ai_service.llm_cache.execute_with_cache")
+@patch("app.ai_service.is_prompt_out_of_scope", return_value=None)
+def test_experience_edit_uses_structure_preserving_bullet_schema(mock_scope, mock_cache):
+    mock_cache.return_value = BulletEditorOutput(updated_bullets=[
+        "Built reliable Python services.",
+        "Reduced deployment time by 30%.",
+    ])
+
+    result = refine_section_with_ai(
+        section_type="experience",
+        section_data=["Built Python services.", "Reduced deployment time by 30%."],
+        prompt="Use stronger action verbs.",
+        job=sample_job(),
+    )
+
+    assert result.splitlines() == [
+        "Built reliable Python services.",
+        "Reduced deployment time by 30%.",
+    ]
+    assert mock_cache.call_args.kwargs["expected_schema"] is BulletEditorOutput

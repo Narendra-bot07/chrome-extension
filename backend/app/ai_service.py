@@ -22,7 +22,8 @@ from app.schemas import (
     SummaryEditorOutput,
     SkillsEditorOutput,
     ExperienceEditorOutput,
-    ProjectEditorOutput
+    ProjectEditorOutput,
+    BulletEditorOutput
 )
 
 from app.llm.deepseek_provider import (
@@ -543,10 +544,8 @@ def refine_section_with_ai(
     schema_cls = SummaryEditorOutput
     if stype == "skills":
         schema_cls = SkillsEditorOutput
-    elif stype == "experience":
-        schema_cls = ExperienceEditorOutput
-    elif stype == "projects":
-        schema_cls = ProjectEditorOutput
+    elif stype in ("experience", "projects"):
+        schema_cls = BulletEditorOutput
 
     payload_dict = {
         "section_type": stype,
@@ -557,8 +556,18 @@ def refine_section_with_ai(
 
     def _call_llm():
         provider = get_provider(api_key)
-        sys_msg = f"Refine resume section {section_type} for job {job.title} based on instruction: {prompt}"
-        user_prompt = f"Section content: {json.dumps(section_data, default=str)}"
+        sys_msg = (
+            f"You are editing the {section_type} section of a resume for the {job.title} role. "
+            f"Follow this instruction exactly: {prompt}. Preserve all factual claims, employers, "
+            "projects, technologies, dates, and metrics unless the supplied content supports them. "
+            "For bullet sections, return exactly one updated_bullets item for every supplied item, "
+            "in the same order. Improve wording rather than inventing evidence."
+        )
+        user_prompt = (
+            "Current section content (this is the authoritative text to edit):\n"
+            f"{json.dumps(section_data, default=str, ensure_ascii=False)}\n\n"
+            f"Target job skills: {json.dumps(job.required_skills, default=str, ensure_ascii=False)}"
+        )
         return provider.invoke_structured(prompt=user_prompt, schema_cls=schema_cls, system_instruction=sys_msg, temperature=0.2)
 
     res = llm_cache.execute_with_cache(
@@ -574,7 +583,14 @@ def refine_section_with_ai(
     elif stype == "skills":
         return ", ".join(res.skills)
     elif stype in ("experience", "projects"):
-        return "\n".join(res.updated_bullets)
+        bullets = [str(item).strip() for item in res.updated_bullets if str(item).strip()]
+        expected_count = len(section_data) if isinstance(section_data, list) else 0
+        if expected_count and len(bullets) != expected_count:
+            raise ValueError(
+                f"AI returned {len(bullets)} bullets; expected {expected_count}. "
+                "The edit was rejected to preserve resume structure."
+            )
+        return "\n".join(bullets)
 
     return getattr(res, "summary", str(res))
 

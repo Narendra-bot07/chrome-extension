@@ -1382,52 +1382,6 @@ async def api_download_cover_letter_pdf(request: CoverLetterResult):
             detail=f"Failed to generate cover letter PDF: {str(e)}"
         )
 
-class RefineSectionRequest(BaseModel):
-    section_type: str
-    section_data: Any
-    prompt: str
-    job: JobAnalysis
-    resume_id: Optional[str] = None
-    intelligence_model: Optional[str] = None
-    working_resume: Optional[Dict[str, Any]] = None
-    source_resume: Optional[Dict[str, Any]] = None
-    resume_match_analysis: Optional[Dict[str, Any]] = None
-    ats_analysis: Optional[Dict[str, Any]] = None
-    accepted_changes: Optional[List[Dict[str, Any]]] = None
-    pending_changes: Optional[List[Dict[str, Any]]] = None
-
-@router.post("/refine-section")
-async def api_refine_section(
-    request: RefineSectionRequest,
-):
-    try:
-        refined_content = refine_section_with_ai(
-            section_type=request.section_type,
-            section_data=request.section_data,
-            prompt=request.prompt,
-            job=request.job,
-            api_key=None,
-            resume_id=request.resume_id,
-            intelligence_model=request.intelligence_model,
-            working_resume=request.working_resume,
-            source_resume=request.source_resume,
-            resume_match_analysis=request.resume_match_analysis,
-            ats_analysis=request.ats_analysis,
-            accepted_changes=request.accepted_changes,
-            pending_changes=request.pending_changes
-        )
-        return {"refined": refined_content}
-    except ValueError as ve:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(ve)
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Refinement failed: {str(e)}"
-        )
-
 class SupportTicketRequest(BaseModel):
     subject: str
     priority: str = "NORMAL"

@@ -8,23 +8,10 @@ from observability.config import (
 from observability.logging import redact_sensitive_data, logger
 
 def before_send(event: Dict[str, Any], hint: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Sanitize errors before sending to Sentry Cloud."""
-    if "exc_info" in hint:
-        exc_type, exc_value, tb = hint["exc_info"]
-        
-        # 1. Filter out expected HTTP exceptions (any status code < 500)
-        from fastapi import HTTPException as FastAPIHTTPException
-        from starlette.exceptions import HTTPException as StarletteHTTPException
-        from core.exceptions import BaseAppException
-
-        if isinstance(exc_value, (FastAPIHTTPException, StarletteHTTPException)):
-            if exc_value.status_code < 500:
-                return None
-        elif isinstance(exc_value, BaseAppException):
-            if exc_value.status_code < 500:
-                return None
-
-    # 2. Recursively redact passwords, tokens, API keys, document details
+    """Sanitize errors before sending to Sentry Cloud. Every non-2xx status
+    (3xx/4xx/5xx) is wanted in Sentry now, not just 500s -- see
+    observability/middleware.py's _capture_non_2xx, which is the primary
+    path for this. This no longer filters by status code; it only redacts."""
     try:
         sanitized_event = redact_sensitive_data(event)
         return sanitized_event
