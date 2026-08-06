@@ -127,11 +127,16 @@ const persistAiCacheToStorage = () => {
  * AI-classify whatever landed in "Other". Never throws -- on any network or
  * server failure, the rule-based "Other" bucket is left exactly as-is, so
  * this is a pure enhancement with no correctness risk if it fails.
+ *
+ * apiUrl === '' is a deliberate, valid value meaning "same-origin relative
+ * request" (used by the headless PDF renderer, which is served by the same
+ * backend process it needs to call -- see TailorRender.tsx). Only
+ * null/undefined means "no API available, skip entirely".
  */
 export async function categorizeSkillsWithAI(skillsArray, skillsCategories, apiUrl) {
   const localResult = categorizeSkills(skillsArray, skillsCategories);
   const uncertain = localResult.Other || [];
-  if (!uncertain.length || !apiUrl) return localResult;
+  if (!uncertain.length || apiUrl == null) return localResult;
 
   loadAiCacheFromStorage();
 

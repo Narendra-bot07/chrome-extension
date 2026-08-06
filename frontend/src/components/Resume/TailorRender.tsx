@@ -350,7 +350,19 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
       return undefined;
     }
     let cancelled = false;
-    categorizeSkillsWithAI(rawSkills, rawSkillCategories, getApiUrl())
+    // window.__INJECTED_RESUME_DATA__ is only ever set by the headless
+    // Playwright PDF renderer (see playwright_pdf.py's add_init_script).
+    // That page is served by the SAME backend process at
+    // http://127.0.0.1:$PORT/__pdf_renderer/... -- calling the public HTTPS
+    // API origin from there is a needless cross-origin request that was
+    // never added to CORS (confirmed in production: preflight OPTIONS
+    // rejected, every AI classification silently failed). A relative path
+    // resolves against that same origin instead, which the backend already
+    // serves both the static renderer and /api/... from -- genuinely
+    // same-origin, no CORS involved at all.
+    const isPdfRendererContext = typeof window !== 'undefined' && Boolean((window as any).__INJECTED_RESUME_DATA__);
+    const skillsApiUrl = isPdfRendererContext ? '' : getApiUrl();
+    categorizeSkillsWithAI(rawSkills, rawSkillCategories, skillsApiUrl)
       .then(upgraded => {
         if (cancelled) return;
         setAiCategorizedSkills(upgraded);
