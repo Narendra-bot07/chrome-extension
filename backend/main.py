@@ -75,6 +75,22 @@ async def lifespan(app: FastAPI):
     start_notification_ticker()
     start_remote_write_ticker()
     await asyncio.to_thread(_ensure_playwright_chromium)
+    # Pay Chromium's 8-9 second cold-start cost during service startup rather
+    # than during the first user's PDF download. The helper routes creation to
+    # Playwright's dedicated owning thread.
+    from app.playwright_pdf import warmup_playwright
+    try:
+        await asyncio.to_thread(warmup_playwright)
+        _startup_logger.info("[PLAYWRIGHT] Chromium warmup completed.")
+    except Exception as exc:
+        # Keep the API available if the platform has a transient Chromium
+        # startup problem; the first render can still use the lazy retry path.
+        _startup_logger.exception("[PLAYWRIGHT] Chromium warmup failed: %s", exc)
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_exception(exc)
+        except Exception:
+            pass
     yield
     close_db_pool()
     from app.playwright_pdf import shutdown_playwright

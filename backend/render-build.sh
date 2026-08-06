@@ -18,6 +18,18 @@ fi
 # Vercel or on a sibling directory surviving Render's packaging.
 (
   cd "$FRONTEND_DIR"
+  # frontend/.env is correctly git-ignored and therefore is unavailable on
+  # Render. Bridge the backend service's Sentry variables into the VITE_*
+  # names that must exist at frontend compile time. Explicit VITE_* settings
+  # still take precedence when configured in the Render dashboard.
+  export VITE_SENTRY_DSN="${VITE_SENTRY_DSN:-${SENTRY_FRONTEND_DSN:-}}"
+  SENTRY_DSN_CONFIGURED=false
+  if [[ -n "$VITE_SENTRY_DSN" ]]; then
+    SENTRY_DSN_CONFIGURED=true
+    export VITE_SENTRY_ENABLED="${VITE_SENTRY_ENABLED:-true}"
+    export VITE_ENABLE_ERROR_MONITORING="${VITE_ENABLE_ERROR_MONITORING:-true}"
+  fi
+  echo "PDF renderer Sentry build config: enabled=${VITE_SENTRY_ENABLED:-false}, dsn_configured=$SENTRY_DSN_CONFIGURED"
   npm ci
   npm run build -- --outDir "$RENDERER_DIST_DIR"
 )

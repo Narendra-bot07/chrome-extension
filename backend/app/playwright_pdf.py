@@ -170,6 +170,11 @@ def shutdown_playwright():
     _playwright_executor.shutdown(wait=False)
 
 
+def warmup_playwright():
+    """Start Chromium on its owning executor before the first user render."""
+    _playwright_executor.submit(_get_context).result(timeout=60)
+
+
 def _timer():
     """Returns a lap(label) function that prints elapsed time since the
     previous lap and since the timer started. Resume renders were observed
@@ -269,6 +274,16 @@ def generate_pdf_via_playwright(
         page.on("pageerror", lambda exc: print(f"[PDF-BROWSER-ERROR] {exc}"))
         lap("get_context + new_page")
         try:
+            # Install the payload before navigation. PrintLayout already reads
+            # this global when it mounts, so PDF generation no longer depends
+            # on winning a race with its lazy-route event listener.
+            page.add_init_script(
+                script=(
+                    "window.__INJECTED_RESUME_DATA__ = JSON.parse("
+                    + json.dumps(resume_json_str)
+                    + ");"
+                )
+            )
             response = _open_renderer(page, "print", {"template": template_name, "format": "a4"})
             lap("navigation (_open_renderer)")
             _raise_if_superseded(client_render_id, render_revision)
@@ -277,27 +292,6 @@ def generate_pdf_via_playwright(
                 page.reload(wait_until="domcontentloaded")
                 lap("504 reload")
 
-            # /print is lazy-loaded. Do not dispatch until PrintLayout has
-            # mounted its event listener; otherwise a busy instance can lose
-            # the event and validation observes only the loading shell.
-            # 5000ms was too tight for a cold render on Render's shared CPU --
-            # mounting this lazy route means fetching+parsing+executing several
-            # JS chunks (react-vendor, router, TailorRender, icons, ...) before
-            # this flag can even be set, which is strictly more work than the
-            # Auto-Fit wait below that already gets 8000ms for a cheaper,
-            # already-mounted computation. Confirmed via production traceback:
-            # Page.wait_for_function timing out on this exact line.
-            page.wait_for_function(
-                "window.__PDF_RENDERER_ACCEPTING_DATA__ === true",
-                timeout=15000,
-            )
-            lap("wait for PrintLayout ingestion handshake")
-
-            # Inject JSON safely
-            page.evaluate("data => { window.__INJECTED_RESUME_DATA__ = JSON.parse(data); }", resume_json_str)
-            page.evaluate("window.dispatchEvent(new Event('resumeDataReady'));")
-            lap("inject resume data + dispatch event")
-
             # Wait for React to mount, run the Auto-Fit engine, and finish compression
             try:
                 # The readiness marker is intentionally display:none. The
@@ -305,11 +299,11 @@ def generate_pdf_via_playwright(
                 # every successful render. Attached means React completed the
                 # measured Auto-Fit plan, which is the actual readiness signal.
                 page.wait_for_selector(
-                    "#resume-print-ready", state="attached", timeout=8000
+                    "#resume-print-ready", state="attached", timeout=15000
                 )
             except Exception as exc:
                 raise TimeoutError(
-                    "PDF renderer did not finish Auto-Fit within 8 seconds."
+                    "PDF renderer did not mount and finish Auto-Fit within 15 seconds."
                 ) from exc
             lap("wait_for_selector(#resume-print-ready) [client-side Auto-Fit engine]")
             _raise_if_superseded(client_render_id, render_revision)
