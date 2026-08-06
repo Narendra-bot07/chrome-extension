@@ -65,7 +65,7 @@ const TEMPLATES_LIST = [
 ];
 
 // Miniature Live A4 preview renderer card
-const MiniPreview = ({ resume, templateId }) => {
+const MiniPreview = React.memo(function MiniPreview({ resume, templateId }) {
   return (
     <div className="resume-document-light w-full h-[260px] bg-white border-b border-zinc-200 overflow-hidden relative shadow-inner flex justify-center items-start group-hover:shadow-md transition-all">
       <div 
@@ -77,7 +77,10 @@ const MiniPreview = ({ resume, templateId }) => {
       <div className="absolute inset-0 bg-black/[0.02] group-hover:bg-black/[0.04] transition-colors pointer-events-none" />
     </div>
   );
-};
+}, (previous, next) => (
+  previous.templateId === next.templateId
+  && previous.resumeFingerprint === next.resumeFingerprint
+));
 
 export default function TemplateSelectionView({ onBack }) {
   const navigate = useNavigate();
@@ -105,7 +108,10 @@ export default function TemplateSelectionView({ onBack }) {
   const userATSScore = baseATS !== undefined && baseATS !== null ? Number(baseATS) : null;
 
   const activeResume = React.useMemo(
-    () => workflowResume || tailoredResume || parsedResume,
+    // The finalized/categorized tailored document is canonical at this
+    // boundary. Preferring the older workflow snapshot caused the gallery to
+    // cycle through multiple resume objects and compile every template again.
+    () => tailoredResume || workflowResume || parsedResume,
     [workflowResume, tailoredResume, parsedResume]
   );
 
@@ -124,6 +130,10 @@ export default function TemplateSelectionView({ onBack }) {
         )
     };
   }, [activeResume]);
+  const displayResumeFingerprint = React.useMemo(
+    () => JSON.stringify(displayResume || {}),
+    [displayResume]
+  );
 
   const activeTemplate = selectedTemplate || 'ExecutiveATS';
 
@@ -249,7 +259,11 @@ export default function TemplateSelectionView({ onBack }) {
                 }`}
               >
                 {/* Live Miniature Page Preview wrapper */}
-                <MiniPreview resume={displayResume} templateId={t.id} />
+                <MiniPreview
+                  resume={displayResume}
+                  resumeFingerprint={displayResumeFingerprint}
+                  templateId={t.id}
+                />
 
                 {/* Details Footer */}
                 <div className="p-5 flex-1 flex flex-col justify-between space-y-4">

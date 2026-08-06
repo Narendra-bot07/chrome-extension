@@ -190,7 +190,9 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
   const params = getParamsForLevel(layoutLevel);
 
   useEffect(() => {
-    console.log(`--- TailorRender Engine: Compiling ${resolvedTemplateKey} at layout level ${layoutLevel} ---`);
+    if (import.meta.env.DEV) {
+      console.debug(`--- TailorRender Engine: Compiling ${resolvedTemplateKey} at layout level ${layoutLevel} ---`);
+    }
   }, [layoutLevel, resolvedTemplateKey]);
 
   const targetResume = React.useMemo(() => {
