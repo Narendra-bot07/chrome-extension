@@ -36,12 +36,15 @@ export default function JobExtractPage() {
   // started the same job request.
   useEffect(() => {
     if (initialScanStartedRef.current) return;
-    if (loadingAuth || loadingResume || loadingPreferences) return;
+    // Scanning does not depend on job preferences. AppContext will proceed
+    // immediately when a cached active resume exists, while slower profile,
+    // preference and resume-list refreshes finish in parallel.
+    if (loadingAuth) return;
     initialScanStartedRef.current = true;
     if (isExtension) handleScanPage(true);
     else if (!jobText) handleScanPage();
   }, [
-    isExtension, jobText, loadingAuth, loadingResume, loadingPreferences,
+    isExtension, jobText, loadingAuth,
     handleScanPage
   ]);
 
@@ -100,7 +103,7 @@ export default function JobExtractPage() {
     });
   }, [jobAnalysis, parsedResume]);
 
-  if (loadingAuth || loadingResume || loadingPreferences) {
+  if (loadingAuth || loadingResume) {
     return <SessionRestorationLoader label="Restoring Session & User Profile..." />;
   }
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import TemplateSelectionView from '../components/TemplateSelectionView';
 import { useNavigate } from 'react-router-dom';
@@ -18,7 +18,6 @@ function TemplatesPage() {
   } = useApp();
 
   const activeResume = tailoredResume || workflowResume || parsedResume;
-  const [preparingSkills, setPreparingSkills] = useState(true);
   const preparedKeyRef = useRef('');
   const skillPreparationKey = useMemo(() => JSON.stringify({
     id: activeResume?.id || activeResume?.resume_id || '',
@@ -27,16 +26,15 @@ function TemplatesPage() {
 
   useEffect(() => {
     if (!resumeWorkflowHydrated || !activeResume) {
-      setPreparingSkills(false);
       return;
     }
     if (preparedKeyRef.current === skillPreparationKey) {
-      setPreparingSkills(false);
       return;
     }
     preparedKeyRef.current = skillPreparationKey;
     let cancelled = false;
-    setPreparingSkills(true);
+    // Categorization is presentation enrichment. It must never block template
+    // selection or expose an implementation-detail loading screen to users.
     categorizeSkillsWithAI(
       activeResume.skills || activeResume.technical_skills || [],
       activeResume.skills_categories || activeResume.technical_skills_by_category || {},
@@ -54,18 +52,20 @@ function TemplatesPage() {
       updateFinalizedWorkflowResume(categorizedResume).catch(error => {
         console.warn('[SKILLS] Categories applied locally; workflow persistence deferred.', error);
       });
-    }).finally(() => {
-      if (!cancelled) setPreparingSkills(false);
+    }).catch(error => {
+      // Templates already have a deterministic local categorizer, so a
+      // background enrichment failure must stay non-blocking.
+      console.warn('[SKILLS] Background category enrichment skipped.', error);
     });
     return () => { cancelled = true; };
   }, [resumeWorkflowHydrated, skillPreparationKey, apiUrl]);
 
-  if (loading || !resumeWorkflowHydrated || preparingSkills) {
+  if (loading || !resumeWorkflowHydrated) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-zinc-950 text-zinc-300 gap-3">
         <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#00bda5]/20 border-t-[#00bda5]" />
         <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">
-          {preparingSkills ? 'Organizing Skills Before Templates...' : 'Loading Templates Studio...'}
+          Loading Templates Studio...
         </span>
       </div>
     );

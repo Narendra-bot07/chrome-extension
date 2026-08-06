@@ -1331,12 +1331,6 @@ export function AppProvider({ children }) {
     }
     if (isInitial) setLoadingResume(true);
     try {
-      // Run local disk/S3 orphan reconciliation in background without blocking resume list response
-      fetch(`${apiUrl}/api/v1/resumes/reconcile-local`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      }).catch(() => {});
-
       const res = await fetch(`${apiUrl}/api/v1/resumes/`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -1347,6 +1341,46 @@ export function AppProvider({ children }) {
         try {
           localStorage.setItem('resumes_list', JSON.stringify(resumes));
         } catch (e) {}
+
+        // Reconciliation is an exceptional orphan-recovery operation, not a
+        // normal resume-list dependency. It scans/hashes files and may parse
+        // text on the backend, so launching it during every startup competed
+        // with JD extraction for worker threads and DB connections. Only run
+        // it when the database genuinely has no resume for this user, once
+        // per authenticated browser session, and never block this response.
+        if (resumes.length === 0) {
+          const reconciliation = resumeReconciliationRef.current;
+          if (reconciliation.token !== token) {
+            reconciliation.token = token;
+            reconciliation.completed = false;
+            reconciliation.promise = null;
+          }
+          if (!reconciliation.completed && !reconciliation.promise) {
+            reconciliation.promise = fetch(`${apiUrl}/api/v1/resumes/reconcile-local`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${token}` }
+            })
+              .then(response => response.ok ? response.json() : null)
+              .then(async result => {
+                if (!result?.recovered) return;
+                const refreshed = await fetch(`${apiUrl}/api/v1/resumes/`, {
+                  headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!refreshed.ok) return;
+                const payload = await refreshed.json();
+                const recoveredResumes = Array.isArray(payload) ? payload : (payload.resumes || []);
+                setResumesList(recoveredResumes);
+                try {
+                  localStorage.setItem('resumes_list', JSON.stringify(recoveredResumes));
+                } catch (e) {}
+              })
+              .catch(() => {})
+              .finally(() => {
+                reconciliation.completed = true;
+                reconciliation.promise = null;
+              });
+          }
+        }
         return resumes;
       }
       console.error("Failed to fetch resumes:", res.status, await res.text());
@@ -1531,6 +1565,16 @@ export function AppProvider({ children }) {
       const activeRecord = await res.json();
       const updatedList = await fetchResumesList();
       const activeResume = normalizeResumeRecord({ ...activeRecord, is_active: true });
+      // Never show scores or generated content belonging to the previously
+      // active resume while the new deterministic comparison is in flight.
+      const liveRequest = liveATSRequestRef.current;
+      if (liveRequest.timer) clearTimeout(liveRequest.timer);
+      if (liveRequest.controller) liveRequest.controller.abort();
+      liveRequest.key = '';
+      liveRequest.sequence += 1;
+      setComparison(null);
+      setLiveATS(null);
+      setTailoredResume(null);
       persistParsedResume(activeResume);
       return { activeResume, resumes: updatedList };
     } catch (err) {
@@ -1723,10 +1767,15 @@ export function AppProvider({ children }) {
   };
 
   const ensureExtractionProfileReady = () => {
-    if (loadingAuth || loadingResume) return false;
+    if (loadingAuth) return false;
 
     const token = session?.access_token || localStorage.getItem('access_token');
     const hasResume = Boolean(parsedResume) || (Array.isArray(resumesList) && resumesList.length > 0);
+
+    // A cached/locally restored active resume is enough to start extraction.
+    // Do not wait for an unrelated background resume-list refresh when the
+    // document required by the pipeline is already available.
+    if (loadingResume && !hasResume) return false;
 
     const isExtension = window.location.protocol === 'chrome-extension:';
 
@@ -2618,18 +2667,20 @@ export function AppProvider({ children }) {
   };
 
   // Perform full Gap analysis (ATS Compare) & Pre-Tailoring merge (Step 7)
-  const handleCompareActiveResumeToJob = async () => {
-    if (!parsedResume || !jobAnalysis) return null;
+  const handleCompareActiveResumeToJob = async (resumeOverride = null) => {
+    const comparisonResume = resumeOverride || parsedResume;
+    const comparisonJob = getCanonicalJobAnalysis() || jobAnalysis;
+    if (!comparisonResume || !comparisonJob) return null;
 
-    let activeParsed = parsedResume;
+    let activeParsed = comparisonResume;
     try {
-      if (parsedResume.id && (!parsedResume.experience || parsedResume.experience.length === 0) && parsedResume.raw_text) {
+      if (comparisonResume.id && (!comparisonResume.experience || comparisonResume.experience.length === 0) && comparisonResume.raw_text) {
         const token = session?.access_token || localStorage.getItem('access_token');
         const parseHeaders = {};
         if (token) parseHeaders["Authorization"] = `Bearer ${token}`;
         
 
-        const parseRes = await fetch(`${apiUrl}/api/v1/resumes/${parsedResume.id}/parse`, {
+        const parseRes = await fetch(`${apiUrl}/api/v1/resumes/${comparisonResume.id}/parse`, {
           method: "POST",
           headers: parseHeaders
         });
@@ -2660,7 +2711,7 @@ export function AppProvider({ children }) {
             body: JSON.stringify(buildTailoringComparePayload({
               resumeId: activeParsed.id,
               resume: toRenderableResume(activeParsed),
-              job: getCanonicalJobAnalysis(),
+              job: comparisonJob,
               selectedSections
             }))
           }

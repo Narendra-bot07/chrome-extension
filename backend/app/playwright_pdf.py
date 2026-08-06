@@ -228,12 +228,12 @@ def _open_renderer(page, route: str, query: Optional[dict] = None):
             # 8s was too tight for Render under real load (queued behind the
             # single-worker render executor while other requests/renders were
             # still using CPU, or a colder response than a synthetic benchmark) --
-            # candidates were timing out before the page even got a chance to
-            # respond, not because rendering itself is slow. domcontentloaded
-            # doesn't wait on images, so this has nothing to do with photos
-            # specifically; a resume with a photo just happened to be what
-            # was being rendered when the server was already under load.
-            response = page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            # Stop navigation waiting as soon as the server commits a response.
+            # Renderer mounting/readiness is deliberately handled by the
+            # cancellable loop below. Waiting for DOMContentLoaded here made a
+            # healthy but CPU-bound renderer look unavailable and then paid the
+            # same timeout again against the public fallback URL.
+            response = page.goto(url, wait_until="commit", timeout=20000)
             if response and response.status >= 400:
                 failures.append(f"{url} returned HTTP {response.status}")
                 continue

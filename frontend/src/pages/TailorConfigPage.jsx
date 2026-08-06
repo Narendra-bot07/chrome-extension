@@ -67,6 +67,17 @@ function TailorConfigPage() {
     }
   };
 
+  const handleChangeResume = React.useCallback(async (resumeId) => {
+    // Score the activated record returned by the API. Waiting for parsedResume
+    // state here caused the comparison endpoint to receive the previous resume.
+    comparisonRequestRef.current = '';
+    const result = await handleActivateResume(resumeId);
+    if (result?.activeResume && typeof handleCompareActiveResumeToJob === 'function') {
+      await handleCompareActiveResumeToJob(result.activeResume);
+    }
+    return result;
+  }, [handleActivateResume, handleCompareActiveResumeToJob]);
+
   const matchResult = React.useMemo(() => calculateJDMatchScore(parsedResume, jobAnalysis), [parsedResume, jobAnalysis]);
   const matchScore = matchResult.score;
 
@@ -81,7 +92,7 @@ function TailorConfigPage() {
       loading={loading}
       activeResume={parsedResume}
       resumesList={resumesList}
-      onChangeResume={handleActivateResume}
+      onChangeResume={handleChangeResume}
       onChooseResume={() => navigate('/resume-detect')}
       onUploadResume={() => navigate('/resume-detect')}
       validationMessage={selectedSections.length === 0 ? "Select at least one resume section to continue." : ""}

@@ -11,7 +11,11 @@ import time
 _db_context = contextmanager(get_db_connection)
 _session_validity_cache: dict[str, float] = {}
 _session_cache_lock = threading.Lock()
-_SESSION_VALIDITY_TTL_SECONDS = 5.0
+# JWT signature/expiry is still validated on every request. Cache only the
+# additional database revocation lookup briefly so a burst of profile,
+# resume, subscription and extraction calls does not repeat the same remote
+# DB round trip for one session. Revocation remains visible within 30s.
+_SESSION_VALIDITY_TTL_SECONDS = 30.0
 
 
 def _session_recently_verified(session_id: str) -> bool:
