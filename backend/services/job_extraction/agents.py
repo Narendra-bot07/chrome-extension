@@ -38,6 +38,16 @@ BLOCK_SIGNALS = (
     "sign in to continue", "temporarily unavailable", "too many requests",
     "checking your browser", "enable javascript and cookies",
 )
+GENERIC_JOB_TITLE = re.compile(
+    r"^(?:jobs?|careers?|job search|search jobs|opportunities|open positions|"
+    r"single position|job details?|join us|home)$",
+    re.I,
+)
+RECOMMENDATION_SECTION = re.compile(
+    r"(?:^|\n)\s*(?:similar jobs?|related jobs?|recommended jobs?|"
+    r"jobs you may be interested in|other opportunities)\s*(?:\n|$)",
+    re.I,
+)
 
 
 def _state(value: JDState | dict[str, Any]) -> JDState:
@@ -56,12 +66,53 @@ def _portal(url: str) -> str:
     return next((name for name, (needle, _) in PORTALS.items() if needle in host), "generic")
 
 
+def _infer_rendered_job_title(evidence: dict[str, Any]) -> str:
+    hint = str(evidence.get("job_title_hint") or "").strip()
+    if hint and not GENERIC_JOB_TITLE.fullmatch(hint):
+        return hint
+
+    panel = str(evidence.get("selected_panel_text") or evidence.get("visible_text") or "")
+    lines = [re.sub(r"\s+", " ", line).strip() for line in panel.splitlines()]
+    lines = [line for line in lines if line]
+    apply_index = next(
+        (index for index, line in enumerate(lines) if re.fullmatch(r"apply(?: now)?", line, re.I)),
+        -1,
+    )
+    candidates = lines[max(0, apply_index - 12):apply_index] if apply_index > 0 else lines[:30]
+    noise = re.compile(
+        r"^(?:upload your resume.*|view all jobs?|join talent network|sign in|"
+        r"find out how well you match.*|job description|company)$",
+        re.I,
+    )
+    candidates = [
+        line for line in candidates
+        if 4 <= len(line) <= 180
+        and not noise.fullmatch(line)
+        and not GENERIC_JOB_TITLE.fullmatch(line)
+        and not re.match(r"^(?:remote|hybrid|on.site)(?:\b|\s*-)", line, re.I)
+    ]
+    return max(candidates, key=len, default="")
+
+
+def _focused_extension_panel(evidence: dict[str, Any]) -> str:
+    panel = str(evidence.get("selected_panel_text") or evidence.get("visible_text") or "").strip()
+    title = _infer_rendered_job_title(evidence)
+    if title:
+        index = panel.casefold().find(title.casefold())
+        if index >= 0:
+            panel = panel[index:]
+    boundary = RECOMMENDATION_SECTION.search(panel)
+    if boundary and boundary.start() > 0:
+        panel = panel[:boundary.start()]
+    return panel.strip()
+
+
 def _extension_rendered_html(evidence: dict[str, Any]) -> str:
     """Prefer the focused panel while retaining extension-visible JSON-LD."""
-    panel = str(evidence.get("selected_panel_text") or "").strip()
+    panel = _focused_extension_panel(evidence)
     visible = str(evidence.get("visible_text") or "").strip()
     if panel or visible:
-        title_hint = html_lib.escape(str(evidence.get("job_title_hint") or "").strip())
+        title_hint = html_lib.escape(_infer_rendered_job_title(evidence))
         company_hint = html_lib.escape(str(evidence.get("company_hint") or "").strip())
         location_hint = html_lib.escape(str(evidence.get("location_hint") or "").strip())
         if not company_hint:
@@ -446,8 +497,8 @@ def evidence_evaluation_agent(value: JDState | dict[str, Any]) -> dict[str, Any]
         "final_url": state.backend_final_url,
         "description": (soup.find("meta", attrs={"name": "description"}) or {}).get("content"),
     }
-    extension_panel_text = extension.get("selected_panel_text")
-    extension_title = str(extension.get("job_title_hint") or "").casefold().strip()
+    extension_panel_text = _focused_extension_panel(extension)
+    extension_title = _infer_rendered_job_title(extension).casefold().strip()
     normalized_extension_title = re.sub(r"[^a-z0-9]+", " ", extension_title).strip()
     extension_jsonld = extension.get("jsonld") or []
     extension_job_titles: list[str] = []
@@ -660,7 +711,7 @@ def evidence_evaluation_agent(value: JDState | dict[str, Any]) -> dict[str, Any]
         "selected_job_identity": {
             "url": extension.get("selected_job_url") or extension.get("url") or state.url,
             "job_id": extension_job_id or backend_job_id,
-            "title": extension.get("job_title_hint"),
+            "title": _infer_rendered_job_title(extension),
             "company": extension.get("company_hint"),
             "dom_fingerprint": (extension.get("capture") or {}).get("dom_fingerprint"),
         } if selected_job else None,
@@ -717,12 +768,8 @@ def jsonld_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             str(extension.get("visible_text") or "")[:30000],
         )))
         normalized_visible = re.sub(r"[^a-z0-9]+", " ", visible_job_text.casefold()).strip()
-        title_hint = str(extension.get("job_title_hint") or "").strip()
-        generic_hint = re.fullmatch(
-            r"(?:jobs?|careers?|job search|search jobs|opportunities|open positions|join us|home)",
-            title_hint,
-            re.I,
-        )
+        title_hint = _infer_rendered_job_title(extension)
+        generic_hint = GENERIC_JOB_TITLE.fullmatch(title_hint)
 
         def title_is_current(job: dict[str, Any]) -> bool:
             candidate = re.sub(
@@ -939,7 +986,7 @@ def _deterministic_classification(state: JDState) -> ClassificationDecision:
         or state.metadata.get("title")
         or (markdown_title_match.group(1) if markdown_title_match else None)
         or (state.metadata.get("headings") or [""])[0]
-        or (state.extension_evidence or {}).get("job_title_hint")
+        or _infer_rendered_job_title(state.extension_evidence or {})
         or ""
     ).strip()
     has_specific_title = bool(
@@ -1346,7 +1393,7 @@ def _deterministic_job_from_evidence(state: JDState) -> ExtractedJob:
     )[:12000]
     title = str(
         structured.get("title")
-        or (state.extension_evidence or {}).get("job_title_hint")
+        or _infer_rendered_job_title(state.extension_evidence or {})
         or state.metadata.get("title")
         or state.page_title
         or ""

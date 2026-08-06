@@ -106,20 +106,31 @@ export async function captureActiveTabJobEvidence(tabId) {
         }
         return '';
       };
-      const genericTitleNoise = /^(?:jobs?|careers?|job search|search jobs|opportunities|open positions|join us|home)$/i;
+      const genericTitleNoise = /^(?:jobs?|careers?|job search|search jobs|opportunities|open positions|single position|job details?|join us|home)$/i;
       const visibleHeadingCandidates = Array.from(
         (selected?.node || document).querySelectorAll('h1,h2,h3,[class*="job-title"],[class*="jobTitle"]')
       ).map((node, index) => ({
         text: cleanText(node.innerText, 220),
         index,
         inSelectedPanel: Boolean(selected?.node?.contains(node)),
-        headingLevel: /^H[1-3]$/.test(node.tagName) ? Number(node.tagName.slice(1)) : 4
+        headingLevel: /^H[1-3]$/.test(node.tagName) ? Number(node.tagName.slice(1)) : 4,
+        visible: (() => {
+          const style = getComputedStyle(node);
+          const rect = node.getBoundingClientRect();
+          return style.display !== 'none'
+            && style.visibility !== 'hidden'
+            && Number(style.opacity || 1) > 0
+            && rect.width > 2
+            && rect.height > 2
+            && node.getClientRects().length > 0
+            && node.getAttribute('aria-hidden') !== 'true';
+        })()
       })).filter(({ text }) => (
         text.length >= 3
         && text.length <= 180
         && !genericTitleNoise.test(text)
         && !/^(?:job description|qualifications|requirements|responsibilities|company)$/i.test(text)
-      )).sort((a, b) => (
+      )).filter(({ visible }) => visible).sort((a, b) => (
         Number(b.inSelectedPanel) - Number(a.inSelectedPanel)
         || a.headingLevel - b.headingLevel
         || a.index - b.index
@@ -133,6 +144,14 @@ export async function captureActiveTabJobEvidence(tabId) {
             'h1'
           ])
         : selectedHeading;
+      if (jobTitleHint && panelText) {
+        const titleIndex = panelText.toLocaleLowerCase().indexOf(jobTitleHint.toLocaleLowerCase());
+        if (titleIndex >= 0) panelText = panelText.slice(titleIndex);
+      }
+      const recommendationBoundary = panelText.search(
+        /(?:^|\n)\s*(?:similar jobs?|related jobs?|recommended jobs?|jobs you may be interested in|other opportunities)\s*(?:\n|$)/i
+      );
+      if (recommendationBoundary > 0) panelText = panelText.slice(0, recommendationBoundary).trim();
       const companyHint = location.hostname.includes('linkedin.com')
         ? firstText([
             '.job-details-jobs-unified-top-card__company-name',

@@ -2,6 +2,8 @@ from unittest.mock import patch
 
 from services.job_extraction.agents import (
     _deterministic_job_from_evidence,
+    _focused_extension_panel,
+    _infer_rendered_job_title,
     extraction_agent,
     repair_agent,
 )
@@ -111,3 +113,32 @@ Ways To Stand Out
     assert job.preferred_qualifications == [
         "Experience with enterprise data governance."
     ]
+
+
+def test_spa_hidden_generic_title_and_recommendations_are_excluded():
+    evidence = {
+        "job_title_hint": "Single Position",
+        "selected_panel_text": """Upload Your Resume
+View All Jobs
+Senior Advanced Development Engineer, GPU Networking
+Israel, Tel Aviv
+Apply Now
+Job Description
+What You'll Be Doing
+Build GPU networking systems.
+What We Need To See
+Strong C++ and Linux experience.
+Similar jobs
+Senior Software Engineer, Fabric Networking
+JR2020447
+""",
+    }
+
+    assert _infer_rendered_job_title(evidence) == (
+        "Senior Advanced Development Engineer, GPU Networking"
+    )
+    focused = _focused_extension_panel(evidence)
+    assert focused.startswith("Senior Advanced Development Engineer")
+    assert "Build GPU networking systems." in focused
+    assert "Similar jobs" not in focused
+    assert "Fabric Networking" not in focused
