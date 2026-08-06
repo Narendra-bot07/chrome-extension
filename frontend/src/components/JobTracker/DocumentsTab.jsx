@@ -241,9 +241,19 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
     && activeTitle === applicationTitle
     && activeCompany === applicationCompany
   );
-  const currentTailoredResume = activeJobMatchesApplication
-    ? (workflowResume || tailoredResume)
-    : null;
+  // tailoredResume (AppContext, in-memory) is a GLOBAL, unscoped value --
+  // restored from chrome.storage.local/localStorage on every mount with no
+  // job-identity check, and re-broadcast to every open tab/panel via
+  // chrome.storage.onChanged whenever ANY tab tailors a resume for ANY job.
+  // workflowResume is the one value here that's actually verified against
+  // the current job (resumeWorkflow.jobFingerprint === currentJobFingerprint,
+  // see AppContext.jsx). Falling back to the raw tailoredResume when
+  // workflowResume is (correctly) null was exactly how a resume tailored for
+  // a *different* job earlier in the session leaked into this preview --
+  // applicationDetails.tailored_resume/resume_snapshot below (this
+  // application's own persisted, backend-sourced record) is the correct
+  // fallback, not another job's in-memory leftovers.
+  const currentTailoredResume = activeJobMatchesApplication ? workflowResume : null;
 
   const displayResume = currentTailoredResume
     || applicationDetails.tailored_resume
@@ -288,12 +298,18 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
   };
 
   // coverLetter (AppContext, in-memory) only reflects the letter just
-  // generated THIS session -- prefer the actually-fetched full application
-  // record's snapshot first so returning to an application later still shows
-  // its real, previously-generated letter instead of this generic template.
+  // generated THIS session -- and, unlike workflowResume above, carries no
+  // job-identity/fingerprint check at all. activeJobMatchesApplication alone
+  // isn't a strong enough guard for it: that check can be true (title+company
+  // match, or the global jobAnalysis happening to still point at this job)
+  // while coverLetter itself is a stale value restored from a previous
+  // mount/tab that was never invalidated for this specific job switch --
+  // which is exactly how a real-but-wrong letter showed under the right
+  // header before. The persisted per-application snapshot is the only source
+  // guaranteed to belong to THIS application; fall to the generic template,
+  // not another job's real letter, when neither snapshot field is populated.
   const activeCoverLetterText = applicationDetails.cover_letter_snapshot
     || applicationDetails.cover_letter_content
-    || coverLetter
     || (
     `Dear Hiring Manager,\n\nI am writing to express my strong interest in the ${application.job_title || 'Target Role'} position at ${application.company_name || 'Company'}. With my background in technology and proven track record, I am confident I can make an immediate contribution to your team.\n\nThank you for considering my application.\n\nSincerely,\n${rawCandidateName || 'Candidate Name'}`
   );

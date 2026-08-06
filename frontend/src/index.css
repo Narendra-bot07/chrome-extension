@@ -8,53 +8,6 @@
   }
 }
 
-@media (pointer: fine) {
-  body.tf-global-cursor-active,
-  body.tf-global-cursor-active *,
-  body.tf-global-cursor-active *::before,
-  body.tf-global-cursor-active *::after,
-  body.tf-global-cursor-active button,
-  body.tf-global-cursor-active a,
-  body.tf-global-cursor-active input,
-  body.tf-global-cursor-active select,
-  body.tf-global-cursor-active textarea,
-  body.tf-global-cursor-active [role="button"],
-  body.tf-global-cursor-active [role="tab"],
-  body.tf-global-cursor-active [data-cursor] {
-    cursor: none !important;
-  }
-  /* Keep this legacy selector block inert unless the custom cursor is
-     explicitly mounted and activates the body class. */
-  body:not(.tf-global-cursor-active) {
-    cursor: auto !important;
-  }
-  body:not(.tf-global-cursor-active) button,
-  body:not(.tf-global-cursor-active) a,
-  body:not(.tf-global-cursor-active) [role="button"],
-  body:not(.tf-global-cursor-active) [role="tab"] {
-    cursor: pointer !important;
-  }
-}
-
-/* Retained component styling for isolated marketing demos. */
-@media (pointer: fine) and (max-width: 0px) {
-  *,
-  *::before,
-  *::after,
-  html,
-  body,
-  button,
-  a,
-  input,
-  select,
-  textarea,
-  [role="button"],
-  [role="tab"],
-  [data-cursor] {
-    cursor: none !important;
-  }
-}
-
 /* Global Custom Cursor Styles */
 .lp-custom-cursor {
   display: block;

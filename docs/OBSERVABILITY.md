@@ -393,6 +393,16 @@ Set `APP_RELEASE` as a Render environment variable override per-deploy, or use R
 
 Create each project at [sentry.io](https://sentry.io) → New Project, then paste the DSN into the appropriate environment.
 
+### 11.1 What the backend project actually captures
+
+As of 2026-08-07, the backend Sentry project captures **every non-2xx HTTP response**, not just unhandled Python exceptions:
+
+- `observability/middleware.py`'s `CorrelationAndLoggingMiddleware` calls `_capture_non_2xx()` on both the normal success path and the `BaseAppException` path — any response with `status_code` outside 200-299 (3xx/4xx/5xx) gets sent to Sentry as its own `capture_message` event, even if no exception was ever raised for it (e.g. FastAPI's own validation-error responses, or a route that returns `JSONResponse(status_code=...)` directly).
+- Severity level follows status range: 3xx → `info`, 4xx → `warning`, 5xx → `error`.
+- Events are fingerprinted by `[method, route, status_code]`, so repeated hits on the same route/status combination group into one Sentry issue instead of creating a new one per request.
+- `observability/sentry.py`'s `before_send` no longer filters by status code at all (it previously dropped every exception-based event under 500) — it only redacts sensitive fields now.
+- **Volume implication**: routine client errors (expired-token 401s, not-found 404s, request-validation 422s) are now visible Sentry issues, not just genuine 500s. If this proves too noisy in practice, the fix is a targeted ignore-list inside `_capture_non_2xx` for specific expected status/route combinations — not reverting to exception-only capture.
+
 ---
 
 ## 12. Runbook: Responding to Alerts

@@ -129,7 +129,7 @@ To prevent **Cache Stampedes** (multiple concurrent processes executing identica
 
 1. **Lock Acquisition**: On cache miss, worker attempts `SET NX lock:llm:{fingerprint}` with 120s TTL and a unique owner UUID.
 2. **Lock Owner**: Executes LLM call, validates output, writes envelope to Redis, and releases lock.
-3. **Lock Waiters**: Poll cache every `0.25s` up to `15.0s`. Once the owner writes the result, waiters return the validated result directly from cache without hitting DeepSeek.
+3. **Lock Waiters**: Poll cache every `0.25s` up to `LLM_CACHE_LOCK_WAIT_SECONDS` (default `100.0s`, `core/config.py` — raised from an original `15.0s` after production logs showed a waiter timing out and falling through to its own full redundant LLM call, even though real `jd_agent_extraction`/`resume_patch_tailoring` calls routinely take 28-90s and the lock's own TTL is 120s; 15s was never long enough to actually benefit from the lock, just a guaranteed extra 15s wasted before doing the duplicate work anyway). Once the owner writes the result, waiters return the validated result directly from cache without hitting DeepSeek.
 4. **Safety**: Non-owner processes cannot release another worker's lock.
 
 ---
@@ -143,3 +143,18 @@ Telemetry metrics are tracked in `services/cache/llm_cache_telemetry.py`:
 - `saved_output_tokens_total`
 - `lock_contention_total`
 - `validation_failures_total`
+
+---
+
+## 8. URL-Level Result Caching (JD Extraction)
+
+`POST /jobs/extract-url` (`backend/api/v1/jobs.py`) sits above the `LLMCacheService` tier described in §1-7 and caches the whole extraction pipeline's *final result*, not an individual LLM call — a genuinely separate, simpler cache tier using `redis_cache` (the raw `RedisCacheService` transport) directly rather than going through `LLMFingerprintBuilder`/envelope versioning.
+
+**Why a separate tier**: JD extraction (Playwright scrape + LLM classification/extraction) is one of the slowest, most expensive things this API does, and a job posting's URL is a genuinely shared/public resource — a trending posting gets hit by many different users within the same window. The LLM-call-level cache (§1-7) already avoids redundant *identical-payload* LLM calls, but each user's scrape still produces a slightly different evidence payload (different `browser_evidence`, different scrape timing), so it doesn't naturally collapse into one LLM-cache entry the way this URL-level cache does.
+
+- **Key construction** (`_job_extraction_cache_key` in `api/v1/jobs.py`): SHA-256 of a normalized URL (`_normalize_job_url_for_cache` — lowercased host, tracking params like `utm_*`/`fbclid`/`gclid` stripped, fragment and trailing slash stripped, remaining params sorted), further combined with a rendered-DOM identity fingerprint (from `browser_evidence.capture.dom_fingerprint` + a title hint) when available, so SPA career portals that keep a generic/unchanged URL while swapping the visible job in place (confirmed real on jobs.nvidia.com) still get distinct cache entries per posting. Key prefix is versioned (`jd_extraction:v3:...`) so a schema/behavior change can invalidate all prior entries by bumping the version string.
+- **TTL**: 24h (`JD_EXTRACTION_CACHE_TTL_SECONDS`). Job postings rarely change same-day; this balances freshness against hit rate.
+- **Write gating**: only cached when `result.get("success") and result.get("status") == "extracted"`. Explicitly excludes:
+  - Failures ("blocked", "manual_review", etc.) — these can legitimately depend on the *specific request's* `browser_evidence`, so caching one could wrongly deny a different user (with better evidence) a real shot at extraction.
+  - `status == "partial"` — covers a "skills only" extraction (real description text, but empty `responsibilities`/`requirements`) that still returns `success: true`. Caching that would turn a one-off extraction miss into a persistent bug served to every subsequent user for the full TTL. See `reviewer_agent`/`final_response_agent` in `services/job_extraction/agents.py` for how that case is detected.
+- **Usage accounting**: unaffected by cache hits/misses — `UsageService.consume_usage` still fires on a cache hit, same quota cost as a fresh extraction, just served instantly instead of in 5-30s+.

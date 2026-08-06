@@ -308,6 +308,7 @@ export default function CoverLetterPage() {
   const [editPrompt, setEditPrompt] = useState('');
   const [activeSectionScroll, setActiveSectionScroll] = useState(null);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const [downloadedFileName, setDownloadedFileName] = useState('');
 
   const previewWrapperRef = useRef(null);
   const autoGenerationStartedRef = useRef(false);
@@ -436,12 +437,14 @@ export default function CoverLetterPage() {
     const candidate = coverLetterContext?.candidate?.name || 'Candidate';
     const company = coverLetterContext?.job?.company || 'Company';
     const clean = value => String(value).replace(/[^A-Za-z0-9_-]+/g, '_');
+    const filename = `${clean(candidate)}_${clean(company)}_Cover_Letter.pdf`;
     const link = document.createElement('a');
     link.href = artifact.url;
-    link.download = `${clean(candidate)}_${clean(company)}_Cover_Letter.pdf`;
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setDownloadedFileName(filename);
   };
 
   // Submit AI Edit prompt
@@ -1067,6 +1070,58 @@ export default function CoverLetterPage() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* DOWNLOAD SUCCESS MODAL */}
+      {downloadedFileName && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-zinc-950/65 p-4 backdrop-blur-sm animate-fade-in"
+          role="presentation"
+          onClick={() => setDownloadedFileName('')}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cover-letter-download-success-title"
+            onClick={event => event.stopPropagation()}
+            className="w-full max-w-md rounded-3xl border border-zinc-200 bg-white p-7 text-center shadow-2xl dark:border-zinc-800 dark:bg-zinc-950"
+          >
+            <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-[#00bda5] dark:border-emerald-900 dark:bg-emerald-950/40">
+              <CheckCircle2 size={34} strokeWidth={2.2} />
+            </div>
+            <p className="mb-2 text-[10px] font-black uppercase tracking-[0.18em] text-[#00bda5]">
+              Download complete
+            </p>
+            <h2 id="cover-letter-download-success-title" className="text-xl font-black text-zinc-900 dark:text-white">
+              Cover letter downloaded
+            </h2>
+            <p className="mt-2 text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
+              Your tailored cover letter is ready to submit with this application.
+            </p>
+            <div className="mt-5 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-xs font-bold text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 break-all">
+              {downloadedFileName}
+            </div>
+            <div className="mt-6 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setDownloadedFileName('');
+                  navigate('/job-tracker');
+                }}
+                className="rounded-xl border border-zinc-200 bg-white px-4 py-3 text-xs font-extrabold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                Open Job Tracker
+              </button>
+              <button
+                type="button"
+                onClick={() => setDownloadedFileName('')}
+                className="rounded-xl border-0 bg-[#00bda5] px-4 py-3 text-xs font-extrabold text-white shadow-md transition hover:bg-[#00a894]"
+              >
+                Done
+              </button>
+            </div>
+          </section>
         </div>
       )}
 

@@ -387,6 +387,10 @@ Before Playwright navigation, `validate_public_url()` rejects:
 
 This prevents server-side requests to private network resources.
 
+### 7.4 Result caching (added 2026-08-07)
+
+Before running the pipeline, the endpoint checks a Redis cache keyed by normalized URL (+ a rendered-DOM identity fingerprint for SPA portals that keep a generic URL across postings), shared across every user, not scoped to any one account — a job posting's URL is a public resource, so a second user hitting a trending posting gets an instant cached result instead of re-running the full scrape+LLM pipeline. Only genuinely complete successes (`success: true` and `status: "extracted"`) are cached, for 24h. Usage quota is still consumed on a cache hit. Full details, key construction, and the write-gating rationale: [CACHING.md](CACHING.md) §8.
+
 ---
 
 ## 8. LangGraph execution flow
@@ -720,6 +724,7 @@ The reviewer checks:
 - Skill evidence.
 - Suggested-skill count.
 - Unsupported canonical skill labels.
+- **Responsibilities/requirements completeness (added 2026-08-07)**: when `description` has substantial content (>200 chars) but both `responsibilities` and `requirements` are empty, this is flagged for repair. Previously a "skills only" extraction — real description text, but nothing extracted into either list, even when the source page clearly had a "What You Will Be Doing"/"Requirements" section — passed review untouched and reached the client indistinguishable from a genuinely complete result. See [CHANGELOG.md](CHANGELOG.md) 3.15.22.
 
 The reviewer does not make an additional LLM call.
 
@@ -741,6 +746,10 @@ This replaced the earlier many-call pipeline that caused rate-limit problems.
 ---
 
 ## 9. Job extraction schema and normalization
+
+### 9.0 HTML sanitization safety net (added 2026-08-07)
+
+`responsibilities`, `requirements`, `preferred_qualifications`, and `description` are passed through `_clean_evidence_items`/`_clean_evidence_text` (BeautifulSoup-based tag stripping, already used by the deterministic JSON-LD extraction path) **unconditionally** in `extraction_agent`, regardless of which path (deterministic or LLM) produced the value. Previously this cleaning only ran inside `_deterministic_job_from_evidence` — the LLM-extraction branch (used whenever the source page lacks a complete structured `JobPosting` JSON-LD, i.e. most postings) took the model's structured output verbatim, with no sanitization at all. A source page whose evidence carried raw WYSIWYG/Google-Docs-style markup could get copied straight into these fields as literal `<p><strong>...</strong></p>` text. The cleaner is a safe no-op on already-clean plain text, so this is unconditional rather than branch-specific.
 
 ### 9.1 Canonical fields
 
