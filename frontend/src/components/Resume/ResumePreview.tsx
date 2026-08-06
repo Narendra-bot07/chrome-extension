@@ -243,9 +243,17 @@ export default function ResumePreview({
 
       if (!res.ok) {
         const failure = await res.json().catch(() => ({}));
+        if (
+          res.status === 409
+          && failure?.detail?.code === 'PDF_RENDER_SUPERSEDED'
+        ) {
+          return;
+        }
         throw new Error(
           typeof failure.detail === 'string'
             ? failure.detail
+            : typeof failure.detail?.message === 'string'
+              ? failure.detail.message
             : `Rendering failed with status ${res.status}`
         );
       }

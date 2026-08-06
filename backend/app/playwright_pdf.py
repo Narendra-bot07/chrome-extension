@@ -569,6 +569,10 @@ def generate_pdf_via_playwright(
         finally:
             page.close()
             lap("page.close()")
+    except SupersededPdfRender:
+        # Latest-layout-wins cancellation is normal control flow. Propagate it
+        # to the API's 409 handler without a noisy traceback or Sentry event.
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()

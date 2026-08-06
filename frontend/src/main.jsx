@@ -1,6 +1,5 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App.jsx'
 import './styles.css'
 import './dark-theme.css'
 
@@ -9,6 +8,13 @@ import { RootErrorBoundary } from './observability/ErrorBoundary';
 
 // Start Sentry tracking
 initSentry();
+
+const isPdfPrintRoute = window.location.hash.split('?')[0] === '#/print';
+const RootApplication = React.lazy(() => (
+  isPdfPrintRoute
+    ? import('./PdfPrintApp.jsx')
+    : import('./App.jsx')
+));
 
 try {
   const theme = localStorage.getItem('theme');
@@ -27,10 +33,16 @@ try {
 // so the provider now lives there instead, scoped to just that component.
 // See PublicAuthPanel.jsx.
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
+const application = (
+  <React.Suspense fallback={null}>
     <RootErrorBoundary>
-      <App />
+      <RootApplication />
     </RootErrorBoundary>
-  </React.StrictMode>,
+  </React.Suspense>
+);
+
+// StrictMode's intentional effect mount/unmount replay is useful for the
+// interactive app, but duplicates the PDF measurement lifecycle in Chromium.
+ReactDOM.createRoot(document.getElementById('root')).render(
+  isPdfPrintRoute ? application : <React.StrictMode>{application}</React.StrictMode>
 )
