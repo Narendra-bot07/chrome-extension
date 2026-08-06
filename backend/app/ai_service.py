@@ -36,6 +36,19 @@ from services.cache.llm_fingerprint import LLMFingerprintBuilder
 
 logger = logging.getLogger("ai_service")
 
+_shared_provider = None
+_shared_provider_lock = threading.Lock()
+
+
+def _get_shared_provider() -> DeepSeekProvider:
+    """Return one thread-safe provider/client connection pool per process."""
+    global _shared_provider
+    if _shared_provider is None:
+        with _shared_provider_lock:
+            if _shared_provider is None:
+                _shared_provider = DeepSeekProvider()
+    return _shared_provider
+
 def _get_cache_key(prefix: str, content: str) -> str:
     return f"{prefix}:{hashlib.sha256(content.encode('utf-8')).hexdigest()}"
 
@@ -54,10 +67,10 @@ def get_llm(api_key: Optional[str] = None, temperature: float = 0.0, max_retries
     """
     Returns the provider-neutral ResilientLLMWrapper backed by DeepSeek (deepseek-v4-flash / deepseek-v4-pro).
     """
-    return ResilientLLMWrapper()
+    return ResilientLLMWrapper(primary_llm=_get_shared_provider())
 
 def get_provider(api_key: Optional[str] = None) -> DeepSeekProvider:
-    return DeepSeekProvider(api_key=api_key)
+    return DeepSeekProvider(api_key=api_key) if api_key else _get_shared_provider()
 
 def _detect_section_order_from_text(raw_text: str) -> List[str]:
     heading_map = [

@@ -119,9 +119,18 @@ function SuccessView({
   };
 
   return (
-    <div className={`relative flex-1 flex flex-col justify-between py-6 select-none text-zinc-650 dark:text-zinc-350 font-sans mx-auto w-full ${
-      isExtension ? 'max-w-md' : 'max-w-xl'
-    }`}>
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center overflow-y-auto bg-zinc-950/60 p-4 backdrop-blur-sm"
+      role="presentation"
+    >
+    <section
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="export-success-title"
+      className={`relative my-auto flex max-h-[calc(100vh-2rem)] flex-col overflow-y-auto rounded-3xl border border-zinc-200 bg-white px-6 py-6 text-zinc-650 shadow-2xl dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-350 font-sans w-full ${
+        isExtension ? 'max-w-md' : 'max-w-xl'
+      }`}
+    >
       <button
         type="button"
         onClick={onReset}
@@ -140,7 +149,7 @@ function SuccessView({
         </div>
         
         <div className="text-center space-y-1 px-4">
-          <h3 className="text-xs font-black uppercase tracking-widest text-zinc-950 dark:text-zinc-50">Dashboard & Job Tracker Synced</h3>
+          <h3 id="export-success-title" className="text-xs font-black uppercase tracking-widest text-zinc-950 dark:text-zinc-50">Dashboard & Job Tracker Synced</h3>
           <p className="text-[10px] text-zinc-550 dark:text-zinc-400 font-bold">
             Your PDF, tailored resume, and organized job description are saved to this application.
           </p>
@@ -252,6 +261,7 @@ function SuccessView({
           <Download size={11} /> Download Another Copy
         </button>
       </div>
+    </section>
     </div>
   );
 }

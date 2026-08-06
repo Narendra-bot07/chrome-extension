@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     DEEPSEEK_TIMEOUT_SECONDS: float = Field(default=60.0, env="DEEPSEEK_TIMEOUT_SECONDS")
     DEEPSEEK_MAX_RETRIES: int = Field(default=2, env="DEEPSEEK_MAX_RETRIES")
     DEEPSEEK_ENABLE_THINKING: bool = Field(default=False, env="DEEPSEEK_ENABLE_THINKING")
+    # DeepSeek calls are network-bound. Four global slots caused unrelated
+    # workflows to queue even while the Render instance was awaiting I/O.
+    DEEPSEEK_MAX_CONCURRENT_REQUESTS: int = Field(default=8, env="DEEPSEEK_MAX_CONCURRENT_REQUESTS")
     LLM_PROVIDER: str = Field(default="deepseek", env="LLM_PROVIDER")
     AI_PROVIDER: str = Field(default="deepseek", env="AI_PROVIDER")
     ASTRA_MODEL: str = Field(default="", env="ASTRA_MODEL")

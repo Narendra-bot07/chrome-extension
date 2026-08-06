@@ -85,13 +85,22 @@ function DownloadPage({ onClose }) {
   // Keep the existing persistence call, but also sync the live tailoredResume
   // state so the preview actually reflects the edit.
   const updateActiveResumeLayout = useCallback((updater) => {
-    return updateFinalizedWorkflowResume(updater).then(saved => {
-      if (saved?.finalizedTailoredResume) {
-        setTailoredResume(saved.finalizedTailoredResume);
-      }
-      return saved;
+    const baseResume = tailoredResume || workflowResume || parsedResume;
+    if (!baseResume) return null;
+    const nextResume = typeof updater === 'function'
+      ? updater(structuredClone(baseResume))
+      : updater;
+    const canonical = toRenderableResume(nextResume);
+    if (!canonical) return null;
+
+    // The editor expects a React-style synchronous setter. Update the state
+    // driving the right-hand preview before doing any recovery/cloud write.
+    setTailoredResume(canonical);
+    updateFinalizedWorkflowResume(canonical).catch(error => {
+      console.warn('[RESUME-LAYOUT] Live layout applied; deferred persistence failed.', error);
     });
-  }, [updateFinalizedWorkflowResume, setTailoredResume]);
+    return canonical;
+  }, [tailoredResume, workflowResume, parsedResume, updateFinalizedWorkflowResume, setTailoredResume]);
 
   const [downloadSuccess, setDownloadSuccess] = useState(false);
   const [syncedApplication, setSyncedApplication] = useState(null);

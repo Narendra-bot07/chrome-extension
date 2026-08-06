@@ -324,6 +324,11 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
 
   const rawSkills = skills || resume.parsed_data?.skills || resume.technical_skills || [];
   const rawSkillCategories = skills_categories || resume.parsed_data?.skills_categories || resume.technical_skills_by_category || {};
+  const hasFinalizedSkillCategories = Boolean(
+    rawSkillCategories
+    && !Array.isArray(rawSkillCategories)
+    && Object.keys(rawSkillCategories).length
+  );
   const localCategorizedSkills = categorizeSkills(rawSkills, rawSkillCategories);
   // The rule-based categorizer above is instant but bounded by its regex
   // list -- a skill it has never seen (a brand-new tool/framework name)
@@ -345,6 +350,19 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
       (window as any).__SKILLS_CATEGORIZATION_SETTLED__ = true;
       window.dispatchEvent(new Event('skillsCategorizationSettled'));
     };
+    // PDF generation must be deterministic and self-contained. Waiting for a
+    // second AI request here added the full /skills/categorize latency before
+    // Auto-Fit could even begin (and made rendering depend on network/CORS).
+    // The finalized resume already carries accepted skill categories; any
+    // remaining unknown labels safely stay in the local "Other" group.
+    const isPdfRendererContext = typeof window !== 'undefined'
+      && Boolean((window as any).__INJECTED_RESUME_DATA__);
+    if (isPdfRendererContext || hasFinalizedSkillCategories) {
+      setAiCategorizedSkills(null);
+      setAiUpgradeKey(null);
+      markSettled();
+      return undefined;
+    }
     if (!otherSkillsKey) {
       markSettled();
       return undefined;
@@ -360,8 +378,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
     // resolves against that same origin instead, which the backend already
     // serves both the static renderer and /api/... from -- genuinely
     // same-origin, no CORS involved at all.
-    const isPdfRendererContext = typeof window !== 'undefined' && Boolean((window as any).__INJECTED_RESUME_DATA__);
-    const skillsApiUrl = isPdfRendererContext ? '' : getApiUrl();
+    const skillsApiUrl = getApiUrl();
     categorizeSkillsWithAI(rawSkills, rawSkillCategories, skillsApiUrl)
       .then(upgraded => {
         if (cancelled) return;
@@ -373,7 +390,7 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
       });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [otherSkillsKey]);
+  }, [otherSkillsKey, hasFinalizedSkillCategories]);
   const categorizedSkills = (aiUpgradeKey === otherSkillsKey && aiCategorizedSkills) ? aiCategorizedSkills : localCategorizedSkills;
   const rawCandidateName = personal_info?.name || personal_info?.full_name || personal_info?.candidate_name || resume?.name || resume?.full_name || (personal_info?.email ? personal_info.email.split('@')[0].replace(/[0-9_.]+/g, ' ') : '');
   const candidateName = normalizePersonName(rawCandidateName);

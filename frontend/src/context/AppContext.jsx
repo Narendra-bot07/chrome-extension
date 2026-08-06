@@ -1259,15 +1259,23 @@ export function AppProvider({ children }) {
   };
 
   const updateFinalizedWorkflowResume = (updater) => queueWorkflowWrite(current => {
-    if (!current?.finalizedTailoredResume) {
+    // Layout editing can be entered from a restored tailored/workflow resume
+    // before the recovery record has populated finalizedTailoredResume. The
+    // editor must still be able to initialise that slot instead of rejecting
+    // every drag with FINALIZED_RESUME_MISSING.
+    const baseResume = current?.finalizedTailoredResume
+      || tailoredResume
+      || workflowResume
+      || parsedResume;
+    if (!baseResume) {
       throw new Error('FINALIZED_RESUME_MISSING: Finalize the review before editing layout.');
     }
     const nextResume = typeof updater === 'function'
-      ? updater(structuredClone(current.finalizedTailoredResume))
+      ? updater(structuredClone(baseResume))
       : updater;
     const canonical = toRenderableResume(nextResume);
     if (!canonical) throw new Error('FINAL_RESUME_VALIDATION_FAILED: Updated resume is invalid.');
-    return { ...current, finalizedTailoredResume: canonical };
+    return { ...(current || {}), finalizedTailoredResume: canonical };
   });
 
   useEffect(() => {

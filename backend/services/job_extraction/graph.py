@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import threading
 import time
 from typing import Any, Callable, Literal
 from urllib.parse import urlparse
@@ -21,6 +22,8 @@ from services.job_extraction.agents import (
 from services.job_extraction.schemas import JDState
 
 LOG_PREFIX = "[JD-EXTRACTION][GRAPH]"
+_compiled_graph = None
+_compiled_graph_lock = threading.Lock()
 
 
 def _timed(name: str, node: Callable) -> Callable:
@@ -152,6 +155,16 @@ def build_job_intelligence_graph():
     return graph.compile()
 
 
+def get_job_intelligence_graph():
+    """Compile the stable graph once rather than rebuilding it per JD."""
+    global _compiled_graph
+    if _compiled_graph is None:
+        with _compiled_graph_lock:
+            if _compiled_graph is None:
+                _compiled_graph = build_job_intelligence_graph()
+    return _compiled_graph
+
+
 def validate_public_url(url: str) -> None:
     """Reject non-web and private-network targets before Playwright navigation."""
     parsed = urlparse(url)
@@ -181,6 +194,6 @@ def run_job_intelligence(
         original_url=url,
         extension_evidence=browser_evidence or {},
     )
-    result = build_job_intelligence_graph().invoke(initial)
+    result = get_job_intelligence_graph().invoke(initial)
     validated = JDState.model_validate(result)
     return validated.final_response

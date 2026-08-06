@@ -989,7 +989,11 @@ def evidence_planner_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
 def source_builder_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     state = _state(value)
     primary = state.plan.get("primary_source", "markdown")
-    source = json.dumps(state.jobposting_jsonld, ensure_ascii=False) if primary == "jobposting_jsonld" else state.markdown
+    source = json.dumps(
+        state.jobposting_jsonld,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ) if primary == "jobposting_jsonld" else state.markdown
     payload = {
         "primary_source": primary,
         "acquisition_primary_source": state.primary_source,
@@ -1096,7 +1100,11 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         structured = get_llm(temperature=0).with_structured_output(ExtractedJob)
         return structured.invoke([
             SystemMessage(content=EXTRACTION_PROMPT),
-            HumanMessage(content=json.dumps(state.evidence, ensure_ascii=False)),
+            HumanMessage(content=json.dumps(
+                state.evidence,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )),
         ])
 
     job = llm_cache.execute_with_cache(
@@ -1226,7 +1234,11 @@ def skill_intelligence_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         skill_model = get_llm(temperature=0).with_structured_output(SkillDecision)
         return skill_model.invoke([
             SystemMessage(content=SKILL_INTELLIGENCE_PROMPT),
-            HumanMessage(content=json.dumps(fingerprint_payload, ensure_ascii=False)),
+            HumanMessage(content=json.dumps(
+                fingerprint_payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )),
         ])
 
     decision = llm_cache.execute_with_cache(
@@ -1417,7 +1429,7 @@ def repair_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         HumanMessage(content=json.dumps({
             "current_job": state.extracted_job, "repair_fields": state.repair_fields,
             "field_issues": state.field_issues, "evidence": state.evidence,
-        }, ensure_ascii=False)),
+        }, ensure_ascii=False, separators=(",", ":"))),
     ])
     job = ExtractedJob.model_validate(repaired).model_dump(mode="json")
     if not job.get("company_name"):

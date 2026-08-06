@@ -3,6 +3,7 @@ import json
 import time
 import logging
 import threading
+from functools import lru_cache
 from typing import Dict, Any, Optional, List, Type
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -20,7 +21,11 @@ logger = logging.getLogger("deepseek_provider")
 # tailoring -> cover-letter pipeline, queue strictly one-at-a-time behind
 # whichever call happened to be in flight. A bounded semaphore allows real
 # concurrency up to a safety cap instead of hard-serializing everything.
-_AI_REQUEST_SEMAPHORE = threading.Semaphore(4)
+_MAX_CONCURRENT_AI_REQUESTS = max(
+    1,
+    int(os.getenv("DEEPSEEK_MAX_CONCURRENT_REQUESTS", "8")),
+)
+_AI_REQUEST_SEMAPHORE = threading.BoundedSemaphore(_MAX_CONCURRENT_AI_REQUESTS)
 
 
 def _inline_schema_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
@@ -41,6 +46,21 @@ def _inline_schema_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
         return node
 
     return resolve(schema)
+
+
+@lru_cache(maxsize=64)
+def _serialized_inline_schema(schema_cls: Type[BaseModel]) -> str:
+    """Build each Pydantic response schema once per process.
+
+    Schema expansion used to run for every cache miss and every retry path.
+    The schemas are immutable class metadata, so rebuilding and serializing
+    them adds CPU and allocations without changing the request.
+    """
+    return json.dumps(
+        _inline_schema_refs(schema_cls.model_json_schema()),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
 
 
 class DeepSeekProvider:
@@ -91,7 +111,16 @@ class DeepSeekProvider:
         """
         Invokes DeepSeek model with structured JSON response_format and validates output against Pydantic schema_cls.
         """
+        queue_started = time.perf_counter()
         with _AI_REQUEST_SEMAPHORE:
+            queue_ms = round((time.perf_counter() - queue_started) * 1000)
+            if queue_ms >= 100:
+                logger.info(
+                    "[DEEPSEEK_QUEUE] waited_ms=%s capacity=%s schema=%s",
+                    queue_ms,
+                    _MAX_CONCURRENT_AI_REQUESTS,
+                    getattr(schema_cls, "__name__", "unknown"),
+                )
             sys_msg = system_instruction or (
                 "You are an expert AI resume strategist and ATS optimization engine. "
                 "Output valid JSON matching the specified JSON schema strictly. Ensure all JSON is well-formed."
@@ -111,7 +140,7 @@ class DeepSeekProvider:
                 # the model has to *mentally* dereference those pointers —
                 # inline them so every required field is spelled out exactly
                 # where it's needed, with no indirection to drop along the way.
-                schema_json = json.dumps(_inline_schema_refs(schema_cls.model_json_schema()), ensure_ascii=False)
+                schema_json = _serialized_inline_schema(schema_cls)
                 sys_msg = (
                     f"{sys_msg}\n\nRespond with a single JSON object that strictly matches this "
                     f"JSON Schema. Every field listed in every \"required\" array — at every level "
@@ -269,7 +298,9 @@ class _RunnablePipe:
 class ResilientLLMWrapper:
     """Provider-neutral ResilientLLMWrapper providing backward compatibility for get_llm()."""
     def __init__(self, primary_llm: Any = None, fallback_llm: Optional[Any] = None, extra_llm: Optional[Any] = None):
-        self.provider = DeepSeekProvider()
+        # A supplied provider owns a persistent OpenAI/httpx connection pool.
+        # Reusing it avoids DNS, TCP and TLS setup on every cold-cache call.
+        self.provider = primary_llm if isinstance(primary_llm, DeepSeekProvider) else DeepSeekProvider()
 
     def with_structured_output(self, schema: Type[BaseModel], **kwargs: Any) -> LangChainDeepSeekWrapper:
         return LangChainDeepSeekWrapper(self.provider, schema)
