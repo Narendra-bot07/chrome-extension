@@ -347,6 +347,15 @@ export default function CoverLetterPage() {
     };
   }, [selectedTemplate, pageSize, font, fontSize, themeColor, paragraphSpacing, lineHeight, pageMargin, density]);
 
+  // Keep the live canvas identical to the paper dimensions used by
+  // Playwright. Previously this was always 816x1056 (US Letter), which
+  // clipped the bottom 67px whenever the selected output was A4.
+  const previewPaper = useMemo(() => (
+    pageSize === 'Letter'
+      ? { width: 816, height: 1056 }
+      : { width: 794, height: 1123 }
+  ), [pageSize]);
+
   const renderSelectedCoverLetter = useCallback(async () => {
     if (!generatedCoverLetter || !coverLetterContext || isRenderingPdf) return null;
     setIsRenderingPdf(true);
@@ -409,14 +418,14 @@ export default function CoverLetterPage() {
   const handleFitWidth = () => {
     if (!previewWrapperRef.current) return;
     const containerWidth = previewWrapperRef.current.clientWidth;
-    const targetScale = (containerWidth - 60) / 816;
+    const targetScale = (containerWidth - 60) / previewPaper.width;
     setZoom(Math.max(0.4, Math.min(1.8, targetScale)));
   };
 
   // Auto-fit width on mount
   useEffect(() => {
     handleFitWidth();
-  }, []);
+  }, [previewPaper.width]);
 
   // Download exact verified PDF
   const handleDownloadExactPDF = async () => {
@@ -971,13 +980,16 @@ export default function CoverLetterPage() {
           {/* Exact PDF Canvas Document (LIVE PREVIEW = DOWNLOADED PDF) */}
           <div
             className="relative shrink-0"
-            style={{ width: `${816 * zoom}px`, height: `${1056 * zoom}px` }}
+            style={{
+              width: `${previewPaper.width * zoom}px`,
+              height: `${previewPaper.height * zoom}px`
+            }}
           >
           <div
             className="absolute left-0 top-0 origin-top-left transition-transform duration-200 ease-out shadow-2xl bg-white rounded-sm overflow-hidden"
             style={{
-              width: '816px',
-              height: '1056px',
+              width: `${previewPaper.width}px`,
+              height: `${previewPaper.height}px`,
               transform: `scale(${zoom})`,
               transformOrigin: 'top left'
             }}
@@ -1013,7 +1025,13 @@ export default function CoverLetterPage() {
             </button>
           </div>
           <div className="flex-1 bg-zinc-950 overflow-auto p-8 flex justify-center items-start">
-            <div className="w-[816px] min-h-[1056px] bg-white shadow-2xl rounded-sm p-12 text-zinc-900">
+            <div
+              className="bg-white shadow-2xl rounded-sm text-zinc-900"
+              style={{
+                width: `${previewPaper.width}px`,
+                minHeight: `${previewPaper.height}px`
+              }}
+            >
               <CoverLetterRender
                 coverLetter={activeContent}
                 context={coverLetterContext}

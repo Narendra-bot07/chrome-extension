@@ -48,7 +48,6 @@ const AdminUsersPage = React.lazy(() => import('./pages/AdminUsersPage'));
 const NotFoundPage = React.lazy(() => import('./pages/NotFoundPage'));
 import { ReducedMotionProvider, MotionPage } from './motion/MotionSystem';
 import { loginPathFor } from './utils/authRedirect';
-import GlobalCursor from './components/GlobalCursor';
 import BrandLogo from './components/BrandLogo';
 
 function StartupLoader({ label = "Restoring session" }) {
@@ -249,7 +248,6 @@ function App() {
     <HashRouter>
       <AppProvider>
         <ReducedMotionProvider>
-          <GlobalCursor />
           <AppRoutes />
         </ReducedMotionProvider>
       </AppProvider>

@@ -13,8 +13,11 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
   const navigate = useNavigate();
   const {
     tailoredResume,
+    workflowResume,
     coverLetter,
     parsedResume,
+    jobAnalysis,
+    lastAnalyzedUrl,
     handleGenerateCoverLetter,
     setJobAnalysis,
     session
@@ -91,7 +94,10 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
     try {
       setDownloadingType('resume');
 
+      // A finalized in-memory workflow is newer than any previously cached
+      // application PDF. Render it once and overwrite the stored artifact.
       try {
+        if (currentTailoredResume) throw new Error('active-tailored-resume');
         const stored = await fetch(`${getApiUrl()}/api/v1/applications/${application.id}/resume-pdf`, {
           headers: authHeaders()
         });
@@ -100,7 +106,9 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
           return;
         }
       } catch (storageErr) {
-        console.warn('Stored resume PDF check failed, rendering fresh', storageErr);
+        if (storageErr?.message !== 'active-tailored-resume') {
+          console.warn('Stored resume PDF check failed, rendering fresh', storageErr);
+        }
       }
 
       const response = await fetch(`${getApiUrl()}/api/render-unified-pdf`, {
@@ -196,9 +204,10 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
           location: application.location || 'Remote',
           job_url: application.job_url || ''
         };
-    const storedResume = (applicationDetails.resume_snapshot && Object.keys(applicationDetails.resume_snapshot).length)
-      ? applicationDetails.resume_snapshot
-      : tailoredResume || parsedResume;
+    const storedResume = currentTailoredResume
+      || ((applicationDetails.resume_snapshot && Object.keys(applicationDetails.resume_snapshot).length)
+        ? applicationDetails.resume_snapshot
+        : parsedResume);
 
     if (storedJob) {
       setJobAnalysis(storedJob);
@@ -219,10 +228,28 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
     }
   };
 
-  const displayResume = (applicationDetails.resume_snapshot && Object.keys(applicationDetails.resume_snapshot).length)
-    ? applicationDetails.resume_snapshot
-    : applicationDetails.tailored_resume
-    || tailoredResume
+  const normalizedApplicationUrl = String(application.job_url || '').replace(/\/+$/, '').toLowerCase();
+  const normalizedActiveUrl = String(lastAnalyzedUrl || jobAnalysis?.job_url || '').replace(/\/+$/, '').toLowerCase();
+  const activeTitle = String(jobAnalysis?.job_title || jobAnalysis?.title || '').trim().toLowerCase();
+  const activeCompany = String(jobAnalysis?.company_name || jobAnalysis?.company || '').trim().toLowerCase();
+  const applicationTitle = String(application.job_title || '').trim().toLowerCase();
+  const applicationCompany = String(application.company_name || '').trim().toLowerCase();
+  const activeJobMatchesApplication = Boolean(
+    normalizedApplicationUrl && normalizedActiveUrl && normalizedApplicationUrl === normalizedActiveUrl
+  ) || Boolean(
+    activeTitle && activeCompany && applicationTitle && applicationCompany
+    && activeTitle === applicationTitle
+    && activeCompany === applicationCompany
+  );
+  const currentTailoredResume = activeJobMatchesApplication
+    ? (workflowResume || tailoredResume)
+    : null;
+
+  const displayResume = currentTailoredResume
+    || applicationDetails.tailored_resume
+    || ((applicationDetails.resume_snapshot && Object.keys(applicationDetails.resume_snapshot).length)
+      ? applicationDetails.resume_snapshot
+      : null)
     || parsedResume
     || {
         personal_info: {
@@ -470,11 +497,13 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
                 Open in Studio
               </button>
               <button
-                onClick={handleDownloadResume}
-                disabled={downloadingType === 'resume'}
+                onClick={previewModalType === 'resume' ? handleDownloadResume : handleDownloadCoverLetter}
+                disabled={downloadingType === (previewModalType === 'resume' ? 'resume' : 'coverletter')}
                 className="px-3 py-1.5 bg-[#00bda5] hover:bg-[#00a38e] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer border-none disabled:opacity-50"
               >
-                {downloadingType === 'resume' ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />}
+                {downloadingType === (previewModalType === 'resume' ? 'resume' : 'coverletter')
+                  ? <RefreshCw size={13} className="animate-spin" />
+                  : <Download size={13} />}
                 Download PDF
               </button>
               <button

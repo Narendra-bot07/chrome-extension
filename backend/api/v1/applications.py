@@ -245,6 +245,14 @@ async def update_application(
         previous = repo.get_by_id(id, user["id"])
         # Filter request data to only fields that were set
         update_data = {k: v for k, v in request.dict().items() if v is not None}
+        # A binary generated from an older snapshot must never be served for
+        # newly tailored content. Clear its pointer before saving the updated
+        # source-of-truth snapshot; the next download regenerates and stores
+        # the correct artifact at the same deterministic object path.
+        if request.resume_snapshot is not None:
+            update_data["resume_file_path"] = None
+        if request.cover_letter_snapshot is not None:
+            update_data["cover_letter_file_path"] = None
         record = repo.update(id, user["id"], update_data)
         if not record:
             raise HTTPException(
