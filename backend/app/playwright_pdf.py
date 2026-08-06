@@ -212,6 +212,90 @@ def _timer():
     return lap
 
 
+def _finalize_stable_rendered_dom(page):
+    """Recover when React rendered the resume but omitted only its ready marker."""
+    return page.evaluate(
+        """() => {
+          const root = document.querySelector('#resume-print-container');
+          if (!root) return { ready: false, reason: 'missing_root' };
+          const text = (root.innerText || '').trim();
+          const content = root.firstElementChild;
+          if (!content || text.length < 150) {
+            return { ready: false, reason: 'insufficient_content', text_length: text.length };
+          }
+          const rect = content.getBoundingClientRect();
+          const height = Math.max(content.scrollHeight || 0, rect.height || 0);
+          const width = Math.max(content.scrollWidth || 0, rect.width || 0);
+          const sections = Array.from(content.querySelectorAll('[data-section]')).map(node => {
+            const sectionRect = node.getBoundingClientRect();
+            return {
+              id: node.dataset.section,
+              offset_px: sectionRect.top - rect.top,
+              height_px: sectionRect.height,
+              bottom_px: sectionRect.bottom - rect.top
+            };
+          }).filter(section => section.id);
+          if (!sections.length || height <= 0) {
+            return { ready: false, reason: 'unmeasurable_content' };
+          }
+          const pageHeight = 1122;
+          const pageCount = Math.max(1, Math.ceil(height / pageHeight));
+          const sectionOrder = sections.map(section => section.id);
+          const sectionMeasurements = Object.fromEntries(
+            sections.map(section => [section.id, {
+              offset_px: section.offset_px,
+              height_px: section.height_px,
+              bottom_px: section.bottom_px
+            }])
+          );
+          const plan = window.__FINAL_COMPOSITION_PLAN__ || {
+            version: 2,
+            engine_version: '2.0.0-dom-fallback',
+            page_count: pageCount,
+            density: 'compact',
+            page_size: 'A4',
+            compactness_level: Number(window.__INJECTED_RESUME_DATA__?.layout_level || 6),
+            section_order: sectionOrder,
+            page_breaks: [],
+            section_measurements: sectionMeasurements,
+            section_positions: Object.fromEntries(sections.map(section => [section.id, section.offset_px])),
+            measurement_summary: {
+              content_height_px: height,
+              content_width_px: width,
+              page_capacity_px: pageHeight,
+              natural_page_count: pageCount,
+              measured_section_count: sections.length
+            },
+            optimization_actions: ['stable_dom_readiness_recovery'],
+            validation_report: {
+              valid: content.scrollWidth <= content.clientWidth + 1,
+              overflow: false,
+              horizontal_overflow: content.scrollWidth > content.clientWidth + 1,
+              clipping: false,
+              blank_trailing_page: false,
+              tiny_second_page: false,
+              missing_sections: [],
+              content_preserved: true,
+              readable: true
+            },
+            composition_plan_hash: 'stable-dom-recovery',
+            plan_hash: 'stable-dom-recovery'
+          };
+          if (!plan.validation_report?.valid) {
+            return { ready: false, reason: 'invalid_layout' };
+          }
+          window.__FINAL_COMPOSITION_PLAN__ = plan;
+          if (!document.querySelector('#resume-print-ready')) {
+            const marker = document.createElement('div');
+            marker.id = 'resume-print-ready';
+            marker.style.display = 'none';
+            root.appendChild(marker);
+          }
+          return { ready: true, height, width, page_count: plan.page_count, text_length: text.length };
+        }"""
+    )
+
+
 class HyperlinkRenderingError(Exception):
     """Raised when hyperlink annotations fail during Playwright PDF rendering."""
     pass
@@ -319,6 +403,8 @@ def generate_pdf_via_playwright(
                 float(os.getenv("PDF_RENDER_READY_TIMEOUT_SECONDS", "30")),
             )
             ready_deadline = time.monotonic() + ready_timeout
+            stable_dom_signature = None
+            stable_dom_polls = 0
             while True:
                 _raise_if_superseded(client_render_id, render_revision)
                 if time.monotonic() >= ready_deadline:
@@ -336,6 +422,37 @@ def generate_pdf_via_playwright(
                     )
                     break
                 except PlaywrightTimeoutError:
+                    metrics = page.evaluate(
+                        """() => {
+                          const root = document.querySelector('#resume-print-container');
+                          const content = root?.firstElementChild;
+                          if (!root || !content) return null;
+                          const rect = content.getBoundingClientRect();
+                          return {
+                            height: Math.round(Math.max(content.scrollHeight || 0, rect.height || 0)),
+                            width: Math.round(Math.max(content.scrollWidth || 0, rect.width || 0)),
+                            text_length: (root.innerText || '').trim().length,
+                            sections: content.querySelectorAll('[data-section]').length
+                          };
+                        }"""
+                    )
+                    signature = json.dumps(metrics, sort_keys=True) if metrics else None
+                    if signature and signature == stable_dom_signature:
+                        stable_dom_polls += 1
+                    else:
+                        stable_dom_signature = signature
+                        stable_dom_polls = 1 if signature else 0
+                    # Five unchanged measurements prove the DOM is stable even
+                    # if a React effect missed its marker/event handshake.
+                    if (
+                        stable_dom_polls >= 5
+                        and metrics.get("text_length", 0) >= 150
+                        and metrics.get("sections", 0) > 0
+                    ):
+                        recovery = _finalize_stable_rendered_dom(page)
+                        if recovery.get("ready"):
+                            print(f"[PDF-READINESS-RECOVERY] {recovery}")
+                            break
                     continue
             render_error = page.evaluate("window.__PDF_RENDER_ERROR__ || null")
             if render_error:

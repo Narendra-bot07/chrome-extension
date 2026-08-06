@@ -92,9 +92,12 @@ function paginate(sections, pageCount, contentHeight, pageHeight) {
   }));
 }
 
-export async function waitForRenderableFonts(doc = globalThis.document) {
+export async function waitForRenderableFonts(doc = globalThis.document, timeoutMs = 2000) {
   if (!doc?.fonts?.ready) return;
-  await doc.fonts.ready;
+  await Promise.race([
+    doc.fonts.ready,
+    new Promise(resolve => setTimeout(resolve, timeoutMs))
+  ]);
 }
 
 export function measureResumeElement(element) {
