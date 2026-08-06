@@ -260,6 +260,10 @@ class BulletEditorOutput(BaseModel):
     """Structure-preserving output for editing existing resume bullets."""
     updated_bullets: List[str]
 
+class RecordEditorOutput(BaseModel):
+    """Structure-preserving output for education and other record sections."""
+    updated_records: List[Any]
+
 class CoverLetterResult(BaseModel):
     cover_letter: str
     recipient_name: Optional[str] = "Hiring Manager"

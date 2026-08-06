@@ -23,7 +23,8 @@ from app.schemas import (
     SkillsEditorOutput,
     ExperienceEditorOutput,
     ProjectEditorOutput,
-    BulletEditorOutput
+    BulletEditorOutput,
+    RecordEditorOutput
 )
 
 from app.llm.deepseek_provider import (
@@ -528,6 +529,36 @@ def is_prompt_out_of_scope(prompt: str, api_key: Optional[str] = None) -> Option
         return result.reason or "This request is outside the scope of resume editing assistance."
     return None
 
+
+def _apply_explicit_user_replacement(section_data: Any, prompt: str) -> tuple[Any, int]:
+    """Apply an unambiguous `from X to Y` correction without LLM drift."""
+    match = re.search(
+        r"\b(?:change|replace|correct|update)\b.*?\bfrom\s+['\"]?(.+?)['\"]?\s+\bto\s+['\"]?(.+?)['\"]?\s*$",
+        str(prompt or "").strip(),
+        re.IGNORECASE,
+    )
+    if not match:
+        return section_data, 0
+    before = match.group(1).strip().strip("'\"")
+    after = match.group(2).strip().strip("'\"").rstrip(".!").strip()
+    if not before or before == after:
+        return section_data, 0
+
+    replacements = 0
+
+    def visit(value: Any) -> Any:
+        nonlocal replacements
+        if isinstance(value, dict):
+            return {key: visit(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [visit(item) for item in value]
+        if isinstance(value, str) and before in value:
+            replacements += value.count(before)
+            return value.replace(before, after)
+        return value
+
+    return visit(section_data), replacements
+
 def refine_section_with_ai(
     section_type: str,
     section_data: Any,
@@ -541,11 +572,26 @@ def refine_section_with_ai(
         raise ValueError(out_of_scope)
 
     stype = section_type.lower()
+    explicit_result, explicit_count = _apply_explicit_user_replacement(section_data, prompt)
+    if explicit_count:
+        if stype == "summary":
+            if isinstance(explicit_result, dict):
+                return str(explicit_result.get("current_suggested") or explicit_result.get("original") or "")
+            return str(explicit_result)
+        if stype == "skills":
+            return ", ".join(str(item) for item in explicit_result)
+        if stype in ("experience", "projects"):
+            return "\n".join(str(item) for item in explicit_result)
+        if stype in ("education", "achievements"):
+            return explicit_result
+
     schema_cls = SummaryEditorOutput
     if stype == "skills":
         schema_cls = SkillsEditorOutput
     elif stype in ("experience", "projects"):
         schema_cls = BulletEditorOutput
+    elif stype in ("education", "achievements"):
+        schema_cls = RecordEditorOutput
 
     payload_dict = {
         "section_type": stype,
@@ -560,15 +606,19 @@ def refine_section_with_ai(
             f"You are editing the {section_type} section of a resume for the {job.title} role. "
             f"Follow this instruction exactly: {prompt}. Preserve all factual claims, employers, "
             "projects, technologies, dates, and metrics unless the supplied content supports them. "
-            "For bullet sections, return exactly one updated_bullets item for every supplied item, "
-            "in the same order. Improve wording rather than inventing evidence."
+            "The user's instruction is authoritative, including an explicitly requested correction "
+            "to a number, date, name, GPA, or other fact. Do not independently change any other fact. "
+            "For bullet sections, return exactly one updated_bullets item for every supplied item. "
+            "For record sections, return exactly one updated_records item for every supplied item, "
+            "preserving each record's JSON shape and all fields not targeted by the instruction. "
+            "Always preserve item count and order."
         )
         user_prompt = (
             "Current section content (this is the authoritative text to edit):\n"
             f"{json.dumps(section_data, default=str, ensure_ascii=False)}\n\n"
             f"Target job skills: {json.dumps(job.required_skills, default=str, ensure_ascii=False)}"
         )
-        return provider.invoke_structured(prompt=user_prompt, schema_cls=schema_cls, system_instruction=sys_msg, temperature=0.2)
+        return provider.invoke_structured(prompt=user_prompt, schema_cls=schema_cls, system_instruction=sys_msg, temperature=0.0)
 
     res = llm_cache.execute_with_cache(
         task=f"refine_{stype}",
@@ -591,6 +641,28 @@ def refine_section_with_ai(
                 "The edit was rejected to preserve resume structure."
             )
         return "\n".join(bullets)
+    elif stype in ("education", "achievements"):
+        records = list(res.updated_records)
+        expected_count = len(section_data) if isinstance(section_data, list) else 0
+        if len(records) != expected_count:
+            raise ValueError(
+                f"AI returned {len(records)} records; expected {expected_count}. "
+                "The edit was rejected to preserve resume structure."
+            )
+        if stype == "education":
+            normalized_records = []
+            for original, updated in zip(section_data, records):
+                if not isinstance(original, dict) or not isinstance(updated, dict):
+                    raise ValueError("Education edits must preserve structured records.")
+                extra_fields = set(updated) - set(original)
+                if extra_fields:
+                    raise ValueError(
+                        "AI added unsupported education fields: "
+                        + ", ".join(sorted(extra_fields))
+                    )
+                normalized_records.append({**original, **updated})
+            return normalized_records
+        return records
 
     return getattr(res, "summary", str(res))
 

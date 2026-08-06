@@ -39,12 +39,13 @@ company names, or personal information. If no safe fix is necessary, return no p
 Avoid AI-sounding enthusiasm. Score recruiter-readiness from 0 to 100."""
 
 EDIT_PROMPT = """You are the Cover Letter Intelligence Agent in interactive edit mode.
-Obey the user's request by patching only affected blank-line-separated blocks.
+Obey the user's request exactly by patching only affected blank-line-separated blocks.
 Do not regenerate the whole letter. Preserve every untouched block byte-for-byte.
 Each patch `before` must exactly equal the current block at its zero-based index.
 Never introduce a project, skill, company, metric, certification, date, referral,
 publication, or personal fact unless it is supported by the supplied context/strategy.
-An explicit user request changes style or focus, but it does not prove a new fact.
+An explicit user instruction to replace or correct a specific fact authorizes exactly
+that stated replacement; it does not authorize any other factual change.
 Return no patch when the request needs unsupported information. Avoid AI-sounding
 phrases unless explicitly requested."""
 
@@ -246,6 +247,9 @@ def edit_cover_letter(
     support = json.dumps({
         "context": request.context.model_dump(mode="json"),
         "strategy": request.strategy.model_dump(mode="json"),
+        # Facts explicitly supplied by the user are authorized for this edit;
+        # unrelated unsupported facts remain blocked.
+        "explicit_user_instruction": request.user_prompt,
     })
     _assert_no_new_fact_markers(
         request.generated_cover_letter.content, after, support

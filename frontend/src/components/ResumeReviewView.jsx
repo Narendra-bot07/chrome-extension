@@ -163,7 +163,8 @@ function ResumeReviewView({
   }, [rawParsedResume]);
   const { 
     darkMode, apiUrl, apiKey, jobAnalysis, jdFingerprint, setReviewSuggestions, 
-    comparison, selectedSections, liveATS, setLiveATS, isRefineStreaming, setIsRefineStreaming 
+    comparison, selectedSections, liveATS, setLiveATS, isRefineStreaming, setIsRefineStreaming,
+    showToast
   } = useApp();
   const [activeEditSection, setActiveEditSection] = useState(null);
   const [customPrompt, setCustomPrompt] = useState("");
@@ -409,7 +410,11 @@ function ResumeReviewView({
     } catch (e) {
       console.error(e);
       setReviewSuggestions(originalSuggestions);
-      alert("AI editing was interrupted. Your original content has been restored.");
+      showToast?.(
+        e?.message || "AI editing was interrupted. Your original content has been restored.",
+        "error",
+        "AI Edit Failed"
+      );
     } finally {
       setRefining(false);
       setStreamingSection(null);
@@ -429,7 +434,7 @@ function ResumeReviewView({
       const token = localStorage.getItem('access_token');
       if (token) headers.Authorization = `Bearer ${token}`;
       const sectionData = records.map(item => (
-        sectionType === 'education' ? JSON.stringify(item) : String(item)
+        sectionType === 'education' ? item : String(item)
       ));
       const response = await fetch(`${apiUrl}/api/refine-section`, {
         method: 'POST',
@@ -455,9 +460,9 @@ function ResumeReviewView({
         change_id: `${sectionType}:record:${index}`,
         category: labelFor(sectionType),
         status: 'pending',
-        original: sectionType === 'education' ? JSON.stringify(record) : String(record),
+        original: sectionType === 'education' ? record : String(record),
         suggested: payload.refined[index],
-        reason: 'User-requested wording edit with source structure preserved.',
+        reason: 'Applied only the user-requested edit while preserving record structure.',
         atsImpact: 0,
         confidence: 'High',
         sectionType,
@@ -467,8 +472,13 @@ function ResumeReviewView({
       setReviewSuggestions([...retained, ...proposed]);
       setActiveEditSection(null);
       setCustomPrompt('');
+      showToast?.("AI edit is ready for your review.", "success", "Edit Ready");
     } catch (error) {
-      alert(error.message || 'AI edit failed. Original records were preserved.');
+      showToast?.(
+        error.message || 'AI edit failed. Original records were preserved.',
+        "error",
+        "AI Edit Failed"
+      );
     } finally {
       setRefining(false);
       setStreamingSection(null);
@@ -667,16 +677,25 @@ function ResumeReviewView({
               suggestion.sectionType === sectionKey && suggestion.itemIndex === index
             );
             if (recordSuggestion) {
-              const shown = recordSuggestion.status === 'accepted'
-                ? recordSuggestion.suggested
-                : recordSuggestion.original;
-              let displayRecord = shown;
-              if (sectionKey === 'education' && typeof shown === 'string') {
-                try { displayRecord = JSON.parse(shown); } catch { displayRecord = shown; }
-              }
+              const normalizeRecord = value => {
+                if (sectionKey === 'education' && typeof value === 'string') {
+                  try { return JSON.parse(value); } catch { return value; }
+                }
+                return value;
+              };
+              const beforeRecord = normalizeRecord(recordSuggestion.original);
+              const afterRecord = normalizeRecord(recordSuggestion.suggested);
+              const displayRecord = recordSuggestion.status === 'accepted'
+                ? afterRecord
+                : beforeRecord;
               return (
                 <div key={index} className="space-y-1">
-                  <div>{displayValue(displayRecord)}</div>
+                  {recordSuggestion.status === 'pending' ? (
+                    <div className="space-y-1 rounded-lg border border-emerald-200/70 dark:border-emerald-900/40 p-2">
+                      <div className="text-rose-500 line-through">{displayValue(beforeRecord)}</div>
+                      <div className="font-semibold text-emerald-650 dark:text-emerald-400">{displayValue(afterRecord)}</div>
+                    </div>
+                  ) : <div>{displayValue(displayRecord)}</div>}
                   {recordSuggestion.status === 'pending' && (
                     <div className="flex gap-1">
                       <button onClick={() => onUpdateSuggestionStatus(recordSuggestion.id, 'accepted')} className="resume-review-accept px-2 py-0.5 bg-[#00bda5] text-white rounded text-[9px] font-bold">Accept</button>

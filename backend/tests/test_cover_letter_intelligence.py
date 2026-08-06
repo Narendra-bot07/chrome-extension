@@ -109,3 +109,35 @@ def test_interactive_edit_rejects_a_noop_plan(monkeypatch):
 
     with pytest.raises(ValueError, match="meaningful change"):
         edit_cover_letter(request)
+
+
+def test_interactive_edit_allows_an_explicit_user_fact_correction(monkeypatch):
+    generation = generation_request()
+    before = "Dear Hiring Manager,\n\nI improved processing by 30%.\n\nSincerely,\nAda"
+    letter = finalize_generated_cover_letter(_GeneratedDraft(
+        title="Cloud Engineer Cover Letter",
+        content=before,
+    ), generation)
+    request = CoverLetterEditRequest(
+        context=generation.context,
+        strategy=generation.strategy,
+        generated_cover_letter=letter,
+        user_prompt="Correct 30% to 25%.",
+    )
+    monkeypatch.setattr(
+        "services.cover_letter.intelligence._invoke_plan",
+        lambda *args, **kwargs: _PatchPlan(
+            summary="Applied the requested correction.",
+            patches=[ParagraphPatch(
+                paragraph_index=1,
+                before="I improved processing by 30%.",
+                after="I improved processing by 25%.",
+                reason="Apply explicit user correction.",
+            )],
+        ),
+    )
+
+    result = edit_cover_letter(request)
+
+    assert "25%" in result.after_content
+    assert "30%" not in result.after_content

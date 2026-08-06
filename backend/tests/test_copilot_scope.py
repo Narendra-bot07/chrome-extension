@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from app.ai_service import refine_section_with_ai, is_prompt_out_of_scope
-from app.schemas import BulletEditorOutput, JobAnalysis, ScopeCheckResult
+from app.schemas import BulletEditorOutput, JobAnalysis, RecordEditorOutput, ScopeCheckResult
 
 def sample_job():
     return JobAnalysis(**{
@@ -75,3 +75,31 @@ def test_experience_edit_uses_structure_preserving_bullet_schema(mock_scope, moc
         "Reduced deployment time by 30%.",
     ]
     assert mock_cache.call_args.kwargs["expected_schema"] is BulletEditorOutput
+
+
+@patch("app.ai_service.llm_cache.execute_with_cache")
+@patch("app.ai_service.is_prompt_out_of_scope", return_value=None)
+def test_education_edit_preserves_records_and_honors_explicit_gpa_change(mock_scope, mock_cache):
+    mock_cache.return_value = RecordEditorOutput(updated_records=[{
+        "degree": "B.Tech",
+        "institution": "CVR College of Engineering",
+        "gpa": "8.52",
+    }])
+    original = [{
+        "degree": "B.Tech",
+        "institution": "CVR College of Engineering",
+        "gpa": "8.57",
+    }]
+
+    result = refine_section_with_ai(
+        section_type="education",
+        section_data=original,
+        prompt="Change CGPA from 8.57 to 8.52.",
+        job=sample_job(),
+    )
+
+    assert result[0]["gpa"] == "8.52"
+    assert result[0]["degree"] == original[0]["degree"]
+    # Unambiguous fact corrections are deterministic and cannot drift into
+    # unrelated fields, so no LLM call is needed.
+    mock_cache.assert_not_called()
