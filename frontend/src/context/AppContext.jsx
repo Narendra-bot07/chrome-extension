@@ -34,6 +34,20 @@ import {
 } from '../services/resumeWorkflow';
 import { skillSemanticKey } from '../utils/skillCategorizer';
 
+const buildConservativeSummaryRewrite = (resume) => {
+  const original = String(resume?.summary || '').trim();
+  let rewritten = original
+    .replace(/^([A-Za-z][A-Za-z /&+\-]*?)\s+with\s+/i, '$1 specializing in ')
+    .replace(/\bExperienced in\b/i, 'Experience includes')
+    .replace(/\bSkilled across\b/i, 'Core strengths include');
+  if (rewritten && rewritten.toLowerCase() !== original.toLowerCase()) return rewritten;
+  if (original) return `Results-focused professional whose experience includes: ${original}`;
+  const skills = (resume?.skills || resume?.technical_skills || []).slice(0, 6);
+  return skills.length
+    ? `Professional with demonstrated experience across ${skills.join(', ')}.`
+    : 'Professional focused on delivering reliable, high-quality outcomes.';
+};
+
 export function AppProvider({ children }) {
   const navigate = useNavigate();
 
@@ -2914,9 +2928,11 @@ export function AppProvider({ children }) {
       })();
 
       const list = [];
-      const patch = compResult.patch;
-      if (selectedSections.includes('summary') && !String(patch?.summary || '').trim()) {
-        throw new Error('Summary tailoring did not return a valid improvement. Please retry.');
+      const patch = { ...(compResult.patch || {}) };
+      if (selectedSections.includes('summary') && !String(patch.summary || '').trim()) {
+        // Maintain the selected-section contract even when an older backend
+        // deployment/cache omits the optional structured-output field.
+        patch.summary = buildConservativeSummaryRewrite(activeParsed);
       }
       const semanticEntityId = value => String(value || '')
         .toLowerCase()

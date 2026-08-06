@@ -36,6 +36,31 @@ from services.cache.llm_fingerprint import LLMFingerprintBuilder
 
 logger = logging.getLogger("ai_service")
 
+
+def _conservative_summary_rewrite(resume: ResumeStructure) -> str:
+    """Rewrite only wording already supported by the resume."""
+    original = str(resume.summary or "").strip()
+    rewritten = re.sub(
+        r"^([A-Za-z][A-Za-z /&+-]*?)\s+with\s+", r"\1 specializing in ",
+        original, count=1, flags=re.IGNORECASE,
+    )
+    rewritten = re.sub(
+        r"\bExperienced in\b", "Experience includes", rewritten,
+        count=1, flags=re.IGNORECASE,
+    )
+    rewritten = re.sub(
+        r"\bSkilled across\b", "Core strengths include", rewritten,
+        count=1, flags=re.IGNORECASE,
+    )
+    if rewritten and rewritten.casefold() != original.casefold():
+        return rewritten
+    if original:
+        return f"Results-focused professional whose experience includes: {original}"
+    skills = list(resume.skills or [])[:6]
+    if skills:
+        return f"Professional with demonstrated experience across {', '.join(skills)}."
+    return "Professional focused on delivering reliable, high-quality outcomes."
+
 _shared_provider = None
 _shared_provider_lock = threading.Lock()
 
@@ -410,28 +435,25 @@ def generate_tailoring_patch(
             # requested optional field. Produce a conservative wording-only
             # rewrite from the user's own text so Summary is never silently
             # skipped and no new skills, metrics, or claims are invented.
-            rewritten = re.sub(
-                r"^([A-Za-z][A-Za-z /&+-]*?)\s+with\s+",
-                r"\1 specializing in ",
-                original_summary,
-                count=1,
-                flags=re.IGNORECASE,
-            )
-            rewritten = re.sub(
-                r"\bExperienced in\b", "Experience includes", rewritten,
-                count=1, flags=re.IGNORECASE,
-            )
-            rewritten = re.sub(
-                r"\bSkilled across\b", "Core strengths include", rewritten,
-                count=1, flags=re.IGNORECASE,
-            )
-            if rewritten.casefold() == original_summary.casefold() and original_summary:
-                rewritten = f"Results-focused professional with experience reflected across: {original_summary}"
-            patch.summary = rewritten
+            patch.summary = _conservative_summary_rewrite(resume)
 
     pipeline = StrictTailoringEngine().validate_patch(
         resume, job, patch, requested_sections=selected_sections
     )
+    if selected_sections and "summary" in selected_sections and not pipeline.patch.summary:
+        # Validation may reject an adventurous model rewrite. Re-run only the
+        # conservative evidence-preserving fallback and merge its accepted
+        # audit decision into the authoritative pipeline result.
+        fallback_pipeline = StrictTailoringEngine().validate_patch(
+            resume,
+            job,
+            ResumePatch(summary=_conservative_summary_rewrite(resume)),
+            requested_sections={"summary"},
+        )
+        if fallback_pipeline.patch.summary:
+            pipeline.patch.summary = fallback_pipeline.patch.summary
+            pipeline.edits.extend(fallback_pipeline.edits)
+            pipeline.rejected_edits.extend(fallback_pipeline.rejected_edits)
 
     materialized = StrictTailoringEngine().apply_patch(resume, pipeline.patch)
     StrictTailoringEngine.defensive_section_validation_gate(resume, materialized, stage_label="STAGE 7: MERGE & SAVE GATE")

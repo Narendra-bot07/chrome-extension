@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-TAILORING_ENGINE_VERSION = "v1.4.0-required-summary-v10"
+TAILORING_ENGINE_VERSION = "v1.4.1-summary-fallback-v11"
 PATCHABLE_SELECTIONS = frozenset({"summary", "experience", "projects", "skills"})
 
 
