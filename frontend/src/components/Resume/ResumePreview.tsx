@@ -86,7 +86,6 @@ export default function ResumePreview({
       : `pdf-${Date.now()}-${Math.random().toString(36).slice(2)}`
   );
   const lastSuccessfulPayloadRef = useRef<string>('');
-  const firstPendingChangeAtRef = useRef<number | null>(null);
   const adaptiveComposition = useMemo(
     () => createCompositionPlan(resumeData, selectedTemplate || 'ExecutiveATS'),
     [resumeData, selectedTemplate]
@@ -318,60 +317,21 @@ export default function ResumePreview({
   };
 
   useEffect(() => {
-    // The interactive editor already renders the exact resume DOM locally.
-    // Re-rendering a server PDF after every drag creates long-lived HTTP/2
-    // requests and a serialized Playwright backlog. Generate the binary once,
-    // on explicit download, after the user has finished editing.
-    if (interactiveLayoutMode) {
-      setShowLiveLayout(true);
-      setStatusMessage('Live layout preview');
-      setLoadingPdf(false);
-      // Any edit invalidates the previously generated binary. The DOM preview
-      // stays instant; the next explicit download renders this latest payload.
-      if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
-      setPdfBlob(null);
-      setPdfBlobUrl(null);
-      setRenderHash('');
-      setMeasurementHash('');
-      setArtifactFilename('');
-      lastSuccessfulPayloadRef.current = '';
-      return;
-    }
-    const controller = new AbortController();
-    // Each firing launches a full server-side Chromium process (~3.5-5s
-    // cold) serialized behind a process-wide render lock shared by every
-    // user's PDF renders -- and the AbortController below only cancels the
-    // frontend fetch, not the backend's already-launched Playwright work, so
-    // a burst of edits (normal during active section drag-reordering) queued
-    // multiple full renders that all still ran to completion even though
-    // only the last one's result was ever used. 650ms was nowhere near long
-    // enough to coalesce a realistic edit burst into one render; this was
-    // very likely the single largest contributor to the pipeline feeling
-    // slow "between steps" during review/editing.
-    const MAX_DEBOUNCE_WAIT_MS = 1500;
-    const now = Date.now();
-    if (firstPendingChangeAtRef.current === null) firstPendingChangeAtRef.current = now;
-    const elapsed = now - firstPendingChangeAtRef.current;
-    const baseDelay = interactiveLayoutMode ? 750 : 0;
-    // If exactFinalResume (or another dep) keeps getting a new reference
-    // faster than the debounce window -- an unstable upstream memo, or a
-    // rapid burst of edits -- every effect firing cancels the previous
-    // timer before it ever completes, so fetchUnifiedPdfArtifact never
-    // actually runs: the preview sits on "Optimizing..." forever with zero
-    // render requests ever sent. Once a debounce cycle has been pending for
-    // MAX_DEBOUNCE_WAIT_MS, force it through on this tick instead of
-    // deferring again, so a render always eventually happens no matter how
-    // often the inputs keep changing.
-    const delay = elapsed >= MAX_DEBOUNCE_WAIT_MS ? 0 : Math.min(baseDelay, MAX_DEBOUNCE_WAIT_MS - elapsed);
-
-    const timer = window.setTimeout(() => {
-      firstPendingChangeAtRef.current = null;
-      fetchUnifiedPdfArtifact(pagePreference, controller.signal);
-    }, delay);
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
+    // The React template is the live preview in every mode. Never enqueue a
+    // Playwright render merely because content/layout props changed: aborted
+    // browser fetches do not cancel backend Chromium work and previously
+    // created an 18-minute serialized queue. Generate exactly once when the
+    // user explicitly downloads the latest resume.
+    setShowLiveLayout(true);
+    setStatusMessage('Live layout preview');
+    setLoadingPdf(false);
+    if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
+    setPdfBlob(null);
+    setPdfBlobUrl(null);
+    setRenderHash('');
+    setMeasurementHash('');
+    setArtifactFilename('');
+    lastSuccessfulPayloadRef.current = '';
   }, [exactFinalResume, selectedTemplate, pagePreference, companyName]);
 
   // Scroll Active Page Indicator

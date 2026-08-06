@@ -51,6 +51,10 @@ class SupersededPdfRender(Exception):
     """Raised when a newer layout revision makes this render obsolete."""
 
 
+class PdfRenderQueueTimeout(Exception):
+    """Raised when the single Chromium worker is unhealthy or backlogged."""
+
+
 def register_pdf_render_revision(client_render_id: str, revision: int) -> None:
     """Record the newest layout revision before it enters the Chromium queue."""
     if not client_render_id:
@@ -81,7 +85,17 @@ def _raise_if_superseded(client_render_id: Optional[str], revision: Optional[int
 def _serialize_pdf_render(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        return _playwright_executor.submit(func, *args, **kwargs).result()
+        future = _playwright_executor.submit(func, *args, **kwargs)
+        queue_timeout = max(10.0, float(os.getenv("PDF_RENDER_QUEUE_TIMEOUT_SECONDS", "75")))
+        try:
+            return future.result(timeout=queue_timeout)
+        except concurrent.futures.TimeoutError as exc:
+            # Removes queued work that never started. A running render has its
+            # own internal deadlines below and will release the worker shortly.
+            future.cancel()
+            raise PdfRenderQueueTimeout(
+                f"PDF renderer did not become available within {queue_timeout:.0f} seconds."
+            ) from exc
     return wrapper
 
 
@@ -233,7 +247,11 @@ def _open_renderer(page, route: str, query: Optional[dict] = None):
             # cancellable loop below. Waiting for DOMContentLoaded here made a
             # healthy but CPU-bound renderer look unavailable and then paid the
             # same timeout again against the public fallback URL.
-            response = page.goto(url, wait_until="commit", timeout=20000)
+            navigation_timeout_ms = max(
+                1000,
+                int(os.getenv("PDF_RENDER_NAVIGATION_TIMEOUT_MS", "8000")),
+            )
+            response = page.goto(url, wait_until="commit", timeout=navigation_timeout_ms)
             if response and response.status >= 400:
                 failures.append(f"{url} returned HTTP {response.status}")
                 continue
@@ -265,6 +283,8 @@ def generate_pdf_via_playwright(
         _raise_if_superseded(client_render_id, render_revision)
         context = _get_context()
         page = context.new_page()
+        page.set_default_timeout(30000)
+        page.set_default_navigation_timeout(8000)
         # Every validation failure in production so far has zero client-side
         # error info attached -- nothing was listening for browser console
         # output or uncaught page errors, so a React crash / template lookup
@@ -292,12 +312,23 @@ def generate_pdf_via_playwright(
                 page.reload(wait_until="domcontentloaded")
                 lap("504 reload")
 
-            # Wait without an overall deadline: a resource-constrained host may
-            # legitimately need longer. Polling once per second preserves
-            # latest-layout cancellation and fails immediately on React crashes,
-            # avoiding both arbitrary timeouts and an unbounded blocked queue.
+            # A renderer crash must never occupy the sole Chromium worker
+            # indefinitely; that previously produced 10-18 minute queue waits.
+            ready_timeout = max(
+                5.0,
+                float(os.getenv("PDF_RENDER_READY_TIMEOUT_SECONDS", "30")),
+            )
+            ready_deadline = time.monotonic() + ready_timeout
             while True:
                 _raise_if_superseded(client_render_id, render_revision)
+                if time.monotonic() >= ready_deadline:
+                    diagnostic = page.evaluate(
+                        "() => ({error: window.__PDF_RENDER_ERROR__ || null, "
+                        "title: document.title, body: (document.body?.innerText || '').slice(0, 500)})"
+                    )
+                    raise TimeoutError(
+                        f"PDF renderer did not become ready within {ready_timeout:.0f} seconds: {diagnostic}"
+                    )
                 try:
                     page.wait_for_function(
                         "document.querySelector('#resume-print-ready') || window.__PDF_RENDER_ERROR__",
@@ -313,7 +344,13 @@ def generate_pdf_via_playwright(
             _raise_if_superseded(client_render_id, render_revision)
 
             page.wait_for_timeout(200)
-            page.evaluate("document.fonts.ready")
+            try:
+                page.wait_for_function(
+                    "document.fonts.status === 'loaded'",
+                    timeout=max(1000, int(os.getenv("PDF_RENDER_FONTS_TIMEOUT_MS", "5000"))),
+                )
+            except PlaywrightTimeoutError:
+                print("[PDF-WARNING] Font readiness timed out; continuing with available fonts")
             lap("200ms settle + document.fonts.ready")
             
             # Rendering Validation
@@ -588,6 +625,8 @@ def generate_cover_letter_pdf_via_playwright(cover_letter_json_str: str) -> Opti
     try:
         context = _get_context()
         page = context.new_page()
+        page.set_default_timeout(30000)
+        page.set_default_navigation_timeout(8000)
         try:
             _open_renderer(page, "print-cover-letter")
 
@@ -595,7 +634,10 @@ def generate_cover_letter_pdf_via_playwright(cover_letter_json_str: str) -> Opti
             page.evaluate("window.dispatchEvent(new Event('coverLetterDataReady'));")
 
             page.wait_for_timeout(500)
-            page.evaluate("document.fonts.ready")
+            try:
+                page.wait_for_function("document.fonts.status === 'loaded'", timeout=5000)
+            except PlaywrightTimeoutError:
+                pass
 
             # If the cover letter fits in 1 page, enforce exactly page 1
             cl_height = page.evaluate("document.querySelector('#resume-print-container') ? document.querySelector('#resume-print-container').offsetHeight : 0")
@@ -639,6 +681,8 @@ def render_cover_letter_artifact(
         # BrowserContext already defaults to 1, so no per-page equivalent is
         # needed here.
         page = context.new_page()
+        page.set_default_timeout(30000)
+        page.set_default_navigation_timeout(8000)
         page.set_viewport_size(viewport)
         try:
             page.emulate_media(media="print")
@@ -657,17 +701,23 @@ def render_cover_letter_artifact(
                 timeout=10000,
             )
             page.evaluate("""async () => {
-                if (document.fonts?.ready) await document.fonts.ready;
-                await Promise.all(Array.from(document.images).map(image => {
-                    if (image.complete) return Promise.resolve();
-                    return new Promise(resolve => {
-                        image.onload = resolve;
-                        image.onerror = resolve;
-                    });
-                }));
-                await new Promise(resolve =>
-                    requestAnimationFrame(() => requestAnimationFrame(resolve))
-                );
+                const settle = async () => {
+                    if (document.fonts?.ready) await document.fonts.ready;
+                    await Promise.all(Array.from(document.images).map(image => {
+                        if (image.complete) return Promise.resolve();
+                        return new Promise(resolve => {
+                            image.onload = resolve;
+                            image.onerror = resolve;
+                        });
+                    }));
+                    await new Promise(resolve =>
+                        requestAnimationFrame(() => requestAnimationFrame(resolve))
+                    );
+                };
+                await Promise.race([
+                    settle(),
+                    new Promise(resolve => setTimeout(resolve, 5000))
+                ]);
             }""")
             preflight = page.evaluate("""() => {
                 const root = document.querySelector('#resume-print-container');

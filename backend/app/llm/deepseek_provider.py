@@ -3,6 +3,7 @@ import json
 import time
 import logging
 import threading
+from contextlib import contextmanager
 from functools import lru_cache
 from typing import Dict, Any, Optional, List, Type
 from pydantic import BaseModel
@@ -26,6 +27,21 @@ _MAX_CONCURRENT_AI_REQUESTS = max(
     int(os.getenv("DEEPSEEK_MAX_CONCURRENT_REQUESTS", "8")),
 )
 _AI_REQUEST_SEMAPHORE = threading.BoundedSemaphore(_MAX_CONCURRENT_AI_REQUESTS)
+
+
+@contextmanager
+def _ai_request_slot(timeout_seconds: Optional[float] = None):
+    acquired = (
+        _AI_REQUEST_SEMAPHORE.acquire(timeout=max(0.0, timeout_seconds))
+        if timeout_seconds is not None
+        else _AI_REQUEST_SEMAPHORE.acquire()
+    )
+    if not acquired:
+        raise TimeoutError("AI request queue is currently saturated.")
+    try:
+        yield
+    finally:
+        _AI_REQUEST_SEMAPHORE.release()
 
 
 def _inline_schema_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
@@ -106,13 +122,16 @@ class DeepSeekProvider:
         schema_cls: Type[BaseModel],
         system_instruction: Optional[str] = None,
         temperature: float = 0.0,
-        escalate_on_error: bool = True
+        escalate_on_error: bool = True,
+        timeout_seconds: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        queue_timeout_seconds: Optional[float] = None,
     ) -> BaseModel:
         """
         Invokes DeepSeek model with structured JSON response_format and validates output against Pydantic schema_cls.
         """
         queue_started = time.perf_counter()
-        with _AI_REQUEST_SEMAPHORE:
+        with _ai_request_slot(queue_timeout_seconds):
             queue_ms = round((time.perf_counter() - queue_started) * 1000)
             if queue_ms >= 100:
                 logger.info(
@@ -162,7 +181,9 @@ class DeepSeekProvider:
                 raw_json = self._chat_completion(
                     model=self.flash_model,
                     messages=messages,
-                    temperature=temperature
+                    temperature=temperature,
+                    timeout_seconds=timeout_seconds,
+                    max_tokens=max_tokens,
                 )
                 parsed_obj = self._parse_json_schema(raw_json, schema_cls)
                 return parsed_obj
@@ -178,7 +199,9 @@ class DeepSeekProvider:
                     raw_json_pro = self._chat_completion(
                         model=self.pro_model,
                         messages=messages,
-                        temperature=temperature
+                        temperature=temperature,
+                        timeout_seconds=timeout_seconds,
+                        max_tokens=max_tokens,
                     )
                     parsed_obj = self._parse_json_schema(raw_json_pro, schema_cls)
                     return parsed_obj
@@ -186,14 +209,27 @@ class DeepSeekProvider:
                     logger.error(f"[DEEPSEEK_ESCALATION_FAILED] Both flash and pro models failed: {pro_err}")
                     raise pro_err
 
-    def _chat_completion(self, model: str, messages: List[Dict[str, str]], temperature: float) -> str:
+    def _chat_completion(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        timeout_seconds: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+    ) -> str:
         """Execute chat completion call via OpenAI-compatible SDK or HTTP fallback."""
         if self.client:
+            request_kwargs = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "response_format": {"type": "json_object"},
+                "timeout": timeout_seconds or self.timeout,
+            }
+            if max_tokens:
+                request_kwargs["max_tokens"] = max_tokens
             response = self.client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                response_format={"type": "json_object"}
+                **request_kwargs
             )
             content = response.choices[0].message.content
             if not content:
@@ -212,11 +248,13 @@ class DeepSeekProvider:
                 "temperature": temperature,
                 "response_format": {"type": "json_object"}
             }
+            if max_tokens:
+                payload["max_tokens"] = max_tokens
             res = requests.post(
                 f"{self.base_url}/chat/completions",
                 headers=headers,
                 json=payload,
-                timeout=self.timeout
+                timeout=timeout_seconds or self.timeout
             )
             if res.status_code != 200:
                 raise ValueError(f"DeepSeek API HTTP error {res.status_code}: {res.text}")
@@ -246,9 +284,10 @@ class DeepSeekProvider:
 
 class LangChainDeepSeekWrapper:
     """LangChain compatibility wrapper matching with_structured_output interface."""
-    def __init__(self, provider: DeepSeekProvider, schema_cls: Type[BaseModel]):
+    def __init__(self, provider: DeepSeekProvider, schema_cls: Type[BaseModel], **invoke_options: Any):
         self.provider = provider
         self.schema_cls = schema_cls
+        self.invoke_options = invoke_options
 
     def invoke(self, input_data: Any, **kwargs: Any) -> BaseModel:
         if isinstance(input_data, str):
@@ -263,7 +302,11 @@ class LangChainDeepSeekWrapper:
             prompt = json.dumps(input_data)
         else:
             prompt = str(input_data)
-        return self.provider.invoke_structured(prompt=prompt, schema_cls=self.schema_cls)
+        return self.provider.invoke_structured(
+            prompt=prompt,
+            schema_cls=self.schema_cls,
+            **self.invoke_options,
+        )
 
     def __call__(self, input_data: Any, **kwargs: Any) -> Any:
         return self.invoke(input_data, **kwargs)
@@ -303,7 +346,7 @@ class ResilientLLMWrapper:
         self.provider = primary_llm if isinstance(primary_llm, DeepSeekProvider) else DeepSeekProvider()
 
     def with_structured_output(self, schema: Type[BaseModel], **kwargs: Any) -> LangChainDeepSeekWrapper:
-        return LangChainDeepSeekWrapper(self.provider, schema)
+        return LangChainDeepSeekWrapper(self.provider, schema, **kwargs)
 
     def invoke(self, input_data: Any, **kwargs: Any) -> Any:
         wrapper = self.with_structured_output(BaseModel)

@@ -829,6 +829,7 @@ async def api_render_unified_pdf(request: UnifiedRenderRequest):
     import json
     import sentry_sdk
     from app.playwright_pdf import (
+        PdfRenderQueueTimeout,
         SupersededPdfRender,
         generate_pdf_via_playwright,
         register_pdf_render_revision,
@@ -897,6 +898,14 @@ async def api_render_unified_pdf(request: UnifiedRenderRequest):
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "PDF_RENDER_SUPERSEDED", "message": str(exc)},
         )
+    except PdfRenderQueueTimeout as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "PDF_RENDER_BUSY",
+                "message": "PDF generation is busy. Please retry in a moment.",
+            },
+        ) from exc
     except Exception as exc:
         # This handled 422 is filtered by the global Sentry policy, so report
         # the underlying renderer exception explicitly without resume content.

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import html as html_lib
+import os
 import re
 import time
 from datetime import datetime, timezone
@@ -1092,28 +1093,181 @@ INFERRED SKILL RECOMMENDATIONS (REQUIRED):
 Keep responsibilities, mandatory requirements, preferred qualifications, salary, and benefits
 separate. Deduplicate semantically equivalent items. Preserve the complete source URL."""
 
+
+def _clean_evidence_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        value = json.dumps(value, ensure_ascii=False, default=str)
+    text = BeautifulSoup(str(value), "lxml").get_text(" ", strip=True)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _suggested_skills_for(title: str, explicit: list[str]) -> list[str]:
+    role = str(title or "").casefold()
+    role_sets = [
+        (("data", "analytics", "machine learning", "ai"), ["Data Analysis", "Problem Solving", "Data Quality", "Stakeholder Communication"]),
+        (("software", "developer", "engineer", "backend", "frontend"), ["Software Design", "Debugging", "Testing", "Code Review"]),
+        (("product", "program", "project"), ["Roadmapping", "Stakeholder Management", "Requirements Analysis", "Risk Management"]),
+        (("sales", "account", "business development"), ["Pipeline Management", "Negotiation", "Customer Discovery", "Forecasting"]),
+    ]
+    candidates = next(
+        (skills for markers, skills in role_sets if any(marker in role for marker in markers)),
+        ["Problem Solving", "Communication", "Collaboration", "Prioritization"],
+    )
+    explicit_keys = {item.casefold() for item in explicit}
+    fallback_candidates = [
+        *candidates,
+        "Problem Solving", "Communication", "Collaboration", "Prioritization",
+        "Stakeholder Management", "Quality Assurance",
+    ]
+    suggested: list[str] = []
+    for item in fallback_candidates:
+        key = item.casefold()
+        if key not in explicit_keys and key not in {value.casefold() for value in suggested}:
+            suggested.append(item)
+        if len(suggested) == 4:
+            break
+    return suggested
+
+
+def _deterministic_job_from_evidence(state: JDState) -> ExtractedJob:
+    """Produce a useful bounded-latency result from already-cleaned page evidence."""
+    structured = next(
+        (item for item in state.jobposting_jsonld if isinstance(item, dict) and item.get("title")),
+        {},
+    )
+    hiring_org = structured.get("hiringOrganization") or {}
+    if not isinstance(hiring_org, dict):
+        hiring_org = {"name": hiring_org}
+    location_value = structured.get("jobLocation")
+    if isinstance(location_value, list):
+        location_value = location_value[0] if location_value else None
+    if isinstance(location_value, dict):
+        address = location_value.get("address") or location_value
+        if isinstance(address, dict):
+            location_value = ", ".join(
+                str(address.get(key) or "").strip()
+                for key in ("addressLocality", "addressRegion", "addressCountry")
+                if str(address.get(key) or "").strip()
+            )
+
+    source_text = _clean_evidence_text(
+        structured.get("description")
+        or (state.evidence or {}).get("source_text")
+        or state.markdown
+    )[:12000]
+    title = str(
+        structured.get("title")
+        or (state.extension_evidence or {}).get("job_title_hint")
+        or state.metadata.get("title")
+        or state.page_title
+        or ""
+    ).strip()
+    company = str(
+        hiring_org.get("name")
+        or (state.extension_evidence or {}).get("company_hint")
+        or _fallback_company_name(state, None)
+        or "Not Specified"
+    ).strip()
+
+    raw_skills = structured.get("skills") or structured.get("occupationalCategory") or []
+    if isinstance(raw_skills, str):
+        raw_skills = re.split(r"\s*[,;|]\s*", raw_skills)
+    explicit = _atomize_skill_labels(list(raw_skills or []))
+    if not explicit:
+        common_skills = (
+            "Python", "Java", "JavaScript", "TypeScript", "C++", "C#", "SQL", "R",
+            "React", "Angular", "Vue", "Node.js", "AWS", "Azure", "GCP", "Docker",
+            "Kubernetes", "Kafka", "Spark", "Git", "Linux", "Tableau", "Power BI",
+            "Machine Learning", "Data Analysis", "REST APIs", "Agile", "Scrum",
+        )
+        explicit = [skill for skill in common_skills if re.search(rf"(?<!\w){re.escape(skill)}(?!\w)", source_text, re.I)]
+
+    responsibilities = structured.get("responsibilities") or []
+    requirements = (
+        structured.get("qualifications")
+        or structured.get("educationRequirements")
+        or structured.get("experienceRequirements")
+        or []
+    )
+    return ExtractedJob(
+        job_title=title or None,
+        company_name=company,
+        company_domain=(urlparse(str(hiring_org.get("sameAs") or "")).hostname or None),
+        location=_clean_evidence_text(location_value) or None,
+        workplace_type=structured.get("jobLocationType") or "unknown",
+        employment_type=structured.get("employmentType") or "unknown",
+        description=source_text or None,
+        responsibilities=responsibilities,
+        requirements=requirements,
+        preferred_qualifications=[],
+        skills=explicit,
+        suggested_skills=_suggested_skills_for(title, explicit),
+        benefits=structured.get("jobBenefits") or [],
+        application_url=structured.get("url") or state.final_url or state.original_url,
+        date_posted=structured.get("datePosted"),
+        valid_through=structured.get("validThrough"),
+        source_url=state.final_url or state.original_url,
+    )
+
 def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     state = _state(value)
     logger.info("%s Extraction started request_id=%s", LOG_PREFIX, state.request_id)
 
-    def _call_llm():
-        structured = get_llm(temperature=0).with_structured_output(ExtractedJob)
-        return structured.invoke([
-            SystemMessage(content=EXTRACTION_PROMPT),
-            HumanMessage(content=json.dumps(
-                state.evidence,
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )),
-        ])
-
-    job = llm_cache.execute_with_cache(
-        task="jd_agent_extraction",
-        payload_to_fingerprint=state.evidence,
-        llm_callable=_call_llm,
-        expected_schema=ExtractedJob,
-        prompt_version="jd-agent-v1"
+    complete_structured_job = any(
+        isinstance(item, dict) and item.get("title") and item.get("description")
+        for item in state.jobposting_jsonld
     )
+    if complete_structured_job:
+        job = _deterministic_job_from_evidence(state)
+        logger.info(
+            "%s Extraction used deterministic JobPosting JSON-LD request_id=%s",
+            LOG_PREFIX,
+            state.request_id,
+        )
+    else:
+        jd_timeout = max(5.0, float(os.getenv("JD_EXTRACTION_LLM_TIMEOUT_SECONDS", "20")))
+
+        def _call_llm():
+            structured = get_llm(temperature=0).with_structured_output(
+                ExtractedJob,
+                timeout_seconds=jd_timeout,
+                max_tokens=2600,
+                queue_timeout_seconds=max(
+                    0.5,
+                    float(os.getenv("JD_EXTRACTION_AI_QUEUE_TIMEOUT_SECONDS", "3")),
+                ),
+                # A second 60-second model attempt caused the observed ~2m misses.
+                # Existing evidence is a safer fallback for this latency-sensitive path.
+                escalate_on_error=False,
+            )
+            return structured.invoke([
+                SystemMessage(content=EXTRACTION_PROMPT),
+                HumanMessage(content=json.dumps(
+                    state.evidence,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )),
+            ])
+
+        try:
+            job = llm_cache.execute_with_cache(
+                task="jd_agent_extraction",
+                payload_to_fingerprint=state.evidence,
+                llm_callable=_call_llm,
+                expected_schema=ExtractedJob,
+                prompt_version="jd-agent-v2-fast"
+            )
+        except Exception as exc:
+            logger.warning(
+                "%s Fast LLM extraction failed; using deterministic evidence fallback "
+                "request_id=%s error=%s",
+                LOG_PREFIX,
+                state.request_id,
+                type(exc).__name__,
+            )
+            job = _deterministic_job_from_evidence(state)
     job_dict = ExtractedJob.model_validate(job).model_dump(mode="json")
     job_dict["skills"] = _atomize_skill_labels(job_dict.get("skills", []))
     explicit_keys = {skill.casefold() for skill in job_dict["skills"]}
@@ -1423,15 +1577,15 @@ def reviewer_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
 def repair_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     state = _state(value)
     attempt = state.repair_attempts + 1
-    repair_model = get_llm(temperature=0).with_structured_output(ExtractedJob)
-    repaired = repair_model.invoke([
-        SystemMessage(content=EXTRACTION_PROMPT + "\nRepair only listed fields; preserve all other validated fields exactly."),
-        HumanMessage(content=json.dumps({
-            "current_job": state.extracted_job, "repair_fields": state.repair_fields,
-            "field_issues": state.field_issues, "evidence": state.evidence,
-        }, ensure_ascii=False, separators=(",", ":"))),
-    ])
-    job = ExtractedJob.model_validate(repaired).model_dump(mode="json")
+    # Do not start a second long LLM request after extraction. Missing fields
+    # can be repaired from the same trusted evidence deterministically, keeping
+    # the uncached pipeline to at most one bounded model call.
+    current = ExtractedJob.model_validate(state.extracted_job or {}).model_dump(mode="json")
+    fallback = _deterministic_job_from_evidence(state).model_dump(mode="json")
+    for field in state.repair_fields:
+        if field == "suggested_skills" or not current.get(field):
+            current[field] = fallback.get(field)
+    job = ExtractedJob.model_validate(current).model_dump(mode="json")
     if not job.get("company_name"):
         fallback = _fallback_company_name(state, job.get("company_name"))
         if fallback:
@@ -1443,7 +1597,7 @@ def repair_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         if skill.casefold() not in explicit_keys
     ]
     logger.info(
-        "%s Repair completed request_id=%s attempt=%s fields=%s "
+        "%s Deterministic repair completed request_id=%s attempt=%s fields=%s "
         "skills_before=%s skills_after=%s suggested_skills_after=%s "
         "repaired_skills=%s repaired_suggested_skills=%s",
         LOG_PREFIX,
