@@ -10,8 +10,10 @@ function SuccessView({
   tailoredResume,
   companyName,
   syncedApplication,
+  atsScore,
   onDownloadPDF,
-  onReset
+  onReset,
+  standalone = false
 }) {
   const navigate = useNavigate();
   const { 
@@ -19,6 +21,7 @@ function SuccessView({
     fetchApplications, 
     session,
     comparison,
+    liveATS,
     syncCurrentJobToTracker,
     handleGenerateCoverLetter,
     setApiError
@@ -42,9 +45,20 @@ function SuccessView({
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [onReset, saving]);
 
+  const resolvedAtsScore = [
+    atsScore,
+    syncedApplication?.ats_score,
+    syncedApplication?.resume_snapshot?._job_context?.ats_score,
+    comparison?.ats_score_after,
+    comparison?.ats_score_before,
+    liveATS?.current_ats,
+    liveATS?.estimated_ats,
+    liveATS?.original_ats
+  ].map(Number).find(value => Number.isFinite(value) && value >= 0 && value <= 100);
+
   const premiumMetrics = [
     { label: "AI Confidence", value: "98%", icon: Cpu },
-    { label: "ATS Match Score", value: comparison?.ats_score_after != null ? `${Math.round(comparison.ats_score_after)}/100` : "—", icon: Target },
+    { label: "ATS Score", value: resolvedAtsScore != null ? `${Math.round(resolvedAtsScore)}/100` : "Calculating", icon: Target },
     { label: "Resume Quality", value: "Excellent", icon: FileCheck },
     { label: "Recruiter Read Time", value: "6s", icon: Clock }
   ];
@@ -119,19 +133,19 @@ function SuccessView({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[200] flex items-center justify-center overflow-y-auto bg-zinc-950/60 p-4 backdrop-blur-sm"
-      role="presentation"
-    >
+    <div className={standalone
+      ? "min-h-[calc(100vh-80px)] w-full overflow-y-auto bg-tf-page px-4 py-8 flex justify-center"
+      : "fixed inset-0 z-[200] flex items-center justify-center overflow-y-auto bg-zinc-950/60 p-4 backdrop-blur-sm"
+    } role={standalone ? undefined : "presentation"}>
     <section
-      role="dialog"
-      aria-modal="true"
+      role={standalone ? "main" : "dialog"}
+      aria-modal={standalone ? undefined : "true"}
       aria-labelledby="export-success-title"
-      className={`relative my-auto flex max-h-[calc(100vh-2rem)] flex-col overflow-y-auto rounded-3xl border border-zinc-200 bg-white px-6 py-6 text-zinc-650 shadow-2xl dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-350 font-sans w-full ${
-        isExtension ? 'max-w-md' : 'max-w-xl'
+      className={`relative flex flex-col rounded-3xl border border-zinc-200 bg-white px-6 py-6 text-zinc-650 shadow-xl dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-350 font-sans w-full ${
+        standalone ? 'max-w-3xl self-start' : `my-auto max-h-[calc(100vh-2rem)] overflow-y-auto ${isExtension ? 'max-w-md' : 'max-w-xl'}`
       }`}
     >
-      <button
+      {!standalone && <button
         type="button"
         onClick={onReset}
         disabled={saving}
@@ -140,7 +154,7 @@ function SuccessView({
         className="absolute right-0 top-0 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900/90 text-zinc-300 shadow-lg transition hover:border-zinc-500 hover:bg-zinc-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
       >
         <X size={16} />
-      </button>
+      </button>}
       <div className="flex-1 flex flex-col items-center justify-center space-y-5">
         
         {/* Glowing Success Ring */}

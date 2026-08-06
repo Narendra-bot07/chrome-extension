@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
-import SuccessView from '../components/SuccessView';
 import ResumeEditorView from '../components/Resume/ResumeEditorView';
 import TailorRender from '../components/Resume/TailorRender';
 import { useNavigate } from 'react-router-dom';
@@ -70,6 +69,8 @@ function DownloadPage({ onClose }) {
     setTailoredResume,
     workflowResume,
     selectedTemplate,
+    comparison,
+    liveATS,
     handleDownloadFinalPDF,
     loading,
     customFileName,
@@ -102,8 +103,6 @@ function DownloadPage({ onClose }) {
     return canonical;
   }, [tailoredResume, workflowResume, parsedResume, updateFinalizedWorkflowResume, setTailoredResume]);
 
-  const [downloadSuccess, setDownloadSuccess] = useState(false);
-  const [syncedApplication, setSyncedApplication] = useState(null);
   const sourceResume = useMemo(() => {
     try {
       const raw = tailoredResume || workflowResume || parsedResume;
@@ -307,32 +306,17 @@ function DownloadPage({ onClose }) {
     }
     const syncResult = await handleDownloadFinalPDF(layoutLevel);
     if (syncResult?.id) {
-      setSyncedApplication(syncResult);
-      setDownloadSuccess(true);
+      const completion = {
+        syncedApplication: syncResult,
+        tailoredResume: activeResume,
+        companyName,
+        atsScore: comparison?.ats_score_after ?? comparison?.ats_score_before
+          ?? liveATS?.current_ats ?? liveATS?.estimated_ats ?? syncResult?.ats_score
+      };
+      sessionStorage.setItem('tailr4u_export_completion', JSON.stringify(completion));
+      navigate('/export-success', { state: completion });
     }
   };
-
-  if (downloadSuccess) {
-    return (
-      <SuccessView
-        companyName={companyName}
-        tailoredResume={activeResume}
-        syncedApplication={syncedApplication}
-        onDownloadPDF={() => handleDownloadFinalPDF(layoutLevel)}
-        onReset={() => {
-          if (onClose) onClose();
-          navigate(
-            syncedApplication?.id
-              ? `/job-tracker?appId=${encodeURIComponent(syncedApplication.id)}`
-              : '/job-tracker',
-            syncedApplication?.id
-              ? { state: { selectedAppId: syncedApplication.id } }
-              : undefined
-          );
-        }}
-      />
-    );
-  }
 
   if (loading) {
     return (
@@ -437,8 +421,15 @@ function DownloadPage({ onClose }) {
               preparedArtifact: artifact
             });
             if (syncResult?.id) {
-              setSyncedApplication(syncResult);
-              setDownloadSuccess(true);
+              const completion = {
+                syncedApplication: syncResult,
+                tailoredResume: activeResume,
+                companyName,
+                atsScore: comparison?.ats_score_after ?? comparison?.ats_score_before
+                  ?? liveATS?.current_ats ?? liveATS?.estimated_ats ?? syncResult?.ats_score
+              };
+              sessionStorage.setItem('tailr4u_export_completion', JSON.stringify(completion));
+              navigate('/export-success', { state: completion });
             }
           }}
         />

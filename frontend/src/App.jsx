@@ -22,6 +22,7 @@ const TailorProgressPage = React.lazy(() => import('./pages/TailorProgressPage')
 const ReviewChangesPage = React.lazy(() => import('./pages/ReviewChangesPage'));
 const TemplatesPage = React.lazy(() => import('./pages/TemplatesPage'));
 const DownloadPage = React.lazy(() => import('./pages/DownloadPage'));
+const ExportSuccessPage = React.lazy(() => import('./pages/ExportSuccessPage'));
 const CoverLetterPage = React.lazy(() => import('./pages/CoverLetterPage'));
 const PrintLayout = React.lazy(() => import('./components/Resume/PrintLayout'));
 const PrintCoverLetterLayout = React.lazy(() => import('./pages/PrintCoverLetterLayout'));
@@ -223,6 +224,7 @@ function AppRoutes() {
         <Route path="/review-changes" element={<ReviewChangesPage />} />
         <Route path="/templates" element={<TemplatesPage />} />
         <Route path="/download" element={<DownloadPage />} />
+        <Route path="/export-success" element={<ExportSuccessPage />} />
         <Route path="/cover-letter" element={<CoverLetterPage />} />
         <Route path="/support/search" element={<HelpSearchPage />} />
         <Route path="/support/faq" element={<FAQPage />} />
