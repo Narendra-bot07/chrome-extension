@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import calendar
 from psycopg2.extras import RealDictCursor, Json
+from core.config import settings
 
 
 ACTIVE_STATUSES = {"trialing", "active", "grace_period"}
@@ -31,7 +32,10 @@ class SubscriptionService:
 
     def ensure_user_subscription(self, user_id: str):
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            if user_id == "00000000-0000-0000-0000-000000000000":
+            if (
+                user_id == "00000000-0000-0000-0000-000000000000"
+                and settings.APP_ENV.lower() in {"local", "development", "test"}
+            ):
                 cur.execute("""
                     INSERT INTO public.users (id, email, full_name, provider, email_verified)
                     VALUES (%s, 'local.developer@example.com', 'Local Developer', 'local', TRUE)

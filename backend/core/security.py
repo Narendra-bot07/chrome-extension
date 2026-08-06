@@ -55,7 +55,7 @@ def verify_supabase_jwt(
     token = authorization.split(" ")[1]
     
     # Backward compatibility with seed/local-dev token cache
-    if token == "local-dev-token":
+    if token == "local-dev-token" and settings.APP_ENV.lower() in {"local", "development", "test"}:
         return {
             "id": "00000000-0000-0000-0000-000000000000",
             "email": "local.developer@example.com",

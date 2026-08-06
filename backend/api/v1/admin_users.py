@@ -16,6 +16,34 @@ from services.subscriptions.usage_service import UsageService
 router = APIRouter(prefix="/admin/users", tags=["admin-users"])
 
 
+@router.get("/stats")
+def get_user_stats(
+    admin_user: Dict[str, Any] = Depends(verify_admin_access),
+    conn=Depends(get_db_connection),
+):
+    """Return authoritative directory aggregates for the admin dashboard."""
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT
+                COUNT(*)::int AS total_users,
+                COUNT(*) FILTER (WHERE lower(coalesce(current_plan, 'free')) = 'free')::int AS free_users,
+                COUNT(*) FILTER (WHERE lower(coalesce(current_plan, '')) = 'basic')::int AS basic_users,
+                COUNT(*) FILTER (WHERE lower(coalesce(current_plan, '')) = 'pro')::int AS pro_users,
+                COUNT(*) FILTER (WHERE lower(coalesce(current_plan, '')) = 'elite')::int AS elite_users,
+                COUNT(*) FILTER (WHERE is_active IS TRUE)::int AS active_users,
+                COUNT(*) FILTER (WHERE is_active IS FALSE)::int AS suspended_users,
+                COUNT(*) FILTER (WHERE lower(coalesce(role, 'user')) = 'admin')::int AS admin_users,
+                COUNT(*) FILTER (WHERE email_verified IS TRUE)::int AS verified_users,
+                COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days')::int AS signups_7d,
+                COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days')::int AS signups_30d
+            FROM public.users
+            """
+        )
+        stats = cur.fetchone() or {}
+    return stats
+
+
 @router.get("")
 def list_users(
     search: Optional[str] = None,

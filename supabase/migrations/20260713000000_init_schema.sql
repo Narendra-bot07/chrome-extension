@@ -7,11 +7,6 @@ CREATE TABLE IF NOT EXISTS auth.users (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
--- Seed mock developer user
-INSERT INTO auth.users (id, email, raw_user_meta_data)
-VALUES ('00000000-0000-0000-0000-000000000000', 'local.developer@example.com', '{"full_name": "Local Developer"}')
-ON CONFLICT (id) DO NOTHING;
-
 -- 1. Profiles Table (Linked to auth.users)
 CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
