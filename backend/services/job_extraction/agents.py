@@ -1310,6 +1310,22 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             )
             job = _deterministic_job_from_evidence(state)
     job_dict = ExtractedJob.model_validate(job).model_dump(mode="json")
+    # _clean_evidence_items/_clean_evidence_text (BeautifulSoup-based) were
+    # previously only wired into the deterministic JSON-LD path
+    # (_deterministic_job_from_evidence) -- the LLM-extraction branch above
+    # took its structured output verbatim, with no HTML-stripping safety net
+    # at all. A source page whose JobPosting JSON-LD/evidence carries raw
+    # WYSIWYG markup (Google-Docs-authored postings routinely do) could get
+    # copied straight into responsibilities/requirements/preferred_qualifications
+    # as literal "<p><strong>Required Qualifications:&nbsp;</strong></p>..."
+    # text. This is a safe no-op on already-clean text (BeautifulSoup.get_text()
+    # on plain text returns it unchanged), so it's applied unconditionally
+    # regardless of which branch produced `job`.
+    job_dict["responsibilities"] = _clean_evidence_items(job_dict.get("responsibilities"))
+    job_dict["requirements"] = _clean_evidence_items(job_dict.get("requirements"))
+    job_dict["preferred_qualifications"] = _clean_evidence_items(job_dict.get("preferred_qualifications"))
+    if job_dict.get("description"):
+        job_dict["description"] = _clean_evidence_text(job_dict["description"])
     job_dict["skills"] = _atomize_skill_labels(job_dict.get("skills", []))
     explicit_keys = {skill.casefold() for skill in job_dict["skills"]}
     job_dict["suggested_skills"] = [
@@ -1551,6 +1567,21 @@ def reviewer_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             field_issues["company_name"] = ["Missing company name."]
     if not job.description and not job.responsibilities:
         field_issues["description"] = ["Missing both description and responsibilities."]
+    # A substantial description with zero responsibilities/requirements is the
+    # "skills only" bug pattern: the LLM extraction branch (unlike the
+    # deterministic JSON-LD path) had no check forcing it to actually populate
+    # these lists, so a page that clearly has a "What You Will Be Doing" /
+    # "Requirements" section could still come back with both empty and pass
+    # review untouched. Trigger repair (which retries from the same evidence
+    # deterministically, see repair_agent) whenever there's real description
+    # text to work with but nothing was extracted from it.
+    if len(job.description or "") > 200 and not job.responsibilities and not job.requirements:
+        field_issues.setdefault("responsibilities", []).append(
+            "Description has substantial content but responsibilities and requirements are both empty."
+        )
+        field_issues.setdefault("requirements", []).append(
+            "Description has substantial content but responsibilities and requirements are both empty."
+        )
 
     unsupported_skills = [
         skill for skill in job.skills
@@ -1678,6 +1709,19 @@ def final_response_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             field for field in ("job_title", "company_name", "description")
             if not extracted.get(field)
         ]
+        # A "skills only" extraction (real description text, but both
+        # responsibilities and requirements empty) previously passed as
+        # status="extracted" -- indistinguishable from a genuinely complete
+        # result -- which meant /jobs/extract-url's success-gated Redis cache
+        # (see api/v1/jobs.py) could cache and serve this sparse result to
+        # every subsequent user for 24h. Downgrading to "partial" here lets
+        # that cache write be skipped for exactly this case.
+        if (
+            len(extracted.get("description") or "") > 200
+            and not extracted.get("responsibilities")
+            and not extracted.get("requirements")
+        ):
+            missing_fields.append("responsibilities")
     if extracted and not state.needs_manual_review:
         status_name = "partial" if state.extraction_readiness == "PARTIAL" or missing_fields else "extracted"
         success = True

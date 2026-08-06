@@ -109,11 +109,16 @@ async def extract_job_from_provided_url(
         # Shared across every user, not scoped to this one -- a job posting's
         # URL is a public resource, so the 2nd/3rd/... user to hit a trending
         # posting gets this instantly instead of re-running the full
-        # scrape+LLM pipeline. Only cache genuine successes: "blocked" /
-        # "manual_review" / etc. can depend on this specific request's
-        # browser_evidence, so caching a failure could wrongly deny a
-        # different user (with better evidence) a real shot at extraction.
-        if result.get("success"):
+        # scrape+LLM pipeline. Only cache genuine, complete successes:
+        # - "blocked" / "manual_review" / etc. can depend on this specific
+        #   request's browser_evidence, so caching a failure could wrongly
+        #   deny a different user (with better evidence) a real shot at it.
+        # - status == "partial" covers a "skills only" extraction (real
+        #   description text but empty responsibilities/requirements --
+        #   see final_response_agent) that still has success=True. Caching
+        #   that would turn a one-off extraction miss into a persistent bug
+        #   served to every subsequent user for the full TTL.
+        if result.get("success") and result.get("status") == "extracted":
             redis_cache.set(cache_key, result, ttl_seconds=JD_EXTRACTION_CACHE_TTL_SECONDS)
         logger.info(
             "[JD-EXTRACTION][BACKEND] Request completed request_id=%s duration_ms=%s "
