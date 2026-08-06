@@ -1,14 +1,7 @@
 import React from 'react';
 import { collectJobSkills, formatSalary } from '../services/jdExtractionFlow';
 import { Heart, RefreshCw, Wand2, FileText } from 'lucide-react';
-
-function JobSummaryCard({
-  jobAnalysis,
-  jobTitle,
-  companyName,
-  setStep,
-  handleGenerateCoverLetter,
-import { Heart, RefreshCw, Wand2, FileText } from 'lucide-react';
+import { normalizeJobItems } from '../utils/jobText';
 
 function JobSummaryCard({
   jobAnalysis,
@@ -28,6 +21,10 @@ function JobSummaryCard({
   const displayCompany = [details?.company, details?.company_name, jobAnalysis?.company, jobAnalysis?.company_name, companyName]
     .find((str) => str && typeof str === 'string' && !INVALID_TITLE_NOISE.test(str.trim()) && str.trim().toLowerCase() !== displayTitle.toLowerCase()) || '';
   const displaySkills = collectJobSkills(details).explicit;
+  const highlights = normalizeJobItems(jobAnalysis?.highlights || details?.highlights);
+  const qualifications = normalizeJobItems(
+    jobAnalysis?.qualifications || details?.qualifications || jobAnalysis?.requirements || details?.requirements
+  );
 
   React.useEffect(() => {
     console.log('[tailr4u:Trace 08] Final JobSummaryCard render values', {
@@ -74,11 +71,11 @@ function JobSummaryCard({
         <div className="border-b border-slate-100 dark:border-slate-900 my-4" />
 
         {/* Key Highlights */}
-        {jobAnalysis.highlights?.length > 0 && (
+        {highlights.length > 0 && (
           <div className="space-y-2">
             <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 tracking-wide font-sans">Key Highlights</h3>
             <ul className="list-disc pl-5 space-y-1.5 text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-              {jobAnalysis.highlights.map((hl, idx) => (
+              {highlights.map((hl, idx) => (
                 <li key={idx}>{hl}</li>
               ))}
             </ul>
@@ -103,11 +100,11 @@ function JobSummaryCard({
         )}
 
         {/* Qualifications */}
-        {jobAnalysis.qualifications?.length > 0 && (
+        {qualifications.length > 0 && (
           <div className="space-y-2">
             <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 tracking-wide font-sans">Qualifications</h3>
             <ul className="list-disc pl-5 space-y-1.5 text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-              {jobAnalysis.qualifications.map((q, idx) => (
+              {qualifications.map((q, idx) => (
                 <li key={idx}>{q}</li>
               ))}
             </ul>

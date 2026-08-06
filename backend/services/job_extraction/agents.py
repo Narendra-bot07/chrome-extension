@@ -1103,6 +1103,46 @@ def _clean_evidence_text(value: Any) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _clean_evidence_items(value: Any) -> list[str]:
+    """Normalize JSON-LD list fields without leaking publisher HTML to clients."""
+    values: list[Any] = []
+
+    def collect(item: Any) -> None:
+        if item is None:
+            return
+        if isinstance(item, dict):
+            for nested in item.values():
+                collect(nested)
+            return
+        if isinstance(item, (list, tuple, set)):
+            for nested in item:
+                collect(nested)
+            return
+        values.append(item)
+
+    collect(value)
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for value_item in values:
+        raw = str(value_item or "").strip()
+        if not raw:
+            continue
+        soup = BeautifulSoup(raw, "lxml")
+        list_items = soup.find_all("li")
+        candidates = (
+            [item.get_text(" ", strip=True) for item in list_items]
+            if list_items
+            else [soup.get_text(" ", strip=True)]
+        )
+        for candidate in candidates:
+            text = re.sub(r"\s+", " ", candidate).strip(" \t\r\n-•*")
+            key = text.casefold()
+            if text and key not in seen:
+                seen.add(key)
+                cleaned.append(text)
+    return cleaned
+
+
 def _suggested_skills_for(title: str, explicit: list[str]) -> list[str]:
     role = str(title or "").casefold()
     role_sets = [
@@ -1184,13 +1224,12 @@ def _deterministic_job_from_evidence(state: JDState) -> ExtractedJob:
         )
         explicit = [skill for skill in common_skills if re.search(rf"(?<!\w){re.escape(skill)}(?!\w)", source_text, re.I)]
 
-    responsibilities = structured.get("responsibilities") or []
-    requirements = (
-        structured.get("qualifications")
-        or structured.get("educationRequirements")
-        or structured.get("experienceRequirements")
-        or []
-    )
+    responsibilities = _clean_evidence_items(structured.get("responsibilities"))
+    requirements = _clean_evidence_items([
+        structured.get("qualifications"),
+        structured.get("educationRequirements"),
+        structured.get("experienceRequirements"),
+    ])
     return ExtractedJob(
         job_title=title or None,
         company_name=company,
@@ -1201,10 +1240,12 @@ def _deterministic_job_from_evidence(state: JDState) -> ExtractedJob:
         description=source_text or None,
         responsibilities=responsibilities,
         requirements=requirements,
-        preferred_qualifications=[],
+        preferred_qualifications=_clean_evidence_items(
+            structured.get("preferredQualifications")
+        ),
         skills=explicit,
         suggested_skills=_suggested_skills_for(title, explicit),
-        benefits=structured.get("jobBenefits") or [],
+        benefits=_clean_evidence_items(structured.get("jobBenefits")),
         application_url=structured.get("url") or state.final_url or state.original_url,
         date_posted=structured.get("datePosted"),
         valid_through=structured.get("validThrough"),

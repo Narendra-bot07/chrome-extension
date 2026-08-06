@@ -21,6 +21,7 @@ import { useApp } from '../context/AppContext';
 import { fingerprintJD } from '../utils/jobPipelineSession';
 import './JobReviewView.css';
 import { calculateJDMatchScore } from '../utils/matchScore';
+import { normalizeJobItems } from '../utils/jobText';
 
 const isNotAvailable = (val) => {
   if (!val) return true;
@@ -283,17 +284,19 @@ function JobReviewView({
     });
   }, [jobAnalysis, jobTitle, companyName, title, company, location, jobType, workMode]);
 
-  const highlightsList = !isNotAvailable(details.highlights) 
-    ? (Array.isArray(details.highlights) ? details.highlights : [details.highlights])
-    : (!isNotAvailable(jobAnalysis?.highlights) ? (Array.isArray(jobAnalysis.highlights) ? jobAnalysis.highlights : [jobAnalysis.highlights]) : []);
+  const highlightsList = normalizeJobItems(
+    !isNotAvailable(details.highlights) ? details.highlights : jobAnalysis?.highlights
+  );
 
-  const responsibilitiesList = !isNotAvailable(details.responsibilities)
-    ? (Array.isArray(details.responsibilities) ? details.responsibilities : [details.responsibilities])
-    : (!isNotAvailable(jobAnalysis?.responsibilities) ? (Array.isArray(jobAnalysis.responsibilities) ? jobAnalysis.responsibilities : [jobAnalysis.responsibilities]) : []);
+  const responsibilitiesList = normalizeJobItems(
+    !isNotAvailable(details.responsibilities) ? details.responsibilities : jobAnalysis?.responsibilities
+  );
 
-  const qualificationsList = !isNotAvailable(details.qualifications)
-    ? (Array.isArray(details.qualifications) ? details.qualifications : [details.qualifications])
-    : (!isNotAvailable(jobAnalysis?.qualifications) ? (Array.isArray(jobAnalysis.qualifications) ? jobAnalysis.qualifications : [jobAnalysis.qualifications]) : []);
+  const qualificationsList = normalizeJobItems(
+    !isNotAvailable(details.qualifications)
+      ? details.qualifications
+      : (details.requirements || jobAnalysis?.qualifications || jobAnalysis?.requirements)
+  );
 
   const normalizedSkills = collectJobSkills(details);
   const requiredSkills = normalizedSkills.explicit;

@@ -19,6 +19,8 @@ def job_state(**updates):
                 "sameAs": "https://example.com",
             },
             "description": "Build Python and SQL data pipelines on AWS using Docker.",
+            "responsibilities": "<ul><li>Build APIs</li><li>Review code &amp; tests</li></ul>",
+            "qualifications": "<p><strong>Required Qualifications:&nbsp;</strong></p><ul><li>6+ years in engineering</li><li>Associate&rsquo;s degree</li></ul>",
             "jobLocation": {"address": {"addressLocality": "Hyderabad", "addressCountry": "IN"}},
             "employmentType": "FULL_TIME",
             "skills": "Python, SQL, AWS, Docker",
@@ -39,6 +41,12 @@ def test_complete_jobposting_jsonld_skips_llm(mock_get_llm):
     assert result["extracted_job"]["company_name"] == "Example Corp"
     assert set(result["extracted_job"]["skills"]) >= {"Python", "SQL", "AWS", "Docker"}
     assert len(result["extracted_job"]["suggested_skills"]) == 4
+    assert result["extracted_job"]["responsibilities"] == ["Build APIs", "Review code & tests"]
+    assert result["extracted_job"]["requirements"] == [
+        "6+ years in engineering",
+        "Associate’s degree",
+    ]
+    assert "<" not in " ".join(result["extracted_job"]["requirements"])
 
 
 @patch("services.job_extraction.agents.get_llm")
