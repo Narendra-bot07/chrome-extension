@@ -1,5 +1,17 @@
 export const JD_LOG_PREFIX = "[JD-EXTRACTION][FRONTEND]";
 
+export function hasCapturedJobEvidence(value) {
+  return Boolean(
+    value
+    && typeof value === 'object'
+    && (
+      String(value.selected_panel_text || '').trim()
+      || String(value.visible_text || '').trim()
+      || String(value.html || '').trim()
+    )
+  );
+}
+
 export function isExtractableHttpUrl(value) {
   try {
     const url = new URL(value);
@@ -34,9 +46,12 @@ export function classifyBrowserPageUrl(value) {
 
 export async function captureActiveTabJobEvidence(tabId) {
   if (!tabId || !chrome?.scripting?.executeScript) return null;
-  const [{ result } = {}] = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: () => {
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const [{ result } = {}] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
       const cleanText = (value, limit) => String(value || '')
         .replace(/\u00a0/g, ' ')
         .replace(/[ \t]+/g, ' ')
@@ -99,6 +114,7 @@ export async function captureActiveTabJobEvidence(tabId) {
         .filter((item) => item.text.length >= 200)
         .sort((a, b) => b.score - a.score);
       const selected = candidates[0] || null;
+      let panelText = selected?.text || '';
       const firstText = (selectors) => {
         for (const selector of selectors) {
           const value = cleanText(document.querySelector(selector)?.innerText, 500);
@@ -184,7 +200,6 @@ export async function captureActiveTabJobEvidence(tabId) {
         '.jobs-unified-top-card',
         '.top-card-layout'
       ]);
-      let panelText = selected?.text || '';
       if (topCardText && !panelText.includes(topCardText.slice(0, 50))) {
         panelText = `${topCardText}\n\n${panelText}`;
       }
@@ -244,10 +259,22 @@ export async function captureActiveTabJobEvidence(tabId) {
           dom_fingerprint: (fingerprintHash >>> 0).toString(16)
         }
       };
+        }
+      });
+      if (hasCapturedJobEvidence(result)) {
+        result.active_tab_id = tabId;
+        result.capture = { ...(result.capture || {}), capture_attempt: attempt };
+        return result;
+      }
+      lastError = new Error(`Active-tab capture returned no page evidence (attempt ${attempt}).`);
+    } catch (error) {
+      lastError = error;
     }
-  });
-  if (result && typeof result === 'object') result.active_tab_id = tabId;
-  return result || null;
+    if (attempt < 3) {
+      await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+    }
+  }
+  throw lastError || new Error('Active-tab capture returned no page evidence.');
 }
 
 export function assessBrowserJobEvidence(evidence = {}, sourceUrl = '') {

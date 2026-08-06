@@ -10,7 +10,7 @@ import {
 } from '../utils/resumeReviewMerge';
 import {
   assessBrowserJobEvidence, captureActiveTabJobEvidence, classifyBrowserPageUrl,
-  collectJobSkills, isExtractableHttpUrl, validateJDResponse
+  collectJobSkills, hasCapturedJobEvidence, isExtractableHttpUrl, validateJDResponse
 } from '../services/jdExtractionFlow';
 import {
   createJDPipelineSession,
@@ -2026,6 +2026,21 @@ export function AppProvider({ children }) {
           requestId,
           message: captureError?.message || String(captureError)
         });
+      }
+      if (!hasCapturedJobEvidence(browserEvidence)) {
+        resetExtractedJobState('active-tab evidence capture failed', {
+          url: activeUrl,
+          requestId
+        });
+        setJobDetectionStatus('extraction-failed');
+        setJobDetectionMeta({
+          classification: 'capture_failed',
+          confidence: 1,
+          reason: 'Tailr4U could not read the active job page. Reload the page and retry.',
+          extractionMethod: 'client_capture_gate'
+        });
+        setApiError('Tailr4U could not read this job page. Reload the page, then retry the scan.');
+        return;
       }
       const browserAssessment = assessBrowserJobEvidence(browserEvidence || {}, activeUrl);
       if (browserEvidence && typeof browserEvidence === 'object') {

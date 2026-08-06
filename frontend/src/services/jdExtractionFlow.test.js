@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assessBrowserJobEvidence, classifyBrowserPageUrl, classifyJDResult, collectJobSkills, formatSalary, isExtractableHttpUrl, JD_LOG_PREFIX, validateJDResponse } from "./jdExtractionFlow.js";
+import { assessBrowserJobEvidence, classifyBrowserPageUrl, classifyJDResult, collectJobSkills, formatSalary, hasCapturedJobEvidence, isExtractableHttpUrl, JD_LOG_PREFIX, validateJDResponse } from "./jdExtractionFlow.js";
 
 const base = { success: true, request_id: "req-1", classification_confidence: .9 };
 
@@ -102,4 +102,11 @@ test("allows job web URLs and rejects extension-internal URLs", () => {
   assert.equal(isExtractableHttpUrl("chrome://settings"), false);
   assert.equal(isExtractableHttpUrl("https://chrome.google.com/webstore/devconsole/account"), false);
   assert.equal(isExtractableHttpUrl("https://chromewebstore.google.com/detail/example/id"), false);
+});
+
+test("empty browser capture can never be sent as usable evidence", () => {
+  assert.equal(hasCapturedJobEvidence(null), false);
+  assert.equal(hasCapturedJobEvidence({}), false);
+  assert.equal(hasCapturedJobEvidence({ selected_panel_text: '   ' }), false);
+  assert.equal(hasCapturedJobEvidence({ selected_panel_text: 'Job description' }), true);
 });
