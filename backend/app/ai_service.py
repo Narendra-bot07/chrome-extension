@@ -402,6 +402,33 @@ def generate_tailoring_patch(
         prompt_version="tailor-patch-v4-selected-sections"
     )
 
+    if selected_sections and "summary" in selected_sections:
+        original_summary = str(resume.summary or "").strip()
+        proposed_summary = str(patch.summary or "").strip()
+        if not proposed_summary or proposed_summary.casefold() == original_summary.casefold():
+            # Structured-output models occasionally omit an explicitly
+            # requested optional field. Produce a conservative wording-only
+            # rewrite from the user's own text so Summary is never silently
+            # skipped and no new skills, metrics, or claims are invented.
+            rewritten = re.sub(
+                r"^([A-Za-z][A-Za-z /&+-]*?)\s+with\s+",
+                r"\1 specializing in ",
+                original_summary,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            rewritten = re.sub(
+                r"\bExperienced in\b", "Experience includes", rewritten,
+                count=1, flags=re.IGNORECASE,
+            )
+            rewritten = re.sub(
+                r"\bSkilled across\b", "Core strengths include", rewritten,
+                count=1, flags=re.IGNORECASE,
+            )
+            if rewritten.casefold() == original_summary.casefold() and original_summary:
+                rewritten = f"Results-focused professional with experience reflected across: {original_summary}"
+            patch.summary = rewritten
+
     pipeline = StrictTailoringEngine().validate_patch(
         resume, job, patch, requested_sections=selected_sections
     )

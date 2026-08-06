@@ -2915,6 +2915,9 @@ export function AppProvider({ children }) {
 
       const list = [];
       const patch = compResult.patch;
+      if (selectedSections.includes('summary') && !String(patch?.summary || '').trim()) {
+        throw new Error('Summary tailoring did not return a valid improvement. Please retry.');
+      }
       const semanticEntityId = value => String(value || '')
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
