@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { collectJobSkills, formatSalary } from '../services/jdExtractionFlow';
+import { collectJobSkills, formatSalary, isMissingValueToken, cleanLocationValue } from '../services/jdExtractionFlow';
 import { 
   Heart,
   FilePenLine,
@@ -26,11 +26,10 @@ import { normalizeJobItems } from '../utils/jobText';
 const isNotAvailable = (val) => {
   if (!val) return true;
   if (Array.isArray(val)) {
-    return val.length === 0 || (val.length === 1 && typeof val[0] === 'string' && val[0].trim().toLowerCase() === 'not available');
+    return val.length === 0 || val.every((item) => typeof item === 'string' && isMissingValueToken(item));
   }
   if (typeof val === 'string') {
-    const lower = val.trim().toLowerCase();
-    return lower === 'not available' || lower === 'n/a' || lower === 'none' || lower === 'unspecified' || lower === '';
+    return val.trim() === '' || isMissingValueToken(val);
   }
   return false;
 };
@@ -261,7 +260,8 @@ function JobReviewView({
   const company = [jobAnalysis?.company_name, details?.company, jobAnalysis?.company, companyName]
     .find((str) => str && typeof str === 'string' && !isNotAvailable(str) && !INVALID_TITLE_NOISE.test(str.trim()) && str.trim().toLowerCase() !== (title || '').toLowerCase()) || null;
 
-  const location = !isNotAvailable(details.location) ? details.location : (!isNotAvailable(jobAnalysis?.location) ? jobAnalysis.location : null);
+  const rawLocation = !isNotAvailable(details.location) ? details.location : (!isNotAvailable(jobAnalysis?.location) ? jobAnalysis.location : null);
+  const location = rawLocation ? cleanLocationValue(rawLocation) : null;
   const salaryValue = !isNotAvailable(details.salary) ? details.salary : (!isNotAvailable(jobAnalysis?.salary) ? jobAnalysis.salary : null);
   const salary = formatSalary(salaryValue);
   const jobType = !isNotAvailable(details.job_type) ? details.job_type : (!isNotAvailable(jobAnalysis?.job_type) ? jobAnalysis.job_type : (!isNotAvailable(jobAnalysis?.keywords) && jobAnalysis.keywords.includes('Full-time') ? 'Full-time' : null));

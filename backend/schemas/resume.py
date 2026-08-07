@@ -30,6 +30,12 @@ class ResumeLayoutModel(BaseModel):
     footer_components: List[str] = Field(default_factory=list)
     section_variants: Dict[str, str] = Field(default_factory=dict)
     custom_section_titles: Dict[str, str] = Field(default_factory=dict)
+    # Populated during validation (see validate_layout_tree below) from the
+    # legacy flat main_column/sidebar/header_components/footer_components
+    # fields -- a generic rows/columns tree shape the renderer can walk
+    # without needing to know about the "main column vs. sidebar" concept
+    # specifically. Never set this directly; it's derived, not authored.
+    layout_tree: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_layout_tree(self):
@@ -74,6 +80,21 @@ class ResumeLayoutModel(BaseModel):
             raise ValueError("The layout tree contains unsupported components.")
         if len(header_components) != len(set(header_components)) or len(footer_components) != len(set(footer_components)):
             raise ValueError("Duplicate layout components are not allowed.")
+
+        self.layout_tree = {
+            "header": {"components": [c.removeprefix("header.") for c in header_components]},
+            "body": {
+                "rows": [
+                    {
+                        "columns": [
+                            {"sections": list(self.main_column)},
+                            {"sections": list(self.sidebar)},
+                        ]
+                    }
+                ]
+            },
+            "footer": {"components": [c.removeprefix("footer.") for c in footer_components]},
+        }
         return self
 
 class PersonalInfo(BaseModel):
@@ -169,7 +190,7 @@ class ResumeStructure(BaseModel):
     certifications: List[CertificationItem] = []
     achievements: List[str] = []
     publications: List[Dict[str, Any]] = []
-    languages: List[Dict[str, Any]] = []
+    languages: List[Union[Dict[str, Any], str]] = []
     volunteer_experience: List[Dict[str, Any]] = []
     open_source: List[Dict[str, Any]] = []
     leadership: List[Dict[str, Any]] = []
@@ -186,6 +207,21 @@ class ResumeStructure(BaseModel):
     layout_level: Optional[int] = None
     layout_model: Optional[ResumeLayoutModel] = None
     raw_text: Optional[str] = ""
+
+    @field_validator("languages", mode="before")
+    @classmethod
+    def normalize_languages(cls, value: Any) -> list:
+        if not isinstance(value, list):
+            return []
+        # A common "bad" LLM tool-output shape is a flat list of language
+        # names (["English", "Telugu"]) instead of the canonical
+        # {"name": ...} objects -- normalize per-item so both shapes land
+        # in the same place rather than failing validation outright.
+        return [
+            {"name": str(item).strip()} if isinstance(item, str) else item
+            for item in value
+            if item
+        ]
 
 class RenderableResume(ResumeStructure):
     model_config = ConfigDict(extra="forbid")

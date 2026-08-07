@@ -94,6 +94,21 @@ RECOMMENDATION_SECTION = re.compile(
     r"you might also like|you may also like|more jobs (?:at|like this))\s*(?:\n|$)",
     re.I,
 )
+# Confirmed on a real LinkedIn posting: a "Compensation & Perks" list ran
+# straight into LinkedIn's own Premium-subscription upsell module ("Job
+# search faster with Premium", "millions of other members use Premium",
+# "Try Premium for", "1-month free trial...") with no heading in between,
+# so it kept getting swept in as if it were more real perks. This platform
+# chrome is never job-description content on ANY job board it appears on,
+# so it's always safe to treat as a hard section boundary, same as
+# RECOMMENDATION_SECTION above.
+PLATFORM_UPSELL_BOILERPLATE = re.compile(
+    r"(?:premium membership|try premium|\bpremium\b.{0,20}\bfree\b|"
+    r"free trial|easy to cancel|millions of other members|"
+    r"job search faster|unlock (?:premium|insights)|upgrade to premium|"
+    r"see who('s| is) hiring|company insights like|headcount trends)",
+    re.I,
+)
 
 
 def _state(value: JDState | dict[str, Any]) -> JDState:
@@ -147,9 +162,13 @@ def _focused_extension_panel(evidence: dict[str, Any]) -> str:
         index = panel.casefold().find(title.casefold())
         if index >= 0:
             panel = panel[index:]
-    boundary = RECOMMENDATION_SECTION.search(panel)
-    if boundary and boundary.start() > 0:
-        panel = panel[:boundary.start()]
+    boundaries = [
+        match.start()
+        for match in (RECOMMENDATION_SECTION.search(panel), PLATFORM_UPSELL_BOILERPLATE.search(panel))
+        if match and match.start() > 0
+    ]
+    if boundaries:
+        panel = panel[:min(boundaries)]
     return panel.strip()
 
 
@@ -342,7 +361,15 @@ RESTRICTION_PATTERNS = (
     ("access_denied", .96, ("access denied", "request blocked", "not authorized", "forbidden")),
     ("rate_limited", .95, ("too many requests", "rate limit exceeded", "temporarily rate limited")),
     ("session_expired", .93, ("session expired", "your session has expired")),
-    ("employee_only", .92, ("employees only", "internal candidates only", "employee login")),
+    # "employee login" was deliberately removed: confirmed directly against a
+    # real, fully public posting (github.careers) that a site-wide header nav
+    # link ("Employee Login for US Jobs", pointing to a SEPARATE internal
+    # iCIMS instance for employee-only postings) false-positived this on
+    # every single page of that career site, regardless of whether the
+    # specific posting being scraped was actually restricted. "employees
+    # only" / "internal candidates only" describe THIS posting's own
+    # eligibility and don't share that false-positive risk.
+    ("employee_only", .92, ("employees only", "internal candidates only")),
     ("geo_restricted", .9, ("not available in your region", "not available in your country")),
     ("cookie_wall", .86, ("accept cookies to continue", "cookie consent required")),
     ("consent_wall", .84, ("consent required", "please provide consent")),
@@ -717,11 +744,25 @@ def evidence_evaluation_agent(value: JDState | dict[str, Any]) -> dict[str, Any]
         if primary.source_type.startswith("extension"):
             selected_html = _extension_rendered_html(extension)
         elif primary.source_type == "backend_jsonld":
+            # backend_jsonld is always parsed OUT OF backend_html itself (see
+            # the scan a few lines above this function), so whenever it wins
+            # as primary, backend_html is already known present and usable.
+            # A synthetic JSON-LD-only shell here used to throw the full
+            # rendered page away right at the source -- dom_cleaner_agent/
+            # markdown_agent then had nothing but that shell to work with
+            # (confirmed directly: a real posting's DOM-cleaned text dropped
+            # to ~40 chars, all downstream markdown empty), silently starving
+            # the extraction LLM of the actual page content whenever
+            # JSON-LD -- which ranks highest and is picked whenever present,
+            # the common case on modern ATS platforms -- won as primary.
+            # Falls back to the synthetic shell only in the unreachable case
+            # where backend_html is somehow empty despite backend_jsonld
+            # having been parsed from it.
             scripts = "".join(
                 f'<script type="application/ld+json">{json.dumps(item, ensure_ascii=False)}</script>'
                 for item in backend_jsonld
             )
-            selected_html = f"<html><head>{scripts}</head><body></body></html>"
+            selected_html = backend_html or f"<html><head>{scripts}</head><body></body></html>"
         elif primary.source_type == "backend_metadata":
             selected_html = (
                 f"<html><head><title>{html_lib.escape(str(state.backend_page_title or ''))}</title>"
@@ -1305,6 +1346,9 @@ Read ALL supplied primary and supplementary evidence before producing ExtractedJ
 Never invent factual values. For collection fields (responsibilities, requirements,
 preferred_qualifications, skills, suggested_skills, and benefits), always return a JSON
 array and use [] when evidence is genuinely absent. Use null only for absent scalar fields.
+Never fill an absent field with a placeholder word or phrase such as "Unavailable",
+"Not Available", "N/A", "Unknown", "Not Specified", or "TBD" -- use null (for scalars) or
+[] (for arrays) instead. A field must contain only real values found in the evidence.
 
 COMPANY IDENTITY:
 - company_name is the recognizable public employer brand supported by domain, metadata,
@@ -1329,8 +1373,21 @@ EXPLICIT SKILL COVERAGE:
   domain skill, and explicitly required professional competency.
 - Convert examples into separate concise canonical labels when they are explicitly written.
 - Do not omit a skill because it appears inside parentheses, an “e.g.” list, a responsibility,
-  or a preferred qualification.
+  or a preferred qualification. Worked example: the qualification bullet "Experience
+  developing in a high-level programming language (Python, JavaScript, Java, Swift, etc.)"
+  must yield ALL FOUR of Python, JavaScript, Java, and Swift in skills -- not just the
+  first one or two named, and not the sentence as a whole.
 - Generic degrees and years of experience are requirements, not skills.
+
+PAGE CHROME IS NOT JOB CONTENT:
+- The evidence may still contain site navigation, cookie/consent banners, "similar jobs" or
+  "you might also like" rails, social-share widgets, and subscription/membership upsells
+  (e.g. "Try Premium", "Job search faster with Premium", "X and millions of other members
+  use Premium", free-trial pitches, "Unlock company insights") that earlier cleanup missed.
+  None of this is ever real job content -- never place it in any field, and never let it
+  cut a real bullet list short.
+- UI affordances like "... more" / "Show more" are truncation controls, not content -- never
+  emit them as a requirement, responsibility, qualification, or benefit.
 
 INFERRED SKILL RECOMMENDATIONS (REQUIRED):
 - Always produce 4-10 atomic suggested_skills for a valid job detail page, including when
@@ -1459,6 +1516,42 @@ _EXPLICIT_SKILL_ALIASES: dict[str, tuple[str, ...]] = {
     "Databricks": ("databricks",), "Hadoop": ("hadoop",),
     "Tableau": ("tableau",), "Power BI": ("power bi",),
     "Agile": ("agile",), "Scrum": ("scrum",),
+    # Confirmed gap: a real posting listed "Python, JavaScript, Java, Swift,
+    # etc." inside a qualifications bullet (not a dedicated skills list) and
+    # Swift -- absent from the dictionary above -- silently dropped out of
+    # the extracted skills whenever this deterministic path ran instead of
+    # the LLM. Rounding out mainstream languages/platforms/infra tooling
+    # closes that class of gap without waiting on every individual miss to
+    # be reported.
+    "Swift": ("swift",), "Kotlin": ("kotlin",), "Go": ("golang", "go lang"),
+    "Rust": ("rust",), "Ruby": ("ruby",), "PHP": ("php",),
+    "Scala": ("scala",), "Objective-C": ("objective-c", "objective c"),
+    "C": (" c programming", "c language"), "MATLAB": ("matlab",),
+    "Perl": ("perl",), "Dart": ("dart",), "Elixir": ("elixir",),
+    "Haskell": ("haskell",), "Shell Scripting": ("shell script", "bash scripting"),
+    "PowerShell": ("powershell",),
+    "HTML": ("html",), "CSS": ("css",), "Sass": ("sass", "scss"),
+    "Next.js": ("next.js", "nextjs"), "Nuxt.js": ("nuxt.js", "nuxtjs"),
+    "Svelte": ("svelte",), "Express.js": ("express.js", "expressjs"),
+    "Spring": ("spring framework",), "Spring Boot": ("spring boot",),
+    ".NET": (".net", "dotnet", "asp.net"), "Flask": ("flask",),
+    "Ruby on Rails": ("ruby on rails", "rails"),
+    "GraphQL": ("graphql",), "gRPC": ("grpc",), "WebSockets": ("websocket",),
+    "Microservices": ("microservices", "microservice architecture"),
+    "MongoDB": ("mongodb", "mongo db"), "PostgreSQL": ("postgresql", "postgres"),
+    "MySQL": ("mysql",), "Redis": ("redis",), "Elasticsearch": ("elasticsearch",),
+    "DynamoDB": ("dynamodb",), "Cassandra": ("cassandra",),
+    "RabbitMQ": ("rabbitmq",), "Terraform": ("terraform",),
+    "Ansible": ("ansible",), "Jenkins": ("jenkins",),
+    "CI/CD": ("ci/cd", "continuous integration", "continuous deployment"),
+    "GitHub Actions": ("github actions",), "GitLab CI": ("gitlab ci",),
+    "Android": ("android",), "iOS": ("ios",), "SwiftUI": ("swiftui",),
+    "Flutter": ("flutter",), "React Native": ("react native",),
+    "Unity": ("unity3d", "unity engine"), "Unreal Engine": ("unreal engine",),
+    "Selenium": ("selenium",), "Cypress": ("cypress",), "Jest": ("jest",),
+    "GraphDB": ("graph database",), "Blockchain": ("blockchain",),
+    "Solidity": ("solidity",), "Figma": ("figma",),
+    "Excel": ("excel", "microsoft excel"), "Salesforce": ("salesforce",),
 }
 
 
@@ -1493,6 +1586,9 @@ _JD_SECTION_HEADINGS = {
     ),
     "benefits": (
         "benefits", "what we offer", "perks", "compensation and benefits",
+        "compensation & benefits", "compensation and perks",
+        "compensation & perks", "compensation", "benefits and perks",
+        "perks and benefits",
     ),
 }
 
@@ -1522,8 +1618,16 @@ def _deterministic_section_items(text: str, section: str) -> list[str]:
        the strict whole-line-only heading match just never fired.
     """
     target_headings = set(_JD_SECTION_HEADINGS[section])
+    # Keys must be normalized, matching how heading_group_for/
+    # combined_heading_groups below normalize their query -- keying by the
+    # raw tuple strings instead only ever matched by coincidence, for
+    # headings that happened to contain no punctuation ("perks",
+    # "requirements"). Any heading using "&" (e.g. "compensation & perks")
+    # could never match: _normalize_section_heading strips "&" from the
+    # query but the raw dict key still had it, so the two could never be
+    # equal.
     all_headings = {
-        heading: group
+        _normalize_section_heading(heading): group
         for group, headings in _JD_SECTION_HEADINGS.items()
         for heading in headings
     }
@@ -1554,6 +1658,25 @@ def _deterministic_section_items(text: str, section: str) -> list[str]:
             groups.add(group)
         return groups if len(groups) >= 2 else None
 
+    def _looks_like_heading(raw_line: str) -> bool:
+        """Any markdown heading marker, or a short line that's ENTIRELY
+        bold (markdownify's rendering of a <strong>-only paragraph, a
+        common shape for a visual section heading in a JD authored without
+        real <h2-6> tags), counts as a section boundary even when it isn't
+        one of our recognized responsibilities/requirements/preferred/
+        benefits headings. Without this, an unrecognized heading -- e.g. a
+        real posting's "Compensation Range", "GitHub values", "Who We Are",
+        "EEO Statement" -- was invisible to the loop below and got silently
+        swept into whichever section was still active all the way to the
+        end of the document (or the 30-item safety cap), confirmed directly
+        against a real posting where "Preferred Qualifications" absorbed
+        the entire rest of the page this way.
+        """
+        stripped = raw_line.strip()
+        if re.match(r"^#{1,6}\s+\S", stripped):
+            return True
+        return bool(len(stripped) <= 60 and re.fullmatch(r"\*\*[^*]+\*\*[:.]?", stripped))
+
     active = False
     completed_once = False
     items: list[str] = []
@@ -1569,6 +1692,11 @@ def _deterministic_section_items(text: str, section: str) -> list[str]:
         # build features").
         candidate = re.sub(r"^(?:\d{1,2}|[a-zA-Z]|[ivxIVX]{1,4})[.)]\s+", "", candidate).strip()
         if len(candidate) < 3 or len(candidate) > 700:
+            return
+        # LinkedIn/Indeed-style "show more" truncation affordances ("...
+        # more", "…more", "Show more") are UI chrome, not JD content, but
+        # pass every other filter here (real length, no known heading match).
+        if re.fullmatch(r"(?:\.{2,}|…)?\s*(?:more|show more)\.?", candidate, flags=re.I):
             return
         key = candidate.casefold()
         if key not in seen:
@@ -1590,7 +1718,7 @@ def _deterministic_section_items(text: str, section: str) -> list[str]:
         # noise stripping recognizes would otherwise get silently swept
         # into whichever section was still active, polluting it with a
         # different job's content.
-        if RECOMMENDATION_SECTION.search(line):
+        if RECOMMENDATION_SECTION.search(line) or PLATFORM_UPSELL_BOILERPLATE.search(line):
             break
 
         normalized_whole = _normalize_section_heading(line.rstrip(":"))
@@ -1635,6 +1763,10 @@ def _deterministic_section_items(text: str, section: str) -> list[str]:
                 continue
 
         if not active:
+            continue
+        if _looks_like_heading(raw_line):
+            completed_once = True
+            active = False
             continue
         add_item(line)
     return items
@@ -1746,13 +1878,31 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     # original purpose: a bounded-latency fallback for when the LLM call
     # itself actually fails or times out, not a shortcut applied just because
     # structured data happens to exist.
-    jd_timeout = max(5.0, float(os.getenv("JD_EXTRACTION_LLM_TIMEOUT_SECONDS", "20")))
+    # 20s was tuned back when this branch only ran on LLM-extraction-eligible
+    # pages (JSON-LD-complete pages took the deterministic shortcut and never
+    # reached this timeout at all). Now that the LLM is the primary path for
+    # EVERY page (see comment above), that same 20s measured directly against
+    # a real posting: DeepSeek's flash model needed ~30s+ to finish a normal
+    # ~2.6k-token structured response, so the old default was silently
+    # discarding good-but-slower completions into the lower-quality
+    # deterministic fallback far more often than intended. escalate_on_error
+    # stays False below -- this still won't retry against the slower "pro"
+    # model -- so raising the ceiling here doesn't reopen the ~2m-miss
+    # problem that setting was added to prevent.
+    jd_timeout = max(5.0, float(os.getenv("JD_EXTRACTION_LLM_TIMEOUT_SECONDS", "35")))
 
     def _call_llm():
         structured = get_llm(temperature=0).with_structured_output(
             ExtractedJob,
             timeout_seconds=jd_timeout,
-            max_tokens=2600,
+            # 2600 measured too tight against a real, content-rich posting
+            # (10 requirements + 4 preferred qualifications + description +
+            # responsibilities + skills, now that the LLM also sees the full
+            # page text, not just a short JSON-LD summary): observed
+            # "DeepSeek returned empty content" failures consistent with the
+            # completion being cut off mid-JSON before it could close out a
+            # valid object.
+            max_tokens=4000,
             queue_timeout_seconds=max(
                 0.5,
                 float(os.getenv("JD_EXTRACTION_AI_QUEUE_TIMEOUT_SECONDS", "3")),

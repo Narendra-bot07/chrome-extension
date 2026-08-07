@@ -163,9 +163,15 @@ class DeepSeekProvider:
                 sys_msg = (
                     f"{sys_msg}\n\nRespond with a single JSON object that strictly matches this "
                     f"JSON Schema. Every field listed in every \"required\" array — at every level "
-                    f"of nesting, not just the top level — MUST be present with a value. Do not omit "
-                    f"a required field inside a nested object just because other fields were easier "
-                    f"to determine:\n{schema_json}"
+                    f"of nesting, not just the top level — MUST be present with a value (not merely "
+                    f"omitted from the object). Do not omit a required field inside a nested object "
+                    f"just because other fields were easier to determine. A field whose schema type "
+                    f"includes \"null\", or that is absent from its object's \"required\" array, is "
+                    f"genuinely optional: when the source material has no real value for it, set it "
+                    f"to null (or [] for arrays) rather than inventing a placeholder word like "
+                    f"\"Unavailable\", \"Not Available\", \"N/A\", \"Unknown\", or \"TBD\" — those "
+                    f"placeholder strings are worse than an honest null because they render to users "
+                    f"as if they were real extracted data:\n{schema_json}"
                 )
             except Exception:
                 pass
@@ -177,37 +183,56 @@ class DeepSeekProvider:
             ]
 
             # Attempt 1: Primary Model (deepseek-v4-flash)
-            try:
-                raw_json = self._chat_completion(
-                    model=self.flash_model,
-                    messages=messages,
-                    temperature=temperature,
-                    timeout_seconds=timeout_seconds,
-                    max_tokens=max_tokens,
-                )
-                parsed_obj = self._parse_json_schema(raw_json, schema_cls)
-                return parsed_obj
-            except Exception as flash_err:
-                logger.warning(f"[DEEPSEEK_FAILOVER] Primary model ({self.flash_model}) failed: {flash_err}")
-                if not escalate_on_error:
-                    raise flash_err
-
-                # Attempt 2: Escalation Model (deepseek-v4-pro)
-                logger.info(f"[DEEPSEEK_ESCALATION] Attempting escalation to ({self.pro_model})...")
-                time.sleep(1.0)
+            flash_err: Exception = ValueError("unreachable")
+            for flash_attempt in range(2):
                 try:
-                    raw_json_pro = self._chat_completion(
-                        model=self.pro_model,
+                    raw_json = self._chat_completion(
+                        model=self.flash_model,
                         messages=messages,
                         temperature=temperature,
                         timeout_seconds=timeout_seconds,
                         max_tokens=max_tokens,
                     )
-                    parsed_obj = self._parse_json_schema(raw_json_pro, schema_cls)
-                    return parsed_obj
-                except Exception as pro_err:
-                    logger.error(f"[DEEPSEEK_ESCALATION_FAILED] Both flash and pro models failed: {pro_err}")
-                    raise pro_err
+                    return self._parse_json_schema(raw_json, schema_cls)
+                except Exception as attempt_err:
+                    flash_err = attempt_err
+                    # "DeepSeek returned empty content" is an anomalous,
+                    # non-deterministic response shape confirmed via direct
+                    # repro: the SAME request, retried moments later,
+                    # sometimes succeeds -- worth exactly one quick
+                    # same-model retry. Any other error (timeout, network,
+                    # genuine API failure) is NOT retried here; it falls
+                    # straight through to the escalate-or-raise handling
+                    # below unchanged, since retrying those would just
+                    # repeat the same failure at the cost of extra latency.
+                    if flash_attempt == 0 and "empty content" in str(attempt_err).casefold():
+                        logger.warning(
+                            f"[DEEPSEEK_EMPTY_CONTENT_RETRY] {self.flash_model} "
+                            "returned empty content; retrying once"
+                        )
+                        continue
+                    break
+
+            logger.warning(f"[DEEPSEEK_FAILOVER] Primary model ({self.flash_model}) failed: {flash_err}")
+            if not escalate_on_error:
+                raise flash_err
+
+            # Attempt 2: Escalation Model (deepseek-v4-pro)
+            logger.info(f"[DEEPSEEK_ESCALATION] Attempting escalation to ({self.pro_model})...")
+            time.sleep(1.0)
+            try:
+                raw_json_pro = self._chat_completion(
+                    model=self.pro_model,
+                    messages=messages,
+                    temperature=temperature,
+                    timeout_seconds=timeout_seconds,
+                    max_tokens=max_tokens,
+                )
+                parsed_obj = self._parse_json_schema(raw_json_pro, schema_cls)
+                return parsed_obj
+            except Exception as pro_err:
+                logger.error(f"[DEEPSEEK_ESCALATION_FAILED] Both flash and pro models failed: {pro_err}")
+                raise pro_err
 
     def _chat_completion(
         self,

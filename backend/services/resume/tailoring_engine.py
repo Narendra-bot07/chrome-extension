@@ -240,7 +240,26 @@ class StrictTailoringEngine:
     ) -> float:
         if not proposed or not proposed.strip():
             return 0.0
-        return 0.95
+        original_tokens = self._tokens(original)
+        if not original_tokens:
+            # No source text to compare against (e.g. a freshly-added bullet
+            # rather than a rewrite of an existing one) -- nothing to score
+            # divergence against, so don't penalize.
+            return 0.9
+        # How much of the ORIGINAL bullet's own content survives into the
+        # proposal -- a rewrite that keeps the same facts/keywords (just
+        # better wording) scores high even if it adds new connecting words;
+        # a rewrite that discards the original entirely and fabricates
+        # unrelated content scores low. This used to be a hardcoded 0.95
+        # regardless of input, which meant the confidence < MIN_CONFIDENCE
+        # rejection path (see _validate_text_edit) could never fire --
+        # confirmed directly: a proposed bullet sharing ZERO words with its
+        # source ("Completely unrelated generated project narrative."
+        # replacing "Created a Python service for 40% faster processing.")
+        # was accepted outright.
+        shared = original_tokens & self._tokens(proposed)
+        overlap_ratio = len(shared) / len(original_tokens)
+        return round(min(0.97, 0.35 + overlap_ratio * 0.62), 3)
 
     def _validate_text_edit(
         self,

@@ -49,6 +49,22 @@ _browser_instance = None
 _context_instance = None
 
 
+# Confirmed directly (production-matching repro against a real, public,
+# WAF-protected careers site returning a genuine 403): default Playwright
+# Chromium is trivially fingerprinted as a bot -- navigator.webdriver is
+# true and the default UA string literally contains "HeadlessChrome" --
+# and common WAFs (AWS WAF, Akamai, PerimeterX, etc.) block on sight before
+# the page ever renders. The exact same URL, same network path, returns 200
+# with the full posting once these are masked. This targets only automation
+# fingerprinting, not authentication or paywalls -- a real visitor's browser
+# already sees this exact public page.
+_SCRAPE_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+_WEBDRIVER_MASK_SCRIPT = "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+
+
 def _get_context_on_pool_thread():
     global _playwright_instance, _browser_instance, _context_instance
     if _browser_instance is not None:
@@ -67,11 +83,19 @@ def _get_context_on_pool_thread():
             _playwright_instance = sync_playwright().start()
         _browser_instance = _playwright_instance.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+            args=[
+                "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+            ],
         )
         _context_instance = None
     if _context_instance is None:
-        _context_instance = _browser_instance.new_context()
+        _context_instance = _browser_instance.new_context(
+            user_agent=_SCRAPE_USER_AGENT,
+            viewport={"width": 1366, "height": 900},
+            locale="en-US",
+        )
+        _context_instance.add_init_script(_WEBDRIVER_MASK_SCRIPT)
     return _context_instance
 
 

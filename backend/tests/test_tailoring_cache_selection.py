@@ -6,11 +6,16 @@ from services.resume.tailoring_cache import (
 
 
 def _cached(sections):
+    canonical = canonical_selected_sections(sections)
     return {
         "tailoring_engine_version": TAILORING_ENGINE_VERSION,
         "tailoring_generation_status": "completed",
-        "selected_sections": canonical_selected_sections(sections),
-        "patch": {},
+        "selected_sections": canonical,
+        # A real cache entry always carries the actual edits; an always-
+        # empty patch here would fail tailoring_cache_matches's has_edits
+        # check regardless of whether section-selection matching (what
+        # these tests exist to verify) is correct.
+        "patch": {section: "Example tailored text." for section in canonical},
     }
 
 

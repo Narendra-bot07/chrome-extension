@@ -348,6 +348,33 @@ export function assessBrowserJobEvidence(evidence = {}, sourceUrl = '') {
   };
 }
 
+// Backend schemas now scrub these at the Pydantic boundary (job_schemas.py /
+// app/schemas.py), but this stays as defense-in-depth for any older cached
+// response, legacy field shape, or field these validators don't cover --
+// DeepSeek's structured-output mode sometimes fills an uncertain field with
+// a literal placeholder token (observed in production: "UNAVAILABLE")
+// instead of leaving it empty, and for a composite field like `location`
+// that can land as just one comma-joined segment, e.g.
+// "UNAVAILABLE, UNAVAILABLE, United States".
+const MISSING_VALUE_TOKENS = new Set([
+  'unavailable', 'not available', 'n/a', 'na', 'none', 'unspecified',
+  'not specified', 'not provided', 'not disclosed', 'unknown', 'tbd',
+  'not applicable', 'undisclosed', 'not stated', 'not mentioned',
+]);
+
+export function isMissingValueToken(value) {
+  if (typeof value !== 'string') return false;
+  return MISSING_VALUE_TOKENS.has(value.trim().toLowerCase().replace(/[.!]+$/, ''));
+}
+
+export function cleanLocationValue(value) {
+  if (typeof value !== 'string') return value;
+  if (isMissingValueToken(value)) return null;
+  if (!value.includes(',') && !value.includes('/')) return value.trim();
+  const parts = value.split(/[,/]/).map((part) => part.trim()).filter((part) => part && !isMissingValueToken(part));
+  return parts.length ? parts.join(', ') : null;
+}
+
 export function formatSalary(value) {
   if (!value) return "";
   if (typeof value !== "object") return String(value);
@@ -364,7 +391,7 @@ const toStringList = (value) => {
   if (!value) return [];
   const values = Array.isArray(value) ? value : [value];
   return values
-    .filter((item) => typeof item === "string" && item.trim())
+    .filter((item) => typeof item === "string" && item.trim() && !isMissingValueToken(item))
     .map((item) => item.trim());
 };
 

@@ -328,6 +328,9 @@ def analyze_job_description(jd_text: str, api_key: Optional[str] = None, url: Op
             "- Build the structured job object using ONLY information that actually exists in the provided text.\n"
             "- Never invent or fabricate missing fields.\n"
             "- Extract required_skills from programming languages, frameworks, platforms, tools, cloud, AI/ML, security, infrastructure, and domain skills.\n"
+            "- Never fill an absent field with a placeholder word or phrase such as \"Unavailable\", "
+            "\"Not Available\", \"N/A\", \"Unknown\", \"Not Specified\", or \"TBD\" -- use an empty "
+            "string or empty list instead. A field must contain only real values found in the text.\n"
             "- Return valid JSON matching the exact schema only."
         )
 

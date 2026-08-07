@@ -379,13 +379,23 @@ class ResumeCompositionAgent:
         final_height: float,
         section_order: list[str],
         content_profile: ContentProfile,
+        optimization_exhausted: bool = False,
     ) -> tuple[int, dict[str, int], Measurements]:
         """Step 5: Decide ONE_PAGE vs TWO_PAGE and balance content across pages."""
 
         capacity = PAGE_PRINTABLE_HEIGHT_PX
 
-        # Small overflow recovery check: Never create page 2 for a tiny spillover (< 8% overflow)
-        if capacity < final_height <= capacity * 1.08:
+        # Small overflow recovery check: never create page 2 for a tiny
+        # spillover (< 8% overflow) -- UNLESS every optimization lever in
+        # execute_space_optimization has already been applied at its full
+        # cap (optimization_exhausted=True). In that state there is no
+        # remaining slack for the "micro-adjustments will surely recover
+        # this" reasoning below to lean on: the 12-step budget is a hard
+        # ceiling, so a residual gap after exhausting it is real, not an
+        # estimation-tolerance sliver, and forcing 1 page would mean
+        # actually clipping/shrinking below the safety-limited spacing
+        # profile in the real render.
+        if capacity < final_height <= capacity * 1.08 and not optimization_exhausted:
             page_count = 1
             final_height = capacity  # Recovered space via micro-adjustments
         elif final_height <= capacity:
@@ -527,10 +537,11 @@ class ResumeCompositionAgent:
 
             applied_opts = [res.optimization_name for res in steps_results if res.applied]
             final_height = max(100.0, content_profile.total_estimated_height - recovered_space)
+            optimization_exhausted = len(applied_opts) == len(steps_results)
 
             # Step 5: Page Fit & Page Two Rule
             page_count, page_assignment, measurements = self.determine_page_fit_and_balance(
-                final_height, section_order, content_profile
+                final_height, section_order, content_profile, optimization_exhausted
             )
 
             status = "PASS"

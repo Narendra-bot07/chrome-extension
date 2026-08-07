@@ -7,6 +7,39 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+# DeepSeek's structured-output mode, when uncertain about a field it still
+# perceives as expected, sometimes fills it with a literal placeholder token
+# (observed in production: "UNAVAILABLE") instead of leaving it null -- for a
+# composite field like `location` this can even land as one piece of a
+# comma-joined string, e.g. "UNAVAILABLE, UNAVAILABLE, United States", where
+# the field-level normalizer below would otherwise pass the whole string
+# through untouched since it isn't ENTIRELY a known placeholder. Every
+# scalar/list field the model can populate is scrubbed for these tokens so
+# no consumer (this UI, PDF export, cover letter generation, ATS matching)
+# ever has to special-case them.
+_MISSING_VALUE_TOKENS = frozenset({
+    "unavailable", "not available", "n/a", "na", "none", "unspecified",
+    "not specified", "not provided", "not disclosed", "unknown", "tbd",
+    "not applicable", "undisclosed", "not stated", "not mentioned",
+})
+
+
+def _is_missing_value_token(text: str) -> bool:
+    return text.strip().casefold().rstrip(".!") in _MISSING_VALUE_TOKENS
+
+
+def _strip_missing_value_tokens(text: str) -> str:
+    """Drop placeholder-only segments from a comma/slash-joined composite
+    string (e.g. a "City, State, Country" location) while preserving real
+    parts, and collapse to "" when every part was a placeholder."""
+    if _is_missing_value_token(text):
+        return ""
+    if "," not in text and "/" not in text:
+        return text
+    parts = [p.strip() for p in re.split(r"[,/]", text)]
+    kept = [p for p in parts if p and not _is_missing_value_token(p)]
+    return ", ".join(kept) if kept else ""
+
 
 class SalaryInfo(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -128,12 +161,13 @@ class ExtractedJob(BaseModel):
         if value is None or value == "":
             return None
         if isinstance(value, str):
-            val = value.strip()
+            val = _strip_missing_value_tokens(value.strip())
             return val if val else None
         if isinstance(value, (list, tuple, set)):
             val = ", ".join(str(x).strip() for x in value if x is not None and str(x).strip())
+            val = _strip_missing_value_tokens(val)
             return val if val else None
-        val = str(value).strip()
+        val = _strip_missing_value_tokens(str(value).strip())
         return val if val else None
 
     @field_validator(
@@ -154,21 +188,28 @@ class ExtractedJob(BaseModel):
             if not val:
                 return []
             if "\n" in val:
-                return [line.strip("- •*").strip() for line in val.split("\n") if line.strip()]
-            return [val]
+                return [
+                    line.strip("- •*").strip()
+                    for line in val.split("\n")
+                    if line.strip() and not _is_missing_value_token(line.strip("- •*").strip())
+                ]
+            return [] if _is_missing_value_token(val) else [val]
         if isinstance(value, (list, tuple, set)):
             res = []
             for item in value:
                 if item is None:
                     continue
                 s = str(item).strip()
-                if s:
+                if s and not _is_missing_value_token(s):
                     res.append(s)
             return res
         if isinstance(value, dict):
-            return [str(v).strip() for v in value.values() if v is not None and str(v).strip()]
+            return [
+                str(v).strip() for v in value.values()
+                if v is not None and str(v).strip() and not _is_missing_value_token(str(v).strip())
+            ]
         s = str(value).strip()
-        return [s] if s else []
+        return [] if not s or _is_missing_value_token(s) else [s]
 
     @field_validator("salary", mode="before")
     @classmethod

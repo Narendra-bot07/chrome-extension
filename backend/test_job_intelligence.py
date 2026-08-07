@@ -247,7 +247,15 @@ def test_non_detail_classification(html, url, expected):
 def test_empty_html_requests_bounded_retry():
     decision = _deterministic_classification(state(""))
     assert decision.action == "browser_retry"
-    reviewed = state("", page_type="non_job", classification_confidence=.55, browser_attempts=1,
+    # browser_attempts=0: no real browser fetch has happened yet, so budget
+    # (max_browser_attempts defaults to 1 -- a single bounded browser
+    # attempt, deliberately not retried further to keep worst-case latency
+    # bounded, see browser_agent's own docstring) is still available and a
+    # retry should be allowed. Previously this fixture used
+    # browser_attempts=1, which is already AT the one-attempt budget, so a
+    # retry is correctly refused -- that was testing the exhausted-budget
+    # case while asserting the has-budget outcome.
+    reviewed = state("", page_type="non_job", classification_confidence=.55, browser_attempts=0,
                      plan={"classification_action": "browser_retry"})
     from services.job_extraction.agents import classification_review_agent
     update = classification_review_agent(reviewed)

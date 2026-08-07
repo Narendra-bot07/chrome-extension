@@ -1,7 +1,38 @@
+import re
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import List, Optional, Dict, Any, Union
 from schemas.resume import ResumeLayoutModel, RenderableResume
 from schemas.tailoring import TailorRequest, DownloadPDFRequest, CoverLetterRequest, TailoringReport, ResumePatch
+
+# DeepSeek's structured-output mode, when uncertain about a field it still
+# perceives as expected, sometimes fills it with a literal placeholder token
+# (observed in production: "UNAVAILABLE") instead of leaving it empty -- for
+# a composite field like JobAnalysis.location this can even land as one
+# piece of a comma-joined string, e.g. "UNAVAILABLE, UNAVAILABLE, United
+# States". Every scalar/list field the model can populate is scrubbed for
+# these tokens so no consumer ever has to special-case them.
+_MISSING_VALUE_TOKENS = frozenset({
+    "unavailable", "not available", "n/a", "na", "none", "unspecified",
+    "not specified", "not provided", "not disclosed", "unknown", "tbd",
+    "not applicable", "undisclosed", "not stated", "not mentioned",
+})
+
+
+def _is_missing_value_token(text: str) -> bool:
+    return text.strip().casefold().rstrip(".!") in _MISSING_VALUE_TOKENS
+
+
+def _strip_missing_value_tokens(text: str) -> str:
+    """Drop placeholder-only segments from a comma/slash-joined composite
+    string while preserving real parts, collapsing to "" when every part
+    was a placeholder."""
+    if _is_missing_value_token(text):
+        return ""
+    if "," not in text and "/" not in text:
+        return text
+    parts = [p.strip() for p in re.split(r"[,/]", text)]
+    kept = [p for p in parts if p and not _is_missing_value_token(p)]
+    return ", ".join(kept) if kept else ""
 
 class PersonalInfo(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -93,7 +124,7 @@ class ResumeStructure(BaseModel):
     certifications: List[CertificationItem] = []
     achievements: List[str] = []
     publications: List[Dict[str, Any]] = []
-    languages: List[Dict[str, Any]] = []
+    languages: List[Union[Dict[str, Any], str]] = []
     volunteer_experience: List[Dict[str, Any]] = []
     open_source: List[Dict[str, Any]] = []
     leadership: List[Dict[str, Any]] = []
@@ -109,6 +140,21 @@ class ResumeStructure(BaseModel):
     # contract aligned with the canonical resume schema used by the editor.
     layout_model: Optional[ResumeLayoutModel] = None
     raw_text: Optional[str] = ""
+
+    @field_validator("languages", mode="before")
+    @classmethod
+    def normalize_languages(cls, value: Any) -> list:
+        if not isinstance(value, list):
+            return []
+        # A common "bad" LLM tool-output shape is a flat list of language
+        # names (["English", "Telugu"]) instead of the canonical
+        # {"name": ...} objects -- normalize per-item so both shapes land
+        # in the same place rather than failing validation outright.
+        return [
+            {"name": str(item).strip()} if isinstance(item, str) else item
+            for item in value
+            if item
+        ]
 
 class JobAnalysis(BaseModel):
     is_job_related: bool = True
@@ -166,10 +212,10 @@ class JobAnalysis(BaseModel):
         if value is None:
             return ""
         if isinstance(value, str):
-            return value.strip()
+            return _strip_missing_value_tokens(value.strip())
         if isinstance(value, (list, tuple, set)):
-            return ", ".join(str(x) for x in value if x is not None)
-        return str(value)
+            return _strip_missing_value_tokens(", ".join(str(x) for x in value if x is not None))
+        return _strip_missing_value_tokens(str(value))
 
     @field_validator("highlights", "qualifications", "required_skills", "preferred_skills", "responsibilities", "keywords", "ats_keywords", mode="before")
     @classmethod
@@ -178,12 +224,19 @@ class JobAnalysis(BaseModel):
             return []
         if isinstance(value, str):
             val = value.strip()
-            return [val] if val else []
+            return [] if not val or _is_missing_value_token(val) else [val]
         if isinstance(value, (list, tuple, set)):
-            return [str(x).strip() for x in value if x is not None and str(x).strip()]
+            return [
+                str(x).strip() for x in value
+                if x is not None and str(x).strip() and not _is_missing_value_token(str(x).strip())
+            ]
         if isinstance(value, dict):
-            return [str(v).strip() for v in value.values() if v is not None and str(v).strip()]
-        return [str(value).strip()]
+            return [
+                str(v).strip() for v in value.values()
+                if v is not None and str(v).strip() and not _is_missing_value_token(str(v).strip())
+            ]
+        s = str(value).strip()
+        return [] if not s or _is_missing_value_token(s) else [s]
 
 class MissingSkillSuggestion(BaseModel):
     skill: str

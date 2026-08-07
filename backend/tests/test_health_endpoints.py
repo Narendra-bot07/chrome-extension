@@ -17,16 +17,22 @@ def test_ready_endpoint():
     assert "Backend can serve traffic and required dependencies are reachable." in response.text
 
 def test_health_endpoint():
-    """Test /health endpoint returns structured health json summary."""
+    """Test /health endpoint returns a sanitized status summary.
+
+    Per api/v1/health.py's own docstring, this endpoint is deliberately
+    "Sanitized... suitable for external monitoring" -- component-level
+    database/redis/storage statuses are computed internally to derive
+    status/degraded but intentionally not exposed here (that used to be a
+    richer internal shape with those keys; this asserts the current,
+    intentional contract instead).
+    """
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] in ["healthy", "degraded"]
+    assert data["service"] == "tailr4u-api"
     assert "environment" in data
-    assert "database" in data
-    assert "redis" in data
-    assert "storage" in data
-    assert "version" in data
+    assert "release" in data
 
 def test_v1_health_endpoints():
     """Test API v1 health prefix routes."""

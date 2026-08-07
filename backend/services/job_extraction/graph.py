@@ -89,8 +89,20 @@ def route_after_evidence(state: JDState) -> Literal["browser", "jsonld", "final_
         client_assessment.get("readiness") == "NOT_READY"
         and not bool(client_assessment.get("requiresRecoveryEvaluation"))
     )
-    if not client_rejected_non_job and state.browser_attempts < state.max_browser_attempts and (
-        (state.browser_attempts == 0 and state.extraction_readiness in {"BLOCKED", "NOT_READY"})
+    # A genuinely detected restriction (captcha, access-denied, employee-only,
+    # rate-limited, etc.) will still be there on a second fetch -- retrying
+    # the browser just burns the extra attempt for the same result. Only
+    # "network_failure" (a transient navigation timeout/launch error, not a
+    # page-level block) or plain insufficient evidence are worth a retry.
+    non_transient_restriction = any(
+        (info or {}).get("restriction_type") not in (None, "network_failure")
+        for info in (state.source_restrictions or {}).values()
+    )
+    if (
+        not client_rejected_non_job
+        and not non_transient_restriction
+        and state.browser_attempts < state.max_browser_attempts
+        and (state.browser_attempts == 0 and state.extraction_readiness in {"BLOCKED", "NOT_READY"})
     ):
         return "browser"
     if state.error or state.extraction_readiness in {"BLOCKED", "NOT_READY", "MANUAL_REVIEW"}:

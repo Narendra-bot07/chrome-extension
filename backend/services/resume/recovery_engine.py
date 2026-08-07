@@ -198,10 +198,24 @@ class AchievementSegmentationAgent:
 
     MAX_ATTEMPTS = 3
 
+    # A real achievement/certification title is a short phrase. When the
+    # upstream parser hasn't segmented a section at all yet (exactly the
+    # degenerate case this agent exists to repair), parsed["achievements"]
+    # can itself be one giant unsegmented paragraph -- _title() then falls
+    # back to returning that ENTIRE paragraph as the "anchor" (no early
+    # dash/colon to split on). That anchor matches the whole text verbatim
+    # and, being the longest possible hit at position 0, shadows every real
+    # pattern-detected title via the overlap-resolution sort below, which
+    # prefers the longest hit at the earliest start. Capping anchor length
+    # keeps a degenerate anchor like that from ever poisoning detection.
+    _MAX_PLAUSIBLE_TITLE_LENGTH = 120
+
     @staticmethod
     def _title_hits(text: str, anchors: list[str], strong: bool) -> list[tuple[int, int, str]]:
         hits: list[tuple[int, int, str]] = []
         for anchor in anchors:
+            if len(anchor) > AchievementSegmentationAgent._MAX_PLAUSIBLE_TITLE_LENGTH:
+                continue
             for match in re.finditer(re.escape(anchor), text, re.I):
                 hits.append((match.start(), match.end(), match.group(0)))
                 break

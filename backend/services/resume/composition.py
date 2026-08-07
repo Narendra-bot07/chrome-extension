@@ -7,6 +7,7 @@ import re
 from io import BytesIO
 from dataclasses import dataclass, field
 from typing import Any, Iterable
+from urllib.parse import urlparse
 
 from schemas.resume import ResumeStructure
 from services.resume.preservation import PreservationResult, preserve_resume
@@ -212,6 +213,20 @@ def clean_and_repair_project_links(resume: dict[str, Any]) -> tuple[dict[str, An
     return cleaned_resume, audit_logs
 
 
+def _is_well_formed_url(value: str) -> bool:
+    """A bare-domain-with-no-TLD value like "https://github/" (a common typo
+    for "https://github.com/...") isn't a real, distinct link -- it doesn't
+    resolve to anything specific, let alone a candidate's actual project.
+    Requiring a dotted hostname keeps _rendered_urls from ever promising the
+    renderer will embed a link the user never actually provided."""
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").strip()
+    return bool(parsed.scheme in {"http", "https"} and host and "." in host)
+
+
 def _rendered_urls(resume: ResumeStructure | dict[str, Any]) -> set[str]:
     """Return only URLs the ownership-aware renderer is expected to expose."""
 
@@ -233,7 +248,7 @@ def _rendered_urls(resume: ResumeStructure | dict[str, Any]) -> set[str]:
             if owner_type and record.get("owner_type", owner_type) != owner_type:
                 continue
             value = record.get("normalized_url") or record.get("url")
-            if value:
+            if value and _is_well_formed_url(str(value)):
                 rendered.add(str(value).strip().rstrip("/"))
 
     if owned_model:
@@ -255,10 +270,10 @@ def _rendered_urls(resume: ResumeStructure | dict[str, Any]) -> set[str]:
     personal = data.get("personal_info") or {}
     for key in ("linkedin", "github", "website"):
         value = personal.get(key)
-        if value:
+        if value and _is_well_formed_url(str(value)):
             rendered.add(str(value).strip().rstrip("/"))
     for value in (personal.get("coding_profiles") or {}).values():
-        if value:
+        if value and _is_well_formed_url(str(value)):
             rendered.add(str(value).strip().rstrip("/"))
     for section in ("projects", "certifications", "publications"):
         for item in data.get(section) or []:
@@ -266,8 +281,23 @@ def _rendered_urls(resume: ResumeStructure | dict[str, Any]) -> set[str]:
                 continue
             for key in ("url", "link", "credential_url", "repository_url", "github_url"):
                 value = item.get(key)
-                if value:
+                if value and _is_well_formed_url(str(value)):
                     rendered.add(str(value).strip().rstrip("/"))
+            # Pre-ownership-intelligence project records also carry a
+            # `links` list (the shape the newer owned_model branch above
+            # reads via candidate_links/link_review) -- this fallback
+            # branch never read it at all, so a project whose only URL
+            # lived there was silently invisible to callers of this
+            # function (e.g. the renderer's "did every link actually get
+            # embedded" check).
+            links = item.get("links")
+            if isinstance(links, list):
+                for link in links:
+                    if not isinstance(link, dict):
+                        continue
+                    value = link.get("url") or link.get("normalized_url")
+                    if value and _is_well_formed_url(str(value)):
+                        rendered.add(str(value).strip().rstrip("/"))
     return rendered
 
 

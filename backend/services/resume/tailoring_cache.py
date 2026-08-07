@@ -30,11 +30,14 @@ def tailoring_cache_matches(
     has_edits = isinstance(patch, dict) and any(
         bool(v) for v in patch.values() if v is not None
     )
-    # Reject stale cached analysis that lacks full breakdown dictionary
-    breakdown_before = payload.get("breakdown_before") or {}
-    if not isinstance(breakdown_before, dict) or len(breakdown_before) < 3:
-        return False
-
+    # ATS breakdown freshness (breakdown_before) is deliberately NOT checked
+    # here -- see this module's docstring: ATS-analysis freshness and
+    # tailoring-patch compatibility are separate concerns, and this
+    # function's only job is the latter. A prior version conflated the two,
+    # which made every payload built without a full breakdown_before
+    # (nothing in this module's own contract requires one) silently fail
+    # the match regardless of whether the selected sections actually
+    # matched.
     requested = canonical_selected_sections(selected_sections)
     # Summary is an explicit rewrite contract, not an optional suggestion.
     # A previously cached multi-section patch could contain experience edits
