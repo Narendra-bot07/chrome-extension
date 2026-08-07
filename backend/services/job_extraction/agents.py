@@ -19,9 +19,10 @@ from services.cache.llm_cache import llm_cache
 from core.logging import logger
 from services.job_extraction.browser_pool import run_on_browser_pool
 from services.job_extraction.ssrf_guard import is_request_url_safe
+from services.job_extraction.salary_parser import parse_salary_from_text
 from services.job_extraction.schemas import (
     ClassificationDecision, EvidenceSource, ExtractedJob, JDState,
-    ReviewDecision, SkillDecision,
+    ReviewDecision, SalaryInfo, SkillDecision,
 )
 
 LOG_PREFIX = "[JD-EXTRACTION][BACKEND]"
@@ -213,21 +214,21 @@ def discovery_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     # Detect job identity in URL path OR query string (e.g. LinkedIn search results with currentJobId)
     query_params = dict(re.findall(r"([^=&?]+)=([^&]+)", parsed.query))
     job_in_query = any(query_params.get(k) for k in JOB_ID_QUERY_PARAMS)
+    has_job_path_in_url = bool(
+        # Requires a segment AFTER the keyword (e.g. /careers/software-
+        # engineer-123, /jobs/12345) -- a bare /careers or /jobs (the
+        # listing root / company careers homepage itself, no specific
+        # posting) previously matched too, since the old regex had no
+        # trailing-segment requirement. That fed has_job_identity below,
+        # letting a careers homepage's own marketing copy ("Apply now
+        # for full-time and remote roles... About us: we build...")
+        # satisfy a job_detail branch purely because its URL contained
+        # "/careers", with no specific job title anywhere on the page.
+        re.search(r"/(?:job|jobs|career|careers|position|opening|viewjob)/[^/?#]+", parsed.path, re.I)
+    )
     discovery = {
         "scheme": parsed.scheme, "host": parsed.hostname, "path": parsed.path,
-        "has_job_path": bool(
-            # Requires a segment AFTER the keyword (e.g. /careers/software-
-            # engineer-123, /jobs/12345) -- a bare /careers or /jobs (the
-            # listing root / company careers homepage itself, no specific
-            # posting) previously matched too, since the old regex had no
-            # trailing-segment requirement. That fed has_job_identity below,
-            # letting a careers homepage's own marketing copy ("Apply now
-            # for full-time and remote roles... About us: we build...")
-            # satisfy a job_detail branch purely because its URL contained
-            # "/careers", with no specific job title anywhere on the page.
-            re.search(r"/(?:job|jobs|career|careers|position|opening|viewjob)/[^/?#]+", parsed.path, re.I)
-            or job_in_query
-        ),
+        "has_job_path": has_job_path_in_url or job_in_query,
         "likely_spa": portal in {"linkedin", "workday", "indeed", "glassdoor"},
         "language_hint": None,
     }
@@ -237,13 +238,57 @@ def discovery_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         "discovery": discovery,
         # Browser acquisition is a recovery path, not the extension's normal
         # path. Bound it tightly so an inaccessible portal cannot dominate
-        # request latency for 30-45 seconds.
-        "browser_strategy": {"wait_until": "domcontentloaded", "timeout_ms": 5000},
+        # request latency for 30-45 seconds. The networkidle budget is the
+        # one exception: a URL that itself identifies one specific job
+        # (path-based, e.g. /job/210747568, or query-param-based, e.g.
+        # ?ashby_jid=...) is strong, specific evidence that this exact page
+        # still needs to render widget/AJAX-driven content via client-side
+        # JS after domcontentloaded fires -- confirmed directly against two
+        # real postings: langchain.com/careers?ashby_jid=... (query-param
+        # case) and an Oracle Cloud HCM /job/<id> posting (path case) both
+        # needed several extra seconds of real idle time before their
+        # actual job content (title, location, description) rendered, even
+        # though a generic "main" selector matched the surrounding shell
+        # instantly in both cases. A longer, real networkidle wait
+        # (meaningful here since it's driven by the page's own finite
+        # fetch, not generic page chrome) only applies to these
+        # specifically-identified pages -- every other page keeps the
+        # short, generic-marketing-copy-safe 500ms budget unchanged.
+        "browser_strategy": {
+            "wait_until": "domcontentloaded",
+            "timeout_ms": 5000,
+            "networkidle_wait_ms": 4000 if (has_job_path_in_url or job_in_query) else 500,
+        },
         "execution_log": _event(state, "discovery", portal=portal),
     }
 
 
-def _scrape_job_page(context, fetch_url: str, wait_until: str, timeout_ms: int, selectors: list[str]):
+_ATS_IFRAME_HOST_NEEDLES = tuple(needle for needle, _ in PORTALS.values())
+
+
+def _find_ats_iframe_url(page, top_host: str) -> str | None:
+    """Some ATS platforms (Ashby chief among them) are embedded via a
+    cross-origin <iframe> on the company's OWN careers page rather than
+    hosted directly -- confirmed real-world case: langchain.com/careers
+    embeds jobs.ashbyhq.com/... in an iframe. page.content() never
+    captures iframe content at all (it's a wholly separate document), so
+    no amount of waiting on the parent page recovers it -- the fix is to
+    re-navigate straight to the ATS's own iframe URL, which then gets all
+    of PORTALS' existing ATS-specific handling for free."""
+    for frame in page.frames:
+        frame_url = frame.url
+        if not frame_url:
+            continue
+        host = (urlparse(frame_url).hostname or "").lower()
+        if host and host != top_host and any(needle in host for needle in _ATS_IFRAME_HOST_NEEDLES):
+            return frame_url
+    return None
+
+
+def _scrape_job_page(
+    context, fetch_url: str, wait_until: str, timeout_ms: int, selectors: list[str],
+    networkidle_wait_ms: int = 500,
+):
     """Runs on the dedicated browser-pool thread (see browser_pool.py) against
     the shared, persistent BrowserContext -- gets its own fresh Page, closes
     it when done, but never closes the context/browser themselves so the next
@@ -268,18 +313,86 @@ def _scrape_job_page(context, fetch_url: str, wait_until: str, timeout_ms: int, 
                 route.abort()
         page.route("**/*", _guard_request)
         page.goto(fetch_url, wait_until=wait_until, timeout=timeout_ms)
+        # domcontentloaded above only guarantees the initial HTML shell --
+        # confirmed directly against real postings (Oracle Cloud HCM,
+        # Ashby-embedded career pages): the actual job content on many
+        # modern ATS platforms renders client-side AFTER that point, so
+        # capturing content immediately just got an empty/generic shell,
+        # with none of the portal's own selectors ever matching. Actively
+        # waiting for one of them exits the INSTANT real content appears --
+        # a page that's already fully rendered pays nothing extra for this
+        # -- so it only helps genuinely slow pages instead of taxing fast
+        # ones with a fixed delay.
+        matched = None
+        selector_deadline = time.monotonic() + 6.0
+        for selector in selectors:
+            remaining_ms = (selector_deadline - time.monotonic()) * 1000
+            if remaining_ms <= 0:
+                break
+            try:
+                page.wait_for_selector(selector, timeout=remaining_ms, state="attached")
+                matched = selector
+                break
+            except Exception:
+                continue
         try:
             # Best-effort only: JS-heavy SPAs (LinkedIn, Workday) rarely go
             # fully idle (analytics/chat beacons keep polling), so this
-            # routinely burns its entire timeout for no extra content.
-            # domcontentloaded above already guarantees the DOM we parse.
-            page.wait_for_load_state("networkidle", timeout=500)
+            # routinely burns its entire timeout for no extra content on
+            # most pages. networkidle_wait_ms is only raised above the
+            # default 500ms for URLs discovery_agent already identified as
+            # carrying a specific job's query-param identity (see there for
+            # why that's a meaningfully different, more patient case).
+            page.wait_for_load_state("networkidle", timeout=networkidle_wait_ms)
         except Exception:
             pass
-        matched = next((selector for selector in selectors if page.locator(selector).count()), None)
-        html = page.content()
-        final_url = page.url
-        title = page.title()
+        if matched is None:
+            matched = next((selector for selector in selectors if page.locator(selector).count()), None)
+        # Checked regardless of whether `matched` already found something on
+        # the top-level page: a generic selector like "main" can match the
+        # wrapping marketing page's own static shell even when the actual
+        # job content lives entirely inside a cross-origin ATS iframe (the
+        # LangChain/Ashby case) -- an ATS-hosted iframe is always a
+        # strictly more specific, more reliable source than that shell.
+        iframe_url = _find_ats_iframe_url(page, (urlparse(page.url).hostname or "").lower())
+        if iframe_url:
+            iframe_portal = _portal(iframe_url)
+            iframe_selectors = PORTALS.get(iframe_portal, ("", selectors))[1]
+            try:
+                page.goto(iframe_url, wait_until=wait_until, timeout=timeout_ms)
+                iframe_deadline = time.monotonic() + 6.0
+                iframe_matched = None
+                for selector in iframe_selectors:
+                    remaining_ms = (iframe_deadline - time.monotonic()) * 1000
+                    if remaining_ms <= 0:
+                        break
+                    try:
+                        page.wait_for_selector(selector, timeout=remaining_ms, state="attached")
+                        iframe_matched = selector
+                        break
+                    except Exception:
+                        continue
+                try:
+                    page.wait_for_load_state("networkidle", timeout=max(networkidle_wait_ms, 2000))
+                except Exception:
+                    pass
+                if iframe_matched is None:
+                    iframe_matched = next((s for s in iframe_selectors if page.locator(s).count()), None)
+                html = page.content()
+                final_url = page.url
+                title = page.title()
+                matched = iframe_matched
+            except Exception:
+                # The iframe redirect is a best-effort upgrade; any failure
+                # (navigation timeout, blocked by SSRF guard, etc.) falls
+                # back to whatever the top-level page already captured.
+                html = page.content()
+                final_url = page.url
+                title = page.title()
+        else:
+            html = page.content()
+            final_url = page.url
+            title = page.title()
         return html, final_url, title, matched, errors
     finally:
         page.close()
@@ -320,6 +433,7 @@ def browser_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             state.browser_strategy.get("wait_until", "domcontentloaded"),
             timeout_ms,
             selectors,
+            state.browser_strategy.get("networkidle_wait_ms", 500),
         )
     except Exception as exc:
         logger.exception("%s Browser failed request_id=%s attempt=%s", LOG_PREFIX, state.request_id, attempt)
@@ -1360,6 +1474,11 @@ COMPANY IDENTITY:
   parent/public employer brand on the same page, return the public brand.
 - Do not blindly copy legal suffixes or requisition/entity codes into company_name.
 - Do not infer a parent brand without supporting page/domain evidence.
+- A structured hiringOrganization.name is normally trustworthy, but some ATS platforms leave
+  it unconfigured and it literally names the CAREER-SITE PRODUCT itself, not the employer
+  (e.g. "Candidate Experience page", "Career Site", "Talent Community") -- confirmed real-world
+  case on an Oracle Cloud HCM posting. Never use a phrase like that as company_name; fall back
+  to other page/domain evidence (e.g. the URL subdomain, page title's employer segment) instead.
 - company_domain is the official employer hostname only when supported by the source URL,
   canonical URL, structured metadata, or explicit company website evidence. Return null
   for third-party job boards or uncertainty. Never append ".com" to company_name.
@@ -1388,6 +1507,21 @@ PAGE CHROME IS NOT JOB CONTENT:
   cut a real bullet list short.
 - UI affordances like "... more" / "Show more" are truncation controls, not content -- never
   emit them as a requirement, responsibility, qualification, or benefit.
+
+SALARY & COMPENSATION:
+- Scan the entire evidence (not just a dedicated "Compensation" section -- many postings state
+  it inline within the description or a benefits paragraph) for a stated pay figure or range.
+- currency must be a real ISO-4217-style code (e.g. USD, EUR, GBP, INR) inferred from the
+  symbol/code actually present, never invented or assumed to be USD by default.
+- Preserve both minimum and maximum for a range; if only a single figure is stated, set both
+  minimum and maximum to that same value. Convert "k" shorthand (e.g. "140k") to its full
+  numeric value (140000).
+- period is one of hourly/daily/weekly/monthly/yearly when the evidence states or clearly
+  implies a pay cadence (e.g. "/yr", "per annum", "/hr"); leave it null when genuinely absent
+  rather than guessing.
+- raw should be the exact compensation phrase as it appears in the evidence.
+- Do not confuse a signing bonus, equity grant, or benefits valuation with base salary; only
+  base/total cash compensation figures belong in salary.
 
 INFERRED SKILL RECOMMENDATIONS (REQUIRED):
 - Always produce 4-10 atomic suggested_skills for a valid job detail page, including when
@@ -1794,6 +1928,45 @@ def _deterministic_section_items(text: str, section: str) -> list[str]:
     return items
 
 
+_SALARY_UNIT_TO_PERIOD = {
+    "hour": "hourly", "day": "daily", "week": "weekly",
+    "month": "monthly", "year": "yearly",
+}
+
+
+def _salary_from_structured(base_salary: Any) -> SalaryInfo | None:
+    """Parses schema.org JobPosting.baseSalary (a MonetaryAmount, usually
+    nesting a QuantitativeValue) when present -- a structured field is more
+    trustworthy than regex-scanning free text, so this is tried first (see
+    caller) and parse_salary_from_text only runs when this finds nothing."""
+    if not isinstance(base_salary, dict):
+        return None
+    currency = str(base_salary.get("currency") or "").strip().upper() or None
+    value = base_salary.get("value")
+    if not isinstance(value, dict):
+        if isinstance(value, (int, float)):
+            return SalaryInfo(minimum=float(value), maximum=float(value), currency=currency)
+        return None
+    minimum = value.get("minValue")
+    maximum = value.get("maxValue")
+    single = value.get("value")
+    if minimum is None and maximum is None and single is None:
+        return None
+    minimum = float(minimum) if isinstance(minimum, (int, float)) else (float(single) if isinstance(single, (int, float)) else None)
+    maximum = float(maximum) if isinstance(maximum, (int, float)) else (float(single) if isinstance(single, (int, float)) else None)
+    if minimum is None and maximum is None:
+        return None
+    if minimum is None:
+        minimum = maximum
+    if maximum is None:
+        maximum = minimum
+    unit = str(value.get("unitText") or "").strip().lower()
+    return SalaryInfo(
+        minimum=minimum, maximum=maximum, currency=currency,
+        period=_SALARY_UNIT_TO_PERIOD.get(unit),
+    )
+
+
 def _deterministic_job_from_evidence(state: JDState) -> ExtractedJob:
     """Produce a useful bounded-latency result from already-cleaned page evidence."""
     structured = next(
@@ -1830,15 +2003,16 @@ def _deterministic_job_from_evidence(state: JDState) -> ExtractedJob:
         or (state.evidence or {}).get("source_text")
         or state.markdown
     )[:12000]
-    title = str(
+    title = _strip_title_branding_suffix(str(
         structured.get("title")
         or _infer_rendered_job_title(state.extension_evidence or {})
         or state.metadata.get("title")
         or state.page_title
         or ""
-    ).strip()
+    ).strip())
+    hiring_org_name = str(hiring_org.get("name") or "").strip()
     company = str(
-        hiring_org.get("name")
+        (hiring_org_name if not _is_generic_ats_org_name(hiring_org_name) else "")
         or (state.extension_evidence or {}).get("company_hint")
         or _fallback_company_name(state, None)
         or "Not Specified"
@@ -1871,6 +2045,9 @@ def _deterministic_job_from_evidence(state: JDState) -> ExtractedJob:
     benefits = _clean_evidence_items(structured.get("jobBenefits"))
     if not benefits:
         benefits = _deterministic_section_items(state.markdown, "benefits")
+    salary = _salary_from_structured(structured.get("baseSalary")) or parse_salary_from_text(
+        f"{source_text} {state.markdown}"[:20000]
+    )
     return ExtractedJob(
         job_title=title or None,
         company_name=company,
@@ -1887,6 +2064,7 @@ def _deterministic_job_from_evidence(state: JDState) -> ExtractedJob:
         skills=explicit,
         suggested_skills=_suggested_skills_for(title, explicit),
         benefits=benefits,
+        salary=salary,
         application_url=structured.get("url") or state.final_url or state.original_url,
         date_posted=structured.get("datePosted"),
         valid_through=structured.get("validThrough"),
@@ -2203,6 +2381,34 @@ benefits are absent. List every genuinely incorrect field in repair_fields. If n
 is_valid must be false."""
 
 
+_GENERIC_ATS_ORG_NAME = re.compile(
+    r"candidate experience|career\s*site|careers?\s*page|job\s*board|"
+    r"talent\s*(?:community|network|acquisition)|recruiting\s*(?:site|portal)",
+    re.I,
+)
+# Confirmed real-world case: an Oracle Cloud HCM posting's own JSON-LD
+# hiringOrganization.name was literally "JPMC Candidate Experience page" --
+# Oracle's own unconfigured template branding for the career-site product
+# itself, not the employer, leaking into structured data we're otherwise
+# meant to trust as authoritative. Rejecting it here lets company
+# resolution fall through to _fallback_company_name instead of taking this
+# generic phrase at face value.
+def _is_generic_ats_org_name(name: str) -> bool:
+    return bool(name) and bool(_GENERIC_ATS_ORG_NAME.search(name))
+
+
+_TITLE_BRANDING_SUFFIX = re.compile(
+    r"\s*[|\-–—]\s*(?:[A-Za-z0-9&.,' ]{1,40}\s+)?careers\s*$",
+    re.I,
+)
+# Confirmed real-world case: a Google DeepMind posting's fallback title
+# (used when no JSON-LD/structured title exists, so we resolve from the
+# raw <title> tag) came back as "Research Scientist, Gemini Data, DeepMind
+# — Google Careers" -- the site's own SEO branding suffix, verbatim.
+def _strip_title_branding_suffix(title: str) -> str:
+    return _TITLE_BRANDING_SUFFIX.sub("", title).strip()
+
+
 def _fallback_company_name(state: JDState, current_company: str | None) -> str | None:
     if current_company and str(current_company).strip():
         return str(current_company).strip()
@@ -2227,17 +2433,24 @@ def _fallback_company_name(state: JDState, current_company: str | None) -> str |
     url = state.url or state.original_url
     if url:
         host = urlparse(url).hostname or ""
-        host_parts = host.lower().split(".")
-        # Was a small, independently-maintained blocklist that had drifted
-        # out of sync with PORTALS (missing myworkdayjobs/ashbyhq/icims/
-        # bamboohr/jobvite/workable/successfactors/taleo/oraclecloud) --
-        # e.g. a Workday-hosted posting's host label "myworkdayjobs" was
-        # never blocked, so a page with no other company evidence returned
-        # the fabricated company name "Myworkdayjobs". Now reuses the single
-        # PORTALS-derived list so a newly added platform there is
-        # automatically protected here too.
-        if len(host_parts) >= 2 and host_parts[-2] not in _ATS_HOST_LABELS:
-            return host_parts[-2].capitalize()
+        host_parts = [p for p in host.lower().split(".") if p]
+        # Company/tenant identity for an ATS-hosted URL is normally the
+        # LEFTMOST (most specific) subdomain label -- "the second-to-last
+        # label" only holds for a bare two-label domain. Confirmed
+        # real-world case: jpmc.fa.oraclecloud.com has "jpmc" as the
+        # actual tenant, but the old host_parts[-2] logic landed on
+        # "oraclecloud" (the ATS's own domain, correctly filtered out as
+        # a known label) and returned nothing -- silently losing the one
+        # genuinely useful hint this URL carried. Walking left-to-right
+        # and skipping known ATS labels plus common infra/connector
+        # subdomains finds the tenant regardless of how many extra
+        # subdomain levels a given platform inserts (unchanged for a
+        # plain two-label host like "example.com": the leftmost label
+        # was always "example" either way).
+        generic_subdomains = {"www", "app", "fa", "my", "hire"}
+        for part in host_parts[:-1]:
+            if part not in _ATS_HOST_LABELS and part not in generic_subdomains:
+                return part.capitalize()
     return None
 
 
@@ -2330,6 +2543,25 @@ def reviewer_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             "the role, responsibilities, outcomes, seniority, and domain. Keep them "
             "separate from explicitly stated skills."
         )
+
+    # The LLM path has no dedicated salary-completeness check today, so a
+    # posting whose evidence clearly states a figure but whose LLM
+    # extraction left salary null passed review untouched -- same class of
+    # gap the skills-recovery block above exists to close, mirrored here.
+    if not job.salary:
+        combined_text = " ".join(filter(None, [
+            job.description, " ".join(job.benefits or []),
+            (state.evidence or {}).get("source_text"), state.markdown,
+        ]))
+        recovered_salary = parse_salary_from_text(combined_text[:20000])
+        if recovered_salary:
+            job.salary = recovered_salary
+            if isinstance(state.extracted_job, dict):
+                state.extracted_job["salary"] = recovered_salary.model_dump(mode="json")
+            logger.info(
+                "%s Reviewer recovered salary deterministically request_id=%s salary=%s",
+                LOG_PREFIX, state.request_id, recovered_salary.model_dump(mode="json"),
+            )
 
     repair_fields = list(field_issues)
     needs_repair = bool(repair_fields)

@@ -142,22 +142,14 @@ class ExtractedJob(BaseModel):
     valid_through: Optional[str] = None
     source_url: Optional[str] = None
 
-    @field_validator(
-        "job_title",
-        "company_name",
-        "company_domain",
-        "location",
-        "seniority",
-        "department",
-        "description",
-        "application_url",
-        "date_posted",
-        "valid_through",
-        "source_url",
-        mode="before",
-    )
+    @field_validator("location", mode="before")
     @classmethod
-    def normalize_optional_strings(cls, value: Any) -> Optional[str]:
+    def normalize_location_composite(cls, value: Any) -> Optional[str]:
+        # location is the one field _strip_missing_value_tokens is actually
+        # meant for (its own docstring: "a comma/slash-joined composite
+        # string, e.g. a City, State, Country location") -- splitting on
+        # every comma to drop placeholder segments only makes sense for a
+        # short "A, B, C" composite, not free text.
         if value is None or value == "":
             return None
         if isinstance(value, str):
@@ -169,6 +161,42 @@ class ExtractedJob(BaseModel):
             return val if val else None
         val = _strip_missing_value_tokens(str(value).strip())
         return val if val else None
+
+    @field_validator(
+        "job_title",
+        "company_name",
+        "company_domain",
+        "seniority",
+        "department",
+        "description",
+        "application_url",
+        "date_posted",
+        "valid_through",
+        "source_url",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_strings(cls, value: Any) -> Optional[str]:
+        # Confirmed real-world bug: this used to share
+        # normalize_location_composite's comma/slash-splitting-and-rejoining
+        # logic, which is only correct for a short composite field like
+        # location. Applied to description -- a full free-text paragraph --
+        # it split on EVERY comma in the whole paragraph (including ones
+        # inside a number like "$150,000") and rejoined with ", ", silently
+        # turning "$150,000" into "$150, 000" and corrupting any
+        # comma-thousands-separated figure a JD's description happened to
+        # contain. These fields only need placeholder-token detection on
+        # the whole value, never comma-splitting.
+        if value is None or value == "":
+            return None
+        if isinstance(value, str):
+            text = value.strip()
+            return None if _is_missing_value_token(text) else text
+        if isinstance(value, (list, tuple, set)):
+            val = ", ".join(str(x).strip() for x in value if x is not None and str(x).strip())
+            return None if not val or _is_missing_value_token(val) else val
+        text = str(value).strip()
+        return None if _is_missing_value_token(text) else text
 
     @field_validator(
         "responsibilities",
