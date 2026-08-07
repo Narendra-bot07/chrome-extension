@@ -148,9 +148,9 @@ def route_after_classifier(state: JDState) -> Literal["classification_review", "
 
 def route_after_classification_review(state: JDState) -> Literal["browser", "evidence_planner", "final_response"]:
     action = state.plan.get("classification_review_action")
-    if action == "browser_retry":
+    if action == "browser_retry" and not _has_usable_extension_evidence(state):
         return "browser"
-    if state.page_type == "job_detail" and action != "manual_review":
+    if (state.page_type == "job_detail" or _has_usable_extension_evidence(state)) and action != "manual_review":
         return "evidence_planner"
     return "final_response"
 

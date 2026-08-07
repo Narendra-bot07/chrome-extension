@@ -6,6 +6,7 @@ import pytest
 from services.job_extraction.agents import (
     _deterministic_classification,
     block_detection_agent,
+    classifier_agent,
     dom_cleaner_agent,
     evidence_evaluation_agent,
     final_response_agent,
@@ -102,6 +103,42 @@ def test_rendered_job_dom_skips_browser_even_when_client_assessment_is_conservat
     assert route_after_discovery(routed) == "evidence_evaluation"
 
 
+def test_short_spa_top_card_does_not_discard_full_visible_job_description():
+    top_card = "Data Engineer Intern\nExample Corp\nHyderabad\nApply"
+    visible = """Navigation
+Data Engineer Intern
+Example Corp
+Hyderabad
+Apply
+Job description
+Responsibilities
+Build reliable Python and SQL data pipelines.
+Requirements
+Experience with AWS, Spark, and distributed systems.
+Preferred qualifications
+Experience with Kafka and Docker.
+Similar jobs
+Senior Data Engineer
+"""
+    initial = state(extension_evidence={
+        "url": "https://example.com/jobs/123",
+        "selected_job_url": "https://example.com/jobs/123",
+        "selected_panel_text": top_card,
+        "visible_text": visible,
+        "job_title_hint": "Data Engineer Intern",
+        "company_hint": "Example Corp",
+        "html": "<html><body><div>" + ("application shell " * 40) + "</div></body></html>",
+    })
+    evaluated = evidence_evaluation_agent(initial)
+    cleaned = dom_cleaner_agent(initial.model_copy(update=evaluated))
+    markdown = markdown_agent(initial.model_copy(update={**evaluated, **cleaned}))
+    classified = classifier_agent(initial.model_copy(update={**evaluated, **cleaned, **markdown}))
+
+    assert "Build reliable Python and SQL data pipelines" in markdown["markdown"]
+    assert "Similar jobs" not in markdown["markdown"]
+    assert classified["page_type"] == "job_detail"
+
+
 def test_usable_extension_dom_is_not_sent_to_browser_after_evidence_review():
     rendered = (
         "Data Engineer\nApply now\nJob description\nResponsibilities\n"
@@ -119,6 +156,25 @@ def test_usable_extension_dom_is_not_sent_to_browser_after_evidence_review():
     )
 
     assert route_after_evidence(routed) == "final_response"
+
+
+def test_classification_review_cannot_retry_browser_for_usable_extension_job():
+    rendered = (
+        "Data Engineer Intern\nApply\nJob description\nResponsibilities\n"
+        "Build Python pipelines.\nRequirements\nSQL and AWS experience.\n"
+    ) * 8
+    routed = state(
+        page_type="non_job",
+        classification_confidence=.55,
+        plan={"classification_review_action": "browser_retry"},
+        extension_evidence={
+            "url": "https://example.com/jobs/123",
+            "visible_text": rendered,
+            "job_title_hint": "Data Engineer Intern",
+        },
+    )
+
+    assert route_after_classification_review(routed) == "evidence_planner"
 
 
 def test_failed_bounded_browser_does_not_retry():

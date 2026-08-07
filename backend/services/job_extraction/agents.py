@@ -157,20 +157,45 @@ def _infer_rendered_job_title(evidence: dict[str, Any]) -> str:
 
 
 def _focused_extension_panel(evidence: dict[str, Any]) -> str:
-    panel = str(evidence.get("selected_panel_text") or evidence.get("visible_text") or "").strip()
     title = _infer_rendered_job_title(evidence)
-    if title:
-        index = panel.casefold().find(title.casefold())
-        if index >= 0:
-            panel = panel[index:]
-    boundaries = [
-        match.start()
-        for match in (RECOMMENDATION_SECTION.search(panel), PLATFORM_UPSELL_BOILERPLATE.search(panel))
-        if match and match.start() > 0
-    ]
-    if boundaries:
-        panel = panel[:min(boundaries)]
-    return panel.strip()
+
+    def focus(value: Any) -> str:
+        text = str(value or "").strip()
+        if title:
+            index = text.casefold().find(title.casefold())
+            if index >= 0:
+                text = text[index:]
+        boundaries = [
+            match.start()
+            for match in (RECOMMENDATION_SECTION.search(text), PLATFORM_UPSELL_BOILERPLATE.search(text))
+            if match and match.start() > 0
+        ]
+        if boundaries:
+            text = text[:min(boundaries)]
+        return text.strip()
+
+    # A generic SPA container can win the frontend candidate ranking while
+    # containing only the role's top card (the production LinkedIn regression
+    # was 137 chars). Do not let that tiny panel discard the much richer text
+    # captured from the same rendered tab. Focus both candidates on the active
+    # title and choose the one with the strongest job-section evidence.
+    panel = focus(evidence.get("selected_panel_text"))
+    visible = focus(evidence.get("visible_text"))
+
+    def quality(text: str, *, selected: bool) -> tuple[int, int, int]:
+        section_hits = sum(
+            marker in text.casefold()
+            for marker in (
+                "job description", "responsibilities", "requirements",
+                "minimum qualifications", "preferred qualifications",
+                "about the role", "what you'll do", "what you will do",
+            )
+        )
+        return (section_hits, int(selected and len(text) >= 250), min(len(text), 60000))
+
+    if visible and quality(visible, selected=False) > quality(panel, selected=True):
+        return visible
+    return panel or visible
 
 
 def _extension_rendered_html(evidence: dict[str, Any]) -> str:
@@ -1303,7 +1328,14 @@ def _deterministic_classification(state: JDState) -> ClassificationDecision:
         state.selected_job_detected,
     )
 
-    if (state.selected_job_detected or state.extraction_readiness == "READY" or state.selected_evidence_source == "extension_selected_panel") and has_specific_title and substantial:
+    if state.selected_job_detected and has_specific_title:
+        return ClassificationDecision(
+            page_type="job_detail",
+            confidence=.96,
+            reasons=["Evidence evaluation verified a single rendered job page"],
+        )
+
+    if (state.extraction_readiness == "READY" or state.selected_evidence_source == "extension_selected_panel") and has_specific_title and substantial:
         return ClassificationDecision(
             page_type="job_detail",
             confidence=.96,
