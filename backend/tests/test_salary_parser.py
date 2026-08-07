@@ -111,3 +111,50 @@ def test_singapore_dollar_code_range_with_to_separator():
     assert result.minimum == 80000.0
     assert result.maximum == 120000.0
     assert result.currency == "SGD"
+
+
+def test_comma_less_flat_number_range_is_not_truncated():
+    """Regression test: a prior version of _NUMBER used two alternatives
+    joined by "|" (a 3-digit-capped comma-grouped form first, a plain
+    uncapped form second). Python's re tries alternatives in order and
+    stops at the first one that matches at all, not the longest one, so a
+    flat number with NO thousands separators (e.g. "106000") hit the
+    capped alternative, matched only its first 3 digits ("106"), and left
+    "000" as a separate, unrelated match -- silently truncating any
+    comma-less salary figure over 999. Confirmed on a real Google/DeepMind
+    posting: "France: €104000 - €106000 (EUR)" was reported to the user
+    as "$104000 - €106" (wrong currency AND a truncated maximum).
+    """
+    result = parse_salary_from_text("France: €104000 - €106000 (EUR) + 15% bonus target + equity + benefits.")
+    assert result is not None
+    assert result.minimum == 104000.0
+    assert result.maximum == 106000.0
+    assert result.currency == "EUR"
+
+
+def test_multiple_currency_ranges_in_one_description_picks_first_coherently():
+    """A posting listing per-region pay bands should return one internally
+    consistent range (matching currency, matching figures) rather than
+    mixing a number from one band with a currency marker from another."""
+    text = (
+        "France: €104000 - €106000 (EUR) + 15% bonus target + equity + benefits.\n"
+        "US: $174000 - $252000 (USD) + 15% bonus target + equity + benefits."
+    )
+    result = parse_salary_from_text(text)
+    assert result is not None
+    assert result.currency in {"EUR", "USD"}
+    if result.currency == "EUR":
+        assert result.minimum == 104000.0
+        assert result.maximum == 106000.0
+    else:
+        assert result.minimum == 174000.0
+        assert result.maximum == 252000.0
+
+
+def test_comma_less_six_digit_single_figure():
+    result = parse_salary_from_text("Base salary: $185000 per year")
+    assert result is not None
+    assert result.minimum == 185000.0
+    assert result.maximum == 185000.0
+    assert result.currency == "USD"
+    assert result.period == "yearly"

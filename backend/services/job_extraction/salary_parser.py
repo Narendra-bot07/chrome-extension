@@ -46,11 +46,25 @@ _SYMBOL_ALTERNATION = "|".join(re.escape(s) for s in sorted(_CURRENCY_SYMBOLS, k
 _CODE_ALTERNATION = "|".join(sorted(_CURRENCY_CODES, key=len, reverse=True))
 _CURRENCY_MARKER = re.compile(rf"\b(?:{_CODE_ALTERNATION})\b|{_SYMBOL_ALTERNATION}", re.I)
 
-# \d{1,3}(?:,\d{2,3})* naturally accepts BOTH Western 3-3-3 grouping
+# \d+(?:,\d{2,3})* naturally accepts BOTH Western 3-3-3 grouping
 # ("140,400") and Indian 2-2-3 lakh/crore grouping ("12,00,000") without
 # locale detection, since each comma-separated group is only required to be
 # 2-3 digits wide rather than fixed at 3.
-_NUMBER = re.compile(r"\d{1,3}(?:,\d{2,3})*(?:\.\d+)?\s*[kK]?|\d+(?:\.\d+)?\s*[kK]?")
+#
+# Confirmed real-world bug: this used to be two alternatives joined by "|"
+# -- a capped `\d{1,3}(?:,\d{2,3})*...` first, a plain `\d+...` second.
+# Python's re module tries alternatives in ORDER and stops at the first one
+# that matches AT ALL, not the one that matches the MOST -- so a flat,
+# comma-less number like "106000" hit the first alternative, which greedily
+# takes only its first 3 digits ("106") and then has nothing left to
+# extend it (no comma follows), leaving "000" as a separate, unrelated
+# match. That silently truncated any comma-less salary figure over 999
+# (e.g. "€104000 - €106000", written with no thousands separators at all)
+# down to its first 1-3 digits. A single unified pattern with an uncapped
+# leading \d+ has no such alternative to fall back to -- it always
+# consumes the full leading digit run first, whether or not a comma
+# grouping follows.
+_NUMBER = re.compile(r"\d+(?:,\d{2,3})*(?:\.\d+)?\s*[kK]?")
 
 _PERIOD_MARKER = (
     r"/\s*(?:hr|hour|wk|week|mo|month|yr|year)\b|"

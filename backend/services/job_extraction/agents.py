@@ -107,7 +107,13 @@ PLATFORM_UPSELL_BOILERPLATE = re.compile(
     r"(?:premium membership|try premium|\bpremium\b.{0,20}\bfree\b|"
     r"free trial|easy to cancel|millions of other members|"
     r"job search faster|unlock (?:premium|insights)|upgrade to premium|"
-    r"see who('s| is) hiring|company insights like|headcount trends)",
+    r"see who('s| is) hiring|company insights like|headcount trends|"
+    # Confirmed real-world case: a LinkedIn job panel's "See the full list
+    # of jobs where you'd be a top applicant" Premium promo line, sitting
+    # ABOVE the real job title in DOM order, was longer than the actual
+    # title and won _infer_rendered_job_title's longest-candidate pick.
+    r"see the full list of jobs|top applicant|see how you (?:compare|rank)|"
+    r"how you match|salary insights|see similar (?:jobs|companies))",
     re.I,
 )
 
@@ -151,6 +157,14 @@ def _infer_rendered_job_title(evidence: dict[str, Any]) -> str:
         if 4 <= len(line) <= 180
         and not noise.fullmatch(line)
         and not GENERIC_JOB_TITLE.fullmatch(line)
+        # Confirmed real-world case: a LinkedIn Premium promo line ("See the
+        # full list of jobs where you'd be a top applicant") sitting above
+        # the real title in DOM order was longer than it and won the
+        # longest-candidate pick below, since `noise` only rejected EXACT
+        # whole-line matches against a short fixed list and never saw this
+        # phrasing. PLATFORM_UPSELL_BOILERPLATE is a substring search, so it
+        # catches promo text embedded in a longer captured line too.
+        and not PLATFORM_UPSELL_BOILERPLATE.search(line)
         and not re.match(r"^(?:remote|hybrid|on.site)(?:\b|\s*-)", line, re.I)
     ]
     return max(candidates, key=len, default="")
@@ -2558,8 +2572,23 @@ def reviewer_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     # "Requirements" section could still come back with both empty and pass
     # review untouched. Trigger repair (which retries from the same evidence
     # deterministically, see repair_agent) whenever there's real description
-    # text to work with but nothing was extracted from it.
-    if len(job.description or "") > 200 and not job.responsibilities and not job.requirements:
+    # text to work with but nothing was extracted from it -- but only on the
+    # FIRST pass (mirrors the repair_attempts-aware exception right above
+    # for company_name). Confirmed real-world case (an Oracle Cloud HCM
+    # posting): some JDs are written as one continuous paragraph with no
+    # "Responsibilities"/"Requirements" headings at all -- a repair retry
+    # against the SAME evidence can never find a structure that genuinely
+    # isn't there, so re-flagging it after repair already tried and failed
+    # once just escalates a real page straight to needs_manual_review
+    # (success=False) instead of reaching final_response_agent's own
+    # "partial" graceful-degradation path, which exists for exactly this
+    # case but was unreachable because this check always fired first.
+    if (
+        len(job.description or "") > 200
+        and not job.responsibilities
+        and not job.requirements
+        and state.repair_attempts < 1
+    ):
         field_issues.setdefault("responsibilities", []).append(
             "Description has substantial content but responsibilities and requirements are both empty."
         )

@@ -252,10 +252,18 @@ function JobReviewView({
   };
 
   const details = jobAnalysis?.normalized_content || jobAnalysis || {};
+  // Defense-in-depth alongside the backend's own filtering (agents.py's
+  // PLATFORM_UPSELL_BOILERPLATE) -- confirmed real-world case: a LinkedIn
+  // Premium promo line rendered above the actual title and won an
+  // upstream longest-candidate heuristic. The root cause is fixed at the
+  // source, but this stays as a second line of defense against any other
+  // path (a stale cache entry, a different extraction attempt) putting
+  // platform chrome into job_title.
   const INVALID_TITLE_NOISE = /^(?:people you can reach out to|about the job|about the company|job description|responsibilities|qualifications|requirements|minimum qualifications|preferred qualifications|similar jobs|recommended jobs|explore options|meet the hiring team|your profile and resume|privacy policy|terms of use|apply|easy apply|save|share|follow|show more|see more|search results|jobs for you|0 notifications|skip navigation|sign in|log in|target company)$/i;
+  const PROMO_TITLE_NOISE = /see the full list of jobs|top applicant|see how you (?:compare|rank)|salary insights|see similar (?:jobs|companies)|millions of other members|try premium|premium membership/i;
 
   const title = [jobAnalysis?.job_title, details?.title, jobAnalysis?.title, jobTitle]
-    .find((str) => str && typeof str === 'string' && !isNotAvailable(str) && !INVALID_TITLE_NOISE.test(str.trim())) || null;
+    .find((str) => str && typeof str === 'string' && !isNotAvailable(str) && !INVALID_TITLE_NOISE.test(str.trim()) && !PROMO_TITLE_NOISE.test(str)) || null;
 
   const company = [jobAnalysis?.company_name, details?.company, jobAnalysis?.company, companyName]
     .find((str) => str && typeof str === 'string' && !isNotAvailable(str) && !INVALID_TITLE_NOISE.test(str.trim()) && str.trim().toLowerCase() !== (title || '').toLowerCase()) || null;
