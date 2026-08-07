@@ -139,3 +139,4 @@ tailr4u/
 - For REST API Endpoint Specifications: see [API_CONTRACTS.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/API_CONTRACTS.md)
 - For Security & Authentication: see [SECURITY.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/SECURITY.md)
 - For Prompts & AI Pipelines: see [PROMPTS.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/PROMPTS.md)
+- For the centralized AI Governance/Guardrail Gateway (task registry, policy registry, prompt-injection/jailbreak defense, migration status): see [AI_GOVERNANCE.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/AI_GOVERNANCE.md)

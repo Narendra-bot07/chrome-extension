@@ -139,6 +139,21 @@ All metrics are exported at `GET /metrics` (requires `Authorization: Bearer <MET
 | `llm_cache_hits_total` | Counter | `task` | Cache-bypassed LLM calls |
 | `llm_escalations_total` | Counter | `from_model, to_model, reason` | Flash→Pro escalations |
 
+### 4.3a AI Governance Guardrail Metrics (added 2026-08-07, not yet emitting — no live route calls the gateway yet)
+
+Defined in `observability/metrics.py`; will start populating once a feature migrates to `AIGovernanceGateway` (see [AI_GOVERNANCE.md](AI_GOVERNANCE.md)). Deliberately low-cardinality only — never `user_id`, `email`, `resume_id`, `request_id`, `prompt`, or raw reason text as a label value.
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `ai_guardrail_requests_total` | Counter | `task, decision` | Every request seen by the gateway |
+| `ai_guardrail_blocks_total` | Counter | `task, reason` | Requests blocked, by bounded reason code |
+| `ai_prompt_injection_total` | Counter | `task` | Prompt injection attempts detected |
+| `ai_jailbreak_attempts_total` | Counter | `task` | Jailbreak attempts detected |
+| `ai_output_rejections_total` | Counter | `task, reason` | LLM output rejected by output guardrails |
+| `ai_quota_rejections_total` | Counter | `task` | Rate-limit or product-quota rejections |
+| `ai_input_size_rejections_total` | Counter | `task` | Input size/token-bomb rejections |
+| `ai_security_classifier_duration_seconds` | Histogram | `decision` | Deterministic guardrail classification latency |
+
 ### 4.4 Dependency Metrics
 
 | Metric | Type | Labels | Description |

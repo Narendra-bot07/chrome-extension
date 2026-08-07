@@ -9,6 +9,7 @@ This document archives all active production system prompts, structured output J
 1. **Strict Zero-Hallucination Policy**: Prompts must explicitly prohibit inventing candidate degrees, work experience dates, employer names, or fabricated technical achievements.
 2. **Structured JSON Output**: All LLM pipelines utilize Pydantic schema validation or function calling modes to return typed JSON objects.
 3. **Action Verb Reframing**: Experience bullet points must begin with strong, impact-oriented action verbs (e.g. *Architected, Engineered, Optimized, Spearheaded*).
+4. **(Added 2026-08-07, not yet live for the prompts below)** Once a feature migrates to the centralized `AIGovernanceGateway` (see [AI_GOVERNANCE.md](AI_GOVERNANCE.md)), its system prompt is built exclusively by `services/ai_governance/prompt_builder.py` — a fixed template combining the task's declared allowed/forbidden operations with explicit untrusted-data boundaries (`<untrusted_data>` tags) and rules stating embedded content is data, never instructions. No migrated feature may construct its own ad-hoc system message. The prompts documented in §2 below have **not migrated yet** and are still built inline in `app/ai_service.py` as described.
 
 ---
 

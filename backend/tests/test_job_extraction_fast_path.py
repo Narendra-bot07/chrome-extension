@@ -6,6 +6,7 @@ from services.job_extraction.agents import (
     _infer_rendered_job_title,
     extraction_agent,
     repair_agent,
+    reviewer_agent,
 )
 from services.job_extraction.schemas import JDState
 
@@ -113,6 +114,30 @@ Ways To Stand Out
     assert job.preferred_qualifications == [
         "Experience with enterprise data governance."
     ]
+
+
+def test_research_job_missing_llm_skills_is_recovered_without_manual_review():
+    extracted = {
+        "job_title": "Research Scientist, Gemini Data",
+        "company_name": "DeepMind",
+        "description": "Research machine learning methods for large language models.",
+        "responsibilities": ["Develop JAX and Python experiments for distributed training."],
+        "requirements": ["PhD and experience with deep learning and statistics."],
+        "skills": [],
+        "suggested_skills": ["Communication", "Collaboration", "Problem Solving", "Prioritization"],
+    }
+    result = reviewer_agent(job_state(
+        extracted_job=extracted,
+        jobposting_jsonld=[],
+        markdown="Minimum qualifications: Python, JAX, deep learning, and statistics.",
+        evidence={"source_text": extracted["description"]},
+    ))
+
+    assert result["is_valid"] is True
+    assert result["needs_repair"] is False
+    assert set(result["extracted_job"]["skills"]) >= {
+        "Python", "JAX", "Machine Learning", "Deep Learning", "Statistics",
+    }
 
 
 def test_spa_hidden_generic_title_and_recommendations_are_excluded():

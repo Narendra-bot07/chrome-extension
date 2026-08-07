@@ -292,7 +292,7 @@ export function assessBrowserJobEvidence(evidence = {}, sourceUrl = '') {
   const urlText = parsedUrl
     ? `${parsedUrl.pathname} ${parsedUrl.search} ${parsedUrl.hash}`.toLowerCase()
     : '';
-  const jobIdentityInUrl = /(?:^|[/?#&=_-])(job|jobs|career|careers|position|opening|vacancy|requisition|currentjobid|jobid|gh_jid)(?:[/?#&=_-]|$)/i.test(urlText);
+  const jobIdentityInUrl = /(?:^|[/?#&=_-])(job|jobs|career|careers|position|opening|vacancy|requisition|currentjobid|jobid|gh_jid|ashby_jid)(?:[/?#&=_-]|$)/i.test(urlText);
   const sectionPatterns = [
     /\bjob description\b/i,
     /\b(?:key )?responsibilities\b/i,

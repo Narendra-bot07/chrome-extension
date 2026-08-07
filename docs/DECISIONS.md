@@ -14,6 +14,7 @@ This document tracks all critical architectural, structural, and infrastructure 
 - [ADR-006: Controlled Migration to DeepSeek as Sole LLM Provider](#adr-006-controlled-migration-to-deepseek-as-sole-llm-provider)
 - [ADR-007: Production-Grade Redis LLM Caching Layer](#adr-007-production-grade-redis-llm-caching-layer)
 - [ADR-008: Phase 6 Subscription Tier Standard and Dual Payment Routing](#adr-008-phase-6-subscription-tier-standard-and-dual-payment-routing)
+- [ADR-009: Centralized AI Governance Gateway for Every LLM Call](#adr-009-centralized-ai-governance-gateway-for-every-llm-call)
 
 ---
 
@@ -125,3 +126,18 @@ This document tracks all critical architectural, structural, and infrastructure 
   2. Implemented dual payment gateway routing: International users open Stripe Checkout in a standalone external page, while Indian cardholders launch a Razorpay modal featuring real-time USD-to-INR currency conversion display.
   3. Replaced generic plain text loading states on the subscription dashboard with an animated 3-card skeleton UI.
 - **Consequences**: Provides seamless checkout options for global and local users with clean USD pricing display.
+
+---
+
+## ADR-009: Centralized AI Governance Gateway for Every LLM Call
+
+- **Date**: 2026-08-07
+- **Status**: Infrastructure built and tested; **no live feature migrated yet** (in progress, one feature at a time)
+- **Context**: A full-codebase audit (prompted by an explicit security-architecture request) found ~12 live LLM call sites reaching `DeepSeekProvider` through inconsistent paths — some via `app.ai_service`'s cache-wrapped helpers, some bypassing the shared cache entirely, one constructing its own separate provider instance. No call site had prompt-injection detection, jailbreak detection, output secret-leakage checks, or per-minute rate limiting. Two of the call sites (cover letter generation) duplicated the same capability independently (see ISSUE-014). The audit also surfaced real dead code (a second, unused `ai_service.py`/`tailoring_service.py`/repository layer; a fully-built but never-called LLM scoring feature; a multi-agent orchestration module reachable only from tests) and two route-duplication bugs.
+- **Decision**:
+  1. Delete the confirmed dead code first (see CHANGELOG.md), so the gateway is designed around only the call sites that actually matter.
+  2. Build `services/ai_governance/` as a mandatory single path: task registry (`AITaskType`, an explicit allowlist of live task types), per-task policy registry (`TaskPolicy` — allowed/forbidden operations, PII fields, quota/rate-limit config), a structured permission model (`AIPermissions`, enforced by the output validator, not just stated in the prompt), deterministic input guardrails (size/encoding/token-bomb), deterministic prompt-injection/jailbreak/abuse classification (keyed on sentence *shape*, not keyword presence — see AI_GOVERNANCE.md §7.2 for why naive substring-blocking security terminology is explicitly wrong), a centralized approved-prompt builder with explicit untrusted-data boundaries, and generic output guardrails (secret leakage, system-prompt leakage, unsafe HTML, section-scope enforcement).
+  3. Reuse existing infrastructure rather than duplicating it: the existing `llm_cache`/`redis_cache` layer, the existing `UsageService`/`RateLimiterService` for quota/rate-limiting, the existing `app.ai_service.get_provider()` as the actual DeepSeek call.
+  4. Migrate features to call the gateway **one at a time**, each with its own test coverage proving the migration, rather than a single flag-day cutover across all ~12 call sites — an explicit, deliberate choice given demonstrated risk of a large simultaneous change in a codebase also being edited by other concurrent processes.
+  5. Enforce the "no direct provider import" rule via an allowlist-freeze test (`tests/test_ai_governance_import_guard.py`) rather than a hard prohibition immediately — the ~12 pre-existing call sites are explicitly allowlisted until each migrates; the test fails if that allowlist ever grows, catching a new bypass before it ships.
+- **Consequences**: 67 new passing tests (guardrail unit tests, gateway orchestration tests, import-guard tests) covering the infrastructure. Zero live behavior change yet — every existing AI feature works exactly as it did before this ADR, since nothing calls the new gateway. The real security benefit (prompt-injection defense, output validation, rate limiting) only takes effect as each feature migrates. See [AI_GOVERNANCE.md](AI_GOVERNANCE.md) for the full architecture and current migration state.

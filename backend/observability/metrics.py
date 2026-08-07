@@ -246,6 +246,67 @@ deepseek_provider_health = Gauge(
     registry=registry
 )
 
+# ----------------- AI GOVERNANCE GUARDRAIL METRICS -----------------
+# Low-cardinality only: task + decision/reason. Never user_id, email,
+# resume_id, request_id, prompt, or raw reason text as a label value --
+# see docs/AI_GOVERNANCE.md "Prometheus Metrics".
+ai_guardrail_requests_total = Counter(
+    "ai_guardrail_requests_total",
+    "Total requests seen by the AI governance gateway",
+    ["task", "decision"],
+    registry=registry
+)
+
+ai_guardrail_blocks_total = Counter(
+    "ai_guardrail_blocks_total",
+    "Requests blocked by the AI governance gateway",
+    ["task", "reason"],
+    registry=registry
+)
+
+ai_prompt_injection_total = Counter(
+    "ai_prompt_injection_total",
+    "Prompt injection attempts detected",
+    ["task"],
+    registry=registry
+)
+
+ai_jailbreak_attempts_total = Counter(
+    "ai_jailbreak_attempts_total",
+    "Jailbreak attempts detected",
+    ["task"],
+    registry=registry
+)
+
+ai_output_rejections_total = Counter(
+    "ai_output_rejections_total",
+    "LLM output rejected by output guardrails",
+    ["task", "reason"],
+    registry=registry
+)
+
+ai_quota_rejections_total = Counter(
+    "ai_quota_rejections_total",
+    "Requests rejected by quota or rate limiting",
+    ["task"],
+    registry=registry
+)
+
+ai_input_size_rejections_total = Counter(
+    "ai_input_size_rejections_total",
+    "Requests rejected for exceeding input size limits",
+    ["task"],
+    registry=registry
+)
+
+ai_security_classifier_duration_seconds = Histogram(
+    "ai_security_classifier_duration_seconds",
+    "Deterministic guardrail classification latency in seconds",
+    ["decision"],
+    buckets=(0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25),
+    registry=registry
+)
+
 # ----------------- RELEASE / SERVICE INFO -----------------
 application_info = Gauge(
     "application_info",
@@ -273,4 +334,78 @@ def record_http_request(method: str, route: str, status_code: int, duration_sec:
         http_request_duration_seconds.labels(method=method, route=route).observe(duration_sec)
     except Exception:
         # Observability operations must never raise production runtime exceptions
+        pass
+
+
+def record_ai_guardrail_request(task: str, decision: str) -> None:
+    """Fail-open: a telemetry failure must never block a safe generation --
+    see docs/AI_GOVERNANCE.md 'Guardrail Failure Behavior'."""
+    if not METRICS_ENABLED:
+        return
+    try:
+        ai_guardrail_requests_total.labels(task=task, decision=decision).inc()
+    except Exception:
+        pass
+
+
+def record_ai_guardrail_block(task: str, reason: str) -> None:
+    if not METRICS_ENABLED:
+        return
+    try:
+        ai_guardrail_blocks_total.labels(task=task, reason=reason).inc()
+    except Exception:
+        pass
+
+
+def record_ai_prompt_injection(task: str) -> None:
+    if not METRICS_ENABLED:
+        return
+    try:
+        ai_prompt_injection_total.labels(task=task).inc()
+    except Exception:
+        pass
+
+
+def record_ai_jailbreak_attempt(task: str) -> None:
+    if not METRICS_ENABLED:
+        return
+    try:
+        ai_jailbreak_attempts_total.labels(task=task).inc()
+    except Exception:
+        pass
+
+
+def record_ai_output_rejection(task: str, reason: str) -> None:
+    if not METRICS_ENABLED:
+        return
+    try:
+        ai_output_rejections_total.labels(task=task, reason=reason).inc()
+    except Exception:
+        pass
+
+
+def record_ai_quota_rejection(task: str) -> None:
+    if not METRICS_ENABLED:
+        return
+    try:
+        ai_quota_rejections_total.labels(task=task).inc()
+    except Exception:
+        pass
+
+
+def record_ai_input_size_rejection(task: str) -> None:
+    if not METRICS_ENABLED:
+        return
+    try:
+        ai_input_size_rejections_total.labels(task=task).inc()
+    except Exception:
+        pass
+
+
+def record_ai_security_classifier_duration(decision: str, duration_sec: float) -> None:
+    if not METRICS_ENABLED:
+        return
+    try:
+        ai_security_classifier_duration_seconds.labels(decision=decision).observe(duration_sec)
+    except Exception:
         pass

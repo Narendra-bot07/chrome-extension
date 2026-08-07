@@ -148,7 +148,8 @@ def discovery_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     # Detect job identity in URL path OR query string (e.g. LinkedIn search results with currentJobId)
     query_params = dict(re.findall(r"([^=&?]+)=([^&]+)", parsed.query))
     job_in_query = any(query_params.get(k) for k in (
-        "currentJobId", "jobId", "job_id", "jobid", "jk", "gh_jid", "requisitionId", "postingId"
+        "currentJobId", "jobId", "job_id", "jobid", "jk", "gh_jid", "ashby_jid",
+        "requisitionId", "postingId"
     ))
     discovery = {
         "scheme": parsed.scheme, "host": parsed.hostname, "path": parsed.path,
@@ -998,10 +999,29 @@ def _deterministic_classification(state: JDState) -> ClassificationDecision:
             flags=re.I,
         )
     )
+    # has_specific_title is an AND-gate on every job_detail branch below, but
+    # title extraction only has platform-specific help for a few hardcoded
+    # ATS hosts (PORTALS above) -- an ATS widget embedded on a company's own
+    # domain (e.g. Ashby's ?ashby_jid=... embed, confirmed real-world case:
+    # langchain.com/careers?ashby_jid=... classified non_job at confidence
+    # .8 despite being a genuine job-detail page) commonly renders inside
+    # non-semantic markup our generic title/heading heuristics can't
+    # reliably extract a title from, even though document.title/headings
+    # never update because the widget is a tab/query-param-driven SPA
+    # panel, not a real navigation. A URL that itself carries a
+    # known-ATS specific-job identifier (discovery_agent's job_in_query
+    # check, folded into discovery.has_job_path) is strong, independent
+    # evidence this is one specific job -- used here only as an alternative
+    # to title-extraction success, and only in branches that already
+    # require real section/apply/employment content evidence on top, so it
+    # can't turn a listing page into a false job_detail on its own.
+    url_has_job_identity = bool((state.discovery or {}).get("has_job_path"))
+    has_job_identity = has_specific_title or url_has_job_identity
 
     logger.info(
         "%s Classifier signals request_id=%s apply=%s sections=%s "
-        "employment=%s listing=%s cards=%s markdown_length=%s specific_title=%s selected_job_detected=%s",
+        "employment=%s listing=%s cards=%s markdown_length=%s specific_title=%s "
+        "url_job_identity=%s selected_job_detected=%s",
         LOG_PREFIX,
         state.request_id,
         apply_signals,
@@ -1011,6 +1031,7 @@ def _deterministic_classification(state: JDState) -> ClassificationDecision:
         cards,
         len(state.markdown),
         has_specific_title,
+        url_has_job_identity,
         state.selected_job_detected,
     )
 
@@ -1023,29 +1044,35 @@ def _deterministic_classification(state: JDState) -> ClassificationDecision:
 
     if listing_signals and (cards >= 1 or re.search(r"/(?:jobs?|careers?|positions?|openings?)(?:[/?#]|$)", url_text, re.I)) and apply_signals == 0 and len(section_signals) < 2:
         return ClassificationDecision(page_type="job_list", confidence=.88, reasons=["Repeated listing/search signals"])
-    if substantial and apply_signals > 0 and section_signals and has_specific_title:
+    if substantial and apply_signals > 0 and section_signals and has_job_identity:
         return ClassificationDecision(
             page_type="job_detail",
             confidence=.93,
             reasons=[
-                "Specific role title found",
+                "Specific role title found" if has_specific_title else "URL identifies a specific job posting",
                 "Application action found",
                 f"Job-detail sections found: {', '.join(section_signals[:5])}",
             ],
         )
-    if substantial and len(section_signals) >= 2 and has_specific_title:
+    if substantial and len(section_signals) >= 2 and has_job_identity:
         return ClassificationDecision(
             page_type="job_detail",
             confidence=.86,
             reasons=[
                 "Specific role title and multiple coherent job-description sections found"
+                if has_specific_title
+                else "URL identifies a specific job posting with multiple coherent job-description sections found"
             ],
         )
-    if substantial and apply_signals > 0 and employment_signals and has_specific_title:
+    if substantial and apply_signals > 0 and employment_signals and has_job_identity:
         return ClassificationDecision(
             page_type="job_detail",
             confidence=.82,
-            reasons=["Role title, employment metadata, and application action found"],
+            reasons=[
+                "Role title, employment metadata, and application action found"
+                if has_specific_title
+                else "URL identifies a specific job posting, with employment metadata and an application action found"
+            ],
         )
     if len(state.markdown) < 250:
         return ClassificationDecision(page_type="non_job", confidence=.55, reasons=["Insufficient page evidence"], action="browser_retry")
@@ -1294,6 +1321,56 @@ def _suggested_skills_for(title: str, explicit: list[str]) -> list[str]:
     return suggested
 
 
+# Deterministic, evidence-only recovery for the occasional structured LLM
+# response that contains a complete JD but leaves `skills` empty. These labels
+# are emitted only when their exact term/alias occurs in the captured page.
+_EXPLICIT_SKILL_ALIASES: dict[str, tuple[str, ...]] = {
+    "Python": ("python",), "Java": ("java",), "JavaScript": ("javascript",),
+    "TypeScript": ("typescript",), "C++": ("c++",), "C#": ("c#",),
+    "SQL": ("sql",), "R": ("r programming", " r "),
+    "JAX": ("jax",), "TensorFlow": ("tensorflow",), "PyTorch": ("pytorch",),
+    "Keras": ("keras",), "NumPy": ("numpy",), "Pandas": ("pandas",),
+    "Scikit-learn": ("scikit-learn", "sklearn"),
+    "Machine Learning": ("machine learning",),
+    "Deep Learning": ("deep learning",),
+    "Reinforcement Learning": ("reinforcement learning",),
+    "Natural Language Processing": ("natural language processing", "nlp"),
+    "Computer Vision": ("computer vision",),
+    "Generative AI": ("generative ai", "generative artificial intelligence"),
+    "Large Language Models": ("large language model", "large language models", "llm", "llms"),
+    "Transformers": ("transformer models", "transformers"),
+    "Distributed Training": ("distributed training",),
+    "Data Science": ("data science",), "Data Analysis": ("data analysis",),
+    "Statistics": ("statistics", "statistical modeling", "statistical learning"),
+    "Optimization": ("optimization",), "Algorithms": ("algorithms",),
+    "Research": ("research",), "Experiment Design": ("experiment design", "experimentation"),
+    "React": ("react",), "Angular": ("angular",), "Vue.js": ("vue.js", "vuejs"),
+    "Node.js": ("node.js", "nodejs"), "Django": ("django",), "FastAPI": ("fastapi",),
+    "REST APIs": ("rest api", "restful api", "rest apis"),
+    "AWS": ("aws", "amazon web services"), "Azure": ("azure",),
+    "Google Cloud": ("google cloud", "gcp"), "Docker": ("docker",),
+    "Kubernetes": ("kubernetes", "k8s"), "Git": ("git",), "Linux": ("linux",),
+    "Kafka": ("kafka",), "Apache Spark": ("apache spark", "pyspark", "spark"),
+    "Databricks": ("databricks",), "Hadoop": ("hadoop",),
+    "Tableau": ("tableau",), "Power BI": ("power bi",),
+    "Agile": ("agile",), "Scrum": ("scrum",),
+}
+
+
+def _deterministic_explicit_skills(*values: Any) -> list[str]:
+    text = " ".join(_clean_evidence_text(value) for value in values if value)
+    padded = f" {text.casefold()} "
+    found: list[str] = []
+    for canonical, aliases in _EXPLICIT_SKILL_ALIASES.items():
+        if any(
+            re.search(rf"(?<![a-z0-9]){re.escape(alias.strip().casefold())}(?![a-z0-9])", padded)
+            for alias in aliases
+            if alias.strip()
+        ):
+            found.append(canonical)
+    return found
+
+
 _JD_SECTION_HEADINGS = {
     "responsibilities": (
         "responsibilities", "key responsibilities", "what you'll do",
@@ -1410,13 +1487,7 @@ def _deterministic_job_from_evidence(state: JDState) -> ExtractedJob:
         raw_skills = re.split(r"\s*[,;|]\s*", raw_skills)
     explicit = _atomize_skill_labels(list(raw_skills or []))
     if not explicit:
-        common_skills = (
-            "Python", "Java", "JavaScript", "TypeScript", "C++", "C#", "SQL", "R",
-            "React", "Angular", "Vue", "Node.js", "AWS", "Azure", "GCP", "Docker",
-            "Kubernetes", "Kafka", "Spark", "Git", "Linux", "Tableau", "Power BI",
-            "Machine Learning", "Data Analysis", "REST APIs", "Agile", "Scrum",
-        )
-        explicit = [skill for skill in common_skills if re.search(rf"(?<!\w){re.escape(skill)}(?!\w)", source_text, re.I)]
+        explicit = _deterministic_explicit_skills(source_text, state.markdown)
 
     responsibilities = _clean_evidence_items(structured.get("responsibilities"))
     if not responsibilities:
@@ -1804,9 +1875,32 @@ def reviewer_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         flags=re.I,
     )
     if skill_evidence_markers and not job.skills:
-        field_issues.setdefault("skills", []).append(
-            "Evidence contains skill signals but no explicit skills were extracted."
+        recovered_skills = _deterministic_explicit_skills(
+            job.description,
+            job.responsibilities,
+            job.requirements,
+            job.preferred_qualifications,
+            (state.evidence or {}).get("source_text"),
+            state.markdown,
         )
+        if recovered_skills:
+            job.skills = recovered_skills
+            if isinstance(state.extracted_job, dict):
+                state.extracted_job["skills"] = recovered_skills
+            logger.info(
+                "%s Reviewer recovered explicit skills deterministically request_id=%s skills=%s",
+                LOG_PREFIX, state.request_id, recovered_skills,
+            )
+        else:
+            # A complete single-job page can legitimately describe general
+            # capabilities without naming an atomic tool/language. This is an
+            # enrichment gap, not conflicting evidence, and must not stop the
+            # user's extraction flow.
+            logger.info(
+                "%s Reviewer found generic skill signals without atomic labels; "
+                "continuing request_id=%s",
+                LOG_PREFIX, state.request_id,
+            )
     if len(job.suggested_skills) < 4:
         field_issues.setdefault("suggested_skills", []).append(
             "Provide 4-10 atomic, high-confidence skill recommendations inferred from "

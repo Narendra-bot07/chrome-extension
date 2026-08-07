@@ -314,13 +314,20 @@ class TestSentrySetup:
         with patch.object(sentry_module, "OBSERVABILITY_ENABLED", False):
             sentry_module.setup_sentry()
 
-    def test_before_send_drops_4xx(self):
+    def test_before_send_no_longer_drops_4xx(self):
+        # before_send used to drop every exception-based event under 500 --
+        # that's exactly what hid 4xx traffic from Sentry entirely (a route
+        # returning a 404/400/422 Response directly, with no exception
+        # raised, was invisible either way). Non-2xx capture now happens in
+        # observability/middleware.py's _capture_non_2xx instead, which
+        # covers both cases; before_send only sanitizes now, regardless of
+        # status code. See docs/CHANGELOG.md 3.15.21.
         from observability.sentry import before_send
         from fastapi import HTTPException
         exc = HTTPException(status_code=404)
         event = {"message": "not found"}
         result = before_send(event, {"exc_info": (type(exc), exc, None)})
-        assert result is None
+        assert result is not None
 
     def test_before_send_keeps_5xx(self):
         from observability.sentry import before_send

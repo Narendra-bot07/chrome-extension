@@ -22,7 +22,6 @@ from app.schemas import (
 )
 from app.parser import extract_text
 from app.ai_service import parse_resume, analyze_job_description, generate_tailoring_patch, apply_tailoring_patch, generate_cover_letter, refine_section_with_ai, calculate_resume_job_match_score
-from api.v1.resume import router as resume_manager_router
 from api.dependencies import get_resume_repository, get_ats_repository
 from core.security import verify_supabase_jwt
 from core.database import get_db_connection
@@ -60,7 +59,13 @@ from services.cover_letter import (
 )
 
 router = APIRouter(prefix="/api")
-router.include_router(resume_manager_router)
+# api/v1/resume.py's router is already mounted once, at /api/v1/resumes/*,
+# via api/router.py -> main.py's app.include_router(api_router, prefix=API_V1_STR).
+# Re-mounting it here duplicated every resume route (including several that
+# reach the LLM) at a second, unused URL prefix (/api/resumes/*) -- confirmed
+# via grep that the frontend never calls that prefix. Removed as dead/
+# redundant route surface rather than left as a second, unaudited entry
+# point into the same handlers.
 
 @router.get("/templates")
 async def get_templates():
@@ -1363,33 +1368,6 @@ async def api_refine_section_stream(
         ),
         media_type="text/event-stream"
     )
-
-@router.post("/download-cover-letter-pdf")
-async def api_download_cover_letter_pdf(request: CoverLetterResult):
-    try:
-        from app.playwright_pdf import generate_cover_letter_pdf_via_playwright
-        from fastapi.concurrency import run_in_threadpool
-        
-        pdf_bytes = await run_in_threadpool(
-            generate_cover_letter_pdf_via_playwright,
-            request.json()
-        )
-        clean_company = "".join([c if c.isalnum() or c == '_' else '_' for c in request.company_name.replace(" ", "_")])
-        filename = f"{clean_company}_Cover_Letter.pdf"
-        
-        return StreamingResponse(
-            io.BytesIO(pdf_bytes),
-            media_type="application/pdf",
-            headers={
-                "Content-Disposition": f"attachment; filename={filename}",
-                "Access-Control-Expose-Headers": "Content-Disposition"
-            }
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate cover letter PDF: {str(e)}"
-        )
 
 class SupportTicketRequest(BaseModel):
     subject: str

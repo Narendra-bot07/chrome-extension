@@ -57,13 +57,26 @@ def test_create_checkout_razorpay():
     assert "checkout_url" in res
     assert res["subscription_id"] is not None
 
-def test_stripe_webhook_verification():
+def test_stripe_webhook_verification(monkeypatch):
+    # verify_webhook's test-mode bypass (app/billing/providers/stripe_provider.py)
+    # only activates when STRIPE_WEBHOOK_SECRET is unset/blank/"dummy" -- reads
+    # os.getenv() at call time, not the pre-instantiated settings singleton, so
+    # this test previously relied on incidental test-collection ORDER never
+    # having loaded a real .env yet. Any test importing enough of the app
+    # (e.g. anything reaching app.ai_service, which calls load_dotenv() as a
+    # side effect) run first flips this from a coincidence to a real failure.
+    # Pin the precondition explicitly instead of depending on import order.
+    monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
     provider = StripeProvider()
     payload = json.dumps({"type": "checkout.session.completed", "data": {"object": {"id": "cs_test"}}}).encode('utf-8')
     event = provider.verify_webhook(payload, "dummy_sig")
     assert event["type"] == "checkout.session.completed"
 
-def test_razorpay_webhook_verification():
+def test_razorpay_webhook_verification(monkeypatch):
+    # Same rationale as test_stripe_webhook_verification above --
+    # app/billing/providers/razorpay_provider.py's bypass is equally
+    # order-dependent on RAZORPAY_WEBHOOK_SECRET being unset.
+    monkeypatch.delenv("RAZORPAY_WEBHOOK_SECRET", raising=False)
     provider = RazorpayProvider()
     payload = json.dumps({"event": "subscription.charged", "payload": {}}).encode('utf-8')
     event = provider.verify_webhook(payload, "dummy_sig")

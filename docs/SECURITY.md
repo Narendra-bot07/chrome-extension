@@ -65,6 +65,10 @@ To prevent API key depletion and DDOS attacks on LLM pipelines:
    - Pro Tier Users: Higher tier quota with minimal throttling.
 3. **Resilient AI Spacing**: `_SINGLE_AI_REQUEST_LOCK` enforces a strict minimum spacing (`1.5` seconds) between LLM invocations to prevent `429 Quota Exceeded` errors on upstream providers.
 
+### 3.1a AI Governance & Guardrail Layer (added 2026-08-07)
+
+`services/ai_governance/` (see [AI_GOVERNANCE.md](AI_GOVERNANCE.md) for the full architecture) is a centralized gateway every LLM call is meant to route through — task registry, per-task policy, deterministic prompt-injection/jailbreak/abuse-category classification, PII/secret redaction, output validation (secret leakage, section-scope enforcement, no unsafe HTML), and privacy-safe audit logging. **As of this writing, the gateway infrastructure is built and fully tested but no live route calls it yet** — every real call site still calls `app.ai_service`/the relevant service module directly, unchanged. See AI_GOVERNANCE.md §16 "Current State" for the live migration status; treat this doc's threat-model claims about prompt injection/jailbreak as describing the gateway's *capability*, not yet the *current production behavior* of every AI endpoint.
+
 ### 3.2 CORS & HTTP Security Headers
 FastAPI configures `CORSMiddleware` (`main.py:63-74`) with explicit origin whitelisting:
 - Allowed Origins: `settings.FRONTEND_URL` (production default `https://tailr4u.com`, not `app.tailr4u.com`), plus `http://localhost:5173` and `http://127.0.0.1:5173` for local dev.
@@ -94,6 +98,7 @@ FastAPI configures `CORSMiddleware` (`main.py:63-74`) with explicit origin white
 | **Malicious/Hostile Page Content During Extraction** | Medium | No content-script injection or Shadow DOM overlay exists — extraction runs via a single `chrome.scripting.executeScript` call from the side panel (`frontend/src/services/jdExtractionFlow.js`) that reads DOM text into a plain JS object; page text is never executed. See [BROWSER_INTELLIGENCE_ARCHITECTURE.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/BROWSER_INTELLIGENCE_ARCHITECTURE.md) status note for the corrected extension architecture. |
 | **Malicious PDF Upload Exploits** | Medium | Content-type magic byte check, sandbox parsing, size limit enforcement |
 | **Cross-Origin Request Forgery (CSRF)**| Low | Stateless JWT authentication in Authorization header; no ambient cookies |
+| **Prompt Injection / Jailbreak via resume, JD, or Edit-With-AI instruction text** | Medium (mitigation built, not yet live on any route) | `services/ai_governance/injection_guardrails.py` deterministic classification, distinguishing DATA (a resume legitimately describing security work) from an operational REQUEST for harm — see [AI_GOVERNANCE.md](AI_GOVERNANCE.md) §7. Not yet wired to a live endpoint. |
 
 ---
 
