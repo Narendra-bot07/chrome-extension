@@ -25,9 +25,21 @@ _serialize_pdf_render does) gives every call the same consistent thread
 regardless of which asyncio.to_thread worker happened to invoke browser_agent.
 """
 import concurrent.futures
+import threading
 
 from playwright.sync_api import sync_playwright
 
+# No timeout previously existed on the .result() call below at all. Every
+# call already has its own bounded budget internally (page.goto capped at
+# 5s, networkidle wait capped at 0.5s), so a normal call finishes well
+# under this; this exists purely as a ceiling against a genuine hang
+# (browser/driver-level, outside any single Playwright call's own timeout --
+# e.g. page.close() itself hanging) -- which, with max_workers=1, would
+# otherwise block JD extraction for every user of the entire product
+# indefinitely, not just the one request that triggered it.
+_POOL_CALL_TIMEOUT_SECONDS = 30.0
+
+_executor_lock = threading.Lock()
 _executor = concurrent.futures.ThreadPoolExecutor(
     max_workers=1, thread_name_prefix="jd-scrape-browser"
 )
@@ -63,6 +75,28 @@ def _get_context_on_pool_thread():
     return _context_instance
 
 
+def _reset_pool_after_timeout():
+    """A timed-out call's worker thread is presumed permanently stuck --
+    Python threads cannot be forcibly killed, and with max_workers=1 the
+    single worker never becomes free again on its own. Waiting longer
+    wouldn't help, so instead of leaving every future call queued forever
+    behind a hang that will never resolve, abandon that executor/thread
+    entirely and start a fresh one. The old browser/playwright instances
+    are owned by the now-abandoned thread and are deliberately NOT closed
+    here -- Playwright's sync API raises if touched from a different
+    thread than the one that started it; they're simply dropped."""
+    global _executor, _playwright_instance, _browser_instance, _context_instance
+    with _executor_lock:
+        old_executor = _executor
+        _executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="jd-scrape-browser"
+        )
+        _playwright_instance = None
+        _browser_instance = None
+        _context_instance = None
+    old_executor.shutdown(wait=False)
+
+
 def run_on_browser_pool(fn, *args, **kwargs):
     """Runs fn(context, *args, **kwargs) on the dedicated pool thread, where
     `context` is the shared, persistent BrowserContext. fn gets a fresh Page
@@ -71,7 +105,14 @@ def run_on_browser_pool(fn, *args, **kwargs):
     def _call():
         context = _get_context_on_pool_thread()
         return fn(context, *args, **kwargs)
-    return _executor.submit(_call).result()
+    with _executor_lock:
+        executor = _executor
+    future = executor.submit(_call)
+    try:
+        return future.result(timeout=_POOL_CALL_TIMEOUT_SECONDS)
+    except concurrent.futures.TimeoutError:
+        _reset_pool_after_timeout()
+        raise
 
 
 def _shutdown_on_pool_thread():

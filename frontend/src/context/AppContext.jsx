@@ -6,6 +6,7 @@ import { toRenderableResume } from '../utils/renderableResume';
 import { calculateJDMatchScore } from '../utils/matchScore';
 import {
   mergeReviewResume,
+  retainNonDegradingATSSuggestions,
   validateWorkingResume
 } from '../utils/resumeReviewMerge';
 import {
@@ -730,9 +731,15 @@ export function AppProvider({ children }) {
   const getJobIdentityFromUrl = (url = '') => {
     try {
       const parsed = new URL(url);
+      // Kept in sync with backend/services/job_extraction/agents.py's
+      // JOB_ID_QUERY_PARAMS -- this one was found to have drifted (missing
+      // ashby_jid, which the backend copy already had). The query-string
+      // fallback a few lines below means a missing key here degrades
+      // gracefully rather than breaking identity detection outright, but
+      // keep this list matched to the backend one when either changes.
       const jobIdKeys = [
-        'currentJobId', 'jobId', 'job_id', 'jobid', 'jk',
-        'gh_jid', 'requisitionId', 'requisition_id', 'postingId'
+        'currentJobId', 'jobId', 'job_id', 'jobid', 'jk', 'gh_jid',
+        'ashby_jid', 'requisitionId', 'requisition_id', 'postingId'
       ];
       for (const key of jobIdKeys) {
         const value = parsed.searchParams.get(key);
@@ -3088,7 +3095,12 @@ export function AppProvider({ children }) {
         });
       }
 
-      setReviewSuggestions(list);
+      const verifiedSuggestions = retainNonDegradingATSSuggestions(
+        activeParsed,
+        list,
+        getCanonicalJobAnalysis()
+      );
+      setReviewSuggestions(verifiedSuggestions);
       clearInterval(progressInterval);
       setLoadingProgress(100);
       setLoadingMessage("Tailoring complete!");
@@ -3212,7 +3224,16 @@ export function AppProvider({ children }) {
           console.warn("Strict ATS scoring failed", await scoreResponse.text());
         }
       } catch (scoreError) {
-        console.warn("Strict ATS scoring unavailable", scoreError);
+        // This is optional background verification. Document Review already
+        // has the same deterministic local score, so network transitions and
+        // the bounded timeout must not surface as application failures.
+        if (
+          scoreError?.name !== 'TimeoutError'
+          && scoreError?.name !== 'AbortError'
+          && navigator.onLine
+        ) {
+          console.debug("Strict ATS background verification skipped", scoreError);
+        }
       }
     } catch (err) {
       console.error(err);

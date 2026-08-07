@@ -18,6 +18,7 @@ from app.ai_service import get_llm
 from services.cache.llm_cache import llm_cache
 from core.logging import logger
 from services.job_extraction.browser_pool import run_on_browser_pool
+from services.job_extraction.ssrf_guard import is_request_url_safe
 from services.job_extraction.schemas import (
     ClassificationDecision, EvidenceSource, ExtractedJob, JDState,
     ReviewDecision, SkillDecision,
@@ -32,7 +33,51 @@ PORTALS = {
     "lever": ("lever.co", [".posting-page", ".section-wrapper"]),
     "indeed": ("indeed.com", ["#jobDescriptionText"]),
     "glassdoor": ("glassdoor.", ['[class*="JobDetails_jobDescription"]']),
+    # Added for broader ATS coverage. Selector hints are best-effort (some
+    # unverified against live pages) but zero-risk either way: browser_agent
+    # only ever does a non-blocking page.locator(selector).count() with
+    # these, never a blocking wait_for_selector -- a wrong/stale selector
+    # just means `matched` stays None, identical to having no entry at all.
+    # The real, load-bearing value of adding a platform here is `_portal()`
+    # recognizing its host (used by _fallback_company_name's ATS blocklist
+    # below, so a Workday/Ashby/... hostname is never mistaken for a real
+    # employer brand name) and future platform-specific handling having a
+    # place to attach without another silent gap.
+    "ashby": ("ashbyhq.com", ['[class*="job-posting"]', "main"]),
+    "icims": ("icims.com", [".iCIMS_JobContent", "#iCIMS_JobContent"]),
+    "smartrecruiters": ("smartrecruiters.com", [".job-sections", "#st-jobPosting"]),
+    "bamboohr": ("bamboohr.com", [".job-description", "main"]),
+    "jobvite": ("jobvite.com", [".jv-job-detail-description", ".jv-page-body"]),
+    "workable": ("workable.com", ['[data-ui="job-description"]']),
+    "successfactors": ("successfactors.", ["main", "article"]),
+    "taleo": ("taleo.net", [".requisitionDescriptionInterface", "main"]),
+    "oraclecloud_hcm": ("oraclecloud.com", ["main", '[role="main"]']),
 }
+# Hostname labels PORTALS is keyed on (the eTLD+1-ish label a URL like
+# jobs.ashbyhq.com/greenhouse.io/myworkdayjobs.com resolves to at
+# `host.split(".")[-2]`) -- used by _fallback_company_name to recognize an
+# ATS's own hosting domain and never return it as a fabricated "company
+# name". Single source of truth instead of a second, independently
+# maintained blocklist that drifts out of sync with PORTALS (confirmed
+# drifted before this fix: myworkdayjobs/ashbyhq/icims/bamboohr/jobvite/
+# workable/successfactors/taleo/oraclecloud were all missing).
+_ATS_HOST_LABELS = frozenset(
+    needle.split(".")[0] for needle, _ in PORTALS.values()
+) | {"ziprecruiter", "jobs", "careers", "remote"}
+# Query-param names various ATS platforms use to identify one specific job
+# (LinkedIn/Indeed's currentJobId/jobId, Greenhouse's gh_jid, Ashby's
+# ashby_jid, Workday's requisitionId, etc). This used to be duplicated
+# inline in three separate places (discovery_agent's job_in_query,
+# _explicit_job_id, and frontend/src/context/AppContext.jsx's
+# getJobIdentityFromUrl) that drifted out of sync -- confirmed for real
+# when ashby_jid was added to two of the three but missed in the third.
+# Single source of truth backend-side; the frontend copy still needs its
+# own list (can't share a Python constant across languages) but should be
+# kept in sync with this one when either changes.
+JOB_ID_QUERY_PARAMS = (
+    "currentJobId", "jobId", "job_id", "jobid", "jk", "gh_jid", "ashby_jid",
+    "requisitionId", "requisition_id", "postingId",
+)
 BLOCK_SIGNALS = (
     "access denied", "verify you are human", "captcha", "security check",
     "sign in to continue", "temporarily unavailable", "too many requests",
@@ -45,7 +90,8 @@ GENERIC_JOB_TITLE = re.compile(
 )
 RECOMMENDATION_SECTION = re.compile(
     r"(?:^|\n)\s*(?:similar jobs?|related jobs?|recommended jobs?|"
-    r"jobs you may be interested in|other opportunities)\s*(?:\n|$)",
+    r"jobs you may be interested in|other opportunities|"
+    r"you might also like|you may also like|more jobs (?:at|like this))\s*(?:\n|$)",
     re.I,
 )
 
@@ -147,14 +193,20 @@ def discovery_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     portal = _portal(state.url)
     # Detect job identity in URL path OR query string (e.g. LinkedIn search results with currentJobId)
     query_params = dict(re.findall(r"([^=&?]+)=([^&]+)", parsed.query))
-    job_in_query = any(query_params.get(k) for k in (
-        "currentJobId", "jobId", "job_id", "jobid", "jk", "gh_jid", "ashby_jid",
-        "requisitionId", "postingId"
-    ))
+    job_in_query = any(query_params.get(k) for k in JOB_ID_QUERY_PARAMS)
     discovery = {
         "scheme": parsed.scheme, "host": parsed.hostname, "path": parsed.path,
         "has_job_path": bool(
-            re.search(r"/(job|jobs|career|position|opening|viewjob)", parsed.path, re.I)
+            # Requires a segment AFTER the keyword (e.g. /careers/software-
+            # engineer-123, /jobs/12345) -- a bare /careers or /jobs (the
+            # listing root / company careers homepage itself, no specific
+            # posting) previously matched too, since the old regex had no
+            # trailing-segment requirement. That fed has_job_identity below,
+            # letting a careers homepage's own marketing copy ("Apply now
+            # for full-time and remote roles... About us: we build...")
+            # satisfy a job_detail branch purely because its URL contained
+            # "/careers", with no specific job title anywhere on the page.
+            re.search(r"/(?:job|jobs|career|careers|position|opening|viewjob)/[^/?#]+", parsed.path, re.I)
             or job_in_query
         ),
         "likely_spa": portal in {"linkedin", "workday", "indeed", "glassdoor"},
@@ -181,6 +233,21 @@ def _scrape_job_page(context, fetch_url: str, wait_until: str, timeout_ms: int, 
     page = context.new_page()
     try:
         page.on("pageerror", lambda error: errors.append(str(error)[:300]))
+        # Re-validates the host of EVERY request this page makes -- not just
+        # the URL passed to page.goto() below -- so a redirect chain or a
+        # JS-initiated fetch/XHR from within the rendered page can't reach a
+        # private/internal address that only becomes known after navigation
+        # starts. See ssrf_guard.py for why one upfront check isn't enough.
+        def _guard_request(route):
+            try:
+                safe = is_request_url_safe(route.request.url)
+            except Exception:
+                safe = False
+            if safe:
+                route.continue_()
+            else:
+                route.abort()
+        page.route("**/*", _guard_request)
         page.goto(fetch_url, wait_until=wait_until, timeout=timeout_ms)
         try:
             # Best-effort only: JS-heavy SPAs (LinkedIn, Workday) rarely go
@@ -464,10 +531,7 @@ def _source_rank(source: EvidenceSource) -> float:
 def _explicit_job_id(url: str) -> str | None:
     try:
         parsed = urlparse(url)
-        for key in (
-            "currentJobId", "jobId", "job_id", "jobid", "jk", "gh_jid",
-            "requisitionId", "requisition_id", "postingId",
-        ):
+        for key in JOB_ID_QUERY_PARAMS:
             values = dict(re.findall(r"([^=&?]+)=([^&]+)", parsed.query))
             if values.get(key):
                 return values[key]
@@ -992,7 +1056,13 @@ def _deterministic_classification(state: JDState) -> ClassificationDecision:
     ).strip()
     has_specific_title = bool(
         title
-        and len(title) >= 5
+        # Was >=5, rejecting genuinely valid short titles ("CFO", "CTO",
+        # "COO", "QA", "PM" are all <5 chars) outright as if no title had
+        # been found at all. The generic-placeholder fullmatch check right
+        # below already filters out non-titles regardless of length ("CFO"
+        # doesn't match any of those literal words), so the length
+        # threshold's only real job is rejecting empty/near-empty noise.
+        and len(title) >= 2
         and not re.fullmatch(
             r"(?:careers?|jobs?|search jobs?|open positions?|home)",
             title,
@@ -1044,7 +1114,20 @@ def _deterministic_classification(state: JDState) -> ClassificationDecision:
 
     if listing_signals and (cards >= 1 or re.search(r"/(?:jobs?|careers?|positions?|openings?)(?:[/?#]|$)", url_text, re.I)) and apply_signals == 0 and len(section_signals) < 2:
         return ClassificationDecision(page_type="job_list", confidence=.88, reasons=["Repeated listing/search signals"])
-    if substantial and apply_signals > 0 and section_signals and has_job_identity:
+    # `cards` (count of "view job"/"see job"/"open position(s)" style CTAs)
+    # is a proxy for "how many distinct job entries does this page show".
+    # None of the three job_detail branches below previously gated on it at
+    # all -- a real search-results page (LinkedIn/Indeed/Glassdoor, 10-20
+    # job cards, several individually mentioning "Requirements:"/"Apply
+    # now" in their teaser text) could rack up 2+ section_signals plus
+    # apply_signals>0 plus a URL path like /jobs, satisfying the .93-
+    # confidence branch below as a single job_detail even though it's
+    # unambiguously a listing. Requiring cards<2 targets exactly that
+    # multi-card shape without penalizing a genuine single-job page that
+    # happens to show a small "similar jobs" sidebar (which usually
+    # doesn't repeat the specific CTA phrasing `cards` looks for per item).
+    is_multi_job_listing = cards >= 2
+    if substantial and apply_signals > 0 and section_signals and has_job_identity and not is_multi_job_listing:
         return ClassificationDecision(
             page_type="job_detail",
             confidence=.93,
@@ -1054,7 +1137,7 @@ def _deterministic_classification(state: JDState) -> ClassificationDecision:
                 f"Job-detail sections found: {', '.join(section_signals[:5])}",
             ],
         )
-    if substantial and len(section_signals) >= 2 and has_job_identity:
+    if substantial and len(section_signals) >= 2 and has_job_identity and not is_multi_job_listing:
         return ClassificationDecision(
             page_type="job_detail",
             confidence=.86,
@@ -1064,7 +1147,7 @@ def _deterministic_classification(state: JDState) -> ClassificationDecision:
                 else "URL identifies a specific job posting with multiple coherent job-description sections found"
             ],
         )
-    if substantial and apply_signals > 0 and employment_signals and has_job_identity:
+    if substantial and apply_signals > 0 and employment_signals and has_job_identity and not is_multi_job_listing:
         return ClassificationDecision(
             page_type="job_detail",
             confidence=.82,
@@ -1073,6 +1156,12 @@ def _deterministic_classification(state: JDState) -> ClassificationDecision:
                 if has_specific_title
                 else "URL identifies a specific job posting, with employment metadata and an application action found"
             ],
+        )
+    if is_multi_job_listing and listing_signals:
+        return ClassificationDecision(
+            page_type="job_list",
+            confidence=.85,
+            reasons=["Multiple job cards with listing/search signals found"],
         )
     if len(state.markdown) < 250:
         return ClassificationDecision(page_type="non_job", confidence=.55, reasons=["Insufficient page evidence"], action="browser_retry")
@@ -1402,6 +1491,19 @@ def _deterministic_section_items(text: str, section: str) -> list[str]:
 
     This is deliberately conservative: content is copied from the page, never
     generated, and section boundaries are recognized by common heading names.
+
+    Handles two markup shapes:
+    1. Heading alone on its own line, followed by separate item lines --
+       the original, common case for cleanly bulleted JDs.
+    2. Heading and its first content on the SAME line, e.g.
+       "Responsibilities: Design and build features, collaborate with
+       teams, ship code." -- confirmed missing in production (JPMC/Oracle
+       Cloud HCM postings render this way; markdownify collapses an
+       "<p><strong>Responsibilities:</strong> ...</p>"-shaped source into
+       one line with no line break). Previously this whole section came
+       back empty even though the classifier's own looser substring check
+       had already confirmed the heading text was present in the page --
+       the strict whole-line-only heading match just never fired.
     """
     target_headings = set(_JD_SECTION_HEADINGS[section])
     all_headings = {
@@ -1409,30 +1511,116 @@ def _deterministic_section_items(text: str, section: str) -> list[str]:
         for group, headings in _JD_SECTION_HEADINGS.items()
         for heading in headings
     }
+
+    def heading_group_for(segment: str) -> str | None:
+        return all_headings.get(_normalize_section_heading(segment.rstrip(":")))
+
+    def combined_heading_groups(line: str) -> set[str] | None:
+        """Recognizes a short combined heading like "Responsibilities &
+        Requirements" or "Role and Requirements" -- every "&"/"/"/","/"and"
+        -separated segment must EXACTLY match a known heading (short-line
+        length cap plus all-segments-must-match keeps this from ever
+        matching incidental prose, e.g. "This role has diverse
+        responsibilities and clear requirements" -- that sentence has far
+        more than 2 segments once split this way and most of them aren't
+        heading phrases, so it correctly falls through to being body text).
+        """
+        if len(line) > 60:
+            return None
+        parts = [p for p in re.split(r"\s*(?:&|/|,|\band\b)\s*", line, flags=re.I) if p.strip()]
+        if len(parts) < 2:
+            return None
+        groups: set[str] = set()
+        for part in parts:
+            group = heading_group_for(part)
+            if not group:
+                return None
+            groups.add(group)
+        return groups if len(groups) >= 2 else None
+
     active = False
+    completed_once = False
     items: list[str] = []
     seen: set[str] = set()
-    for raw_line in str(text or "").splitlines():
-        line = re.sub(r"\s+", " ", raw_line).strip(" \t\r\n#•*-–—")
-        if not line:
-            continue
-        normalized = _normalize_section_heading(line.rstrip(":"))
-        heading_group = all_headings.get(normalized)
-        if heading_group:
-            if active and heading_group != section:
-                break
-            active = normalized in target_headings
-            continue
-        if not active:
-            continue
-        if len(line) < 3 or len(line) > 700:
-            continue
-        key = line.casefold()
+
+    def add_item(candidate: str) -> None:
+        candidate = candidate.strip(" \t\r\n#•*-–—:;")
+        # Strip a leading list-numbering prefix ("1.", "2)", "a)", "iii.")
+        # left over from JDs authored as numbered/lettered lists -- content
+        # was already captured correctly before this, just with the raw
+        # numbering baked into the visible text (e.g. "1. Design and build
+        # features" shown verbatim to the end user instead of "Design and
+        # build features").
+        candidate = re.sub(r"^(?:\d{1,2}|[a-zA-Z]|[ivxIVX]{1,4})[.)]\s+", "", candidate).strip()
+        if len(candidate) < 3 or len(candidate) > 700:
+            return
+        key = candidate.casefold()
         if key not in seen:
             seen.add(key)
-            items.append(line)
-        if len(items) >= 30:
+            items.append(candidate)
+
+    for raw_line in str(text or "").splitlines():
+        line = re.sub(r"\s+", " ", raw_line).strip(" \t\r\n#•*-–—")
+        if not line or len(items) >= 30:
+            if len(items) >= 30:
+                break
+            continue
+
+        # Trailing-boilerplate boundary: the extension-panel path already
+        # has this (_focused_extension_panel), but the backend
+        # Playwright/full-page markdown path (what this function actually
+        # operates on) had no equivalent -- an unheaded "Similar Jobs"/
+        # "Recommended Jobs" rail with no CSS class dom_cleaner_agent's
+        # noise stripping recognizes would otherwise get silently swept
+        # into whichever section was still active, polluting it with a
+        # different job's content.
+        if RECOMMENDATION_SECTION.search(line):
             break
+
+        normalized_whole = _normalize_section_heading(line.rstrip(":"))
+        heading_group = all_headings.get(normalized_whole)
+        if not heading_group:
+            combined_groups = combined_heading_groups(line)
+            if combined_groups and section in combined_groups:
+                heading_group = section
+        if heading_group:
+            if heading_group == section:
+                # Break, don't restart, if we're either already mid-section
+                # (this same heading appearing again with NO other heading
+                # in between -- e.g. a "You might also like" card repeating
+                # "Responsibilities" right after the real section, with no
+                # intervening Requirements/Benefits/etc. heading to have
+                # already flipped `active` off) or we'd already completed
+                # this section once earlier in the document.
+                if active or completed_once:
+                    break
+                active = True
+            else:
+                if active:
+                    completed_once = True
+                active = False
+            continue
+
+        colon_index = line.find(":")
+        if colon_index > 0:
+            inline_heading_group = heading_group_for(line[:colon_index])
+            if inline_heading_group:
+                if inline_heading_group == section:
+                    if active or completed_once:
+                        break
+                    active = True
+                    remainder = line[colon_index + 1:].strip()
+                    for piece in re.split(r"(?<=[.;])\s+", remainder):
+                        add_item(piece)
+                else:
+                    if active:
+                        completed_once = True
+                    active = False
+                continue
+
+        if not active:
+            continue
+        add_item(line)
     return items
 
 
@@ -1597,6 +1785,22 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     job_dict["responsibilities"] = _clean_evidence_items(job_dict.get("responsibilities"))
     job_dict["requirements"] = _clean_evidence_items(job_dict.get("requirements"))
     job_dict["preferred_qualifications"] = _clean_evidence_items(job_dict.get("preferred_qualifications"))
+    # benefits was missed in the pass above -- the deterministic JSON-LD
+    # path already cleaned it (_deterministic_job_from_evidence), but the
+    # LLM-extraction branch never did, same gap as responsibilities/
+    # requirements/preferred_qualifications had. job_title/company_name/
+    # location were never cleaned in EITHER branch -- a WYSIWYG-authored
+    # posting whose title/company/location carries inline markup (rare but
+    # real, e.g. a company name with a trademark-symbol <sup> tag) would
+    # display literal tag text. Not currently exploitable as stored XSS
+    # (confirmed no dangerouslySetInnerHTML anywhere in the frontend --
+    # React text nodes auto-escape), but still a real data-quality gap and
+    # defense-in-depth for any future non-JSX consumer of these fields
+    # (PDF templates, emails, anything that string-concatenates HTML).
+    job_dict["benefits"] = _clean_evidence_items(job_dict.get("benefits"))
+    for short_field in ("job_title", "company_name", "location"):
+        if job_dict.get(short_field):
+            job_dict[short_field] = _clean_evidence_text(job_dict[short_field])
     if job_dict.get("description"):
         job_dict["description"] = _clean_evidence_text(job_dict["description"])
     job_dict["skills"] = _atomize_skill_labels(job_dict.get("skills", []))
@@ -1805,7 +2009,13 @@ def _fallback_company_name(state: JDState, current_company: str | None) -> str |
         parts = [p.strip() for p in re.split(r"\s+[|\-–—]\s+|\s+at\s+", page_title, flags=re.I) if p.strip()]
         candidates = [
             p for p in parts[1:]
-            if p.lower() not in {"linkedin", "indeed", "glassdoor", "ziprecruiter", "jobs", "careers", "remote"}
+            # Exact-segment match only caught "Careers" as a whole segment --
+            # a segment merely CONTAINING an ATS/job-board word ("Careers at
+            # Acme", "Acme Careers Portal") passed through unfiltered and was
+            # returned verbatim as a fabricated company name. Now rejects any
+            # candidate containing one of these words anywhere, not just an
+            # exact match.
+            if not any(word in p.casefold() for word in _ATS_HOST_LABELS)
         ]
         if candidates:
             return candidates[0]
@@ -1813,7 +2023,15 @@ def _fallback_company_name(state: JDState, current_company: str | None) -> str |
     if url:
         host = urlparse(url).hostname or ""
         host_parts = host.lower().split(".")
-        if len(host_parts) >= 2 and host_parts[-2] not in {"linkedin", "indeed", "glassdoor", "greenhouse", "lever", "workday", "smartrecruiters"}:
+        # Was a small, independently-maintained blocklist that had drifted
+        # out of sync with PORTALS (missing myworkdayjobs/ashbyhq/icims/
+        # bamboohr/jobvite/workable/successfactors/taleo/oraclecloud) --
+        # e.g. a Workday-hosted posting's host label "myworkdayjobs" was
+        # never blocked, so a page with no other company evidence returned
+        # the fabricated company name "Myworkdayjobs". Now reuses the single
+        # PORTALS-derived list so a newly added platform there is
+        # automatically protected here too.
+        if len(host_parts) >= 2 and host_parts[-2] not in _ATS_HOST_LABELS:
             return host_parts[-2].capitalize()
     return None
 

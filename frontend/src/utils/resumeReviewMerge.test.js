@@ -4,6 +4,7 @@ import {
   buildAcceptedTailoringPatch,
   hasReviewOperation,
   mergeReviewResume,
+  retainNonDegradingATSSuggestions,
   validateWorkingResume
 } from './resumeReviewMerge.js';
 import { toRenderableResume } from './renderableResume.js';
@@ -16,6 +17,25 @@ const original = {
   certifications: [{ name: 'Zero Trust Training', credential_id: 'ZTA-1' }],
   custom_sections: [{ title: 'Leadership', description: ['Increased membership by 40%.'] }]
 };
+
+test('score-degrading tailoring suggestions are excluded before review', () => {
+  const resume = {
+    personal_info: { email: 'candidate@example.com', phone: '123', linkedin: 'profile' },
+    summary: 'Python engineer',
+    skills: ['Python'],
+    experience: [{ role: 'Engineer', start_date: '2024', end_date: 'Present', description: ['Developed reliable Python services with measurable 20% gains.'] }],
+    projects: [],
+    education: [{ degree: 'B.Tech' }]
+  };
+  const job = { title: 'Python Engineer', required_skills: ['Python'], keywords: ['Python'] };
+  const suggestions = [{
+    id: 'experience:0:0', sectionType: 'experience', itemIndex: 0, bulletIndex: 0,
+    status: 'pending', original: resume.experience[0].description[0],
+    suggested: 'Helped with services.'
+  }];
+
+  assert.deepEqual(retainNonDegradingATSSuggestions(resume, suggestions, job), []);
+});
 
 test('accepted change updates one bullet and preserves the complete immutable source', () => {
   const snapshot = structuredClone(original);

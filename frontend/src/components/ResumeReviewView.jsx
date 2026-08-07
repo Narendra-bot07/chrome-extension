@@ -843,12 +843,12 @@ function ResumeReviewView({
   const originalResumeMatch = fallbackMatch.score;
   const currentResumeMatch = deterministicCurrentScore.score;
   const rawEstimatedResumeMatch = deterministicPotentialScore.score;
-  const estimatedResumeMatch = Math.max(originalResumeMatch, currentResumeMatch, rawEstimatedResumeMatch);
+  const estimatedResumeMatch = rawEstimatedResumeMatch;
 
   const originalATS = fallbackMatch.atsScore;
   const currentATS = deterministicCurrentScore.atsScore;
   const rawEstimatedATS = deterministicPotentialScore.atsScore;
-  const estimatedATS = Math.max(originalATS, currentATS, rawEstimatedATS);
+  const estimatedATS = rawEstimatedATS;
 
   const breakdownBefore = fallbackMatch.breakdown || {};
   const breakdownEstimated = deterministicPotentialScore.breakdown || breakdownBefore;

@@ -114,7 +114,12 @@ export default function ResumeEditorView({
           ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {})
         },
         body: JSON.stringify(parsedResume.layout_model)
-      }).catch(() => setLayoutMessage('Layout is saved locally; cloud sync will retry when the service is available.'));
+      }).catch(() => {
+        // Layout is already applied locally via the optimistic update in
+        // applyCommittedLayout; a cloud-sync failure here isn't actionable
+        // by the user, so it's silently retried on the next layout change
+        // rather than surfaced as a warning.
+      });
     }, 350);
     return () => clearTimeout(timer);
   }, [resumeId, parsedResume?.layout_model, apiUrl, session?.access_token]);

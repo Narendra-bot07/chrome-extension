@@ -1,4 +1,5 @@
 import { toRenderableResume } from './renderableResume.js';
+import { calculateJDMatchScore } from './matchScore.js';
 
 const clone = value => structuredClone(value);
 const canonical = value => {
@@ -147,6 +148,41 @@ export function mergeReviewResume(originalInput, suggestions = []) {
   }
 
   return { originalResume: original, workingResume: working, operations, invalidOperations };
+}
+
+/** Keep only edits verified not to lower the deterministic ATS score. */
+export function retainNonDegradingATSSuggestions(originalInput, suggestions = [], job) {
+  const original = toRenderableResume(originalInput);
+  if (!original || !job || !Array.isArray(suggestions) || !suggestions.length) {
+    return Array.isArray(suggestions) ? suggestions : [];
+  }
+
+  const baselineATS = calculateJDMatchScore(original, job).atsScore;
+  let composedATS = baselineATS;
+  let retained = [];
+
+  for (const suggestion of suggestions) {
+    const acceptedCandidate = { ...suggestion, status: 'accepted' };
+    const candidateResume = mergeReviewResume(original, [acceptedCandidate]).workingResume;
+    if (calculateJDMatchScore(candidateResume, job).atsScore < baselineATS) continue;
+
+    const proposed = [...retained, suggestion];
+    const composedResume = mergeReviewResume(
+      original,
+      proposed.map(item => ({ ...item, status: 'accepted' }))
+    ).workingResume;
+    const nextATS = calculateJDMatchScore(composedResume, job).atsScore;
+    if (nextATS < composedATS) continue;
+
+    retained = [...retained, {
+      ...suggestion,
+      atsImpact: nextATS - composedATS,
+      verifiedATSImpact: nextATS - composedATS
+    }];
+    composedATS = nextATS;
+  }
+
+  return retained;
 }
 
 const sectionCounts = resume => Object.fromEntries(

@@ -910,6 +910,7 @@ async def api_render_unified_pdf(request: UnifiedRenderRequest):
                 "code": "PDF_RENDER_BUSY",
                 "message": "PDF generation is busy. Please retry in a moment.",
             },
+            headers={"Retry-After": "2"},
         ) from exc
     except Exception as exc:
         # This handled 422 is filtered by the global Sentry policy, so report

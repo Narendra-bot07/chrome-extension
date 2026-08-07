@@ -239,12 +239,46 @@ export default function ResumePreview({
       setStatusMessage(interactiveLayoutMode ? 'Live layout preview' : 'Recomposing resume…');
       setWarningMessage(null);
 
-      const res = await fetch(`${apiUrl}/api/render-unified-pdf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestPayload),
-        signal
-      });
+      let res: Response | null = null;
+      let lastNetworkError: unknown = null;
+      // The backend serializes every render onto a single Chromium worker and
+      // its own docs record renders legitimately taking 45-75s end to end
+      // (see playwright_pdf.py's _timer() comment); its queue only 503s after
+      // a job has waited 75s for that worker. A short fixed 1s/2s backoff
+      // (the previous behavior) gives up and surfaces a scary error to the
+      // user well before a same in-flight render from this exact user could
+      // ever finish and free the worker. Backoff instead over a budget
+      // comparable to that queue timeout, honoring Retry-After when the
+      // server sends one.
+      const maxAttempts = 6;
+      let waitMs = 2000;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        try {
+          res = await fetch(`${apiUrl}/api/render-unified-pdf`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestPayload),
+            signal
+          });
+          if (res.status !== 503 || attempt === maxAttempts - 1) break;
+          const retryAfterSeconds = Number(res.headers.get('Retry-After'));
+          waitMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+            ? retryAfterSeconds * 1000
+            : Math.min(15000, waitMs * 2);
+          setStatusMessage(`PDF renderer is busy with another render. Retrying in ${Math.round(waitMs / 1000)}s... (${attempt + 1}/${maxAttempts - 1})`);
+        } catch (networkError) {
+          if ((networkError as Error)?.name === 'AbortError') throw networkError;
+          lastNetworkError = networkError;
+          if (attempt === maxAttempts - 1) throw networkError;
+          waitMs = Math.min(15000, waitMs * 2);
+          setStatusMessage(`Network changed. Reconnecting in ${Math.round(waitMs / 1000)}s... (${attempt + 1}/${maxAttempts - 1})`);
+        }
+        await new Promise(resolve => window.setTimeout(resolve, waitMs));
+      }
+
+      if (!res) {
+        throw lastNetworkError || new Error('Unable to reach the PDF service.');
+      }
 
       if (!res.ok) {
         const failure = await res.json().catch(() => ({}));
@@ -311,6 +345,7 @@ export default function ResumePreview({
         page_preference: pref
       });
       console.warn('Backend PDF recomposition fallback triggered', err);
+      throw err;
     } finally {
       if (requestId === renderRequestIdRef.current) setLoadingPdf(false);
     }
@@ -392,11 +427,16 @@ export default function ResumePreview({
         return;
       }
 
-      throw new Error('The validated preview artifact is not ready yet.');
+      throw new Error('PDF generation did not return an artifact. Please retry.');
     } catch (err) {
       console.error(err);
+      const message = /busy/i.test(String((err as Error)?.message || ''))
+        ? 'PDF generation is busy. Please wait a moment and try again.'
+        : /fetch|network|reach|connection/i.test(String((err as Error)?.message || ''))
+          ? 'Your connection changed during PDF generation. Please reconnect and try again.'
+          : 'Failed to download PDF. Please try again.';
       if (typeof window !== 'undefined' && window.dispatchEvent) {
-        window.dispatchEvent(new CustomEvent('tailr4u-toast', { detail: { message: 'Failed to download PDF.', type: 'error', title: 'Download Error' } }));
+        window.dispatchEvent(new CustomEvent('tailr4u-toast', { detail: { message, type: 'error', title: 'Download Paused' } }));
       }
     } finally {
       setIsDownloading(false);

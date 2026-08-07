@@ -1,6 +1,7 @@
 """Authenticated API integration for the single active JD intelligence engine."""
 import asyncio
 import hashlib
+import re
 import time
 import uuid
 from contextlib import contextmanager
@@ -16,6 +17,7 @@ from schemas.jobs import JobUrlExtractRequest
 from services.cache.redis_cache import redis_cache
 from services.job_extraction.backend_extractor import extract_job_from_url
 from services.subscriptions.usage_service import UsageService
+from app.services.rate_limiter_service import RateLimiterService
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 _db_context = contextmanager(get_db_connection)
@@ -30,12 +32,21 @@ _db_context = contextmanager(get_db_connection)
 # any one user) means every user after the first gets an instant result.
 JD_EXTRACTION_CACHE_TTL_SECONDS = 24 * 60 * 60  # Job postings rarely change same-day; 24h balances freshness against hit rate.
 _TRACKING_PARAM_PREFIXES = ("utm_", "fbclid", "gclid", "mc_cid", "mc_eid", "igshid", "trk", "ref_", "_hs")
+# Some SPA career portals route entirely by fragment (e.g. #/job/12345,
+# #job=12345) while keeping one unchanging path+query for the whole site --
+# unconditionally dropping the fragment then collapses two DIFFERENT
+# postings onto the same normalized URL/cache key. Only fragments that look
+# like they encode a job identity are kept; purely presentational fragments
+# (#top, #apply-now) are still dropped so they don't fragment the cache for
+# portals where the fragment carries no job identity at all.
+_FRAGMENT_JOB_ID_PATTERN = re.compile(r"(?:job|jobs|position|opening|req|posting|vacancy|listing)[/_=-]?\d+|\d{4,}", re.I)
 
 
 def _normalize_job_url_for_cache(url: str) -> str:
-    """Strips tracking params, fragment, and trailing slash so two users
-    landing on the same posting via different marketing links (e.g. one with
-    ?utm_source=..., one without) still share the same cache entry."""
+    """Strips tracking params and trailing slash so two users landing on the
+    same posting via different marketing links (e.g. one with
+    ?utm_source=..., one without) still share the same cache entry. Keeps
+    the fragment when it looks job-identifying (see _FRAGMENT_JOB_ID_PATTERN)."""
     parsed = urlparse((url or "").strip())
     host = (parsed.hostname or "").lower()
     if parsed.port:
@@ -45,7 +56,9 @@ def _normalize_job_url_for_cache(url: str) -> str:
         (key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True)
         if not any(key.lower().startswith(prefix) for prefix in _TRACKING_PARAM_PREFIXES)
     )
-    return urlunparse(("", host, path, "", urlencode(kept_params), ""))
+    fragment = parsed.fragment or ""
+    kept_fragment = fragment if _FRAGMENT_JOB_ID_PATTERN.search(fragment) else ""
+    return urlunparse(("", host, path, "", urlencode(kept_params), kept_fragment))
 
 
 def _job_extraction_cache_key(url: str, browser_evidence: Dict[str, Any] | None = None) -> str:
@@ -107,6 +120,35 @@ async def extract_job_from_provided_url(
                     "code": "NON_JOB_PAGE",
                     "message": "Open a public job-detail page before scanning.",
                 },
+            },
+        )
+    # The only existing throttle here was UsageService's monthly product
+    # quota -- no per-minute limiting at all. One user could stay well
+    # within a monthly quota (e.g. 20-30 calls/day) while rapid-firing the
+    # SAME slow/hostile domain: the browser-scrape fallback is a single-
+    # worker pool (browser_pool.py), so repeatedly occupying its one worker
+    # thread for 5s per call is a real, low-cost way for one user to
+    # degrade extraction latency for every other concurrent user. Redis-only
+    # (no DB connection) rate limiter, matching the pattern already
+    # established for auth/signup abuse checks.
+    limiter = RateLimiterService(conn=None)
+    if limiter.is_rate_limited("jd_extraction_user", user["id"], max_requests=10, window_seconds=60):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "success": False,
+                "request_id": request_id,
+                "error": {"code": "RATE_LIMITED", "message": "Too many extraction requests. Please wait a moment and try again."},
+            },
+        )
+    request_host = (urlparse(request.url).hostname or "").lower()
+    if request_host and limiter.is_rate_limited("jd_extraction_domain", request_host, max_requests=5, window_seconds=60):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "success": False,
+                "request_id": request_id,
+                "error": {"code": "RATE_LIMITED", "message": "This job site is receiving a lot of extraction requests right now. Please try again shortly."},
             },
         )
     cache_key = _job_extraction_cache_key(request.url, request.browser_evidence)

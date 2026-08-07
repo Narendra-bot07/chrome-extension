@@ -1,12 +1,9 @@
 """Fresh LangGraph orchestrator for job intelligence; intentionally no checkpointer."""
 from __future__ import annotations
 
-import ipaddress
-import socket
 import threading
 import time
 from typing import Any, Callable, Literal
-from urllib.parse import urlparse
 
 from langgraph.graph import END, START, StateGraph
 
@@ -20,6 +17,7 @@ from services.job_extraction.agents import (
     source_builder_agent, _job_signal_score,
 )
 from services.job_extraction.schemas import JDState
+from services.job_extraction.ssrf_guard import validate_public_url
 
 LOG_PREFIX = "[JD-EXTRACTION][GRAPH]"
 _compiled_graph = None
@@ -175,25 +173,6 @@ def get_job_intelligence_graph():
             if _compiled_graph is None:
                 _compiled_graph = build_job_intelligence_graph()
     return _compiled_graph
-
-
-def validate_public_url(url: str) -> None:
-    """Reject non-web and private-network targets before Playwright navigation."""
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("A complete HTTP or HTTPS URL is required.")
-    host = parsed.hostname.lower()
-    if host in {"localhost", "metadata.google.internal"}:
-        raise ValueError("Private network URLs are not permitted.")
-    try:
-        addresses = [ipaddress.ip_address(host)]
-    except ValueError:
-        try:
-            addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(host, None)]
-        except socket.gaierror as exc:
-            raise ValueError("The job page hostname could not be resolved.") from exc
-    if any(ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast for ip in addresses):
-        raise ValueError("Private network URLs are not permitted.")
 
 
 def run_job_intelligence(
