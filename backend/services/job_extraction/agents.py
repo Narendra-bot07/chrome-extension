@@ -1552,6 +1552,28 @@ _EXPLICIT_SKILL_ALIASES: dict[str, tuple[str, ...]] = {
     "GraphDB": ("graph database",), "Blockchain": ("blockchain",),
     "Solidity": ("solidity",), "Figma": ("figma",),
     "Excel": ("excel", "microsoft excel"), "Salesforce": ("salesforce",),
+    "Cybersecurity": ("cybersecurity", "cyber security"),
+    "Product Security": ("product security",),
+    "Application Security": ("application security", "appsec"),
+    "Security Engineering": ("security engineering",),
+    "Security Research": ("security research",),
+    "Security Analysis": ("security analysis",),
+    "Threat Modeling": ("threat modeling", "threat modelling"),
+    "Vulnerability Management": ("vulnerability management",),
+    "Vulnerability Research": ("vulnerability research",),
+    "Penetration Testing": ("penetration testing", "pen testing"),
+    "Incident Response": ("incident response",),
+    "Secure SDLC": ("secure sdlc", "security development lifecycle", "secure software development lifecycle"),
+    "Code Review": ("code review", "code reviews"),
+    "Cloud Security": ("cloud security",),
+    "Web Security": ("web security",),
+    "Network Security": ("network security",),
+    "Cryptography": ("cryptography", "cryptographic"),
+    "Authentication": ("authentication",),
+    "Authorization": ("authorization", "authorisation"),
+    "OWASP": ("owasp",),
+    "SAST": ("sast", "static application security testing"),
+    "DAST": ("dast", "dynamic application security testing"),
 }
 
 
@@ -1797,6 +1819,10 @@ def _deterministic_job_from_evidence(state: JDState) -> ExtractedJob:
                 location_part(key)
                 for key in ("addressLocality", "addressRegion", "addressCountry")
                 if location_part(key)
+                and location_part(key).casefold() not in {
+                    "unavailable", "not available", "not specified",
+                    "unknown", "n/a", "none",
+                }
             )
 
     source_text = _clean_evidence_text(
@@ -1818,7 +1844,11 @@ def _deterministic_job_from_evidence(state: JDState) -> ExtractedJob:
         or "Not Specified"
     ).strip()
 
-    raw_skills = structured.get("skills") or structured.get("occupationalCategory") or []
+    # `occupationalCategory` classifies the role; it is not a skills field.
+    # GitHub Careers commonly publishes the literal value "UNAVAILABLE"
+    # here. Using it as a fallback made the skills list look non-empty and
+    # prevented deterministic recovery from the actual description.
+    raw_skills = structured.get("skills") or []
     if isinstance(raw_skills, str):
         raw_skills = re.split(r"\s*[,;|]\s*", raw_skills)
     explicit = _atomize_skill_labels(list(raw_skills or []))
@@ -1845,7 +1875,9 @@ def _deterministic_job_from_evidence(state: JDState) -> ExtractedJob:
         job_title=title or None,
         company_name=company,
         company_domain=(urlparse(str(hiring_org.get("sameAs") or "")).hostname or None),
-        location=_clean_evidence_text(location_value) or None,
+        location=(lambda value: None if not value or value.casefold() in {
+            "unavailable", "not available", "not specified", "unknown", "n/a", "none"
+        } else value)(_clean_evidence_text(location_value)),
         workplace_type=structured.get("jobLocationType") or "unknown",
         employment_type=structured.get("employmentType") or "unknown",
         description=source_text or None,
@@ -2021,6 +2053,10 @@ def _atomize_skill_labels(skills: list[str]) -> list[str]:
     """Split LLM-returned example phrases into atomic ATS labels."""
     atomic: list[str] = []
     seen: set[str] = set()
+    placeholders = {
+        "unavailable", "not available", "not specified", "unknown",
+        "n/a", "na", "none", "null", "undefined", "-", "--",
+    }
     for value in skills or []:
         text = re.sub(r"\s+", " ", str(value or "")).strip(" .;")
         if not text:
@@ -2041,6 +2077,8 @@ def _atomize_skill_labels(skills: list[str]) -> list[str]:
             if not clean:
                 continue
             key = clean.casefold()
+            if key in placeholders:
+                continue
             if key not in seen:
                 seen.add(key)
                 atomic.append(clean)

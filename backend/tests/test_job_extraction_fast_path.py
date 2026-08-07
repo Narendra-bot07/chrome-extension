@@ -100,6 +100,33 @@ def test_llm_failure_falls_back_to_deterministic_evidence(mock_get_llm):
 
 
 @patch("services.job_extraction.agents.get_llm")
+def test_github_unavailable_taxonomy_never_becomes_a_skill(mock_get_llm):
+    mock_get_llm.return_value.with_structured_output.return_value.invoke.side_effect = ValueError("empty LLM content")
+    state = job_state(
+        jobposting_jsonld=[{
+            "@type": "JobPosting",
+            "title": "Product Security Engineer III",
+            "hiringOrganization": {"name": "GitHub, Inc."},
+            "description": (
+                "Perform product security and application security reviews, threat modeling, "
+                "vulnerability research, code reviews, and incident response."
+            ),
+            "occupationalCategory": "UNAVAILABLE",
+        }],
+        evidence={"source_text": "Product security, threat modeling, vulnerability research, code review and incident response."},
+        markdown="Product security, threat modeling, vulnerability research, code review and incident response.",
+    )
+
+    result = extraction_agent(state)
+
+    assert "UNAVAILABLE" not in result["extracted_job"]["skills"]
+    assert set(result["extracted_job"]["skills"]) >= {
+        "Product Security", "Application Security", "Threat Modeling",
+        "Vulnerability Research", "Code Review", "Incident Response",
+    }
+
+
+@patch("services.job_extraction.agents.get_llm")
 def test_repair_is_deterministic_and_never_starts_second_llm_call(mock_get_llm):
     state = job_state(
         extracted_job={

@@ -77,8 +77,9 @@ def _job_extraction_cache_key(url: str, browser_evidence: Dict[str, Any] | None 
         str(evidence.get("job_title_hint") or "").strip().casefold(),
     )))
     identity = f"{normalized}|{rendered_identity}" if rendered_identity else normalized
-    # v3 invalidates results produced before focused-panel/title validation.
-    return f"jd_extraction:v3:{hashlib.sha256(identity.encode('utf-8')).hexdigest()}"
+    # v4 invalidates fallback results that could contain provider placeholders
+    # such as occupationalCategory="UNAVAILABLE" as an explicit skill.
+    return f"jd_extraction:v4:{hashlib.sha256(identity.encode('utf-8')).hexdigest()}"
 
 
 def _is_disallowed_extraction_target(url: str) -> bool:
