@@ -43,10 +43,16 @@ _executor_lock = threading.Lock()
 _executor = concurrent.futures.ThreadPoolExecutor(
     max_workers=1, thread_name_prefix="jd-scrape-browser"
 )
+_pool_admission = threading.BoundedSemaphore(1)
+_thread_state = threading.local()
 
-_playwright_instance = None
-_browser_instance = None
-_context_instance = None
+
+class BrowserPoolBusyError(RuntimeError):
+    """The recovery browser is already serving another extraction.
+
+    This is intentionally distinct from an execution timeout.  Callers can
+    continue with extension evidence instead of queueing behind a slow page.
+    """
 
 
 # Confirmed directly (production-matching repro against a real, public,
@@ -66,37 +72,42 @@ _WEBDRIVER_MASK_SCRIPT = "Object.defineProperty(navigator, 'webdriver', {get: ()
 
 
 def _get_context_on_pool_thread():
-    global _playwright_instance, _browser_instance, _context_instance
-    if _browser_instance is not None:
+    browser = getattr(_thread_state, "browser", None)
+    context = getattr(_thread_state, "context", None)
+    playwright = getattr(_thread_state, "playwright", None)
+    if browser is not None:
         try:
-            if not _browser_instance.is_connected():
+            if not browser.is_connected():
                 raise RuntimeError("browser disconnected")
         except Exception:
             try:
-                _browser_instance.close()
+                browser.close()
             except Exception:
                 pass
-            _browser_instance = None
-            _context_instance = None
-    if _browser_instance is None:
-        if _playwright_instance is None:
-            _playwright_instance = sync_playwright().start()
-        _browser_instance = _playwright_instance.chromium.launch(
+            browser = None
+            context = None
+    if browser is None:
+        if playwright is None:
+            playwright = sync_playwright().start()
+            _thread_state.playwright = playwright
+        browser = playwright.chromium.launch(
             headless=True,
             args=[
                 "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
                 "--disable-blink-features=AutomationControlled",
             ],
         )
-        _context_instance = None
-    if _context_instance is None:
-        _context_instance = _browser_instance.new_context(
+        _thread_state.browser = browser
+        context = None
+    if context is None:
+        context = browser.new_context(
             user_agent=_SCRAPE_USER_AGENT,
             viewport={"width": 1366, "height": 900},
             locale="en-US",
         )
-        _context_instance.add_init_script(_WEBDRIVER_MASK_SCRIPT)
-    return _context_instance
+        context.add_init_script(_WEBDRIVER_MASK_SCRIPT)
+        _thread_state.context = context
+    return context
 
 
 def _reset_pool_after_timeout():
@@ -109,15 +120,12 @@ def _reset_pool_after_timeout():
     are owned by the now-abandoned thread and are deliberately NOT closed
     here -- Playwright's sync API raises if touched from a different
     thread than the one that started it; they're simply dropped."""
-    global _executor, _playwright_instance, _browser_instance, _context_instance
+    global _executor
     with _executor_lock:
         old_executor = _executor
         _executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="jd-scrape-browser"
         )
-        _playwright_instance = None
-        _browser_instance = None
-        _context_instance = None
     old_executor.shutdown(wait=False)
 
 
@@ -126,39 +134,52 @@ def run_on_browser_pool(fn, *args, **kwargs):
     `context` is the shared, persistent BrowserContext. fn gets a fresh Page
     from that context (`context.new_page()`) and must close it when done --
     the context and browser themselves are never closed here, only reused."""
-    def _call():
-        context = _get_context_on_pool_thread()
-        return fn(context, *args, **kwargs)
-    with _executor_lock:
-        executor = _executor
-    future = executor.submit(_call)
+    # ThreadPoolExecutor starts a Future's timeout while it is still queued.
+    # With one worker, a second extraction therefore used to hit the 30s
+    # ceiling and reset the shared pool even though its own task had never
+    # started.  Admit only one caller and fail fast as a recovery-source miss;
+    # the main pipeline can still use the extension's rendered DOM evidence.
+    if not _pool_admission.acquire(timeout=1.0):
+        raise BrowserPoolBusyError("JD recovery browser is busy")
     try:
-        return future.result(timeout=_POOL_CALL_TIMEOUT_SECONDS)
-    except concurrent.futures.TimeoutError:
-        _reset_pool_after_timeout()
-        raise
+        def _call():
+            context = _get_context_on_pool_thread()
+            return fn(context, *args, **kwargs)
+        with _executor_lock:
+            executor = _executor
+        future = executor.submit(_call)
+        try:
+            return future.result(timeout=_POOL_CALL_TIMEOUT_SECONDS)
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            _reset_pool_after_timeout()
+            raise
+    finally:
+        _pool_admission.release()
 
 
 def _shutdown_on_pool_thread():
-    global _playwright_instance, _browser_instance, _context_instance
-    if _context_instance is not None:
+    context = getattr(_thread_state, "context", None)
+    browser = getattr(_thread_state, "browser", None)
+    playwright = getattr(_thread_state, "playwright", None)
+    if context is not None:
         try:
-            _context_instance.close()
+            context.close()
         except Exception:
             pass
-        _context_instance = None
-    if _browser_instance is not None:
+        _thread_state.context = None
+    if browser is not None:
         try:
-            _browser_instance.close()
+            browser.close()
         except Exception:
             pass
-        _browser_instance = None
-    if _playwright_instance is not None:
+        _thread_state.browser = None
+    if playwright is not None:
         try:
-            _playwright_instance.stop()
+            playwright.stop()
         except Exception:
             pass
-        _playwright_instance = None
+        _thread_state.playwright = None
 
 
 def shutdown_browser_pool():

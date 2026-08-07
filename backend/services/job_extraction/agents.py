@@ -17,7 +17,7 @@ from markdownify import markdownify
 from app.ai_service import get_llm
 from services.cache.llm_cache import llm_cache
 from core.logging import logger
-from services.job_extraction.browser_pool import run_on_browser_pool
+from services.job_extraction.browser_pool import BrowserPoolBusyError, run_on_browser_pool
 from services.job_extraction.ssrf_guard import is_request_url_safe
 from services.job_extraction.salary_parser import parse_salary_from_text
 from services.job_extraction.schemas import (
@@ -458,6 +458,26 @@ def browser_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             selectors,
             state.browser_strategy.get("networkidle_wait_ms", 500),
         )
+    except BrowserPoolBusyError as exc:
+        # This recovery source is deliberately non-queueing. The extension's
+        # rendered DOM remains available to evidence evaluation, so pool
+        # contention is an acquisition miss rather than an application error.
+        logger.warning(
+            "%s Recovery browser busy request_id=%s attempt=%s",
+            LOG_PREFIX, state.request_id, attempt,
+        )
+        return {
+            "browser_attempts": attempt,
+            "backend_raw_html": "",
+            "backend_final_url": None,
+            "backend_page_title": None,
+            "raw_html": "",
+            "final_url": None,
+            "page_title": None,
+            "error": {"code": "BROWSER_BUSY", "message": str(exc)},
+            "metadata": {"browser_errors": [str(exc)]},
+            "execution_log": _event(state, "browser", attempt=attempt, error="BrowserPoolBusyError"),
+        }
     except Exception as exc:
         logger.exception("%s Browser failed request_id=%s attempt=%s", LOG_PREFIX, state.request_id, attempt)
         return {

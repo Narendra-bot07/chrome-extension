@@ -81,6 +81,46 @@ def test_verified_extension_evidence_skips_backend_browser():
     assert route_after_discovery(routed) == "evidence_evaluation"
 
 
+def test_rendered_job_dom_skips_browser_even_when_client_assessment_is_conservative():
+    rendered = (
+        "Senior Security Engineer\nApply now\nResponsibilities\n"
+        "Build and review secure services.\nRequirements\nPython and cloud security experience.\n"
+    ) * 8
+    routed = state(extension_evidence={
+        "url": "https://example.com/jobs/123",
+        "selected_job_url": "https://example.com/jobs/123",
+        "selected_panel_text": rendered,
+        "visible_text": rendered,
+        "job_title_hint": "Senior Security Engineer",
+        "client_assessment": {
+            "readiness": "PARTIAL",
+            "isLikelyJob": True,
+            "requiresRecoveryEvaluation": True,
+        },
+    })
+
+    assert route_after_discovery(routed) == "evidence_evaluation"
+
+
+def test_usable_extension_dom_is_not_sent_to_browser_after_evidence_review():
+    rendered = (
+        "Data Engineer\nApply now\nJob description\nResponsibilities\n"
+        "Build Python pipelines.\nQualifications\nSQL and AWS experience.\n"
+    ) * 8
+    routed = state(
+        extension_evidence={
+            "url": "https://example.com/jobs/123",
+            "selected_panel_text": rendered,
+            "visible_text": rendered,
+            "job_title_hint": "Data Engineer",
+        },
+        extraction_readiness="NOT_READY",
+        browser_attempts=0,
+    )
+
+    assert route_after_evidence(routed) == "final_response"
+
+
 def test_failed_bounded_browser_does_not_retry():
     routed = state(
         browser_attempts=1,

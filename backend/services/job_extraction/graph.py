@@ -44,6 +44,29 @@ def _timed(name: str, node: Callable) -> Callable:
     return wrapped
 
 
+def _has_usable_extension_evidence(state: JDState) -> bool:
+    """Whether the user's already-rendered tab can drive extraction alone.
+
+    Backend Chromium is a recovery source, not a second opinion on DOM the
+    extension can already see (including authenticated and SPA-only pages).
+    """
+    evidence = state.extension_evidence or {}
+    evidence_url = str(evidence.get("selected_job_url") or evidence.get("url") or "").rstrip("/")
+    request_url = str(state.url or "").rstrip("/")
+    if evidence_url and request_url and evidence_url != request_url:
+        return False
+    panel = str(evidence.get("selected_panel_text") or "").strip()
+    visible = str(evidence.get("visible_text") or "").strip()
+    has_jsonld = _job_signal_score(evidence.get("jsonld") or [], structured=True) >= .9
+    panel_is_job = len(panel) >= 200 and _job_signal_score(panel) >= .25
+    page_is_job = (
+        len(visible) >= 500
+        and bool(str(evidence.get("job_title_hint") or "").strip())
+        and _job_signal_score(visible[:50000]) >= .25
+    )
+    return has_jsonld or panel_is_job or page_is_job
+
+
 def route_after_discovery(state: JDState) -> Literal["browser", "evidence_evaluation"]:
     """Skip the Playwright fetch when the extension already captured strong
     evidence from the user's own logged-in page — a cold browser launch plus
@@ -71,7 +94,7 @@ def route_after_discovery(state: JDState) -> Literal["browser", "evidence_evalua
         and not bool(client_assessment.get("requiresRecoveryEvaluation"))
         and len(panel_text or visible_text) >= 200
     )
-    if client_ready or strong_panel or has_job_jsonld:
+    if client_ready or strong_panel or has_job_jsonld or _has_usable_extension_evidence(state):
         return "evidence_evaluation"
     return "browser"
 
@@ -101,6 +124,7 @@ def route_after_evidence(state: JDState) -> Literal["browser", "jsonld", "final_
     if (
         not client_rejected_non_job
         and not non_transient_restriction
+        and not _has_usable_extension_evidence(state)
         and state.browser_attempts < state.max_browser_attempts
         and (state.browser_attempts == 0 and state.extraction_readiness in {"BLOCKED", "NOT_READY"})
     ):

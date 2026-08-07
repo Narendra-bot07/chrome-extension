@@ -720,6 +720,7 @@ export function AppProvider({ children }) {
   const extractionVersionRef = useRef(0);
   const activeExtractionIdentityRef = useRef('');
   const extractionInFlightRef = useRef(false);
+  const extractionStartupRef = useRef(false);
   const activeRequestIdRef = useRef(null);
   const extractionAbortControllerRef = useRef(null);
   const coverLetterAbortControllerRef = useRef(null);
@@ -1900,6 +1901,17 @@ export function AppProvider({ children }) {
       return;
     }
 
+    // chrome.tabs.query() and evidence capture are asynchronous. Previously
+    // `extractionInFlightRef` was set only after both, so the route effect and
+    // tab listener could enter together and send two identical backend jobs.
+    // Reserve the startup phase synchronously; an already-running request can
+    // still be cancelled below when the active job identity truly changes.
+    if (extractionStartupRef.current) {
+      logExtraction('Duplicate request ignored', { reason: 'scan_startup_in_progress', forceRescan });
+      return;
+    }
+    extractionStartupRef.current = true;
+
     let requestId = null;
     let expectedIdentity = '';
     let extractionProgressInterval = null;
@@ -2283,6 +2295,7 @@ export function AppProvider({ children }) {
       setJobDetectionStatus(inaccessible ? 'page-inaccessible' : 'extraction-failed');
       setApiError(inaccessible ? null : (err.message || 'Page extraction failed. Retry the scan.'));
     } finally {
+      extractionStartupRef.current = false;
       if (extractionProgressInterval) {
         window.clearInterval(extractionProgressInterval);
       }
