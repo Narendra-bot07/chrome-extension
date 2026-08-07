@@ -4,6 +4,17 @@ All notable changes to **Tailr4U** will be documented in this file. The format i
 
 ---
 
+## [3.15.24] - 2026-08-07
+
+### Fixed
+- **Re-audited DB connection pool usage backend-wide after the user reported recurring "connection pool exhausted" issues, despite ISSUE-005 being marked resolved.** A full sweep of every connection-acquisition site found the original fix never actually covered several real offenders. Fixed:
+  - `build_selected_resume_intelligence` / `confirm_selected_resume_intelligence` (`api/v1/resume.py`) — a `Depends()`-bound `ResumeRepository` was held for the entire multi-LLM-step intelligence pipeline (several seconds to tens of seconds), even though `PostgresCheckpointStore` alongside it had already been correctly converted to a connection factory for exactly this reason. New `_ScopedResumeRepository` proxy (over the two methods the pipeline actually calls) opens a fresh short-lived connection per call instead.
+  - `app/billing/routers/billing.py` — never covered by the original ISSUE-005 sweep at all. `create_checkout`, `verify_checkout_session`, `cancel_subscription`, and `razorpay_webhook`'s `payment.failed` branch all held a connection across real outbound HTTPS calls to Stripe/Razorpay. Restructured into short-lived DB-read / external-call-with-no-connection / DB-write phases.
+  - `api/v1/auth.py`'s `google_login` — `verify_google_token` (up to 3 sequential Google HTTPS calls, confirmed to touch no DB state at all) ran with an already-checked-out, completely idle connection for its whole duration. Now called via a temporary connection-less `AuthService` instance before any connection is acquired.
+- **Left deliberately open, documented rather than rushed**: `register_user`'s rate-limiting/device-abuse checks genuinely interleave DB access with external HTTP calls inside the same service methods (not a separable phase), so the quick fix pattern doesn't apply without restructuring those services' internal coupling — too risky to do under time pressure to abuse-prevention-critical code. Also flagged: 6 storage-download/upload endpoints holding a connection during Supabase Storage network calls (minor), and `api/v1/workflows.py`'s dormant `nullcontext`-wrapped checkpoint store (currently inert, landmine for later). Full detail, verdicts, and priority ordering: [KNOWN_ISSUES.md](KNOWN_ISSUES.md) ISSUE-005.
+
+---
+
 ## [3.15.23] - 2026-08-07
 
 ### Fixed

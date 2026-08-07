@@ -105,16 +105,43 @@ def recommend_resume_layout(
     return result
 
 
+class _ScopedResumeRepository:
+    """Proxy over the two ResumeRepository methods the Phase-2 intelligence
+    pipeline nodes actually call (services/resume_intelligence/nodes.py),
+    opening a fresh short-lived connection per call instead of holding one
+    bound connection for the whole multi-LLM-step pipeline. Mirrors
+    PostgresCheckpointStore's connection-factory pattern below -- the
+    checkpoint store was already fixed this way (see docs/KNOWN_ISSUES.md
+    ISSUE-005), but a Depends()-bound ResumeRepository was still being passed
+    into the same pipeline, which regressed back to the exact anti-pattern
+    the checkpoint-store fix was meant to eliminate: one pooled connection
+    checked out and held idle across several seconds-to-tens-of-seconds LLM
+    calls (parse_resume, semantic analysis) per request.
+    """
+
+    def __init__(self, user_id: str) -> None:
+        self._user_id = user_id
+
+    def get_selected_snapshot(self, resume_id: str, user_id: str):
+        with user_scoped_db_context(self._user_id) as conn:
+            return ResumeRepository(conn).get_selected_snapshot(resume_id, user_id)
+
+    def set_source_fingerprint_if_missing(self, resume_id: str, user_id: str, fingerprint: str):
+        with user_scoped_db_context(self._user_id) as conn:
+            return ResumeRepository(conn).set_source_fingerprint_if_missing(
+                resume_id, user_id, fingerprint
+            )
+
+
 def _resume_intelligence_service(
     *,
     user_id: str,
-    repo: ResumeRepository,
     storage: FileService,
 ) -> SelectedResumeIntelligenceService:
     parser_service = AIService()
     semantic_analyzer = DeepSeekSemanticAnalyzer()
     return SelectedResumeIntelligenceService(
-        repository=repo,
+        repository=_ScopedResumeRepository(user_id),
         storage=storage,
         # PostgresCheckpointStore takes a connection FACTORY, not one bound
         # connection: this pipeline runs multiple LLM steps and writes a
@@ -135,12 +162,10 @@ def build_selected_resume_intelligence(
     resume_id: str,
     payload: SelectedResumeIntelligenceRequest,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
-    repo: ResumeRepository = Depends(get_resume_repository),
     storage: FileService = Depends(get_storage_service),
 ):
     service = _resume_intelligence_service(
         user_id=user["id"],
-        repo=repo,
         storage=storage,
     )
     return service.run(
@@ -162,12 +187,10 @@ def confirm_selected_resume_intelligence(
     workflow_id: str,
     payload: SelectedResumeConfirmationRequest,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
-    repo: ResumeRepository = Depends(get_resume_repository),
     storage: FileService = Depends(get_storage_service),
 ):
     service = _resume_intelligence_service(
         user_id=user["id"],
-        repo=repo,
         storage=storage,
     )
     return service.confirm(

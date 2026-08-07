@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from typing import Dict, Any, List
 from core.config import settings
@@ -12,6 +13,17 @@ from app.analytics.events.tracking.analytics_service import AnalyticsService
 _MOCK_SUBSCRIPTION_IDS = {"sub_mock_stripe_123", "sub_mock_razorpay_123"}
 
 router = APIRouter(prefix="/billing", tags=["billing"])
+
+# Short-lived connection for use OUTSIDE the request-scoped Depends() chain.
+# get_subscription_service/get_credit_service below resolve via
+# Depends(get_db_connection), which FastAPI caches per-request -- fine for a
+# route that only ever does DB work, but every route in this file that also
+# calls out to Stripe/Razorpay (real outbound HTTPS, hundreds of ms to
+# seconds) held that same pooled connection idle for the whole call. See
+# docs/KNOWN_ISSUES.md ISSUE-005 -- this file was the one area that incident's
+# sweep never covered. Routes with an external call in the middle now open
+# one of these around just the DB work on each side instead.
+_db_context = contextmanager(get_db_connection)
 
 def get_billing_service():
     return BillingService()
@@ -31,9 +43,9 @@ async def create_checkout(
     req: CheckoutRequest,
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     billing_svc: BillingService = Depends(get_billing_service),
-    sub_svc: SubscriptionService = Depends(get_subscription_service)
 ):
-    plan = sub_svc.get_plan(req.plan_id)
+    with _db_context() as conn:
+        plan = SubscriptionService(conn).get_plan(req.plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
 
@@ -59,9 +71,10 @@ async def create_checkout(
     # webhook handlers below may ever call activate_subscription.
     is_mock = checkout_res.get("subscription_id") in _MOCK_SUBSCRIPTION_IDS
     if is_mock and settings.ALLOW_MOCK_BILLING_ACTIVATION:
-        sub_svc.activate_subscription(
-            user["id"], plan["id"], checkout_res["provider"], checkout_res["subscription_id"]
-        )
+        with _db_context() as conn:
+            SubscriptionService(conn).activate_subscription(
+                user["id"], plan["id"], checkout_res["provider"], checkout_res["subscription_id"]
+            )
 
     return CheckoutResponse(
         checkout_url=checkout_res["checkout_url"],
@@ -76,7 +89,6 @@ async def verify_checkout_session(
     req: Dict[str, Any],
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     billing_svc: BillingService = Depends(get_billing_service),
-    sub_svc: SubscriptionService = Depends(get_subscription_service)
 ):
     """
     Read-only status check, polled by the frontend after a checkout redirect.
@@ -115,14 +127,17 @@ async def verify_checkout_session(
             # provider API is temporarily unavailable.
             pass
 
-        recorded_payment = sub_svc.get_checkout_payment(
-            user["id"], "razorpay", provider_subscription_id
-        )
+        with _db_context() as conn:
+            recorded_payment = SubscriptionService(conn).get_checkout_payment(
+                user["id"], "razorpay", provider_subscription_id
+            )
         if recorded_payment and str(recorded_payment.get("status") or "").lower() == "failed":
             checkout_status = "failed"
 
-    current_sub = sub_svc.get_user_subscription(user["id"])
-    plan = sub_svc.get_plan(current_sub["plan_id"]) if current_sub else None
+    with _db_context() as conn:
+        sub_svc = SubscriptionService(conn)
+        current_sub = sub_svc.get_user_subscription(user["id"])
+        plan = sub_svc.get_plan(current_sub["plan_id"]) if current_sub else None
     requested_plan = str(req.get("plan_code") or "").lower()
     active_plan = str((plan or {}).get("code") or (plan or {}).get("id") or "").lower()
     if requested_plan and active_plan == requested_plan:
@@ -146,15 +161,16 @@ async def get_history(
 async def cancel_subscription(
     user: Dict[str, Any] = Depends(verify_supabase_jwt),
     billing_svc: BillingService = Depends(get_billing_service),
-    sub_svc: SubscriptionService = Depends(get_subscription_service)
 ):
-    sub = sub_svc.get_user_subscription(user["id"])
+    with _db_context() as conn:
+        sub = SubscriptionService(conn).get_user_subscription(user["id"])
     if not sub:
         raise HTTPException(status_code=404, detail="No active subscription found")
-        
+
     success = billing_svc.cancel_subscription(sub["provider"], sub["provider_subscription_id"])
     if success:
-        sub_svc.cancel_subscription(sub["provider_subscription_id"])
+        with _db_context() as conn:
+            SubscriptionService(conn).cancel_subscription(sub["provider_subscription_id"])
         return {"status": "success", "message": "Subscription canceled"}
     else:
         raise HTTPException(status_code=500, detail="Failed to cancel with provider")
@@ -218,18 +234,15 @@ async def stripe_webhook(
 async def razorpay_webhook(
     request: Request,
     billing_svc: BillingService = Depends(get_billing_service),
-    sub_svc: SubscriptionService = Depends(get_subscription_service),
-    credit_svc: CreditService = Depends(get_credit_service),
-    conn = Depends(get_db_connection)
 ):
     payload = await request.body()
     sig_header = request.headers.get("x-razorpay-signature")
-    
+
     try:
         event = billing_svc.verify_razorpay_webhook(payload, sig_header)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-        
+
     event_name = event.get('event')
 
     if event_name == 'payment.failed':
@@ -249,57 +262,66 @@ async def razorpay_webhook(
             except Exception:
                 provider_sub = {}
             user_id = str((provider_sub.get('notes') or {}).get('user_id') or '')
+            # Both Razorpay lookups above are now fully resolved -- open the
+            # DB connection only for the write, not while those two outbound
+            # HTTPS calls were in flight.
             if user_id:
-                sub_svc.create_payment(
-                    user_id=user_id,
-                    provider="razorpay",
-                    payment_id=payment_entity.get('id') or f"failed_{provider_subscription_id}",
-                    provider_order_id=provider_subscription_id,
-                    amount=payment_entity.get('amount', 0) / 100.0,
-                    currency=payment_entity.get('currency', 'INR').upper(),
-                    status="failed"
-                )
-                analytics = AnalyticsService(conn)
-                analytics.emit_event(user_id, "PAYMENT_FAILED", metadata={
-                    "provider": "razorpay",
-                    "reason": payment_entity.get('error_reason') or payment_entity.get('error_code')
-                })
+                with _db_context() as conn:
+                    SubscriptionService(conn).create_payment(
+                        user_id=user_id,
+                        provider="razorpay",
+                        payment_id=payment_entity.get('id') or f"failed_{provider_subscription_id}",
+                        provider_order_id=provider_subscription_id,
+                        amount=payment_entity.get('amount', 0) / 100.0,
+                        currency=payment_entity.get('currency', 'INR').upper(),
+                        status="failed"
+                    )
+                    analytics = AnalyticsService(conn)
+                    analytics.emit_event(user_id, "PAYMENT_FAILED", metadata={
+                        "provider": "razorpay",
+                        "reason": payment_entity.get('error_reason') or payment_entity.get('error_code')
+                    })
 
     # Successful subscription charge activates access and grants credits.
+    # No outbound HTTP calls in this branch -- one connection for the whole
+    # branch is fine, same as stripe_webhook above.
     elif event_name == 'subscription.charged':
         sub_entity = event['payload']['subscription']['entity']
         payment_entity = event['payload']['payment']['entity']
-        
+
         # Retrieve user from notes
         user_id = sub_entity.get('notes', {}).get('user_id')
         if not user_id:
             return {"status": "ignored"}
-            
+
         amount = payment_entity.get('amount', 0) / 100.0
         currency = payment_entity.get('currency', 'INR').upper()
-        
-        payment = sub_svc.create_payment(
-            user_id=user_id,
-            provider="razorpay",
-            payment_id=payment_entity['id'],
-            amount=amount,
-            currency=currency,
-            status="success"
-        )
-        
-        # razorpay_provider.create_checkout() sets notes.plan_id to the actual
-        # purchased plan's id when it creates the subscription -- read it back
-        # instead of hardcoding "pro" for every successful charge regardless
-        # of what was actually bought (see KNOWN_ISSUES.md ISSUE-015).
-        plan_id = sub_entity.get('notes', {}).get('plan_id') or "pro"
-        plan = sub_svc.get_plan(plan_id)
-        if plan:
-            sub_svc.activate_subscription(user_id, plan_id, "razorpay", sub_entity['id'])
-            credit_svc.add_credits(user_id, payment["id"], plan["credits"], "Razorpay Subscription")
-            
-            # Emit Analytics Events
-            analytics = AnalyticsService(conn)
-            analytics.emit_event(user_id, "PAYMENT_SUCCESS", metadata={"provider": "razorpay", "amount": amount, "currency": currency})
-            analytics.emit_event(user_id, "SUBSCRIPTION_CREATED", metadata={"provider": "razorpay", "plan": plan_id})
-            
+
+        with _db_context() as conn:
+            sub_svc = SubscriptionService(conn)
+            credit_svc = CreditService(conn)
+            payment = sub_svc.create_payment(
+                user_id=user_id,
+                provider="razorpay",
+                payment_id=payment_entity['id'],
+                amount=amount,
+                currency=currency,
+                status="success"
+            )
+
+            # razorpay_provider.create_checkout() sets notes.plan_id to the actual
+            # purchased plan's id when it creates the subscription -- read it back
+            # instead of hardcoding "pro" for every successful charge regardless
+            # of what was actually bought (see KNOWN_ISSUES.md ISSUE-015).
+            plan_id = sub_entity.get('notes', {}).get('plan_id') or "pro"
+            plan = sub_svc.get_plan(plan_id)
+            if plan:
+                sub_svc.activate_subscription(user_id, plan_id, "razorpay", sub_entity['id'])
+                credit_svc.add_credits(user_id, payment["id"], plan["credits"], "Razorpay Subscription")
+
+                # Emit Analytics Events
+                analytics = AnalyticsService(conn)
+                analytics.emit_event(user_id, "PAYMENT_SUCCESS", metadata={"provider": "razorpay", "amount": amount, "currency": currency})
+                analytics.emit_event(user_id, "SUBSCRIPTION_CREATED", metadata={"provider": "razorpay", "plan": plan_id})
+
     return {"status": "success"}

@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import contextmanager
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, status, Request, Response
 from pydantic import BaseModel
 from core.security import forget_verified_session, verify_supabase_jwt, hash_password, verify_password, validate_password
@@ -29,6 +30,12 @@ from schemas.auth import TurnstileVerifyRequest
 router = APIRouter(prefix="/auth", tags=["auth"])
 RESET_CONFIRMATION = "If an account exists for this email, a reset link has been sent."
 REFRESH_COOKIE = "tailr4u_refresh"
+
+# Short-lived connection for use OUTSIDE the request-scoped Depends() chain --
+# see google_login below, which defers connection acquisition until after its
+# outbound Google HTTPS calls complete instead of holding a Depends()-bound
+# connection idle for their whole duration (docs/KNOWN_ISSUES.md ISSUE-005).
+_db_context = contextmanager(get_db_connection)
 
 
 def _set_refresh_cookie(response: Response, token: str) -> None:
@@ -378,73 +385,78 @@ async def google_login(
     payload: GoogleAuthRequest,
     request: Request,
     response: Response,
-    conn = Depends(get_db_connection)
 ):
     if not payload.credential:
         raise HTTPException(status_code=400, detail="Missing credential.")
 
-    auth_service = AuthService(conn)
     try:
         # verify_google_token makes up to three sequential blocking HTTPS
         # calls (ID-token cert verification, then a userinfo/People API
         # fallback for the access-token flow the web login button actually
-        # sends -- see auth_service.py). Run off the event loop so a slow
-        # or failing Google request doesn't stall every other concurrent
-        # request this single-process server is handling, including
-        # unrelated email/password logins.
-        idinfo = await asyncio.to_thread(auth_service.verify_google_token, payload.credential)
-        
-        user = auth_service.sync_oauth_user(
-            provider="google",
-            provider_user_id=idinfo.get("sub"),
-            email=idinfo.get("email"),
-            full_name=idinfo.get("name", ""),
-            avatar_url=idinfo.get("picture", ""),
-            email_verified=idinfo.get("email_verified", False),
-            first_name=idinfo.get("given_name", ""),
-            last_name=idinfo.get("family_name", ""),
-            locale=idinfo.get("locale", ""),
-            profile_details=idinfo.get("tailr4u_profile") or {}
-        )
+        # sends -- see auth_service.py) and touches no DB state at all
+        # (confirmed: no self.conn reference anywhere in its body). It
+        # previously ran under a Depends(get_db_connection)-bound connection
+        # held idle for the connection's whole dependency lifetime while this
+        # ran -- a pooled connection sitting open and unused for however long
+        # Google takes to respond (docs/KNOWN_ISSUES.md ISSUE-005). AuthService
+        # only needs a real conn for the DB-backed calls further down, so
+        # construct a conn-less instance just for this one call, and open the
+        # real connection only after Google has already answered.
+        idinfo = await asyncio.to_thread(AuthService(None).verify_google_token, payload.credential)
 
-        # Same is_active check as login_user -- suspending an account must
-        # block Google sign-in too, not just password login.
-        if user.get("is_active") is False:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="This account has been deactivated. Contact support if you believe this is a mistake."
+        with _db_context() as conn:
+            auth_service = AuthService(conn)
+            user = auth_service.sync_oauth_user(
+                provider="google",
+                provider_user_id=idinfo.get("sub"),
+                email=idinfo.get("email"),
+                full_name=idinfo.get("name", ""),
+                avatar_url=idinfo.get("picture", ""),
+                email_verified=idinfo.get("email_verified", False),
+                first_name=idinfo.get("given_name", ""),
+                last_name=idinfo.get("family_name", ""),
+                locale=idinfo.get("locale", ""),
+                profile_details=idinfo.get("tailr4u_profile") or {}
             )
 
-        session_service = SessionService(conn)
-        session_id = session_service.create_session(user["id"], request, "google")
-        refresh_token = session_service.issue_refresh_token(session_id)
-        _set_refresh_cookie(response, refresh_token)
-        
-        access_token = auth_service.generate_custom_jwt(user, session_id)
-        has_completed_preferences = JobPreferencesRepository(conn).has_completed(user["id"])
-        profile_import = idinfo.get("tailr4u_profile") or {}
+            # Same is_active check as login_user -- suspending an account must
+            # block Google sign-in too, not just password login.
+            if user.get("is_active") is False:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="This account has been deactivated. Contact support if you believe this is a mistake."
+                )
 
-        # Same-device, different-account notice -- see login_user for why.
-        other_accounts_on_device = []
-        device_hash = DeviceAbuseService.hash_device_id(payload.installation_id) if payload.installation_id else ""
-        if device_hash:
-            abuse_service = DeviceAbuseService(conn)
-            client_ip = request.client.host if request.client else "unknown"
-            abuse_service.record_device_sighting(
-                user["id"], device_hash,
-                DeviceAbuseService.hash_ip(client_ip),
-                DeviceAbuseService.hash_user_agent(request.headers.get("user-agent", "")),
+            session_service = SessionService(conn)
+            session_id = session_service.create_session(user["id"], request, "google")
+            refresh_token = session_service.issue_refresh_token(session_id)
+            _set_refresh_cookie(response, refresh_token)
+
+            access_token = auth_service.generate_custom_jwt(user, session_id)
+            has_completed_preferences = JobPreferencesRepository(conn).has_completed(user["id"])
+            profile_import = idinfo.get("tailr4u_profile") or {}
+
+            # Same-device, different-account notice -- see login_user for why.
+            other_accounts_on_device = []
+            device_hash = DeviceAbuseService.hash_device_id(payload.installation_id) if payload.installation_id else ""
+            if device_hash:
+                abuse_service = DeviceAbuseService(conn)
+                client_ip = request.client.host if request.client else "unknown"
+                abuse_service.record_device_sighting(
+                    user["id"], device_hash,
+                    DeviceAbuseService.hash_ip(client_ip),
+                    DeviceAbuseService.hash_user_agent(request.headers.get("user-agent", "")),
+                )
+                other_accounts_on_device = abuse_service.find_other_accounts_on_device(device_hash, user["id"])
+
+            # Emit Analytics Event
+            analytics_service = AnalyticsService(conn)
+            analytics_service.emit_event(
+                user_id=user["id"],
+                event_type="USER_LOGIN",
+                metadata={"provider": "google"},
+                session_id=session_id
             )
-            other_accounts_on_device = abuse_service.find_other_accounts_on_device(device_hash, user["id"])
-
-        # Emit Analytics Event
-        analytics_service = AnalyticsService(conn)
-        analytics_service.emit_event(
-            user_id=user["id"],
-            event_type="USER_LOGIN",
-            metadata={"provider": "google"},
-            session_id=session_id
-        )
 
         return {
             "status": "success",

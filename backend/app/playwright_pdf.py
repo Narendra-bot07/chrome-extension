@@ -400,7 +400,7 @@ def generate_pdf_via_playwright(
             # indefinitely; that previously produced 10-18 minute queue waits.
             ready_timeout = max(
                 5.0,
-                float(os.getenv("PDF_RENDER_READY_TIMEOUT_SECONDS", "30")),
+                float(os.getenv("PDF_RENDER_READY_TIMEOUT_SECONDS", "60")),
             )
             ready_deadline = time.monotonic() + ready_timeout
             stable_dom_signature = None

@@ -19,7 +19,6 @@ export default function PrintLayout() {
   const searchParams = new URLSearchParams(location.search);
   const templateName = searchParams.get('template') || 'ProfessionalATS';
   const containerRef = useRef(null);
-  const blockedExpansionLevelRef = useRef<number | null>(null);
 
   // 1. Ingestion
   useEffect(() => {
@@ -32,7 +31,6 @@ export default function PrintLayout() {
           0,
           Math.min(20, Number(window.__INJECTED_RESUME_DATA__?.layout_level ?? 6))
         ));
-        blockedExpansionLevelRef.current = null;
         setFittingComplete(false);
       }
     };
@@ -82,7 +80,6 @@ export default function PrintLayout() {
       // line boxes differently during PDF pagination; fitting to the exact
       // paper edge can clip the final education/certification row.
       const MAX_HEIGHT = isA4 ? 1100 : 1035;
-      const TARGET_MIN_HEIGHT = MAX_HEIGHT * 0.88;
       
       // Force matching size constraints onto the template container
       el.style.width = targetWidth;
@@ -105,19 +102,12 @@ export default function PrintLayout() {
       const measuredLayoutLevel = fitLayoutLevel;
 
       if (currentHeight <= MAX_HEIGHT) {
-        // Expand a genuinely under-filled page using presentation-only density
-        // changes. Stop at the last safe level if the next expansion overflows.
-        const nextLevel = fitLayoutLevel + 1;
-        const blockedLevel = blockedExpansionLevelRef.current;
-        if (
-          occupiedHeight < TARGET_MIN_HEIGHT
-          && fitLayoutLevel < 20
-          && (blockedLevel === null || nextLevel < blockedLevel)
-        ) {
-          setFitLayoutLevel(nextLevel);
-          return;
-        }
-        // Fits perfectly!
+        // The selected/live-preview layout already fits. Finalize it on the
+        // first stable measurement. The former cosmetic "fill the page"
+        // loop incremented layoutLevel as many as 14 times, re-rendering the
+        // entire template and re-reading every descendant's computed style on
+        // each pass. Under production CPU contention that alone exceeded the
+        // backend's readiness deadline even though the document was valid.
         const measurement = currentMeasurement;
         const finalPlan = buildMeasuredCompositionPlan({
           ...measurement,
@@ -147,7 +137,6 @@ export default function PrintLayout() {
         setFittingComplete(true);
       } else {
         if (fitLayoutLevel > 0) {
-          blockedExpansionLevelRef.current = fitLayoutLevel;
           setFitLayoutLevel(level => Math.max(0, level - 1));
           return;
         }
