@@ -285,6 +285,20 @@ def _find_ats_iframe_url(page, top_host: str) -> str | None:
     return None
 
 
+# A production incident (real TimeoutError from run_on_browser_pool) traced
+# to this: the selector-wait, networkidle-wait, and iframe-redirect budgets
+# added below were each given their OWN independent ceiling with no shared
+# accounting, so worst case (goto 5s + selector wait 6s + networkidle 4s,
+# THEN the same three again for an iframe redirect) summed to exactly 30s --
+# browser_pool's own _POOL_CALL_TIMEOUT_SECONDS, with zero margin for actual
+# network latency or Playwright IPC/render overhead. Hitting that ceiling is
+# far worse than a single slow request: run_on_browser_pool's timeout
+# handler abandons and replaces the ENTIRE shared browser pool, so one slow
+# page degrades every concurrent user, not just this request. Every wait
+# below now draws from one shared deadline comfortably under that ceiling.
+_SCRAPE_OVERALL_BUDGET_SECONDS = 22.0
+
+
 def _scrape_job_page(
     context, fetch_url: str, wait_until: str, timeout_ms: int, selectors: list[str],
     networkidle_wait_ms: int = 500,
@@ -312,7 +326,13 @@ def _scrape_job_page(
             else:
                 route.abort()
         page.route("**/*", _guard_request)
-        page.goto(fetch_url, wait_until=wait_until, timeout=timeout_ms)
+
+        overall_deadline = time.monotonic() + _SCRAPE_OVERALL_BUDGET_SECONDS
+
+        def _remaining_ms(floor: float = 0.0) -> float:
+            return max(floor, (overall_deadline - time.monotonic()) * 1000)
+
+        page.goto(fetch_url, wait_until=wait_until, timeout=min(timeout_ms, _remaining_ms(500)))
         # domcontentloaded above only guarantees the initial HTML shell --
         # confirmed directly against real postings (Oracle Cloud HCM,
         # Ashby-embedded career pages): the actual job content on many
@@ -324,13 +344,12 @@ def _scrape_job_page(
         # -- so it only helps genuinely slow pages instead of taxing fast
         # ones with a fixed delay.
         matched = None
-        selector_deadline = time.monotonic() + 6.0
         for selector in selectors:
-            remaining_ms = (selector_deadline - time.monotonic()) * 1000
+            remaining_ms = _remaining_ms()
             if remaining_ms <= 0:
                 break
             try:
-                page.wait_for_selector(selector, timeout=remaining_ms, state="attached")
+                page.wait_for_selector(selector, timeout=min(remaining_ms, 6000), state="attached")
                 matched = selector
                 break
             except Exception:
@@ -343,7 +362,7 @@ def _scrape_job_page(
             # default 500ms for URLs discovery_agent already identified as
             # carrying a specific job's query-param identity (see there for
             # why that's a meaningfully different, more patient case).
-            page.wait_for_load_state("networkidle", timeout=networkidle_wait_ms)
+            page.wait_for_load_state("networkidle", timeout=min(networkidle_wait_ms, _remaining_ms()))
         except Exception:
             pass
         if matched is None:
@@ -354,26 +373,30 @@ def _scrape_job_page(
         # job content lives entirely inside a cross-origin ATS iframe (the
         # LangChain/Ashby case) -- an ATS-hosted iframe is always a
         # strictly more specific, more reliable source than that shell.
+        # Only attempted with meaningful budget left; otherwise this would
+        # just be a doomed navigation eating into an already-tight deadline.
         iframe_url = _find_ats_iframe_url(page, (urlparse(page.url).hostname or "").lower())
-        if iframe_url:
+        if iframe_url and _remaining_ms() > 1500:
             iframe_portal = _portal(iframe_url)
             iframe_selectors = PORTALS.get(iframe_portal, ("", selectors))[1]
             try:
-                page.goto(iframe_url, wait_until=wait_until, timeout=timeout_ms)
-                iframe_deadline = time.monotonic() + 6.0
+                page.goto(iframe_url, wait_until=wait_until, timeout=min(timeout_ms, _remaining_ms(500)))
                 iframe_matched = None
                 for selector in iframe_selectors:
-                    remaining_ms = (iframe_deadline - time.monotonic()) * 1000
+                    remaining_ms = _remaining_ms()
                     if remaining_ms <= 0:
                         break
                     try:
-                        page.wait_for_selector(selector, timeout=remaining_ms, state="attached")
+                        page.wait_for_selector(selector, timeout=min(remaining_ms, 6000), state="attached")
                         iframe_matched = selector
                         break
                     except Exception:
                         continue
                 try:
-                    page.wait_for_load_state("networkidle", timeout=max(networkidle_wait_ms, 2000))
+                    page.wait_for_load_state(
+                        "networkidle",
+                        timeout=min(max(networkidle_wait_ms, 2000), _remaining_ms()),
+                    )
                 except Exception:
                     pass
                 if iframe_matched is None:
