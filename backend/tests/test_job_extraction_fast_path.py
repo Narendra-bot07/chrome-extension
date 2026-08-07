@@ -1,3 +1,4 @@
+import uuid
 from unittest.mock import patch
 
 from services.job_extraction.agents import (
@@ -8,7 +9,7 @@ from services.job_extraction.agents import (
     repair_agent,
     reviewer_agent,
 )
-from services.job_extraction.schemas import JDState
+from services.job_extraction.schemas import ExtractedJob, JDState
 
 
 def job_state(**updates):
@@ -33,17 +34,46 @@ def job_state(**updates):
             "skills": "Python, SQL, AWS, Docker",
             "url": "https://example.com/jobs/123",
         }],
-        "evidence": {"source_text": "Build Python and SQL data pipelines on AWS using Docker."},
+        # extraction_agent now always routes through llm_cache.execute_with_cache
+        # (real Redis in this dev environment), keyed by a fingerprint of this
+        # evidence dict. A fixed evidence payload would cache-hit on the second
+        # run of a test that mocks get_llm, silently skipping the mock and
+        # failing assert_called(). A per-call nonce keeps every test run's
+        # fingerprint unique. Tests that pass their own `evidence=` override
+        # (exercising _deterministic_job_from_evidence/reviewer_agent directly,
+        # not the cached LLM path) are unaffected.
+        "evidence": {
+            "source_text": "Build Python and SQL data pipelines on AWS using Docker.",
+            "_test_nonce": uuid.uuid4().hex,
+        },
     }
     values.update(updates)
     return JDState(**values)
 
 
 @patch("services.job_extraction.agents.get_llm")
-def test_complete_jobposting_jsonld_skips_llm(mock_get_llm):
+def test_complete_jobposting_jsonld_still_uses_llm(mock_get_llm):
+    """JSON-LD having a title+description no longer skips the LLM -- that
+    bar is low enough that most ATS platforms clear it while their JSON-LD
+    `description` is still a shortened SEO summary missing real page content
+    (e.g. a standalone skills widget). The LLM is now the primary organizer
+    for every job page; source_builder_agent gives it the full rendered
+    markdown alongside JSON-LD as supplementary evidence, and
+    _deterministic_job_from_evidence is reserved for genuine LLM failures
+    (see test_llm_failure_falls_back_to_deterministic_evidence below)."""
+    mock_structured = mock_get_llm.return_value.with_structured_output.return_value
+    mock_structured.invoke.return_value = ExtractedJob(
+        job_title="Data Engineer",
+        company_name="Example Corp",
+        skills=["Python", "SQL", "AWS", "Docker"],
+        suggested_skills=["Data Modeling", "ETL Design", "Monitoring", "Cost Optimization"],
+        responsibilities=["Build APIs", "Review code & tests"],
+        requirements=["6+ years in engineering", "Associate’s degree"],
+    )
+
     result = extraction_agent(job_state())
 
-    mock_get_llm.assert_not_called()
+    mock_get_llm.assert_called()
     assert result["extracted_job"]["job_title"] == "Data Engineer"
     assert result["extracted_job"]["company_name"] == "Example Corp"
     assert set(result["extracted_job"]["skills"]) >= {"Python", "SQL", "AWS", "Docker"}
@@ -54,6 +84,19 @@ def test_complete_jobposting_jsonld_skips_llm(mock_get_llm):
         "Associate’s degree",
     ]
     assert "<" not in " ".join(result["extracted_job"]["requirements"])
+
+
+@patch("services.job_extraction.agents.get_llm")
+def test_llm_failure_falls_back_to_deterministic_evidence(mock_get_llm):
+    """The deterministic JobPosting JSON-LD path is now reserved for genuine
+    LLM failures/timeouts, not merely-complete-JSON-LD pages."""
+    mock_get_llm.return_value.with_structured_output.return_value.invoke.side_effect = RuntimeError("boom")
+
+    result = extraction_agent(job_state())
+
+    assert result["extracted_job"]["job_title"] == "Data Engineer"
+    assert result["extracted_job"]["company_name"] == "Example Corp"
+    assert set(result["extracted_job"]["skills"]) >= {"Python", "SQL", "AWS", "Docker"}
 
 
 @patch("services.job_extraction.agents.get_llm")

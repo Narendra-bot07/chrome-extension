@@ -1229,11 +1229,24 @@ def evidence_planner_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
 def source_builder_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     state = _state(value)
     primary = state.plan.get("primary_source", "markdown")
-    source = json.dumps(
+    # The extraction LLM must always see the actual rendered page text.
+    # JSON-LD used to REPLACE it whenever the planner picked JSON-LD as
+    # "primary" (i.e. whenever title+description exist -- a low bar most
+    # ATS platforms clear), so a JobPosting JSON-LD `description` that's a
+    # shortened SEO summary silently hid the real requirements/skills text
+    # that only appears in the rendered DOM/markdown. JSON-LD is still
+    # surfaced -- it's a higher-trust structured signal for fields like
+    # employment_type/dates -- but always alongside the page text, never
+    # instead of it.
+    jsonld_hints = json.dumps(
         state.jobposting_jsonld,
         ensure_ascii=False,
         separators=(",", ":"),
-    ) if primary == "jobposting_jsonld" else state.markdown
+    )[:2000] if state.jobposting_jsonld else ""
+    source = (
+        f"STRUCTURED_JOBPOSTING_JSONLD (supplementary, may be incomplete):\n{jsonld_hints}\n\n"
+        f"RENDERED_PAGE_TEXT (primary; authoritative for skills/requirements/responsibilities):\n{state.markdown}"
+    ) if jsonld_hints else state.markdown
     payload = {
         "primary_source": primary,
         "acquisition_primary_source": state.primary_source,
@@ -1255,10 +1268,13 @@ def source_builder_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         "evidence_conflicts": state.evidence_conflicts,
         "planner_warnings": state.planner_warnings,
         "detected_sections": state.detected_sections,
-        # A focused 12k-character evidence window is enough for one posting
-        # while materially reducing LLM prompt ingestion latency. The source
-        # is already selected/cleaned before this node.
-        "source_text": source[:12000],
+        # A focused evidence window is enough for one posting while
+        # materially reducing LLM prompt ingestion latency. The source is
+        # already selected/cleaned before this node. Budget: up to ~2k for
+        # the optional JSON-LD prefix (see above) plus the same 12k of
+        # actual page text as before, so combining the two never starves
+        # the page text of the room it previously had on its own.
+        "source_text": source[:14000],
         "source_urls": list(dict.fromkeys(filter(None, [state.original_url, state.final_url, state.metadata.get("canonical_url")]))),
         "source_scores": state.source_scores,
         "field_source_hints": state.evidence.get("field_source_hints", {}),
@@ -1717,59 +1733,60 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     state = _state(value)
     logger.info("%s Extraction started request_id=%s", LOG_PREFIX, state.request_id)
 
-    complete_structured_job = any(
-        isinstance(item, dict) and item.get("title") and item.get("description")
-        for item in state.jobposting_jsonld
-    )
-    if complete_structured_job:
-        job = _deterministic_job_from_evidence(state)
-        logger.info(
-            "%s Extraction used deterministic JobPosting JSON-LD request_id=%s",
+    # The LLM is the primary organizer for every job page, including ones
+    # with JobPosting JSON-LD -- JSON-LD's own `description` field is very
+    # often a shortened/SEO-only summary that omits content the page renders
+    # separately (a standalone "Required Skills" widget, a bulleted
+    # requirements block assembled from multiple DOM nodes, etc.). This used
+    # to skip the LLM entirely whenever JSON-LD merely had a title+description
+    # (a very low bar most modern ATS platforms clear), silently downgrading
+    # those postings to a ~50-word hardcoded skill dictionary
+    # (_deterministic_explicit_skills) instead of real understanding of the
+    # page. _deterministic_job_from_evidence is now reserved for its
+    # original purpose: a bounded-latency fallback for when the LLM call
+    # itself actually fails or times out, not a shortcut applied just because
+    # structured data happens to exist.
+    jd_timeout = max(5.0, float(os.getenv("JD_EXTRACTION_LLM_TIMEOUT_SECONDS", "20")))
+
+    def _call_llm():
+        structured = get_llm(temperature=0).with_structured_output(
+            ExtractedJob,
+            timeout_seconds=jd_timeout,
+            max_tokens=2600,
+            queue_timeout_seconds=max(
+                0.5,
+                float(os.getenv("JD_EXTRACTION_AI_QUEUE_TIMEOUT_SECONDS", "3")),
+            ),
+            # A second 60-second model attempt caused the observed ~2m misses.
+            # Existing evidence is a safer fallback for this latency-sensitive path.
+            escalate_on_error=False,
+        )
+        return structured.invoke([
+            SystemMessage(content=EXTRACTION_PROMPT),
+            HumanMessage(content=json.dumps(
+                state.evidence,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )),
+        ])
+
+    try:
+        job = llm_cache.execute_with_cache(
+            task="jd_agent_extraction",
+            payload_to_fingerprint=state.evidence,
+            llm_callable=_call_llm,
+            expected_schema=ExtractedJob,
+            prompt_version="jd-agent-v2-fast"
+        )
+    except Exception as exc:
+        logger.warning(
+            "%s LLM extraction failed; using deterministic evidence fallback "
+            "request_id=%s error=%s",
             LOG_PREFIX,
             state.request_id,
+            type(exc).__name__,
         )
-    else:
-        jd_timeout = max(5.0, float(os.getenv("JD_EXTRACTION_LLM_TIMEOUT_SECONDS", "20")))
-
-        def _call_llm():
-            structured = get_llm(temperature=0).with_structured_output(
-                ExtractedJob,
-                timeout_seconds=jd_timeout,
-                max_tokens=2600,
-                queue_timeout_seconds=max(
-                    0.5,
-                    float(os.getenv("JD_EXTRACTION_AI_QUEUE_TIMEOUT_SECONDS", "3")),
-                ),
-                # A second 60-second model attempt caused the observed ~2m misses.
-                # Existing evidence is a safer fallback for this latency-sensitive path.
-                escalate_on_error=False,
-            )
-            return structured.invoke([
-                SystemMessage(content=EXTRACTION_PROMPT),
-                HumanMessage(content=json.dumps(
-                    state.evidence,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                )),
-            ])
-
-        try:
-            job = llm_cache.execute_with_cache(
-                task="jd_agent_extraction",
-                payload_to_fingerprint=state.evidence,
-                llm_callable=_call_llm,
-                expected_schema=ExtractedJob,
-                prompt_version="jd-agent-v2-fast"
-            )
-        except Exception as exc:
-            logger.warning(
-                "%s Fast LLM extraction failed; using deterministic evidence fallback "
-                "request_id=%s error=%s",
-                LOG_PREFIX,
-                state.request_id,
-                type(exc).__name__,
-            )
-            job = _deterministic_job_from_evidence(state)
+        job = _deterministic_job_from_evidence(state)
     job_dict = ExtractedJob.model_validate(job).model_dump(mode="json")
     # _clean_evidence_items/_clean_evidence_text (BeautifulSoup-based) were
     # previously only wired into the deterministic JSON-LD path
