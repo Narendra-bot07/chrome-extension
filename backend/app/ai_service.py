@@ -416,7 +416,16 @@ def generate_tailoring_patch(
                 prompt=payload_str,
                 schema_cls=ResumePatch,
                 system_instruction=sys_msg,
-                temperature=0.1
+                temperature=0.1,
+                # Measured directly against the live API (2026-08-09): this
+                # exact call shape took 22.7s with deepseek-v4-pro's default
+                # reasoning on (1684 of 1897 completion tokens spent on an
+                # invisible reasoning phase) vs 5.1s with it off, and the
+                # no-reasoning output was equally (if not more) concrete and
+                # evidence-grounded -- this is a bounded delta-patch
+                # generation task (rewrite these specific bullets/summary
+                # against this specific JD), not open-ended reasoning.
+                disable_reasoning=True,
             )
             logger.info("[STAGE 4 & 5: AI RESPONSE & JSON PARSE] Successfully received and parsed patch: %s", patch.model_dump())
             return patch

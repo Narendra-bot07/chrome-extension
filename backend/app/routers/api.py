@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from contextlib import contextmanager
+import asyncio
 import io
 import json
 import re
@@ -28,6 +29,7 @@ from core.database import get_db_connection
 from repositories.resume_repository import ResumeRepository
 from repositories.ats_repository import ATSRepository
 from services.subscriptions.usage_service import UsageService
+from services.cache.redis_cache import redis_cache
 
 _db_context = contextmanager(get_db_connection)
 
@@ -363,9 +365,23 @@ async def api_compare(
 
             resume_data = normalize_resume_payload(request.resume)
             if not resume_data.get("experience") and not resume_data.get("education"):
-                db_record = repo.get_by_id(resume_id, user["id"]) if resume_id else repo.get_active(user["id"])
-                if not db_record and resume_id:
-                    db_record = repo.get_active(user["id"])
+                # The caller sent an unpopulated resume, so this falls back to
+                # the user's saved copy -- the SAME record gets re-fetched
+                # from Postgres on every compare call in a session (tweak a
+                # suggestion, compare again, tweak again...). A short-TTL
+                # cache avoids paying a DB round trip for a record that
+                # almost certainly hasn't changed since the last call a few
+                # seconds ago; the TTL is intentionally short (not the 24h+
+                # style used elsewhere) so a real edit in between is never
+                # stale for more than a moment.
+                resume_cache_key = f"resume_lookup:v1:{user['id']}:{resume_id or 'active'}"
+                db_record = redis_cache.get(resume_cache_key)
+                if db_record is None:
+                    db_record = repo.get_by_id(resume_id, user["id"]) if resume_id else repo.get_active(user["id"])
+                    if not db_record and resume_id:
+                        db_record = repo.get_active(user["id"])
+                    if db_record:
+                        redis_cache.set(resume_cache_key, db_record, ttl_seconds=90)
                 if db_record:
                     resume_data = normalize_resume_payload(db_record)
 
@@ -428,15 +444,24 @@ async def api_compare(
                     tailoring_audit=breakdown_json.get("tailoring_audit") or {},
                 )
 
-        # Cache miss -- LLM call runs with NO DB connection held.
+        # Cache miss -- LLM call runs with NO DB connection held. res_before
+        # doesn't depend on the patch at all (it scores the UNTAILORED
+        # resume) -- it used to run only after the LLM call finished, paying
+        # its own time on top for no reason. Running it alongside the LLM
+        # call overlaps that (small but non-zero, and 100% deterministic/
+        # in-process) cost with the LLM's network round trip instead of
+        # paying both sequentially.
         try:
             from fastapi.concurrency import run_in_threadpool
-            comparison = await run_in_threadpool(
-                generate_tailoring_patch,
-                resume,
-                job,
-                api_key=None,
-                selected_sections=set(selected_sections),
+            comparison, res_before = await asyncio.gather(
+                run_in_threadpool(
+                    generate_tailoring_patch,
+                    resume,
+                    job,
+                    api_key=None,
+                    selected_sections=set(selected_sections),
+                ),
+                asyncio.to_thread(ATSScoringEngine.calculate_score, resume, job),
             )
         except Exception as exc:
             print(f"[TAILORING][BACKEND] Patch generation failed: {exc}")
@@ -447,8 +472,6 @@ async def api_compare(
                     "message": str(exc),
                 },
             )
-
-        res_before = ATSScoringEngine.calculate_score(resume, job)
 
         tailored_resume = apply_tailoring_patch(resume, comparison.patch)
         res_after = ATSScoringEngine.calculate_score(tailored_resume, job)

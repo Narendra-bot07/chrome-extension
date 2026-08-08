@@ -545,9 +545,15 @@ def test_metadata_partial_and_dom_noise_cleanup():
 def test_routing_high_low_confidence_and_repair_limits():
     assert route_after_classifier(state(page_type="job_detail", classification_confidence=.9)) == "evidence_planner"
     assert route_after_classifier(state(page_type="job_detail", classification_confidence=.5)) == "classification_review"
-    assert route_after_reviewer(state(is_valid=True)) == "final_response"
-    assert route_after_reviewer(state(needs_repair=True, repair_attempts=0)) == "repair"
-    assert route_after_reviewer(state(needs_repair=True, repair_attempts=2)) == "extraction_manual_review"
+    # Each of the 4 semantic Pro workers already owns one targeted retry
+    # inside extraction_agent itself (see agents.py) -- the graph no longer
+    # loops back through a separate global repair pass. Routing after the
+    # (now purely informational) reviewer step is a straight fork on
+    # whether extraction_agent produced a record at all, not on is_valid/
+    # needs_repair -- those still get computed for review_issues/logging but
+    # no longer drive a rerun.
+    assert route_after_reviewer(state(extracted_job={"job_title": "Engineer"})) == "final_response"
+    assert route_after_reviewer(state(extracted_job=None)) == "extraction_manual_review"
 
 
 def test_stable_success_blocked_and_manual_response_shapes():

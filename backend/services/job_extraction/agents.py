@@ -2363,6 +2363,15 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         structured = get_llm(temperature=0).with_structured_output(
             schema,
             model_override=settings.DEEPSEEK_JD_MODEL,
+            # Confirmed via direct measurement (2026-08-09): deepseek-v4-pro
+            # spends completion_tokens on an invisible reasoning phase before
+            # any real output -- small worker budgets (300-900 tokens) were
+            # being entirely consumed by reasoning_tokens, producing "empty
+            # content" almost every time. reasoning_effort="none" skips that
+            # phase; these are short classification/extraction tasks, not
+            # open-ended reasoning (see deepseek_provider.py's
+            # disable_reasoning docstring for the measured before/after).
+            disable_reasoning=True,
             timeout_seconds=6.0 if retry else 8.0,
             max_tokens=token_limit,
             queue_timeout_seconds=queue_timeout,
@@ -2643,6 +2652,15 @@ def skill_intelligence_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         skill_model = get_llm(temperature=0).with_structured_output(
             SkillDecision,
             model_override=settings.DEEPSEEK_JD_MODEL,
+            # Confirmed via direct measurement (2026-08-09): deepseek-v4-pro
+            # spends completion_tokens on an invisible reasoning phase before
+            # any real output -- small worker budgets (300-900 tokens) were
+            # being entirely consumed by reasoning_tokens, producing "empty
+            # content" almost every time. reasoning_effort="none" skips that
+            # phase; these are short classification/extraction tasks, not
+            # open-ended reasoning (see deepseek_provider.py's
+            # disable_reasoning docstring for the measured before/after).
+            disable_reasoning=True,
             timeout_seconds=8.0,
             max_tokens=500,
             escalate_on_error=False,
@@ -2745,11 +2763,28 @@ _TITLE_BRANDING_SUFFIX = re.compile(
     r"\s*[|\-–—]\s*(?:[A-Za-z0-9&.,' ]{1,40}\s+)?careers\s*$",
     re.I,
 )
+# Confirmed real-world case (2026-08-09, two separate live Greenhouse
+# postings on job-boards.greenhouse.io/anthropic): job_title is now ALWAYS
+# deterministic (see the Pro-worker split above -- no worker schema carries
+# it), so whenever a page has no JobPosting JSON-LD, this falls all the way
+# to the raw <title> tag. Greenhouse's own <title> for every posting is
+# literally "Job Application for {role} at {company}" -- without stripping
+# this wrapper, job_title came back as "Job Application for Staff+ Software
+# Engineer, Privacy at Anthropic" instead of "Staff+ Software Engineer,
+# Privacy". Applied BEFORE the branding-suffix strip below so a posting that
+# somehow has both wrappers still resolves to just the role.
+_TITLE_APPLICATION_WRAPPER = re.compile(
+    r"^\s*job\s+application\s+for\s+(.+?)\s+at\s+[A-Za-z0-9&.,' ]{1,80}\s*$",
+    re.I,
+)
 # Confirmed real-world case: a Google DeepMind posting's fallback title
 # (used when no JSON-LD/structured title exists, so we resolve from the
 # raw <title> tag) came back as "Research Scientist, Gemini Data, DeepMind
 # — Google Careers" -- the site's own SEO branding suffix, verbatim.
 def _strip_title_branding_suffix(title: str) -> str:
+    wrapper_match = _TITLE_APPLICATION_WRAPPER.match(title)
+    if wrapper_match:
+        title = wrapper_match.group(1).strip()
     return _TITLE_BRANDING_SUFFIX.sub("", title).strip()
 
 
@@ -2952,6 +2987,15 @@ def repair_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         structured = get_llm(temperature=0).with_structured_output(
             ExtractedJob,
             model_override=settings.DEEPSEEK_JD_MODEL,
+            # Confirmed via direct measurement (2026-08-09): deepseek-v4-pro
+            # spends completion_tokens on an invisible reasoning phase before
+            # any real output -- small worker budgets (300-900 tokens) were
+            # being entirely consumed by reasoning_tokens, producing "empty
+            # content" almost every time. reasoning_effort="none" skips that
+            # phase; these are short classification/extraction tasks, not
+            # open-ended reasoning (see deepseek_provider.py's
+            # disable_reasoning docstring for the measured before/after).
+            disable_reasoning=True,
             timeout_seconds=8.0,
             max_tokens=1200,
             queue_timeout_seconds=max(

@@ -141,6 +141,7 @@ class DeepSeekProvider:
         queue_timeout_seconds: Optional[float] = None,
         race_head_start_seconds: Optional[float] = None,
         model_override: Optional[str] = None,
+        disable_reasoning: bool = False,
     ) -> BaseModel:
         """
         Invokes DeepSeek model with structured JSON response_format and validates output against Pydantic schema_cls.
@@ -209,6 +210,7 @@ class DeepSeekProvider:
                     timeout_seconds=timeout_seconds,
                     max_tokens=max_tokens,
                     json_mode=True,
+                    disable_reasoning=disable_reasoning,
                 )
                 return self._parse_json_schema(raw_json, schema_cls)
 
@@ -218,6 +220,7 @@ class DeepSeekProvider:
                 # and not really an "escalation").
                 return self._invoke_flash_only(
                     messages, temperature, timeout_seconds, max_tokens, schema_cls,
+                    disable_reasoning=disable_reasoning,
                 )
 
             # Escalation used to be strictly sequential: wait for flash to
@@ -242,6 +245,7 @@ class DeepSeekProvider:
                     if race_head_start_seconds is None
                     else race_head_start_seconds
                 ),
+                disable_reasoning=disable_reasoning,
             )
 
     # Default head start before pro joins the race. Callers with real
@@ -258,6 +262,7 @@ class DeepSeekProvider:
 
     def _invoke_flash_only(
         self, messages, temperature, timeout_seconds, max_tokens, schema_cls,
+        disable_reasoning: bool = False,
     ) -> BaseModel:
         err: Exception = ValueError("unreachable")
         for attempt in range(2):
@@ -269,6 +274,7 @@ class DeepSeekProvider:
                     timeout_seconds=timeout_seconds,
                     max_tokens=max_tokens,
                     json_mode=attempt == 0,
+                    disable_reasoning=disable_reasoning,
                 )
                 return self._parse_json_schema(raw_json, schema_cls)
             except Exception as attempt_err:
@@ -284,7 +290,7 @@ class DeepSeekProvider:
 
     def _invoke_with_race(
         self, messages, temperature, timeout_seconds, max_tokens, schema_cls,
-        head_start: float,
+        head_start: float, disable_reasoning: bool = False,
     ) -> BaseModel:
         results: Dict[str, BaseModel] = {}
         errors: Dict[str, Exception] = {}
@@ -352,6 +358,7 @@ class DeepSeekProvider:
                 raw_json_pro = self._chat_completion(
                     model=self.pro_model, messages=messages, temperature=temperature,
                     timeout_seconds=timeout_seconds, max_tokens=max_tokens,
+                    disable_reasoning=disable_reasoning,
                 )
                 parsed = self._parse_json_schema(raw_json_pro, schema_cls)
                 with lock:
@@ -363,6 +370,7 @@ class DeepSeekProvider:
                         raw_json_pro = self._chat_completion(
                             model=self.pro_model, messages=messages, temperature=temperature,
                             timeout_seconds=timeout_seconds, max_tokens=max_tokens, json_mode=False,
+                            disable_reasoning=disable_reasoning,
                         )
                         parsed = self._parse_json_schema(raw_json_pro, schema_cls)
                         with lock:
@@ -417,6 +425,7 @@ class DeepSeekProvider:
         timeout_seconds: Any = _TIMEOUT_NOT_SPECIFIED,
         max_tokens: Optional[int] = None,
         json_mode: bool = True,
+        disable_reasoning: bool = False,
     ) -> str:
         """Execute chat completion call via OpenAI-compatible SDK or HTTP fallback."""
         # timeout_seconds not specified -> this provider's own default
@@ -438,6 +447,23 @@ class DeepSeekProvider:
                 request_kwargs["response_format"] = {"type": "json_object"}
             if max_tokens:
                 request_kwargs["max_tokens"] = max_tokens
+            if disable_reasoning:
+                # Confirmed via direct measurement (2026-08-09): deepseek-v4-pro
+                # is a reasoning model that spends completion_tokens on an
+                # invisible reasoning_tokens phase BEFORE any real output --
+                # e.g. a 300-token budget was entirely consumed by 300
+                # reasoning_tokens with zero left for content, producing
+                # "empty content" every time for small-output extraction
+                # tasks. reasoning_effort="none" (OpenAI-compatible
+                # extra_body field DeepSeek's API also honors) skips that
+                # phase entirely: same measurement went from
+                # completion_tokens=300/reasoning_tokens=300/content=""
+                # to completion_tokens=17/reasoning_tokens=None/real content.
+                # Only used for JD extraction's small, strictly-bounded
+                # classification/extraction workers -- other callers of this
+                # shared provider have not been measured with this flag and
+                # keep the model's default (reasoning-enabled) behavior.
+                request_kwargs["extra_body"] = {"reasoning_effort": "none"}
             response = self.client.chat.completions.create(
                 **request_kwargs
             )
@@ -462,6 +488,8 @@ class DeepSeekProvider:
                 payload["response_format"] = {"type": "json_object"}
             if max_tokens:
                 payload["max_tokens"] = max_tokens
+            if disable_reasoning:
+                payload["reasoning_effort"] = "none"
             res = requests.post(
                 f"{self.base_url}/chat/completions",
                 headers=headers,

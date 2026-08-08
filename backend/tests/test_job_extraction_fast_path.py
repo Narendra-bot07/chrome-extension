@@ -157,70 +157,75 @@ def _split_with_structured_output(facts_result=None, content_result=None, sleep_
 
 
 @patch("services.job_extraction.agents.get_llm")
-def test_extraction_splits_into_concurrent_facts_and_content_calls(mock_get_llm):
-    """extraction_agent now makes two SEPARATE LLM calls (see agents.py's
-    ExtractedJobFacts/ExtractedJobContent split) instead of one combined
-    call -- each must be requested with its own schema and merged back into
-    one complete ExtractedJob."""
+def test_extraction_splits_into_four_concurrent_pro_workers(mock_get_llm):
+    """extraction_agent now makes FOUR independent DeepSeek-Pro-only calls
+    (role/skills/responsibilities/requirements, see JDRoleWorkerResult etc.
+    in job_schemas.py) instead of one combined call. job_title/company_name
+    are never part of any worker schema -- they always come from the
+    deterministic JSON-LD/DOM baseline computed up front -- so this asserts
+    each worker's OWN fields land in the merged record."""
     mock_get_llm.return_value.with_structured_output.side_effect = _split_with_structured_output(
-        facts_result=ExtractedJobFacts(job_title="Staff Engineer", company_name="Acme Corp"),
-        content_result=ExtractedJobContent(skills=["Python", "Go"], responsibilities=["Own the platform"]),
+        facts_result=ExtractedJob(seniority="Staff", role_family="Engineering"),
+        content_result=ExtractedJob(
+            skills=["Python", "Go"], responsibilities=["Own the platform"],
+            requirements=["5+ years experience"], preferred_qualifications=["Rust"],
+        ),
     )
 
     result = extraction_agent(job_state())
 
-    assert result["extracted_job"]["job_title"] == "Staff Engineer"
-    assert result["extracted_job"]["company_name"] == "Acme Corp"
+    # Always deterministic -- no worker schema carries these fields.
+    assert result["extracted_job"]["job_title"] == "Data Engineer"
+    assert result["extracted_job"]["company_name"] == "Example Corp"
+    # Role worker.
+    assert result["extracted_job"]["seniority"] == "Staff"
+    assert result["extracted_job"]["role_family"] == "Engineering"
+    # Skills / Responsibilities / Requirements workers.
     assert result["extracted_job"]["skills"] == ["Python", "Go"]
     assert result["extracted_job"]["responsibilities"] == ["Own the platform"]
+    assert result["extracted_job"]["requirements"] == ["5+ years experience"]
+    assert result["extracted_job"]["preferred_qualifications"] == ["Rust"]
     assert result["used_deterministic_extraction"] is False
 
 
 @patch("services.job_extraction.agents.get_llm")
-def test_facts_failure_does_not_discard_a_successful_content_result(mock_get_llm):
-    """A failure in just the facts half must fall back to deterministic
-    evidence for ONLY that half -- not discard the content half's already-
-    successful (and possibly slow-to-obtain) LLM result."""
+def test_one_failed_worker_does_not_discard_other_successful_workers(mock_get_llm):
+    """A worker that fails its initial attempt AND its one targeted retry
+    must fall back to the deterministic baseline for ONLY its own fields --
+    the other three workers' already-successful results must survive
+    untouched (spec: "One failed worker does not discard successful
+    workers")."""
     mock_get_llm.return_value.with_structured_output.side_effect = _split_with_structured_output(
-        facts_result=RuntimeError("facts boom"),
-        content_result=ExtractedJobContent(skills=["Rust"], responsibilities=["Ship services"]),
+        facts_result=RuntimeError("role worker boom"),
+        content_result=ExtractedJob(
+            skills=["Rust"], responsibilities=["Ship services"],
+            requirements=["Own the on-call rotation"],
+        ),
     )
 
     result = extraction_agent(job_state())
 
-    # Facts came from the deterministic JobPosting JSON-LD fallback (see job_state()).
-    assert result["extracted_job"]["job_title"] == "Data Engineer"
-    assert result["extracted_job"]["company_name"] == "Example Corp"
-    # Content is NOT lost despite facts failing.
+    # Role worker failed twice (initial + retry) -> falls back to whatever
+    # the deterministic baseline has for its fields (nothing, here) rather
+    # than losing the rest of the extraction.
+    assert result["extracted_job"]["seniority"] is None
+    # The other three workers are NOT discarded just because role failed.
     assert result["extracted_job"]["skills"] == ["Rust"]
     assert result["extracted_job"]["responsibilities"] == ["Ship services"]
+    assert result["extracted_job"]["requirements"] == ["Own the on-call rotation"]
+    # job_title/company_name are unaffected either way -- always deterministic.
+    assert result["extracted_job"]["job_title"] == "Data Engineer"
+    assert result["extracted_job"]["company_name"] == "Example Corp"
     assert result["used_deterministic_extraction"] is True
 
 
 @patch("services.job_extraction.agents.get_llm")
-def test_content_failure_does_not_discard_a_successful_facts_result(mock_get_llm):
-    mock_get_llm.return_value.with_structured_output.side_effect = _split_with_structured_output(
-        facts_result=ExtractedJobFacts(job_title="Staff Engineer", company_name="Acme Corp"),
-        content_result=RuntimeError("content boom"),
-    )
-
-    result = extraction_agent(job_state())
-
-    assert result["extracted_job"]["job_title"] == "Staff Engineer"
-    assert result["extracted_job"]["company_name"] == "Acme Corp"
-    # Content fell back to the deterministic evidence path instead of coming
-    # back empty just because the LLM call for it failed.
-    assert set(result["extracted_job"]["skills"]) >= {"Python", "SQL", "AWS", "Docker"}
-    assert result["used_deterministic_extraction"] is True
-
-
-@patch("services.job_extraction.agents.get_llm")
-def test_facts_and_content_calls_run_concurrently_not_sequentially(mock_get_llm):
+def test_four_workers_run_concurrently_not_sequentially(mock_get_llm):
     """The whole point of the split: wall-clock time should be roughly ONE
-    call's duration, not both calls' durations added together."""
+    worker's duration, not four workers' durations added together."""
     mock_get_llm.return_value.with_structured_output.side_effect = _split_with_structured_output(
-        facts_result=ExtractedJobFacts(job_title="Staff Engineer"),
-        content_result=ExtractedJobContent(skills=["Python"]),
+        facts_result=ExtractedJob(seniority="Staff"),
+        content_result=ExtractedJob(skills=["Python"]),
         sleep_seconds=0.3,
     )
 
@@ -228,8 +233,8 @@ def test_facts_and_content_calls_run_concurrently_not_sequentially(mock_get_llm)
     extraction_agent(job_state())
     elapsed = time.perf_counter() - started
 
-    # Sequential would be ~0.6s+; concurrent should land close to ~0.3s.
-    assert elapsed < 0.5
+    # Sequential (4x0.3s) would be ~1.2s+; concurrent should land close to ~0.3s.
+    assert elapsed < 0.6
 
 
 @patch("services.job_extraction.agents.get_llm")
