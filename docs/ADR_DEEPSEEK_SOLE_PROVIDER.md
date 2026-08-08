@@ -111,3 +111,16 @@ See `docs/DEPLOYMENT.md` §6 for the full checklist.
 - [ ] Revoke Groq key in Groq Console
 - [ ] Verify DeepSeek billing activity
 - [ ] Confirm zero Gemini/Groq traffic in Render logs (24h)
+
+---
+
+## Amendment (2026-08-09): JD extraction is a documented exception to the Flash-default / Pro-escalation policy
+
+The "Model Routing Policy" section above (Flash for structured JD extraction, Pro only for escalation) is **no longer accurate for JD extraction specifically**. Live-URL testing found single JD extractions taking 46-92s; tracing the root cause required deviating from this ADR's default routing for that one pipeline. Full detail: [JD_EXTRACTION_ENGINE_DOCUMENTATION.md](JD_EXTRACTION_ENGINE_DOCUMENTATION.md) §8.18 and [CHANGELOG.md](CHANGELOG.md) 3.17.0.
+
+**What changed, scoped to `services/job_extraction/agents.py` only:**
+
+- JD extraction (the four Role/Skills/Responsibilities/Requirements workers, plus the now-unreachable `repair_agent`) calls `deepseek-v4-pro` **exclusively** via a new `model_override` parameter on `DeepSeekProvider.invoke_structured` — no Flash call, no escalation, no race, no head-start delay for this pipeline. Enforced by a new `DEEPSEEK_JD_MODEL` setting (`core/config.py`), hard-validated at startup to equal exactly `"deepseek-v4-pro"` — the app refuses to boot with any other value.
+- **New provider-level capability, additive and opt-in**: `disable_reasoning: bool = False` on `DeepSeekProvider.invoke_structured` / `_chat_completion`, sent to the API as `extra_body={"reasoning_effort": "none"}` when `True`. Measured directly against the live API (not assumed): `deepseek-v4-pro` spends `completion_tokens` on an invisible `reasoning_tokens` phase before any real output — a 300-token JD-worker budget came back as 300 reasoning tokens / 0 content / `finish_reason: "length"` with reasoning on, vs. 17 tokens total and correct output with it off. JD extraction sets `disable_reasoning=True` on every worker call (classification/extraction/normalization, not open-ended reasoning — matches this ADR's existing framing of what Flash-tier tasks are for). Resume-tailoring's `generate_tailoring_patch` (`app/ai_service.py`) also opts in (`disable_reasoning=True`) after the same call shape measured 22.7s with reasoning vs 5.1s without, same-or-better output quality.
+- **This is a per-call-site opt-in, not a change to the shared provider's defaults.** Every other caller (cover letters, resume parsing, semantic insights, skill categorization, resume-tailoring's own Flash attempt before Pro) still gets the Flash-default / Pro-escalation-with-reasoning-enabled behavior described above unless it explicitly passes `disable_reasoning=True`. Do not lower `DeepSeekProvider._RACE_HEAD_START_SECONDS` or flip `disable_reasoning` on for any other call site without measuring that task's actual reasoning-token overhead and output-quality delta first, the same way this amendment did — reasoning may be genuinely load-bearing for tasks this ADR still routes through the default policy.
+- **Practical implication for anyone adding a new JD-extraction-adjacent LLM call**: use `model_override=settings.DEEPSEEK_JD_MODEL` + `disable_reasoning=True`, not the default `invoke_structured(...)` call shape this ADR otherwise recommends.

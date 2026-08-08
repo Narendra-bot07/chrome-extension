@@ -6,6 +6,26 @@ This document tracks all currently identified technical issues, edge-case bugs, 
 
 ## Active Issues Register
 
+### ISSUE-017: LinkedIn Server-Side Extraction Can Surface a Wrong Title/Company from a Near-Zero-Confidence Metadata Fallback
+- **Date Discovered**: 2026-08-09
+- **Severity**: Low
+- **Component**: `backend/services/job_extraction/agents.py` (`evidence_evaluation_agent`)
+- **Description**: When the JD extraction pipeline is run without extension-supplied `browser_evidence` (i.e. server-side Playwright only — the exact scenario when testing live URLs directly against the pipeline, not the real extension flow), a login-walled LinkedIn URL correctly gets `backend_playwright` marked `restricted` (`restriction_type: login_required`, confirmed `confidence: 0.92`) and correctly returns `status: "partial"` rather than fabricating success. However, the pipeline still falls through to whatever's left (`backend_metadata`, confirmed real case scored `0.1975` — far below every other source's usual bar) and surfaces that source's `job_title`/`company_name` verbatim. Live repro: a LinkedIn search-results URL returned `job_title: "PETADATA hiring US IT RECRUITERS - FRESHERS in Hyderabad, Telangana, India | LinkedIn"` and `company_name: "FRESHERS in Hyderabad, Telangana, India"` — an unrelated posting's data, not the requested job.
+- **Current Status**: Open. Does not affect production LinkedIn extraction via the extension, which supplies evidence from the user's own already-authenticated browser tab — this only manifests when there is no usable extension evidence at all and the only remaining source is a near-worthless metadata scrape.
+- **Assigned Fix**: Consider a minimum `job_signal_score`/`quality_score` floor below which `evidence_evaluation_agent` routes straight to `manual_review` instead of selecting a technically-"usable" but practically-noise source as primary.
+
+---
+
+### ISSUE-016: `ResumeRepository.get_active`/`get_by_id` Each Defined Twice — Second Definition Silently Shadows the First
+- **Date Discovered**: 2026-08-09
+- **Severity**: Low
+- **Component**: `backend/repositories/resume_repository.py`
+- **Description**: `ResumeRepository` (a single class) defines `get_active` at both line ~261 and line ~478. Python keeps only the last definition of a method with a given name — the second `get_active` (the simpler of the two: single query, no "fall back to most recently updated resume if none is explicitly `is_active`" branch) is the one that actually runs; the first definition, including that fallback branch, is unreachable dead code. Found while adding the resume-fetch cache in [CACHING.md](CACHING.md) §9 — not related to that change, pre-existing.
+- **Current Status**: Open, not fixed. Not necessarily a live bug (the second/active definition is a valid, simpler implementation on its own), but the dead first definition is misleading to read and its fallback behavior — if actually desired — currently never executes.
+- **Assigned Fix**: Decide which behavior is correct (plain "most recent `is_active=TRUE` row" vs. "fall back to most recently updated resume overall if none is flagged active"), delete the other definition, and rename if both are legitimately needed for different callers.
+
+---
+
 ### ISSUE-015: `/billing/verify-session` Grants Paid Plans Without Verifying Payment
 - **Date Discovered**: 2026-08-04
 - **Date Fixed**: 2026-08-04

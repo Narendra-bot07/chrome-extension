@@ -2,10 +2,12 @@
 
 ## End-to-End Engineering Documentation
 
-**Document status:** Current implementation, with one stale provider name (see correction below)  
+**Document status:** Evidence acquisition/ranking/session sections (§2-§7, §10-§14, §16-§19, §21-§22) are current. The extraction/review/repair sections (§8.18-8.20, §15) describe an **architecture replaced 2026-08-09** — read the correction below before trusting any "one Groq/DeepSeek call" or "flash → pro escalation" claim in this document.  
 **Scope:** Chrome extension JD capture, hybrid evidence acquisition, backend Job Intelligence graph, extraction, review, session management, ATS comparison integration, frontend states, observability, testing, and operations.
 
-> ⚠️ **Provider correction**: every mention of **Groq** throughout this document (the "one structured Groq call" pattern, `Groq rate limiting`, `Groq's tool_use_failed`, §15 "Groq call management", §18.5, etc.) should be read as **DeepSeek**. Per [ADR_DEEPSEEK_SOLE_PROVIDER.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/ADR_DEEPSEEK_SOLE_PROVIDER.md), Groq was fully removed from the codebase (`groq_service.py` deleted, `groq` package not in `requirements.txt`) and `backend/services/job_extraction/agents.py` now calls `app.ai_service.get_llm()`, which routes through `DeepSeekProvider`/`ResilientLLMWrapper` (`deepseek-v4-flash` → `deepseek-v4-pro` escalation) instead. The call-count discipline this document describes (one normal-path call, at most one repair call) is a real, still-enforced constraint — only the vendor name is outdated. This banner was added rather than rewriting all ~15 in-body mentions individually, to avoid introducing new errors in a 37KB document without re-verifying every surrounding claim line-by-line.
+> ⚠️ **Provider correction**: every mention of **Groq** throughout this document (the "one structured Groq call" pattern, `Groq rate limiting`, `Groq's tool_use_failed`, §15 "Groq call management", §18.5, etc.) should be read as **DeepSeek**. Per [ADR_DEEPSEEK_SOLE_PROVIDER.md](file:///e:/PICTURES/OneDrive/Desktop/chrome-extension/docs/ADR_DEEPSEEK_SOLE_PROVIDER.md), Groq was fully removed from the codebase (`groq_service.py` deleted, `groq` package not in `requirements.txt`).
+
+> ⚠️ **Architecture correction (2026-08-09)**: §8.18-8.20 and §15 below describe the OLD extraction model — "one structured call using `ExtractedJob`", "flash → pro escalation", "at most one repair call". That model is gone for JD extraction. As of the [3.17.0](CHANGELOG.md) rewrite: **DeepSeek Pro only, no Flash, no racing, no escalation** (`DEEPSEEK_JD_MODEL`, hard-validated at startup to equal `"deepseek-v4-pro"`); deterministic extraction (JSON-LD/DOM/regex, zero LLM calls) runs first and unconditionally; the single `ExtractedJob` call is decomposed into **four independent, concurrently-run Pro workers** (role, skills, responsibilities, requirements) under a 15s hard deadline via `asyncio.TaskGroup`; each worker gets its own single targeted retry instead of a whole-schema repair pass; and DeepSeek Pro's reasoning phase is explicitly disabled for these calls (`disable_reasoning=True` → `reasoning_effort: "none"`) since it was silently consuming small per-worker token budgets and returning empty content. See §8.18-8.20 (updated in place below) and [CHANGELOG.md](CHANGELOG.md) 3.17.0 for the full rationale and measured before/after latency.
 
 ---
 
@@ -20,8 +22,8 @@ tailr4u's Job Description Extractor is no longer a simple webpage scraper. It is
 - Deterministic evidence ranking and invariant repair.
 - Semantic page classification.
 - Extraction-readiness evaluation.
-- One structured Groq extraction call in the normal path.
-- Deterministic validation and at most one repair call when required.
+- Deterministic (LLM-free) extraction as the baseline, then up to four concurrent DeepSeek-Pro-only workers filling in what deterministic extraction couldn't (see §8.18).
+- Deterministic validation and, per worker, at most one targeted retry when required — no whole-schema repair call.
 - Session-scoped JD persistence across the extension workflow.
 - Stable frontend outcomes for extracted, partial, selection-required, non-job, blocked, manual-review, and insufficient-evidence states.
 
@@ -747,32 +749,35 @@ The source builder:
 - Includes browser-session title/company/location hints.
 - Provides field source hints for identity, description, and application URL.
 
-### 8.18 Structured extraction
+### 8.18 Structured extraction (rewritten 2026-08-09 — see [CHANGELOG.md](CHANGELOG.md) 3.17.0)
 
-The normal extraction path makes one structured Groq call using `ExtractedJob`.
+`extraction_agent` (`services/job_extraction/agents.py`) no longer makes one call for the whole `ExtractedJob` schema. It runs, in order:
 
-The extraction prompt requires:
+1. **Deterministic extraction first, unconditionally.** `_deterministic_job_from_evidence` (JSON-LD structured fields, regex heading-detection over rendered markdown via `_JD_SECTION_HEADINGS`, a ~150-term skill-alias dictionary) runs before any LLM call and produces the `baseline` dict — this is not a fallback-on-failure path anymore, it's the first step every extraction takes. `job_title`, `company_name`, `location`, `workplace_type`, `employment_type`, `salary`, `application_url`, `date_posted`, `valid_through`, and `source_url` come from this baseline **only** — no LLM worker schema carries these fields at all.
+2. **Deterministic evidence segmentation** slices the rendered markdown into four rough section buckets (role/skills/responsibilities/requirements) via regex heading matching, falling back to the full cleaned evidence text for any bucket where segmentation found nothing usable (correctness over micro-optimization — an unsegmented worker still gets the right facts, just with more irrelevant context).
+3. **Four independent DeepSeek-Pro-only workers run concurrently** via `asyncio.TaskGroup` under a 15-second hard deadline (`asyncio.timeout(15.0)`):
 
-- Exact role title.
-- Recognizable employer brand.
-- Location.
-- Workplace and employment types.
-- Description.
-- Responsibilities.
-- Requirements.
-- Preferred qualifications.
-- Explicit skills.
-- Suggested skills.
-- Benefits.
-- Salary.
-- Application and posting dates.
-- Source URL.
+   | Worker | Schema | Fields |
+   |---|---|---|
+   | Role | `JDRoleWorkerResult` | `seniority`, `experience_min`, `experience_max`, `role_family`, `department` |
+   | Skills | `JDSkillsWorkerResult` | `skills`, `suggested_skills` |
+   | Responsibilities | `JDResponsibilitiesWorkerResult` | `responsibilities` |
+   | Requirements | `JDRequirementsWorkerResult` | `requirements`, `preferred_qualifications`, `benefits` |
 
-It explicitly prevents a marketplace such as LinkedIn from being treated as the employer when the selected job card identifies another company.
+   Each call: `model_override=settings.DEEPSEEK_JD_MODEL` (hard-validated at startup to be exactly `"deepseek-v4-pro"` — no Flash, no escalation, no race, no head-start delay for this pipeline), `escalate_on_error=False`, `disable_reasoning=True` (see below), and its own strict `max_tokens` budget.
+4. **Reasoning explicitly disabled** (`disable_reasoning=True` → `extra_body={"reasoning_effort": "none"}` on the underlying DeepSeek call). Root-cause finding (2026-08-09, measured directly against the live API, not assumed): `deepseek-v4-pro` is a reasoning model that spends `completion_tokens` on an invisible `reasoning_tokens` phase before any real output. A 300-token worker budget with reasoning enabled came back as 300 `reasoning_tokens` / 0 content / `finish_reason: "length"` — completely empty, every time, not occasionally. With reasoning disabled the same call used 17 tokens total and returned correct output. This is why token budgets this small (200-900) work at all; they would not survive DeepSeek Pro's default reasoning behavior.
+5. **Targeted retry, per worker, at most once.** A worker that fails (timeout, empty content, malformed JSON) gets exactly one retry with a shorter timeout, still scoped to that worker only — a Skills failure never reruns Role/Responsibilities/Requirements. Total worst case: 4 initial calls + 4 retries = 8 Pro calls; typical case (no failures) is 4.
+6. **Merge**: `merged = {**baseline, **each successful worker's non-empty fields}`, then re-validated as one `ExtractedJob` (this is where all the field normalizers — placeholder stripping, workplace/employment canonicalization, salary coercion — actually run; the four worker schemas have none of their own). A worker that never resolved (failed twice, or was still running when the 15s deadline fired and got cancelled) simply leaves the deterministic baseline's value for its fields in place — `used_deterministic_extraction` is `True` whenever fewer than 4 of 4 workers succeeded, but the response is never "blank," only less complete for that specific field group.
 
-### 8.19 Deterministic review
+It explicitly prevents a marketplace such as LinkedIn from being treated as the employer when the selected job card identifies another company (this rule lives in `EXTRACTION_PROMPT`, shared by all four workers).
 
-The reviewer checks:
+**Verified, live, cache-bypassed** (same 3 real postings, back-to-back): LangChain 53.6s → 10.5s; Anthropic 78.0s → 11.2s; Disney 46.4s → 8.6s, with 12/12 worker calls succeeding first try. Full before/after numbers and the empty-content root-cause trace: [CHANGELOG.md](CHANGELOG.md) 3.17.0.
+
+**Not yet done**: none of this streams to the frontend today. `/jobs/extract-url` (§7.1) is still one atomic request/response — the client waits for all four workers (or the 15s deadline) before getting anything back. `minimum_ready` (title/company/description/skills-or-requirements/responsibilities all present) is computed and recorded to `jd_time_to_minimum_ready_seconds` but nothing early-releases it to the UI. SSE progressive per-worker delivery was scoped but not built.
+
+### 8.19 Deterministic review (now informational only — no longer gates routing)
+
+`reviewer_agent` still runs and still checks the same things it always did:
 
 - Job title.
 - Company.
@@ -780,24 +785,24 @@ The reviewer checks:
 - Skill evidence.
 - Suggested-skill count.
 - Unsupported canonical skill labels.
-- **Responsibilities/requirements completeness (added 2026-08-07)**: when `description` has substantial content (>200 chars) but both `responsibilities` and `requirements` are empty, this is flagged for repair. Previously a "skills only" extraction — real description text, but nothing extracted into either list, even when the source page clearly had a "What You Will Be Doing"/"Requirements" section — passed review untouched and reached the client indistinguishable from a genuinely complete result. See [CHANGELOG.md](CHANGELOG.md) 3.15.22.
+- Responsibilities/requirements completeness (added 2026-08-07): when `description` has substantial content (>200 chars) but both `responsibilities` and `requirements` are empty, this is flagged. See [CHANGELOG.md](CHANGELOG.md) 3.15.22.
 
-The reviewer does not make an additional LLM call.
+**As of 2026-08-09, its `needs_repair`/`is_valid`/`repair_fields` output no longer drives graph routing.** `route_after_reviewer` (`graph.py`) now routes purely on whether `extraction_agent` produced a record at all (`"final_response" if state.extracted_job else "extraction_manual_review"`) — and `extraction_agent` always produces at least the deterministic baseline, so in practice this is always `"final_response"`. The reviewer's field-level checks are preserved for `review_issues`/logging visibility, but no repair call is ever triggered by them anymore; that's what §8.20 replaces. **`final_response_agent` has its own, independent `missing_fields` check** (job_title/company_name/description presence, plus the "skills-only" pattern) that still correctly downgrades a genuinely incomplete result to `status: "partial"` — so a missing required field is still never silently reported as a full success, it just isn't routed through `reviewer_agent`/`repair_agent` to get there anymore.
 
-### 8.20 Optional repair
+The reviewer does not make an LLM call (it never did, despite an older log line claiming `llm_calls_so_far=1`).
 
-If review finds repairable issues:
+### 8.20 Repair — replaced by per-worker targeted retry (§8.18 step 5)
 
-- At most one repair call is allowed.
-- The repair prompt includes current extraction, repair fields, field issues, and sanitized evidence.
-- The result is normalized and reviewed again.
+`repair_agent` still exists in `agents.py` (full-schema `ExtractedJob` repair, `model_override=DEEPSEEK_JD_MODEL`, `disable_reasoning=True`, 1200 max_tokens) but **the graph no longer routes to it** — `repair`, along with `extraction_manual_review_agent`, is now unreachable from `route_after_reviewer` (see §8.19). The targeted retry inside each of the four workers (§8.18 step 5) is the actual repair mechanism now: smaller, cheaper, and scoped to only the field group that actually failed, rather than re-asking for the entire job record because one section came back short. This is intentional dead code pending a cleanup pass, not a bug — kept in place in case routing needs to be reintroduced, but not currently exercised. Do not assume `repair_attempts`/`max_repair_attempts` on `JDState` reflect anything happening in production today.
 
-Therefore:
+Call-count summary (see also §15, also rewritten):
 
-- Normal path: one Groq call.
-- Repair path: maximum two Groq calls.
-
-This replaced the earlier many-call pipeline that caused rate-limit problems.
+```text
+Cache hit (URL-level, §7.4): 0 Pro calls
+Full deterministic success:   0 Pro calls (rare — most real postings still need at least one worker)
+Typical:                      4 Pro calls (one per worker, no retries)
+Worst case:                   8 Pro calls (every worker fails once, retries once each)
+```
 
 ---
 
@@ -818,6 +823,9 @@ This replaced the earlier many-call pipeline that caused rate-limit problems.
 - `employment_type`
 - `seniority`
 - `department`
+- `experience_min` (added 2026-08-09 — populated by the Role worker, §8.18; not yet surfaced in `JobReviewView.jsx`)
+- `experience_max` (added 2026-08-09 — same as above)
+- `role_family` (added 2026-08-09 — same as above)
 - `description`
 - `responsibilities`
 - `requirements`
@@ -1145,28 +1153,32 @@ This removed ATS comparison as an extraction bottleneck.
 
 ---
 
-## 15. Groq call management
+## 15. LLM call management (rewritten 2026-08-09 — was "Groq call management")
 
-Rate limiting occurred because the earlier agent pipeline made many calls per extraction.
+Rate limiting was the original reason for a strict call-count policy; latency is the current one. See §8.18 for the full architecture.
 
 Current call policy:
 
-- Evidence acquisition: deterministic/browser operations.
-- Restriction detection: deterministic.
-- Source ranking: deterministic.
-- Page classification: deterministic.
-- Normal structured extraction: one Groq call.
-- Review: deterministic.
-- Repair: optional one Groq call.
+- Evidence acquisition: deterministic/browser operations. Zero LLM calls.
+- Restriction detection: deterministic. Zero LLM calls.
+- Source ranking: deterministic. Zero LLM calls.
+- Page classification: deterministic. Zero LLM calls.
+- Deterministic extraction baseline: zero LLM calls (JSON-LD/DOM/regex).
+- Structured extraction: up to four concurrent DeepSeek-Pro-only calls (role/skills/responsibilities/requirements), each with at most one targeted retry.
+- Review: deterministic, zero LLM calls (§8.19 — no longer gates a repair call).
+- Repair: not reachable in the current graph (§8.20) — superseded by per-worker targeted retry.
 
 Maximum:
 
 ```text
-Normal extraction: 1 Groq call
-Extraction needing repair: 2 Groq calls
+Cache hit (§7.4):        0 Pro calls
+Typical extraction:      4 Pro calls (one per worker, no retries needed)
+Worst case:               8 Pro calls (every worker fails once, retries once each)
 ```
 
-Resume storage and resume listing do not require Groq. Resume parsing can be performed separately/on demand.
+This replaced both the earlier many-call pipeline that caused rate-limit problems (Groq era) **and** the later single-combined-call-with-flash/pro-escalation design that caused 46-92s single extractions (see [CHANGELOG.md](CHANGELOG.md) 3.17.0) — decomposition into small, parallel, Pro-only, non-reasoning calls addresses both latency and reliability at once.
+
+Resume storage and resume listing do not require an LLM call. Resume parsing can be performed separately/on demand.
 
 ---
 
@@ -1394,11 +1406,11 @@ Confirm:
 - Parenthetical lists were atomized.
 - UI uses `collectJobSkills()`.
 
-### 18.5 Groq returns HTTP 400 tool validation
+### 18.5 DeepSeek returns HTTP 400 tool validation, or a worker returns empty content
 
-Inspect the failing field.
+For a genuine schema-validation 400: inspect the failing field. Source-native categorical labels should use permissive schema fields followed by deterministic normalization. Do not make the tool schema stricter than real job-site values.
 
-Source-native categorical labels should use permissive schema fields followed by deterministic normalization. Do not make the tool schema stricter than real job-site values.
+For **empty content with no error** from a JD-extraction worker specifically (as of the 2026-08-09 rewrite, §8.18): check `disable_reasoning=True` is actually being passed for that call site. `deepseek-v4-pro` silently spends the entire `max_tokens` budget on an invisible reasoning phase when this isn't set, producing `finish_reason: "length"` with zero real content — this looks like a token-budget-too-small bug but isn't; the fix is disabling reasoning, not raising `max_tokens`. Confirm via the response's `usage.completion_tokens_details.reasoning_tokens` field if you have raw API access — if `reasoning_tokens == completion_tokens`, that's the signature.
 
 ### 18.6 Extraction spinner does not stop
 
@@ -1449,8 +1461,8 @@ The scan should begin only after hydration.
 6. Keep page type, page access, and readiness separate.
 7. Keep explicit and suggested skills separate.
 8. Keep frontend capture portal-independent; selectors are optional optimizations.
-9. Keep retries bounded.
-10. Keep normal Groq usage to one extraction call.
+9. Keep retries bounded — one targeted retry per worker (§8.18 step 5), never a whole-schema rerun.
+10. Keep JD extraction on DeepSeek Pro only, reasoning disabled — no Flash, no racing, no escalation, no thinking budget silently eating a small worker's token allowance (§8.18, §15).
 11. Keep JD persistence session-scoped.
 12. Keep ATS comparison non-blocking.
 13. Preserve compatibility aliases until all consumers migrate.

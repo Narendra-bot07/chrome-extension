@@ -309,8 +309,30 @@ class ExtractedJob(BaseModel):
 
 
 class JDRoleWorkerResult(BaseModel):
-    """Small Pro-only role classification result."""
+    """Pro-only role/identity classification result.
+
+    job_title/company_name/location/workplace_type/employment_type/salary
+    are here (added 2026-08-09) because leaving them purely to regex/JSON-LD
+    heuristics produced confident-looking wrong answers a model would not
+    make: e.g. `parse_salary_from_text` (salary_parser.py) matches the
+    nearest number to any currency symbol with no understanding of what
+    that number IS -- confirmed live on a LangChain posting where it
+    returned "$125" while the real compensation line ("$350K OTE USD") sat
+    a few lines away, because some other, unrelated dollar figure on the
+    page was textually closer to a currency marker. An LLM reading the
+    surrounding sentence can tell revenue/funding/quota/headcount apart
+    from actual role compensation; a regex proximity match cannot. Still
+    only ever OVERRIDES the deterministic baseline when non-empty (see
+    extraction_agent's merge) -- a worker timeout/failure still leaves the
+    deterministic guess in place rather than nothing at all.
+    """
     model_config = ConfigDict(extra="ignore")
+    job_title: Optional[str] = None
+    company_name: Optional[str] = None
+    location: Optional[str] = None
+    workplace_type: Optional[str] = None
+    employment_type: Optional[str] = None
+    salary: Optional[SalaryInfo] = None
     seniority: Optional[str] = None
     experience_min: Optional[float] = None
     experience_max: Optional[float] = None

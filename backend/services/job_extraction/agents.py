@@ -2340,13 +2340,38 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         return markdown[:30000]
 
     worker_specs = {
-        "role": (JDRoleWorkerResult, 300, segment("role")),
+        # Role gets the FULL cleaned evidence (not a narrow "about the
+        # role" section slice like the other three workers) -- job title,
+        # employer, location, and compensation can appear anywhere on the
+        # page (a header, a separate "Compensation & Benefits" block far
+        # from any "about the role" heading), and this worker's whole point
+        # is to read them in context rather than pattern-match nearby text.
+        "role": (JDRoleWorkerResult, 600, markdown[:30000]),
         "skills": (JDSkillsWorkerResult, 500, segment("skills")),
         "responsibilities": (JDResponsibilitiesWorkerResult, 900, segment("responsibilities")),
         "requirements": (JDRequirementsWorkerResult, 900, segment("requirements")),
     }
     worker_prompts = {
-        "role": "Extract only seniority, numeric experience range, role family, and department.",
+        "role": (
+            "Extract job_title, company_name, location, workplace_type "
+            "(remote/hybrid/onsite/unknown), employment_type "
+            "(full_time/part_time/contract/internship/temporary/volunteer/"
+            "unknown/other), salary, seniority, numeric experience range, "
+            "role family, and department. Use actual understanding of the "
+            "page, not proximity matching: job_title is the specific role "
+            "being hired for, not a page wrapper like 'Job Application for "
+            "X at Y'. company_name is the real employer, never a job board "
+            "or ATS platform (LinkedIn, Greenhouse, Ashby, Workday, etc.) "
+            "hosting the posting. salary is compensation actually offered "
+            "FOR THIS ROLE (base pay, OTE, hourly rate) -- if the page "
+            "mentions multiple dollar figures (revenue, funding raised, "
+            "contract/deal size, company valuation, headcount, years of "
+            "experience), identify which one, if any, is genuinely this "
+            "role's pay by reading the surrounding sentence, and leave "
+            "salary null rather than guess if none clearly is. Set any "
+            "field to null when the evidence doesn't clearly support it -- "
+            "never invent a placeholder value."
+        ),
         "skills": "Extract all explicit atomic skills and 4-10 non-duplicate inferred ATS skills.",
         "responsibilities": "Extract every distinct job responsibility. Preserve meaning; do not invent.",
         "requirements": "Separate required qualifications, preferred qualifications, and benefits.",
@@ -2452,17 +2477,23 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             )
 
     asyncio.run(orchestrate())
+    # Merge before computing minimum_ready -- job_title/company_name can now
+    # come from the Role worker (see JDRoleWorkerResult), not only the
+    # deterministic baseline, so checking baseline alone would under-report
+    # readiness whenever Role corrected/supplied a field the deterministic
+    # pass got wrong or missed entirely.
+    merged = dict(baseline)
+    for worker_result in results.values():
+        for field, field_value in worker_result.items():
+            if field_value not in (None, [], ""):
+                merged[field] = field_value
+    job_dict = ExtractedJob.model_validate(merged).model_dump(mode="json")
     minimum_ready = bool(
-        baseline.get("job_title")
-        and baseline.get("company_name")
-        and baseline.get("description")
-        and (results.get("skills") or baseline.get("skills"))
-        and (
-            results.get("responsibilities")
-            or baseline.get("responsibilities")
-            or results.get("requirements")
-            or baseline.get("requirements")
-        )
+        job_dict.get("job_title")
+        and job_dict.get("company_name")
+        and job_dict.get("description")
+        and job_dict.get("skills")
+        and (job_dict.get("responsibilities") or job_dict.get("requirements"))
     )
     jd_extraction_stage_duration_seconds.labels(
         stage="time_to_minimum_ready",
@@ -2471,12 +2502,6 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     jd_time_to_minimum_ready_seconds.labels(
         status="success" if minimum_ready else "partial"
     ).observe(time.perf_counter() - extraction_started)
-    merged = dict(baseline)
-    for worker_result in results.values():
-        for field, field_value in worker_result.items():
-            if field_value not in (None, [], ""):
-                merged[field] = field_value
-    job_dict = ExtractedJob.model_validate(merged).model_dump(mode="json")
     used_deterministic_extraction = len(results) < len(worker_specs)
     if used_deterministic_extraction:
         reason = "deadline" if len(results) and not errors else "worker_failure"

@@ -126,6 +126,25 @@ All metrics are exported at `GET /metrics` (requires `Authorization: Bearer <MET
 | `pdf_render_duration_seconds` | Histogram | `status` | Playwright PDF render latency |
 | `notification_delivery_total` | Counter | `channel, status` | Email sends via Resend |
 
+### 4.2a JD Extraction Worker Metrics (added 2026-08-09, actually wired and emitting)
+
+Unlike the AI-governance guardrail metrics in §4.3a below (defined but dead until a feature migrates to the gateway), these are called from live code today — `.labels(...).observe()`/`.inc()` fires from inside `extraction_agent` (`services/job_extraction/agents.py`) and `extract_job_from_provided_url` (`api/v1/jobs.py`) on every real request. Added as part of the [3.17.0](CHANGELOG.md) Pro-only/four-worker JD extraction rewrite — see [JD_EXTRACTION_ENGINE_DOCUMENTATION.md](JD_EXTRACTION_ENGINE_DOCUMENTATION.md) §8.18. No label ever carries a URL, company name, user ID, or job ID.
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `jd_extraction_stage_duration_seconds` | Histogram | `stage, status` | Per-stage latency (`cache_lookup`, `deterministic_extraction`, `time_to_first_result`, `time_to_minimum_ready`, `semantic_extraction`, `total_extraction`) |
+| `jd_worker_duration_seconds` | Histogram | `worker, status, attempt` | Latency of each of the 4 Pro workers (`role`/`skills`/`responsibilities`/`requirements`), `attempt` = `initial`/`retry` |
+| `jd_worker_output_tokens` | Counter | `worker` | Estimated output tokens per worker (chars/4 heuristic) |
+| `jd_extraction_worker_failures_total` | Counter | `worker, reason, attempt` | Worker failures (`reason` = exception class name) and their targeted retries |
+| `jd_worker_timeout_total` | Counter | `worker, attempt` | Workers that hit the per-call timeout specifically (subset of the failures above) |
+| `jd_extraction_cache_total` | Counter | `status` | URL-level result cache lookups (§8 in [CACHING.md](CACHING.md)) — `hit`/`miss` |
+| `jd_cache_lookup_seconds` | Histogram | `status` | Latency of that same cache lookup |
+| `jd_deterministic_extraction_seconds` | Histogram | — | Latency of the zero-LLM deterministic baseline pass |
+| `jd_time_to_first_result_seconds` | Histogram | — | Time from extraction start to the first worker resolving |
+| `jd_time_to_minimum_ready_seconds` | Histogram | `status` | Time until title/company/description/skills-or-requirements/responsibilities are all present (`status` = `success`/`partial`) — not yet exposed to the frontend as an early-continue signal, see §8.18's "not yet done" note |
+| `jd_total_extraction_seconds` | Histogram | `status` | End-to-end latency including the URL-level cache check |
+| `jd_partial_completion_total` | Counter | `reason` | Extractions where fewer than 4/4 workers succeeded (`reason` = `deadline`/`worker_failure`) |
+
 ### 4.3 LLM Metrics
 
 | Metric | Type | Labels | Description |
@@ -243,6 +262,45 @@ histogram_quantile(0.95, rate(pdf_render_duration_seconds_bucket[5m]))
 # Redis Cache Hit Rate
 rate(cache_hits_total[5m]) /
 (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m])) * 100
+```
+
+### 5.2a JD Extraction Worker Panels (added 2026-08-09)
+
+Companion panels for the metrics in §4.2a — not yet built into a saved dashboard, but every query below works against what's actually emitting today:
+
+```promql
+# P50 / P95 time to first worker result
+histogram_quantile(0.50, rate(jd_time_to_first_result_seconds_bucket[15m]))
+histogram_quantile(0.95, rate(jd_time_to_first_result_seconds_bucket[15m]))
+
+# P50 / P95 time to minimum-viable-for-tailoring
+histogram_quantile(0.50, rate(jd_time_to_minimum_ready_seconds_bucket[15m]))
+histogram_quantile(0.95, rate(jd_time_to_minimum_ready_seconds_bucket[15m]))
+
+# P50 / P95 total extraction latency
+histogram_quantile(0.50, rate(jd_total_extraction_seconds_bucket[15m]))
+histogram_quantile(0.95, rate(jd_total_extraction_seconds_bucket[15m]))
+
+# Per-worker P95 latency
+histogram_quantile(0.95, sum by (worker, le) (rate(jd_worker_duration_seconds_bucket[15m])))
+
+# Per-worker token usage (avg)
+rate(jd_worker_output_tokens[15m]) / rate(jd_worker_duration_seconds_count[15m])
+
+# Worker failure rate (targeted retries triggered)
+sum by (worker) (rate(jd_extraction_worker_failures_total{attempt="initial"}[15m]))
+
+# Retry rate (initial attempts that needed a retry)
+sum(rate(jd_extraction_worker_failures_total{attempt="initial"}[15m])) /
+sum(rate(jd_worker_duration_seconds_count{attempt="initial"}[15m])) * 100
+
+# URL-level cache hit %
+sum(rate(jd_extraction_cache_total{status="hit"}[15m])) /
+sum(rate(jd_extraction_cache_total[15m])) * 100
+
+# Partial-completion % (fewer than 4/4 workers succeeded)
+sum(rate(jd_partial_completion_total[15m])) /
+sum(rate(jd_total_extraction_seconds_count[15m])) * 100
 ```
 
 ---
