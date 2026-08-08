@@ -63,13 +63,26 @@ export function DocumentsTab({ application, onUpdateDocumentStatus }) {
   });
 
   // Fire-and-forget: the user already has their download by the time this
-  // runs, it only saves the *next* click a round trip through Playwright.
-  const persistGeneratedPdf = (kind, base64) => {
+  // runs, so this must never block or fail the download itself -- it only
+  // saves the *next* click a round trip through Playwright by caching the
+  // rendered PDF in Supabase Storage. Still non-blocking, but a single
+  // network blip previously meant that PDF silently never made it to
+  // storage at all (nothing retried it, nothing surfaced it beyond a
+  // console.warn nobody but a developer would ever see) until the user
+  // happened to download the exact same document again. One retry after a
+  // short delay covers the common transient case without making the
+  // "fire-and-forget" tradeoff blocking.
+  const persistGeneratedPdf = (kind, base64, attempt = 1) => {
     fetch(`${getApiUrl()}/api/v1/applications/${application.id}/${kind}-pdf`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ pdf_base64: base64 })
-    }).catch(err => console.warn(`Failed to persist ${kind} PDF for reuse`, err));
+    }).catch(err => {
+      console.warn(`Failed to persist ${kind} PDF for reuse (attempt ${attempt})`, err);
+      if (attempt < 2) {
+        setTimeout(() => persistGeneratedPdf(kind, base64, attempt + 1), 3000);
+      }
+    });
   };
 
   // A failed download used to navigate away to the standalone Resume/Cover

@@ -661,6 +661,21 @@ class ResumeRepository:
                     self.conn.commit()
                     rows = [dict(v1_ver)]
 
+            # Same "No ATS Score / No Match Score" gap as compare_versions
+            # (see _backfill_version_score) -- Resume Manager's version list
+            # reads these columns directly too, so a version whose score was
+            # never persisted (created before that write path existed, or
+            # the background scorer call silently timed out) showed the
+            # same permanent placeholder here, not just in Compare Mode.
+            backfilled = False
+            for index, row in enumerate(rows):
+                updated = self._backfill_version_score(cur, row)
+                if updated is not row:
+                    rows[index] = updated
+                    backfilled = True
+            if backfilled:
+                self.conn.commit()
+
             return rows
 
     def get_version(self, resume_id: str, version_id: str, user_id: str) -> Optional[Dict[str, Any]]:

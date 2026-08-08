@@ -91,3 +91,32 @@ def test_backfill_recomputes_and_persists_score_from_linked_application():
     update_sql = cur.execute.call_args_list[1].args[0]
     assert "UPDATE public.resume_versions" in update_sql
     assert "COALESCE(ats_score" in update_sql
+
+
+def test_list_versions_backfills_scores_for_every_returned_version():
+    """Resume Manager's version LIST (not just Compare Mode) reads ats_score/
+    resume_match_score directly too -- a real production screenshot
+    (2026-08-08) showed "No ATS Score" / "No Match Score" on named tailored
+    versions ("Accenture Tailored", "Anthropic Tailored") in this exact
+    list. list_versions must run the same backfill compare_versions does."""
+    repo = ResumeRepository(MagicMock())
+    cur = MagicMock()
+    repo.conn.cursor.return_value.__enter__.return_value = cur
+    resume_row = {"id": "resume-1", "user_id": "user-1", "parsed_content": {}, "created_at": "2026-08-01"}
+    version_no_score = {
+        "id": "v52", "version_number": 52, "resume_id": "resume-1",
+        "ats_score": None, "resume_match_score": None,
+        "job_id": "app-1", "content": RESUME_CONTENT,
+    }
+    updated_row = {**version_no_score, "ats_score": 72.0, "resume_match_score": 68.0}
+    cur.fetchone.side_effect = [
+        resume_row,                       # resume ownership check
+        {"organized_jd": ORGANIZED_JD},   # _backfill_version_score's SELECT organized_jd
+        updated_row,                      # _backfill_version_score's UPDATE ... RETURNING *
+    ]
+    cur.fetchall.return_value = [version_no_score]
+
+    rows = repo.list_versions("resume-1", "user-1")
+
+    assert rows == [updated_row]
+    repo.conn.commit.assert_called()

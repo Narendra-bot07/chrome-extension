@@ -2,10 +2,11 @@ import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { 
+import {
   Settings, Sun, Moon, AlertCircle, X, Menu,
   LayoutDashboard, FileText, Briefcase, User,
-  LogOut, Zap, Target, Search, HelpCircle, Bell, ChevronDown, Shield, LockKeyhole
+  LogOut, Zap, Target, Search, HelpCircle, Bell, ChevronDown, Shield, LockKeyhole,
+  Puzzle
 } from 'lucide-react';
 
 import { Button } from './ui/Button';
@@ -448,8 +449,24 @@ function Layout() {
               })}
             </nav>
 
+            {/* Install Extension -- only meaningful on the website; showing
+                this inside the extension's own side panel (isExtension)
+                would be pointless since the user is already using it. */}
+            {!isExtension && (
+              <a
+                href="https://chromewebstore.google.com/detail/tailr4u/eoalffbgglfdnegpcbmljdikebkocckk?hl=en-US&utm_source=ext_sidebar"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-tf-border/60 bg-tf-surface-2/50 backdrop-blur-md text-tf-text-secondary hover:text-tf-text hover:bg-tf-surface-2/80 transition-all shadow-2xs text-xs font-semibold"
+                title="Install the Tailr4U Chrome extension"
+              >
+                <Puzzle size={15} />
+                <span className="hidden sm:inline">Install Extension</span>
+              </a>
+            )}
+
             {/* Theme Toggle Glass Button */}
-            <button 
+            <button
               className="p-2 rounded-xl border border-tf-border/60 bg-tf-surface-2/50 backdrop-blur-md text-tf-text-secondary hover:text-tf-text hover:bg-tf-surface-2/80 transition-all cursor-pointer shadow-2xs"
               onClick={toggleDarkMode}
               title="Toggle dark / light theme"
