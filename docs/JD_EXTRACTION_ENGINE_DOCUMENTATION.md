@@ -586,6 +586,46 @@ Resolution rules:
   as a genuine identity conflict rather than an artifact of two unrelated
   navigations. See `test_conflicting_job_id_does_not_block_extension_primary_without_selected_signal`
   in `test_job_intelligence.py`.
+- **(Corrected 2026-08-08) ATS cross-origin iframe evidence.** Some ATS
+  platforms (Ashby chief among them) are embedded via a cross-origin
+  `<iframe>` on the company's own careers page rather than hosted directly —
+  confirmed real-world case: `langchain.com/careers` embeds
+  `jobs.ashbyhq.com/...`. The extension can read the iframe's `src`
+  attribute (not blocked by browser policy) but never its rendered content,
+  so whatever DOM it captures is the PARENT page's own generic marketing
+  copy ("About Us", mission statement) — text that routinely scores high
+  enough on keyword-based `job_signal_score` to look like usable job
+  evidence. Before this fix that meant three separate places trusted it as
+  if it were the real job:
+  1. `route_after_discovery` skipped the Playwright fetch entirely (the only
+     thing that can resolve the iframe via `_find_ats_iframe_url`) because
+     the generic text alone cleared `captured_length >= 200` / `strong_panel`.
+  2. Even when the fetch did run, `_source_rank` still ranked the generic
+     extension panel above the real re-navigated Ashby content because
+     `extension_panel_selected` (a `job_signal_score >= .35` keyword check)
+     granted it a `selected_job_signal` quality/specificity boost the real
+     backend evidence didn't get.
+  3. Once the real backend evidence finally won, its correct title
+     ("AI Engineer, Enablement") disagreed with the extension's generic
+     title hint ("Careers"), tripping the 8.7 conflict-escalation rule
+     above and hard-blocking to `MANUAL_REVIEW` anyway.
+  The frontend capture (`captureActiveTabJobEvidence` in
+  `jdExtractionFlow.js`) now flags `ats_iframe_detected: true` whenever a
+  same-page iframe's `src` hostname matches a known ATS needle
+  (`ashbyhq.com`, `greenhouse.io`, `lever.co`, `myworkdayjobs.com`, etc.) and
+  differs from the page's own hostname. The backend treats that flag as a
+  structural (not keyword-based) signal that extension evidence is
+  untrustworthy for this page, unless `extension_jsonld` already carries
+  confirmed job data: `_has_usable_extension_evidence` and
+  `route_after_discovery` both force a real browser fetch, `evidence_
+  evaluation_agent` withholds the `selected_job_signal` boost from the
+  extension panel, and the 8.7 conflict-escalation rule is exempted so the
+  now-correctly-ranked backend primary isn't blocked by a mismatch against
+  evidence already known to be looking at the wrong content. See
+  `test_ats_iframe_generic_parent_evidence_forces_browser_fetch`,
+  `test_ats_iframe_flag_does_not_override_strong_jsonld_evidence`, and
+  `test_ats_iframe_conflict_with_real_backend_jsonld_does_not_block` in
+  `test_job_intelligence.py`.
 
 ### 8.8 Invariant validation
 

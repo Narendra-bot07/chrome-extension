@@ -67,6 +67,20 @@ export async function captureActiveTabJobEvidence(tabId) {
       });
       roots.push(...shadowRoots);
       const iframeEvidence = [];
+      // A cross-origin iframe's `src` attribute is readable even though its
+      // rendered content is not -- confirmed real-world case (LangChain
+      // careers embeds jobs.ashbyhq.com in an iframe): the parent page's own
+      // marketing copy can look "job-like" enough to score as usable
+      // evidence, which then skips the backend Playwright fetch that's the
+      // only thing that can actually resolve the ATS iframe. Flagging that
+      // an ATS iframe exists lets the backend force that fetch instead of
+      // trusting generic parent-page text.
+      const atsIframeHostNeedles = [
+        'ashbyhq.com', 'greenhouse.io', 'lever.co', 'myworkdayjobs.com',
+        'icims.com', 'smartrecruiters.com', 'bamboohr.com', 'jobvite.com',
+        'workable.com', 'successfactors.', 'taleo.net', 'oraclecloud.com'
+      ];
+      let atsIframeDetected = false;
       document.querySelectorAll('iframe').forEach((frame) => {
         try {
           if (frame.contentDocument) {
@@ -76,6 +90,20 @@ export async function captureActiveTabJobEvidence(tabId) {
           }
         } catch {
           // Cross-origin frames remain inaccessible by browser policy.
+        }
+        try {
+          const src = frame.getAttribute('src') || '';
+          if (!src) return;
+          const frameHost = new URL(src, location.href).hostname.toLowerCase();
+          if (
+            frameHost
+            && frameHost !== location.hostname
+            && atsIframeHostNeedles.some((needle) => frameHost.includes(needle))
+          ) {
+            atsIframeDetected = true;
+          }
+        } catch {
+          // Malformed/relative src that fails to parse -- not a usable signal.
         }
       });
       const portalPanelSelectors = location.hostname.includes('linkedin.com')
@@ -300,6 +328,7 @@ export async function captureActiveTabJobEvidence(tabId) {
           : null,
         html: String(clone.outerHTML || '').slice(0, 250000),
         jsonld,
+        ats_iframe_detected: atsIframeDetected,
         capture: {
           candidate_count: candidates.length,
           selected_score: selected?.score || 0,

@@ -835,8 +835,20 @@ def evidence_evaluation_agent(value: JDState | dict[str, Any]) -> dict[str, Any]
         and not extension_jsonld_matches_visible
     )
     trusted_extension_jsonld = [] if stale_extension_jsonld else extension_jsonld
+    # A detected cross-origin ATS iframe (langchain.com/careers embedding
+    # jobs.ashbyhq.com is the confirmed real-world case) means whatever DOM
+    # the extension captured is structurally guaranteed to be the PARENT
+    # page's own copy, not the job -- unless extension_jsonld itself already
+    # carries confirmed job data, "selected panel" status must not be
+    # granted on keyword score alone here: generic marketing copy ("About
+    # Us", "Careers", "Apply now") routinely clears the .35 threshold below,
+    # which previously let it outrank the backend's real re-navigated Ashby
+    # fetch on `_source_rank` purely via the "selected" quality/specificity
+    # boost and .25 bonus.
+    ats_iframe_detected = bool(extension.get("ats_iframe_detected")) and not trusted_extension_jsonld
     extension_panel_selected = bool(
         extension_panel_text
+        and not ats_iframe_detected
         and (
             (extension.get("capture") or {}).get("portal_optimized_panel")
             or _job_signal_score(extension_panel_text) >= .35
@@ -963,11 +975,21 @@ def evidence_evaluation_agent(value: JDState | dict[str, Any]) -> dict[str, Any]
     # remains for the genuinely uncertain case: a non-extension primary
     # (backend-only evidence) with an unresolved conflict and no confirmed
     # selected-job signal.
+    # A detected cross-origin ATS iframe means the extension's title/ID come
+    # from the PARENT page's generic copy, not the actual job -- a mismatch
+    # against a real structured backend_jsonld/backend_playwright primary in
+    # that situation is not a genuine identity conflict, it's exactly the
+    # expected outcome of the extension having looked at the wrong content.
+    # Blocking here would undo the whole point of forcing the browser fetch
+    # in the first place (see route_after_discovery's ats_iframe_detected
+    # check): a confirmed real-world LangChain/Ashby posting extracted fine
+    # once this exemption was added.
     if (
         conflicts
         and primary
         and not primary.source_type.startswith("extension")
         and not primary.selected_job_signal
+        and not ats_iframe_detected
     ):
         readiness = "MANUAL_REVIEW"
         warnings.append("Conflicting job identity could not be resolved safely.")

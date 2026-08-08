@@ -64,6 +64,17 @@ def _has_usable_extension_evidence(state: JDState) -> bool:
         and bool(str(evidence.get("job_title_hint") or "").strip())
         and _job_signal_score(visible[:50000]) >= .25
     )
+    if bool(evidence.get("ats_iframe_detected")) and not has_jsonld:
+        # The extension can see a cross-origin ATS iframe's `src` attribute
+        # (that's not blocked by browser policy) but never its rendered
+        # content -- confirmed real-world case: langchain.com/careers embeds
+        # jobs.ashbyhq.com in an iframe, and the parent page's OWN generic
+        # marketing copy ("About Us", mission statement) scores just high
+        # enough on job_signal_score to look "usable" and skip the backend
+        # Playwright fetch entirely. Only a real browser fetch can resolve
+        # the iframe (see _find_ats_iframe_url), so unless JSON-LD already
+        # proves the parent page itself carries the full job data, force it.
+        return False
     return has_jsonld or panel_is_job or page_is_job
 
 
@@ -73,6 +84,17 @@ def route_after_discovery(state: JDState) -> Literal["browser", "evidence_evalua
     navigation typically costs 5-15s and is redundant when we already have a
     usable job panel or structured JobPosting JSON-LD."""
     evidence = state.extension_evidence or {}
+    has_job_jsonld = _job_signal_score(evidence.get("jsonld") or [], structured=True) >= .9
+    if bool(evidence.get("ats_iframe_detected")) and not has_job_jsonld:
+        # A detected cross-origin ATS iframe (langchain.com/careers embedding
+        # jobs.ashbyhq.com is the confirmed real-world case) means whatever
+        # text the extension captured is the PARENT page's own generic
+        # marketing copy, not the job -- it can still be long/keyword-rich
+        # enough to pass every other check below. Only a real browser fetch
+        # can resolve the iframe (see _find_ats_iframe_url), so route there
+        # unconditionally unless JSON-LD already proves the parent page
+        # itself carries the full job data.
+        return "browser"
     client_assessment = evidence.get("client_assessment") or {}
     panel_text = str(evidence.get("selected_panel_text") or "").strip()
     visible_text = str(evidence.get("visible_text") or "").strip()
@@ -80,7 +102,6 @@ def route_after_discovery(state: JDState) -> Literal["browser", "evidence_evalua
         bool((evidence.get("capture") or {}).get("portal_optimized_panel"))
         or _job_signal_score(panel_text) >= .35
     )
-    has_job_jsonld = _job_signal_score(evidence.get("jsonld") or [], structured=True) >= .9
     client_ready = (
         client_assessment.get("readiness") in {"READY", "PARTIAL"}
         and bool(client_assessment.get("isLikelyJob"))

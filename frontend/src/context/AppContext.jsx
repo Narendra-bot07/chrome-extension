@@ -27,7 +27,6 @@ import { refreshAccessToken } from '../services/authSession';
 import { getApiUrl } from '../config/apiConfig';
 import {
   createResumeWorkflowState,
-  finalizeTailoredResume,
   RESUME_WORKFLOW_STORAGE_KEY,
   resumeWorkflowRepository,
   selectRenderableResume,
@@ -1892,16 +1891,24 @@ export function AppProvider({ children }) {
   };
 
   // Explicit final fallback for when auto-detection genuinely can't read a
-  // page (see ManualJobEntryPage) -- the user has already typed in
-  // structured fields themselves, so this skips the extraction pipeline
-  // entirely and builds the job record directly, mirroring exactly what
-  // handleScanPage's own success path sets (see `job_detail` branch above)
-  // so every downstream consumer (JobReviewView, tailoring, ATS scoring)
-  // sees the same shape regardless of which path produced it.
+  // page (see ManualJobEntryPage). Previously this skipped the extraction
+  // pipeline entirely and built the job record directly from the raw form
+  // fields -- skills/requirements/responsibilities were always empty
+  // arrays no matter how rich the pasted description was, since nothing
+  // ever parsed that free text. Downstream tailoring/ATS scoring then had
+  // nothing to match against, which is exactly what "manual entry pipeline
+  // isn't working" looks like from the outside. This now runs the same
+  // `/api/v1/jobs/extract-url` LLM pipeline handleScanPage uses, treating
+  // the user's typed description as if it were captured page evidence
+  // (job_title_hint/company_hint from the form fields), so manual entry
+  // gets the same structured extraction quality as an automatic scan. If
+  // that call fails outright (network error, non-schema-valid result), it
+  // falls back to the old raw-field job record so the feature never
+  // regresses below what it did before.
   const submitManualJobEntry = async ({
     url, role, company, description, location, employmentType, experience, salary
   }) => {
-    const job = {
+    const rawJob = {
       job_title: role,
       title: role,
       company_name: company,
@@ -1922,22 +1929,74 @@ export function AppProvider({ children }) {
       source_url: url,
       application_url: url
     };
+    let job = rawJob;
+    let extractionMethod = 'manual_input_raw';
+    try {
+      const requestId = (crypto?.randomUUID && crypto.randomUUID()) || `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const browserEvidence = {
+        url,
+        selected_job_url: url,
+        title: role,
+        job_title_hint: role,
+        company_hint: company,
+        location_hint: location || '',
+        selected_panel_text: description,
+        visible_text: description,
+        selected_panel_selector: null,
+        html: '',
+        jsonld: [],
+        capture: {
+          candidate_count: 1,
+          selected_score: 0,
+          portal_optimized_panel: false,
+          has_portal_selectors: false,
+          captured_at: new Date().toISOString(),
+          viewport: { width: 0, height: 0 }
+        }
+      };
+      browserEvidence.client_assessment = assessBrowserJobEvidence(browserEvidence, url);
+      const token = session?.access_token || localStorage.getItem('access_token');
+      const response = await fetch(`${apiUrl}/api/v1/jobs/extract-url`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ url, request_id: requestId, browser_evidence: browserEvidence })
+      });
+      if (response.ok) {
+        const data = validateJDResponse(await response.json());
+        const extracted = data.success ? (data.job || data.extracted_job) : null;
+        if (extracted) {
+          job = extracted;
+          extractionMethod = 'manual_input_llm';
+        }
+        logExtraction('Manual job entry LLM extraction result', {
+          requestId, url, success: Boolean(extracted),
+          skillsCount: collectJobSkills(extracted || {}).explicit.length
+        });
+      } else {
+        console.warn('[JD-EXTRACTION] Manual entry LLM extraction failed; raw fields used', { status: response.status });
+      }
+    } catch (err) {
+      console.warn('[JD-EXTRACTION] Manual entry LLM extraction failed; raw fields used', err);
+    }
     try {
       await scoreJobBeforeReveal(job);
       setLastAnalyzedUrl(url);
-      setJobText(description || '');
-      setJobTitle(role || '');
-      setCompanyName(company || '');
+      setJobText(job.description || description || '');
+      setJobTitle(job.job_title || job.title || role || '');
+      setCompanyName(job.company_name || job.company || company || '');
       setJobAnalysis(job);
       setJobDetectionStatus('ready');
       setJobDetectionMeta({
         classification: 'job_detail',
         confidence: 1,
         reason: 'Manually entered by the user.',
-        extractionMethod: 'manual_input'
+        extractionMethod
       });
       setApiError(null);
-      logExtraction('Manual job entry submitted', { url, titlePresent: Boolean(role), companyPresent: Boolean(company) });
+      logExtraction('Manual job entry submitted', { url, titlePresent: Boolean(role), companyPresent: Boolean(company), extractionMethod });
       return true;
     } catch (err) {
       console.error('Manual job entry failed:', err);
@@ -3183,29 +3242,34 @@ export function AppProvider({ children }) {
           "We could not finalize the resume automatically. Your original resume data is safe. Please retry or review the highlighted sections."
         );
       }
-      const allAcceptedDraft = mergeReviewResume(
-        parsedResume,
-        reviewSuggestions.map(edit => ({ ...edit, status: 'accepted' }))
-      ).workingResume;
-      const finalizedWorkflow = await queueWorkflowWrite(current => {
-        const next = createResumeWorkflowState({
-          originalResume: parsedResume,
-          tailoredDraft: allAcceptedDraft,
-          edits: reviewSuggestions,
-          reviewDecisions: current?.reviewDecisions || {},
-          selectedTemplateId: selectedTemplate,
-          workflowVersion: current?.workflowVersion || 0,
-          originalResumeId: parsedResume.id || parsedResume.resume_id || null,
-          jobFingerprint: jdFingerprintRef.current || null
-        });
-        const finalizedTailoredResume = finalizeTailoredResume({
-          originalResume: next.originalResume,
-          tailoredDraft: next.tailoredDraft,
-          edits: next.edits,
-          reviewDecisions: next.reviewDecisions
-        });
-        return { ...next, finalizedTailoredResume };
-      });
+      // `merged.workingResume` (above) is built directly from the LIVE
+      // reviewSuggestions/accept-reject state -- exactly what the user saw
+      // and approved on the Review Changes screen -- and is already
+      // validated. This USED to be discarded in favor of independently
+      // recomputing "final" content through finalizeTailoredResume()'s own
+      // merge, driven by reviewDecisions pulled from ASYNC-persisted
+      // workflow storage (`current?.reviewDecisions`) -- a second,
+      // independent source of truth that can silently diverge from the
+      // live in-session state (e.g. if persistence hadn't caught up with
+      // the user's most recent accept/reject clicks yet). When it
+      // diverged, the recomputed version -- built from empty/stale
+      // decisions -- collapsed to a no-op merge, i.e. the ORIGINAL resume,
+      // which is exactly what got saved as "tailored." Confirmed real-world
+      // case: Resume Manager versions showing the original resume under
+      // "Tailored" version names. Now `merged.workingResume` IS the final
+      // tailored result directly; the workflow state is still persisted
+      // (audit/recovery trail) but no longer independently re-derives it.
+      const finalizedWorkflow = await queueWorkflowWrite(current => createResumeWorkflowState({
+        originalResume: parsedResume,
+        tailoredDraft: merged.workingResume,
+        edits: reviewSuggestions,
+        reviewDecisions: current?.reviewDecisions || {},
+        finalizedTailoredResume: merged.workingResume,
+        selectedTemplateId: selectedTemplate,
+        workflowVersion: current?.workflowVersion || 0,
+        originalResumeId: parsedResume.id || parsedResume.resume_id || null,
+        jobFingerprint: jdFingerprintRef.current || null
+      }));
       const tailoredResult = selectRenderableResume(finalizedWorkflow);
       if (!tailoredResult) throw new Error('FINAL_RESUME_VALIDATION_FAILED: Final resume is unavailable.');
       await persistTailoredWorkflowResume(tailoredResult);
@@ -3244,6 +3308,7 @@ export function AppProvider({ children }) {
       // this workflow only updated React/storage state, leaving Analytics with
       // nothing to group by date.
       const sourceResumeId = parsedResume?.id || parsedResume?.resume_id || null;
+      let createdVersionId = null;
       if (sourceResumeId) {
         const createdVersion = await createResumeVersion(sourceResumeId, {
           version_name: `${companyName || jobTitle || 'Job'} Tailored`,
@@ -3265,6 +3330,7 @@ export function AppProvider({ children }) {
         if (!createdVersion?.id) {
           throw new Error('The resume was finalized but its generation record could not be saved.');
         }
+        createdVersionId = createdVersion.id;
       }
       setLoading(false);
       navigate('/templates');
@@ -3296,6 +3362,20 @@ export function AppProvider({ children }) {
               ats_score_after: numericScore,
               resume_match_after: Number.isFinite(numericMatchScore) ? numericMatchScore : (previous?.resume_match_after || 0)
             }));
+            // createResumeVersion's own payload never included a score (the
+            // scorer hadn't run yet at that point), so every version row
+            // showed "No ATS Score" / "No Match Score" in Resume Manager
+            // forever after -- this result was only ever applied to local
+            // `comparison` state, never written back to the version record
+            // that Resume Manager actually reads.
+            if (sourceResumeId && createdVersionId) {
+              updateResumeVersion(sourceResumeId, createdVersionId, {
+                ats_score: numericScore,
+                resume_match_score: Number.isFinite(numericMatchScore) ? numericMatchScore : null
+              }).catch((updateError) => {
+                console.warn("Failed to persist ATS score onto the saved resume version", updateError);
+              });
+            }
           }
         } else {
           console.warn("Strict ATS scoring failed", await scoreResponse.text());

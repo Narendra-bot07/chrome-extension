@@ -119,6 +119,47 @@ def test_rendered_job_dom_skips_browser_even_when_client_assessment_is_conservat
     assert route_after_discovery(routed) == "evidence_evaluation"
 
 
+def test_ats_iframe_generic_parent_evidence_forces_browser_fetch():
+    """Regression test: a real LangChain careers posting
+    (langchain.com/careers?ashby_jid=...) embeds jobs.ashbyhq.com in a
+    cross-origin iframe the extension cannot read. The parent page's own
+    generic marketing copy ("About Us") scored just high enough to look
+    like usable job evidence, which skipped the backend Playwright fetch
+    that's the only thing able to resolve the ATS iframe -- production
+    result was title=None, company='LangChain', skills=0. Flagging the
+    detected iframe must force a real browser fetch instead."""
+    generic_marketing_copy = (
+        "About Us\nWe build reliable, general-purpose AI infrastructure.\n"
+        "Careers\nJoin our team and help us apply now on our mission.\n"
+        "Requirements: we look for curious, collaborative people.\n"
+    ) * 8
+    routed = state(extension_evidence={
+        "url": "https://www.langchain.com/careers",
+        "selected_job_url": "https://www.langchain.com/careers",
+        "selected_panel_text": generic_marketing_copy,
+        "visible_text": generic_marketing_copy,
+        "job_title_hint": "Careers",
+        "ats_iframe_detected": True,
+    })
+
+    assert route_after_discovery(routed) == "browser"
+
+
+def test_ats_iframe_flag_does_not_override_strong_jsonld_evidence():
+    posting = {
+        "@type": "JobPosting", "title": "Engineer",
+        "description": "Build systems", "hiringOrganization": {"name": "Example"},
+    }
+    routed = state(extension_evidence={
+        "url": "https://example.com/careers",
+        "selected_job_url": "https://example.com/careers",
+        "jsonld": [posting],
+        "ats_iframe_detected": True,
+    })
+
+    assert route_after_discovery(routed) == "evidence_evaluation"
+
+
 def test_short_spa_top_card_does_not_discard_full_visible_job_description():
     top_card = "Data Engineer Intern\nExample Corp\nHyderabad\nApply"
     visible = """Navigation
@@ -215,6 +256,47 @@ def test_backend_challenge_recovers_with_extension_jsonld():
     assert result["primary_source"] == "extension_jsonld"
     assert result["extraction_readiness"] == "READY"
     assert "Verify you are human" not in result["raw_html"]
+
+
+def test_ats_iframe_conflict_with_real_backend_jsonld_does_not_block():
+    """Regression test: once route_after_discovery forces a browser fetch
+    for a detected ATS iframe (see test_ats_iframe_generic_parent_evidence_
+    forces_browser_fetch), that fetch's real, structured backend_jsonld
+    naturally outranks the extension's generic parent-page panel and
+    becomes primary -- but its title ("AI Engineer, Enablement") then
+    disagrees with the extension's generic job_title_hint ("Careers"),
+    which used to hard-block to MANUAL_REVIEW via the "unresolved conflict
+    on a non-extension primary" rule. That conflict is expected and safe
+    here: ats_iframe_detected is a structural guarantee the extension's own
+    title reflects the wrong (parent) page, not a real identity dispute."""
+    posting = {
+        "@type": "JobPosting", "title": "AI Engineer, Enablement",
+        "description": "Own onboarding and education for new enterprise customers.",
+        "hiringOrganization": {"name": "LangChain"},
+    }
+    html = (
+        '<html><body><script type="application/ld+json">'
+        + json.dumps(posting)
+        + "</script></body></html>"
+    )
+    generic_marketing_copy = (
+        "About Us\nAt LangChain, our mission is to make intelligent agents ubiquitous. "
+        "Careers Join our team. Apply now to help us build. Requirements: curious people. "
+    ) * 8
+    result = evidence_evaluation_agent(state(
+        backend_raw_html=html,
+        backend_final_url="https://www.langchain.com/careers",
+        extension_evidence={
+            "url": "https://www.langchain.com/careers?ashby_jid=abc123",
+            "selected_job_url": "https://www.langchain.com/careers?ashby_jid=abc123",
+            "selected_panel_text": generic_marketing_copy,
+            "visible_text": generic_marketing_copy,
+            "job_title_hint": "Careers",
+            "ats_iframe_detected": True,
+        },
+    ))
+    assert result["primary_source"] == "backend_jsonld"
+    assert result["extraction_readiness"] == "READY"
 
 
 def test_all_restricted_sources_are_blocked_not_non_job():

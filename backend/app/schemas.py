@@ -1,8 +1,33 @@
 import re
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import List, Optional, Dict, Any, Union
 from schemas.resume import ResumeLayoutModel, RenderableResume
 from schemas.tailoring import TailorRequest, DownloadPDFRequest, CoverLetterRequest, TailoringReport, ResumePatch
+
+# Confirmed production incident (2026-08-08): DeepSeek's structured-output
+# mode explicitly emits `null` for a plain-`str` field it has no value for
+# (e.g. a certification with no expiration date, a project with no link) --
+# a bare `str` type (unlike `Optional[str]`) rejects `None` outright, so
+# EVERY parse_resume call touching a resume with an absent optional field
+# like this failed flash validation, forced an expensive escalation to the
+# pro model (60-160s+ observed), and could fail outright if pro returned the
+# same natural `null` for the same reason. Applied to every model below via
+# a `mode="before"` validator scoped ONLY to fields declared as exactly
+# `str` (never `Optional[str]`/`Optional[float]`/etc, so this can't corrupt
+# a genuinely nullable field like `photo_position_y`).
+def _coerce_none_strings(cls: type[BaseModel], data: Any) -> Any:
+    if not isinstance(data, dict):
+        return data
+    string_fields = {
+        name for name, field in cls.model_fields.items()
+        if field.annotation is str
+    }
+    if not string_fields:
+        return data
+    return {
+        key: ("" if key in string_fields and value is None else value)
+        for key, value in data.items()
+    }
 
 # DeepSeek's structured-output mode, when uncertain about a field it still
 # perceives as expected, sometimes fills it with a literal placeholder token
@@ -45,6 +70,8 @@ class PersonalInfo(BaseModel):
     github: str = ""
     job_title: str = ""
 
+    _coerce_none = model_validator(mode="before")(classmethod(_coerce_none_strings))
+
 class ExperienceItem(BaseModel):
     model_config = ConfigDict(extra="allow")
     company: str = ""
@@ -53,6 +80,8 @@ class ExperienceItem(BaseModel):
     start_date: str = ""
     end_date: str = ""
     description: Union[List[str], str] = Field(default_factory=list)
+
+    _coerce_none = model_validator(mode="before")(classmethod(_coerce_none_strings))
 
     @field_validator("description", mode="before")
     @classmethod
@@ -71,6 +100,8 @@ class ProjectItem(BaseModel):
     technology_stack: Union[List[str], str] = Field(default_factory=list)
     link: str = ""
     description: Union[List[str], str] = Field(default_factory=list)
+
+    _coerce_none = model_validator(mode="before")(classmethod(_coerce_none_strings))
 
     @field_validator("description", mode="before")
     @classmethod
@@ -102,6 +133,8 @@ class EducationItem(BaseModel):
     end_date: str = ""
     gpa: str = ""
 
+    _coerce_none = model_validator(mode="before")(classmethod(_coerce_none_strings))
+
 class CertificationItem(BaseModel):
     model_config = ConfigDict(extra="allow")
     name: str = ""
@@ -111,6 +144,8 @@ class CertificationItem(BaseModel):
     credential_id: str = ""
     credential_url: str = ""
     url: str = ""
+
+    _coerce_none = model_validator(mode="before")(classmethod(_coerce_none_strings))
 
 class ResumeStructure(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -140,6 +175,8 @@ class ResumeStructure(BaseModel):
     # contract aligned with the canonical resume schema used by the editor.
     layout_model: Optional[ResumeLayoutModel] = None
     raw_text: Optional[str] = ""
+
+    _coerce_none = model_validator(mode="before")(classmethod(_coerce_none_strings))
 
     @field_validator("languages", mode="before")
     @classmethod

@@ -2,7 +2,7 @@ import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  ArrowRight, BellRing, Check, LayoutDashboard, Moon, Zap, Sun
+  ArrowRight, BellRing, Check, LayoutDashboard, Moon, Puzzle, Zap, Sun
 } from 'lucide-react';
 import { ApplicationLogo } from '../components/ApplicationLogo';
 import BrandLogo from '../components/BrandLogo';
@@ -179,6 +179,14 @@ export default function LandingPage() {
         <span className={`lp-nav-indicator lp-nav-indicator-${activeSection}`} />
       </nav>
       <nav className="lp-account-actions" aria-label="Account navigation">
+        <a
+          className="lp-text-button lp-install-ext-button"
+          href="https://chromewebstore.google.com/detail/tailr4u/eoalffbgglfdnegpcbmljdikebkocckk?hl=en-US&utm_source=ext_sidebar"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <Puzzle size={15} /> Install Extension
+        </a>
         <button
           type="button"
           className="lp-theme-toggle"
