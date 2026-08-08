@@ -941,7 +941,34 @@ def evidence_evaluation_agent(value: JDState | dict[str, Any]) -> dict[str, Any]
         warnings.append(
             "Stale JobPosting JSON-LD was ignored in favor of the current rendered job panel."
         )
-    if conflicts and primary and not primary.selected_job_signal:
+    # This used to fire on ANY primary lacking selected_job_signal, and
+    # route_after_evidence sends MANUAL_REVIEW readiness straight to
+    # final_response -- skipping jsonld, extraction, everything, before the
+    # LLM ever sees the evidence. Confirmed real-world false positives
+    # (2026-08-08: a LinkedIn posting and a LangChain/Ashby-embedded
+    # posting, both with the full JD visibly present on the page): backend
+    # Playwright's OWN independent navigation to a SPA search-results/embed
+    # URL routinely lands on different content than what's currently
+    # selected in the user's own browser tab -- backend Playwright doesn't
+    # share the user's session or selection state, so a title/ID mismatch
+    # there is not evidence the extension is looking at the wrong job, it's
+    # an expected consequence of comparing two independent navigations.
+    # When the primary source is the extension's OWN evidence -- already
+    # the highest-ranked source specifically because it reflects what the
+    # user is actually looking at -- a mismatching backend read is recorded
+    # as a warning for diagnostics only; downstream stages (jsonld_agent's
+    # own stale-JSON-LD rejection, evidence-grounded LLM extraction that
+    # only ever sees the selected primary source, not a blend of both)
+    # already handle real conflicts correctly on their own. The hard block
+    # remains for the genuinely uncertain case: a non-extension primary
+    # (backend-only evidence) with an unresolved conflict and no confirmed
+    # selected-job signal.
+    if (
+        conflicts
+        and primary
+        and not primary.source_type.startswith("extension")
+        and not primary.selected_job_signal
+    ):
         readiness = "MANUAL_REVIEW"
         warnings.append("Conflicting job identity could not be resolved safely.")
 

@@ -568,8 +568,24 @@ Conflicts are recorded when:
 Resolution rules:
 
 - Fresh, selected-region evidence can safely resolve a conflict.
-- Unresolved identity conflicts become `MANUAL_REVIEW`.
 - Evidence from two different jobs is not concatenated.
+- **(Corrected 2026-08-08)** A conflict escalates to `MANUAL_REVIEW` — which
+  `route_after_evidence` sends straight to `final_response`, skipping
+  `jsonld`/`extraction`/everything before the LLM ever runs — **only when
+  the primary source is NOT extension evidence** and lacks a confirmed
+  `selected_job_signal`. When the primary source IS extension evidence
+  (the common, most trustworthy case — it reflects what the user is
+  actually looking at), a conflicting backend read no longer blocks the
+  pipeline; it's recorded as a warning only. Confirmed real-world false
+  positives on a LinkedIn posting and a LangChain/Ashby-embedded posting,
+  both with the full JD visibly present on the page: backend Playwright's
+  own navigation doesn't share the user's browser session/selection state,
+  so for SPA search-results or ATS-iframe-embedded URLs its independently
+  resolved final URL/title routinely differs from the extension's even when
+  both are looking at the same job — that mismatch was previously treated
+  as a genuine identity conflict rather than an artifact of two unrelated
+  navigations. See `test_conflicting_job_id_does_not_block_extension_primary_without_selected_signal`
+  in `test_job_intelligence.py`.
 
 ### 8.8 Invariant validation
 

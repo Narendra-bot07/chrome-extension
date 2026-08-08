@@ -59,43 +59,6 @@ export async function captureActiveTabJobEvidence(tabId) {
         .replace(/\n{3,}/g, '\n\n')
         .trim()
         .slice(0, limit);
-      // LinkedIn (and several other portals) collapse a long job description
-      // behind a "...see more" toggle -- the full text simply isn't in the
-      // DOM until that's clicked. Confirmed real-world case (2026-08-08, a
-      // Charles Schwab posting on LinkedIn): only a small trailing fragment
-      // of an otherwise very rich JD (full Key Responsibilities / Required
-      // Qualifications / Preferred Qualifications sections were entirely
-      // absent) got captured, because the description was still collapsed
-      // when the tab was scanned. Click every matching toggle and give the
-      // DOM a moment to expand before any text is read below, so scoring
-      // and capture both see the fully expanded content.
-      const expandTruncatedContent = () => {
-        const toggleTextPattern = /^(see more|show more|read more|\u2026\s*more)$/i;
-        const clickable = Array.from(document.querySelectorAll('button, a, span[role="button"], [role="button"]'));
-        let clicked = 0;
-        for (const el of clickable) {
-          const text = (el.innerText || el.textContent || '').trim();
-          if (toggleTextPattern.test(text)) {
-            try {
-              el.click();
-              clicked += 1;
-            } catch {
-              // Best-effort only -- a toggle that can't be clicked just
-              // leaves that section collapsed, same as before this fix.
-            }
-          }
-        }
-        return clicked;
-      };
-      if (expandTruncatedContent() > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 400));
-        // A second pass: expanding one toggle (e.g. the job description)
-        // can reveal or reflow further content with its own separate
-        // toggle (e.g. a company "About us" blurb) that didn't exist in
-        // the DOM at all until the first click ran.
-        expandTruncatedContent();
-        await new Promise((resolve) => setTimeout(resolve, 200));
-      }
       const jobSignals = /\b(job description|responsibilities|qualifications|requirements|what you.ll do|what to expect|apply now|easy apply|full.time|part.time|experience)\b/gi;
       const roots = [document];
       const shadowRoots = [];
@@ -151,7 +114,59 @@ export async function captureActiveTabJobEvidence(tabId) {
         })
         .filter((item) => item.text.length >= 200)
         .sort((a, b) => b.score - a.score);
-      const selected = candidates[0] || null;
+      let selected = candidates[0] || null;
+      // LinkedIn (and several other portals) collapse a long job
+      // description behind a "...see more" toggle -- the full text simply
+      // isn't in the DOM until that's clicked. Confirmed real-world case
+      // (2026-08-08, a Charles Schwab posting on LinkedIn): only a small
+      // trailing fragment of an otherwise very rich JD got captured because
+      // the description was still collapsed when the tab was scanned.
+      // Scoped to ONLY the already-selected panel node (not the whole
+      // document) -- clicking indiscriminately across the entire page risks
+      // triggering an unrelated "see more" (a job-list card, a "people you
+      // may know" widget) or, worse, a real `<a href="...">` that navigates
+      // the tab away entirely, which is exactly the kind of page-breaking
+      // side effect that must never happen during evidence capture.
+      if (selected?.node) {
+        const isNavigatingAnchor = (el) => {
+          if (el.tagName !== 'A') return false;
+          const href = el.getAttribute('href');
+          if (!href) return false;
+          const trimmed = href.trim();
+          return trimmed !== '' && trimmed !== '#' && !trimmed.toLowerCase().startsWith('javascript:');
+        };
+        const expandWithin = (root) => {
+          const toggleTextPattern = /^(see more|show more|read more|…\s*more)$/i;
+          const clickable = Array.from(root.querySelectorAll('button, span[role="button"], [role="button"], a'));
+          let clicked = 0;
+          for (const el of clickable) {
+            if (isNavigatingAnchor(el)) continue;
+            const text = (el.innerText || el.textContent || '').trim();
+            if (toggleTextPattern.test(text)) {
+              try {
+                el.click();
+                clicked += 1;
+              } catch {
+                // Best-effort only -- a toggle that can't be clicked just
+                // leaves that section collapsed, same as before this fix.
+              }
+            }
+          }
+          return clicked;
+        };
+        if (expandWithin(selected.node) > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 400));
+          // A second pass: expanding one toggle (e.g. the description) can
+          // reveal a further nested toggle that didn't exist in the DOM at
+          // all until the first click ran.
+          expandWithin(selected.node);
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          const refreshedText = cleanText(selected.node.innerText, 50000);
+          if (refreshedText.length > selected.text.length) {
+            selected = { ...selected, text: refreshedText };
+          }
+        }
+      }
       let panelText = selected?.text || '';
       const firstText = (selectors) => {
         for (const selector of selectors) {

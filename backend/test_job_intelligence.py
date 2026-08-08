@@ -275,6 +275,50 @@ def test_conflicting_jobs_prefer_fresh_selected_panel_and_warn():
     assert result["evidence_conflicts"]
 
 
+def test_conflicting_job_id_does_not_block_extension_primary_without_selected_signal():
+    """Regression test: confirmed real-world false positives (2026-08-08) on
+    a LinkedIn posting and a LangChain/Ashby-embedded posting, both with the
+    full JD visibly present on the page. Backend Playwright's own
+    navigation doesn't share the user's browser session/selection state --
+    for a SPA search-results URL (LinkedIn's currentJobId=...) or an
+    ATS-iframe-embedded posting (LangChain's ashby_jid=...), its own
+    independent fetch can land on a final URL whose job ID differs from the
+    extension's selected_job_url even though both are showing the SAME
+    actual job, purely from how each one resolves/rewrites the URL. When
+    the extension's captured panel also falls back to a generic
+    (non-portal-optimized) region with lower job-signal density --
+    selected_job_signal comes back False -- that ID mismatch used to
+    escalate straight to MANUAL_REVIEW, skipping jsonld/extraction/
+    everything before the LLM ever ran. It must not, as long as the
+    extension is still the primary evidence source."""
+    # Deliberately low job-signal density (one section keyword, no "apply
+    # now"/employment-type phrase) so extension_panel_selected's OR
+    # condition fails on both branches: no portal_optimized_panel AND
+    # _job_signal_score below the .35 threshold -- reproducing a generic,
+    # non-portal-optimized capture fallback rather than a clean one.
+    panel = (
+        "Backend Engineer Intern\n"
+        "We are looking for a backend engineer intern to join our growing team.\n"
+        "Responsibilities include building APIs and working with databases.\n"
+        "Strong Python fundamentals required.\n"
+    ) * 3
+    result = evidence_evaluation_agent(state(
+        url="https://example.com/jobs/11111",
+        backend_raw_html="",
+        backend_final_url="https://example.com/jobs/22222",
+        extension_evidence={
+            "url": "https://example.com/jobs/11111",
+            "selected_job_url": "https://example.com/jobs/11111",
+            "selected_panel_text": panel,
+            "job_title_hint": "Backend Engineer Intern",
+            "capture": {"portal_optimized_panel": False, "dom_fingerprint": "abc"},
+        },
+    ))
+    assert result["primary_source"] == "extension_selected_panel"
+    assert result["evidence_conflicts"]
+    assert result["extraction_readiness"] != "MANUAL_REVIEW"
+
+
 def test_restricted_primary_invariant_routes_to_manual_review():
     invalid = state(
         primary_source="backend_playwright",
