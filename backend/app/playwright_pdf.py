@@ -515,6 +515,17 @@ def generate_pdf_via_playwright(
                 // which is a legitimate, normal case, not a rendering bug.
                 const hasMeaningfulItems = (arr, checkItem) =>
                     Array.isArray(arr) && arr.some(item => item && (typeof item === 'string' ? item.trim() !== '' : checkItem(item)));
+                // The frontend's own normalizeDetailedRecords (resumePresentation.js)
+                // strips exactly these placeholder tokens out of description/
+                // organization/date/etc before deciding whether an achievement or
+                // certification record has anything real to show -- an item whose
+                // only content is a literal "None"/"N/A" placeholder is truthy here
+                // (a non-empty string) but gets normalized away to nothing on the
+                // frontend, which is what actually determines the rendered DOM. Not
+                // mirroring that filter here made this validator expect a section
+                // the frontend had already, correctly, decided to skip.
+                const isPlaceholderText = value => /^(?:0|null|none|undefined|n\/a|na)$/i.test(String(value || '').trim());
+                const hasRealText = value => typeof value === 'string' && value.trim() !== '' && !isPlaceholderText(value);
 
                 const expectedSections = [];
                 if (shouldRender("summary") && data.summary && data.summary.trim() !== '') expectedSections.push("summary");
@@ -522,8 +533,8 @@ def generate_pdf_via_playwright(
                 if (shouldRender("projects") && hasMeaningfulItems(data.projects, item => item.name || item.title || item.description)) expectedSections.push("projects");
                 if (shouldRender("education") && hasMeaningfulItems(data.education, item => item.degree || item.institution || item.school)) expectedSections.push("education");
                 if (shouldRender("skills") && ((Array.isArray(data.skills) && data.skills.length > 0) || (data.skills_categories && Object.keys(data.skills_categories).length > 0))) expectedSections.push("skills");
-                if (shouldRender("certifications") && hasMeaningfulItems(data.certifications, item => item.title || item.name)) expectedSections.push("certifications");
-                if (shouldRender("achievements") && hasMeaningfulItems(data.achievements, item => item.title || item.name || item.description)) expectedSections.push("achievements");
+                if (shouldRender("certifications") && hasMeaningfulItems(data.certifications, item => hasRealText(item.title) || hasRealText(item.name))) expectedSections.push("certifications");
+                if (shouldRender("achievements") && hasMeaningfulItems(data.achievements, item => hasRealText(item.title) || hasRealText(item.name) || hasRealText(item.description))) expectedSections.push("achievements");
                 if (shouldRender("languages") && hasMeaningfulItems(data.languages, item => item.language)) expectedSections.push("languages");
                 if (shouldRender("awards") && hasMeaningfulItems(data.awards, item => item.title)) expectedSections.push("awards");
                 if (shouldRender("volunteer") && hasMeaningfulItems(data.volunteer_experience, item => item.role || item.organization)) expectedSections.push("volunteer");

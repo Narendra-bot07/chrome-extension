@@ -2227,18 +2227,17 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     # original purpose: a bounded-latency fallback for when the LLM call
     # itself actually fails or times out, not a shortcut applied just because
     # structured data happens to exist.
-    # 20s was tuned back when this branch only ran on LLM-extraction-eligible
-    # pages (JSON-LD-complete pages took the deterministic shortcut and never
-    # reached this timeout at all). Now that the LLM is the primary path for
-    # EVERY page (see comment above), that same 20s measured directly against
-    # a real posting: DeepSeek's flash model needed ~30s+ to finish a normal
-    # ~2.6k-token structured response, so the old default was silently
-    # discarding good-but-slower completions into the lower-quality
-    # deterministic fallback far more often than intended. escalate_on_error
-    # is True below, so a slow-but-real flash response still gets a pro
-    # attempt rather than being abandoned -- raising the ceiling here is
-    # extra headroom for the common case, not the only safety net.
-    jd_timeout = max(5.0, float(os.getenv("JD_EXTRACTION_LLM_TIMEOUT_SECONDS", "45")))
+    # A longer per-attempt budget (tried at 35s, then 45s) does NOT reduce
+    # end-user latency -- it increases it. Confirmed live and in production
+    # (2026-08-08): when DeepSeek is genuinely slow, the request waits out
+    # the FULL budget before failing regardless of how long that budget is,
+    # then (see deepseek_provider.py) does NOT escalate to pro on a genuine
+    # timeout, so it falls to the deterministic fallback almost immediately
+    # after. A shorter budget makes that fallback trigger sooner without
+    # losing anything -- a completion that was going to time out at 45s was
+    # never going to finish at 25s either, and one that finishes in 8s is
+    # unaffected by the ceiling either way.
+    jd_timeout = max(5.0, float(os.getenv("JD_EXTRACTION_LLM_TIMEOUT_SECONDS", "25")))
 
     def _call_llm():
         structured = get_llm(temperature=0).with_structured_output(
@@ -2772,21 +2771,19 @@ def repair_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     def _call_repair_llm():
         structured = get_llm(temperature=0).with_structured_output(
             ExtractedJob,
-            timeout_seconds=max(5.0, float(os.getenv("JD_EXTRACTION_LLM_TIMEOUT_SECONDS", "45"))),
+            timeout_seconds=max(5.0, float(os.getenv("JD_EXTRACTION_LLM_TIMEOUT_SECONDS", "25"))),
             max_tokens=8000,
             queue_timeout_seconds=max(
                 0.5, float(os.getenv("JD_EXTRACTION_AI_QUEUE_TIMEOUT_SECONDS", "3"))
             ),
-            # When extraction_agent already fell back to the deterministic
-            # path (see used_deterministic_extraction), its own _call_llm
-            # already exhausted BOTH flash and pro against this exact
-            # evidence before giving up. Confirmed live (2026-08-08, Disney
-            # posting): a genuine payload/latency-driven timeout (not the
-            # transient "empty content" glitch) repeats almost identically
-            # on retry, so escalating to pro here too just pays a second
-            # ~40s+40s round trip for very low odds of a different outcome.
-            # One fresh flash-only attempt is still worth taking (transient
-            # network blips do happen) without doubling the wait.
+            # deepseek_provider.py itself never escalates to pro on a
+            # genuine timeout regardless of this flag (see there) -- this
+            # only still matters for non-timeout failures. When
+            # extraction_agent already fell back to the deterministic path
+            # (used_deterministic_extraction), skip even that: its own
+            # _call_llm already tried this exact evidence once, so a second
+            # blind attempt here is lower-value than just taking the
+            # deterministic result and moving on.
             escalate_on_error=not state.used_deterministic_extraction,
         )
         return structured.invoke([

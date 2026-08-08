@@ -221,20 +221,23 @@ class DeepSeekProvider:
                     break
 
             logger.warning(f"[DEEPSEEK_FAILOVER] Primary model ({self.flash_model}) failed: {flash_err}")
-            # escalate_on_error=False exists to stop a slow TIMEOUT from
-            # doubling worst-case latency (a second 60s-budget call on top of
-            # an already-exhausted one). "Empty content" is a different
-            # failure shape entirely -- the API answered fast with a
-            # response, just with nothing in it -- so retrying it against a
-            # different, stronger model costs about a second, not another
-            # full timeout window. Confirmed via production logs (2026-08-08,
-            # Disney Careers / JPMC postings): both flash attempts (json_object
-            # mode and prompt-enforced retry) returned empty content back to
-            # back, and with escalate_on_error=False this used to give up on
-            # the LLM entirely rather than ever trying deepseek-v4-pro, even
-            # though pro was never actually slow to respond in any of these
-            # cases -- it just never got asked.
-            if not escalate_on_error and "empty content" not in str(flash_err).casefold():
+            # Escalation is only worth its cost for a FAST failure. "Empty
+            # content" means the API answered quickly with nothing in it --
+            # retrying that against a different model costs about a second.
+            # A genuine TIMEOUT means the API never answered within the full
+            # budget at all -- escalating to deepseek-v4-pro (typically
+            # slower, not faster) just pays that same full timeout a second
+            # time for very low odds of a different outcome. Confirmed live
+            # and in production (2026-08-08, Disney/JPMC postings): flash
+            # timed out, escalated anyway, and pro ALSO timed out on the
+            # exact same request every time -- turning one ~20-45s failure
+            # into a ~80-90s one for no benefit. Never escalate on a timeout;
+            # fall straight back to the deterministic evidence path instead,
+            # which is what actually reduces latency here.
+            failure_text = str(flash_err).casefold()
+            is_timeout = isinstance(flash_err, TimeoutError) or "timed out" in failure_text
+            is_empty_content = "empty content" in failure_text
+            if is_timeout or (not escalate_on_error and not is_empty_content):
                 raise flash_err
 
             # Attempt 2: Escalation Model (deepseek-v4-pro)

@@ -443,9 +443,25 @@ export default function TailorRender({ resume, templateName, sectionOrder, layou
       case 'skills':
         return (!!categorizedSkills && Object.keys(categorizedSkills).length > 0) || (Array.isArray(rawSkills) && rawSkills.length > 0);
       case 'certifications':
-        return (Array.isArray(certifications) && certifications.filter(item => item && (item.title || item.name || typeof item === 'string')).length > 0) || (Array.isArray(certificationRecords) && certificationRecords.length > 0);
+        // Was also OR'd with a raw-array truthy/typeof check on `certifications`
+        // -- a whitespace-only string item (e.g. "   ") is a non-empty,
+        // truthy JS string, so `typeof item === 'string'` alone let it count
+        // as "has data" here even though normalizeDetailedRecords trims it
+        // to an empty title+description and drops it entirely. That made
+        // this check say "yes, render certifications" while the actual
+        // render loop below (which maps over certificationRecords) had
+        // nothing to render, producing a heading-less/marker-less section
+        // that then failed the backend PDF renderer's DOM validation as a
+        // "missing section". certificationRecords is normalized with the
+        // exact same rules used to render it, so checking only that can
+        // never diverge from what actually appears in the DOM.
+        return Array.isArray(certificationRecords) && certificationRecords.length > 0;
       case 'achievements':
-        return (Array.isArray(achievements) && achievements.filter(item => item && (item.title || item.name || item.description || typeof item === 'string')).length > 0) || (Array.isArray(achievementRecords) && achievementRecords.length > 0);
+        // Same class of bug as certifications above, confirmed live
+        // (2026-08-08): PDF rendering failed with "Missing sections in
+        // rendered HTML DOM: achievements" because this check could pass on
+        // achievement data normalizeDetailedRecords considered empty.
+        return Array.isArray(achievementRecords) && achievementRecords.length > 0;
       case 'volunteer':
       case 'volunteer_experience': {
         const vol = volunteer_experience || resume.volunteer;
