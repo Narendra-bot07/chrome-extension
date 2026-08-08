@@ -29,7 +29,7 @@ function NoJobDetectedPage() {
           { label: "Extracting Company Details", progressThreshold: 40 },
           { label: "Analyzing Required Skills", progressThreshold: 60 },
           { label: "Finding ATS Keywords", progressThreshold: 80 },
-          { label: "Calculating Resume Match", progressThreshold: 90 }
+          { label: "Calculating Resume Match", progressThreshold: 100 }
         ]}
       />
     );

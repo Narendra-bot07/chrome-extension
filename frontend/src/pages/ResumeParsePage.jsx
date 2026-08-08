@@ -14,7 +14,7 @@ function ResumeParsePage() {
         { label: "Reading Resume File", progressThreshold: 20 },
         { label: "Extracting Identity Info", progressThreshold: 40 },
         { label: "Identifying Professional Experience", progressThreshold: 60 },
-        { label: "Building Structure Model", progressThreshold: 80 }
+        { label: "Building Structure Model", progressThreshold: 100 }
       ]}
     />
   );

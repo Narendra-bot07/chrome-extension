@@ -21,7 +21,7 @@ function TailorProgressPage() {
     }));
   const checklistItems = [
     ...selectedStages,
-    { label: 'Validating Tailored Resume', progressThreshold: 90 }
+    { label: 'Validating Tailored Resume', progressThreshold: 100 }
   ];
 
   return (

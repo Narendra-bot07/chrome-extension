@@ -134,6 +134,31 @@ async def verify_checkout_session(
         if recorded_payment and str(recorded_payment.get("status") or "").lower() == "failed":
             checkout_status = "failed"
 
+    # Stripe's webhook is authoritative, but if it's delayed or misconfigured
+    # for this deployment the frontend's poll would otherwise sit on
+    # "pending" until its timeout even for a payment that already genuinely
+    # completed -- same asymmetry the Razorpay branch above closes. Stripe's
+    # own success AND cancel redirect URLs both carry `session_id` (see
+    # stripe_provider.create_checkout), so the frontend always has one to
+    # send once it captures it from the redirect.
+    session_id = str(req.get("session_id") or "")
+    if provider == "stripe" and session_id:
+        try:
+            stripe_session = billing_svc.fetch_stripe_checkout_session(session_id)
+            if stripe_session and str(stripe_session.get("client_reference_id") or "") == str(user["id"]):
+                session_status = str(stripe_session.get("status") or "").lower()
+                payment_status = str(stripe_session.get("payment_status") or "").lower()
+                if session_status == "complete" and payment_status in {"paid", "no_payment_required"}:
+                    checkout_status = "success"
+                elif session_status == "expired":
+                    checkout_status = "cancelled"
+                else:
+                    checkout_status = "pending"
+        except Exception:
+            # Webhook/database state below remains the safe fallback when the
+            # provider API is temporarily unavailable.
+            pass
+
     with _db_context() as conn:
         sub_svc = SubscriptionService(conn)
         current_sub = sub_svc.get_user_subscription(user["id"])

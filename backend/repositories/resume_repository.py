@@ -1019,6 +1019,75 @@ class ResumeRepository:
 
     record_resume_usage = record_usage_event
 
+    def _backfill_version_score(self, cur, version: Dict[str, Any]) -> Dict[str, Any]:
+        """Opportunistically recompute a missing ats_score/resume_match_score
+        for a version whose score was never persisted (either created before
+        that write path existed, or the background scorer call silently
+        failed/timed out -- see AppContext.jsx's handleGenerateFinalResume).
+        Only possible when the version is linked to a Job Tracker application
+        (job_id) with real structured job data (organized_jd) to score
+        against; otherwise there is genuinely nothing to compute from, and
+        the version's score correctly stays null. Any recovered score is
+        persisted back with COALESCE so it's never recomputed twice and can
+        never clobber a real, already-stored value."""
+        if version.get("ats_score") is not None and version.get("resume_match_score") is not None:
+            return version
+        job_id = version.get("job_id")
+        if not job_id:
+            return version
+        cur.execute("SELECT organized_jd FROM public.applications WHERE id = %s", (job_id,))
+        app_row = cur.fetchone()
+        job_payload = (app_row or {}).get("organized_jd") or {}
+        if isinstance(job_payload, str):
+            try:
+                job_payload = json.loads(job_payload)
+            except (TypeError, ValueError):
+                job_payload = {}
+        # Checked on the RAW payload, before normalization below fills every
+        # field with an empty default -- organized_jd uses the frontend's
+        # job-object field names (job_title/skills), not JobAnalysis's
+        # (title/required_skills), so this must look for either.
+        has_signal = any(
+            job_payload.get(key) for key in ("title", "job_title", "skills", "required_skills")
+        )
+        if not has_signal:
+            return version
+        content = version.get("content") or {}
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except (TypeError, ValueError):
+                content = {}
+        try:
+            # Deferred imports: app.routers.api imports ResumeRepository at
+            # module load time, so a top-level import here would be circular.
+            from services.resume.scoring import ATSScoringEngine
+            from app.schemas import ResumeStructure, JobAnalysis
+            from app.routers.api import normalize_job_payload, normalize_resume_payload
+            resume = ResumeStructure(**normalize_resume_payload(content))
+            job = JobAnalysis(**normalize_job_payload(job_payload))
+            result = ATSScoringEngine.calculate_score(resume, job)
+            ats_score = result.get("ats_score")
+            resume_match_score = result.get("resume_match_score")
+        except Exception:
+            logger.warning("Live ATS score recompute failed for version %s", version.get("id"), exc_info=True)
+            return version
+        if ats_score is None and resume_match_score is None:
+            return version
+        cur.execute(
+            """
+            UPDATE public.resume_versions
+            SET ats_score = COALESCE(ats_score, %s),
+                resume_match_score = COALESCE(resume_match_score, %s),
+                analysis_timestamp = COALESCE(analysis_timestamp, NOW())
+            WHERE id = %s
+            RETURNING *
+            """,
+            (ats_score, resume_match_score, version["id"]),
+        )
+        updated = cur.fetchone()
+        return dict(updated) if updated else version
+
     def compare_versions(self, version_a_id: str, version_b_id: str, user_id: str) -> Dict[str, Any]:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
@@ -1033,6 +1102,10 @@ class ResumeRepository:
             ver_b = rows.get(version_b_id)
             if not ver_a or not ver_b:
                 raise ValueError("One or both versions not found.")
+
+            ver_a = self._backfill_version_score(cur, ver_a)
+            ver_b = self._backfill_version_score(cur, ver_b)
+            self.conn.commit()
 
             # Calculate score diffs
             ats_a = float(ver_a.get("ats_score") or 0)

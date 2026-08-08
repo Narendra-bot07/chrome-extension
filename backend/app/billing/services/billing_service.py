@@ -45,8 +45,21 @@ class BillingService:
         Returns dict with checkout_url, provider, key_id, etc.
         """
         provider_inst, provider_name = self._get_provider_for_request(country, currency, provider_override)
-        checkout_res = provider_inst.create_checkout(user, plan)
-        
+        if provider_name == "razorpay":
+            checkout_res = provider_inst.create_checkout(user, plan, currency=currency or "INR")
+            # No Razorpay Plan is configured for this currency (see
+            # razorpay_provider.create_checkout) -- an explicit Razorpay
+            # request (e.g. the user picked it manually) must still result
+            # in a WORKING checkout rather than a silent INR mischarge, so
+            # fall back to Stripe, which already handles arbitrary
+            # currencies via its own price_data path.
+            if isinstance(checkout_res, dict) and checkout_res.get("unsupported_currency"):
+                provider_inst = self.stripe_provider
+                provider_name = "stripe"
+                checkout_res = provider_inst.create_checkout(user, plan)
+        else:
+            checkout_res = provider_inst.create_checkout(user, plan)
+
         if isinstance(checkout_res, dict):
             url = checkout_res.get("checkout_url") or checkout_res.get("url") or ""
             sub_id = checkout_res.get("subscription_id")
@@ -77,6 +90,9 @@ class BillingService:
 
     def fetch_razorpay_invoice(self, invoice_id: str) -> Dict[str, Any]:
         return self.razorpay_provider.fetch_invoice(invoice_id)
+
+    def fetch_stripe_checkout_session(self, session_id: str) -> Dict[str, Any]:
+        return self.stripe_provider.fetch_checkout_session(session_id)
 
     def cancel_subscription(self, provider: str, provider_subscription_id: str) -> bool:
         if provider == "razorpay":

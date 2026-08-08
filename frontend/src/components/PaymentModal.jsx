@@ -1,10 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Landmark, CheckCircle2, Globe, ShieldCheck, Sparkles, RefreshCw } from 'lucide-react';
-import { fetchLiveUsdToInrRate, convertUsdToInrSync, formatInrPrice } from '../utils/currencyConverter';
+import { fetchLiveUsdToInrRate, convertUsdToInrSync, formatInrPrice, isLikelyIndianUser } from '../utils/currencyConverter';
 
 export function PaymentModal({ isOpen, onClose, plan, onSelectPayment }) {
-  const [selectedProvider, setSelectedProvider] = useState('stripe'); // default to 'stripe'
+  // Default by detected region (see isLikelyIndianUser) rather than always
+  // defaulting to the international option -- an Indian user should land
+  // on UPI/Indian payment methods without having to manually switch. Still
+  // just a default: the cards below remain clickable so a misdetected user
+  // (VPN, travel) isn't stuck.
+  const [selectedProvider, setSelectedProvider] = useState(() => (isLikelyIndianUser() ? 'razorpay' : 'stripe'));
   const [loading, setLoading] = useState(false);
   const [usdToInrRate, setUsdToInrRate] = useState(86.5);
   const [fetchingRate, setFetchingRate] = useState(false);
@@ -143,7 +148,7 @@ export function PaymentModal({ isOpen, onClose, plan, onSelectPayment }) {
                 </div>
                 <div class="spinner-ring"></div>
                 <h2>Redirecting to Secure Checkout</h2>
-                <p>Establishing encrypted payment session with ${provider === 'razorpay' ? 'Razorpay' : 'Stripe'}...</p>
+                <p>Establishing encrypted payment session with ${provider === 'razorpay' ? 'Razorpay' : 'our international payment partner'}...</p>
                 <div class="badge">🔒 256-Bit SSL Encrypted</div>
               </div>
             </body>
@@ -210,7 +215,7 @@ export function PaymentModal({ isOpen, onClose, plan, onSelectPayment }) {
         {/* Payment Options Form */}
         <form onSubmit={handleCheckoutSubmit} className="space-y-4">
           <div className="space-y-3">
-            {/* International Payments / Stripe */}
+            {/* International Payments */}
             <div
               onClick={() => setSelectedProvider('stripe')}
               className={`cursor-pointer rounded-2xl border p-4 flex items-start justify-between transition-all ${
@@ -225,13 +230,13 @@ export function PaymentModal({ isOpen, onClose, plan, onSelectPayment }) {
                 </div>
                 <div>
                   <div className="font-bold text-sm text-zinc-900 dark:text-white flex items-center gap-2">
-                    Stripe (International)
+                    International Payment
                     <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
                       USD / CARDS
                     </span>
                   </div>
                   <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
-                    Credit & Debit Cards globally. Instant encrypted checkout via Stripe.
+                    Credit & Debit Cards globally. Instant encrypted checkout.
                   </p>
                 </div>
               </div>

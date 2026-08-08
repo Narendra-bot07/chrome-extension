@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Check, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
@@ -50,6 +50,12 @@ export default function SubscriptionPage() {
   const [spreadCards, setSpreadCards] = useState(reducedMotion);
   const { subscription, plans, loading, error, refresh } = useSubscription();
   const [usdToInrRate, setUsdToInrRate] = useState(86.5);
+  // Tracks the popup/new-tab window the user's actual checkout is happening
+  // in (Razorpay or Stripe). Nothing previously watched this reference at
+  // all, so a user who just closed that tab -- without clicking anything
+  // inside it -- left the status modal spinning on "Payment in Progress"
+  // for up to the full 2-minute poll timeout instead of resolving instantly.
+  const checkoutTabRef = useRef(null);
 
   useEffect(() => {
     fetchLiveUsdToInrRate().then(rate => setUsdToInrRate(rate));
@@ -63,7 +69,8 @@ export default function SubscriptionPage() {
     status: 'pending', // 'pending' | 'success' | 'failed' | 'cancelled'
     targetPlanName: '',
     provider: '',
-    subscriptionId: ''
+    subscriptionId: '',
+    sessionId: ''
   });
 
   const jdUsage = subscription?.usage?.jd_extraction;
@@ -108,7 +115,8 @@ export default function SubscriptionPage() {
         body: JSON.stringify({
           plan_code: targetPlanCode || 'pro',
           provider: checkout.provider || '',
-          subscription_id: checkout.subscriptionId || ''
+          subscription_id: checkout.subscriptionId || '',
+          session_id: checkout.sessionId || ''
         })
       });
       const data = await res.json().catch(() => null);
@@ -166,14 +174,19 @@ export default function SubscriptionPage() {
       // effect below, already wired to keep calling it) flips the modal to
       // a real 'success' once the webhook has actually landed, or to
       // 'unknown' if it times out without ever landing.
-      handleVerifyAndActivate(searchParams.get('plan_id') || 'pro');
+      // Stripe's own success redirect (see stripe_provider.create_checkout)
+      // always carries session_id -- pass it through so verify-session can
+      // fall back to a live Stripe lookup instead of waiting on the webhook
+      // alone (mirrors the Razorpay subscription_id path below).
+      const stripeSessionId = searchParams.get('session_id') || '';
+      handleVerifyAndActivate(searchParams.get('plan_id') || 'pro', { provider: 'stripe', sessionId: stripeSessionId });
       setPaymentBanner({
         type: 'info',
         message: 'Confirming your payment…'
       });
       try {
         const bc = new BroadcastChannel('payment_channel');
-        bc.postMessage({ type: 'PAYMENT_SUCCESS', plan: searchParams.get('plan_id') || 'pro' });
+        bc.postMessage({ type: 'PAYMENT_SUCCESS', plan: searchParams.get('plan_id') || 'pro', session_id: stripeSessionId });
         bc.close();
       } catch (e) {}
     } else if (paymentStatus === 'cancelled') {
@@ -196,7 +209,11 @@ export default function SubscriptionPage() {
       bc = new BroadcastChannel('payment_channel');
       bc.onmessage = (event) => {
         if (event.data?.type === 'PAYMENT_SUCCESS') {
-          handleVerifyAndActivate(event.data?.plan);
+          const sessionId = event.data?.session_id || '';
+          if (sessionId) {
+            setPaymentStatusModal(prev => ({ ...prev, provider: prev.provider || 'stripe', sessionId }));
+          }
+          handleVerifyAndActivate(event.data?.plan, { provider: 'stripe', sessionId });
         }
       };
     } catch (e) {}
@@ -255,7 +272,40 @@ export default function SubscriptionPage() {
       clearInterval(interval);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [handleVerifyAndActivate, paymentStatusModal.isOpen, paymentStatusModal.status, paymentStatusModal.targetPlanName, paymentStatusModal.provider, paymentStatusModal.subscriptionId]);
+  }, [handleVerifyAndActivate, paymentStatusModal.isOpen, paymentStatusModal.status, paymentStatusModal.targetPlanName, paymentStatusModal.provider, paymentStatusModal.subscriptionId, paymentStatusModal.sessionId]);
+
+  // Fast (500ms) watch for the user closing the actual checkout tab/popup --
+  // separate from the 2-second verify poll above so an abandoned checkout
+  // resolves near-instantly instead of waiting on that slower cadence (or,
+  // worst case, its full 2-minute timeout) to notice anything happened.
+  // Closing the tab is not itself proof of cancellation -- the webhook for a
+  // just-completed payment can still land a moment later -- so this always
+  // runs one more verify first and only falls back to 'cancelled' if that
+  // didn't confirm success.
+  useEffect(() => {
+    if (!paymentStatusModal.isOpen || paymentStatusModal.status !== 'pending') return undefined;
+
+    const interval = setInterval(async () => {
+      const tab = checkoutTabRef.current;
+      if (!tab || !tab.closed) return;
+      checkoutTabRef.current = null;
+      clearInterval(interval);
+      const confirmed = await handleVerifyAndActivate(paymentStatusModal.targetPlanName, paymentStatusModal);
+      if (!confirmed) {
+        setPaymentStatusModal(prev => (
+          prev.status === 'pending'
+            ? { ...prev, status: 'cancelled' }
+            : prev
+        ));
+        setPaymentBanner({
+          type: 'info',
+          message: 'The payment window was closed before checkout completed. You can retry anytime.'
+        });
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [handleVerifyAndActivate, paymentStatusModal.isOpen, paymentStatusModal.status, paymentStatusModal.targetPlanName, paymentStatusModal.provider, paymentStatusModal.subscriptionId, paymentStatusModal.sessionId]);
 
   // Auto-detect plan upgrade completion while status modal is pending
   useEffect(() => {
@@ -297,6 +347,7 @@ export default function SubscriptionPage() {
       return;
     }
 
+    checkoutTabRef.current = checkoutTab || null;
     const targetPlan = checkoutModalPlan;
     try {
       // 1. Close payment gateway selection modal on current page
@@ -368,6 +419,7 @@ export default function SubscriptionPage() {
             name: 'Tailr4U Subscriptions',
             description: `Upgrade to ${targetPlan?.name || 'Pro'}`,
             handler: function (response) {
+              checkoutTabRef.current = null;
               if (targetWin !== window && !targetWin.closed) targetWin.close();
               setPaymentStatusModal(prev => ({ ...prev, isOpen: true, status: 'pending' }));
               setPaymentBanner({
@@ -381,6 +433,7 @@ export default function SubscriptionPage() {
             },
             modal: {
               ondismiss: function () {
+                checkoutTabRef.current = null;
                 if (targetWin !== window && !targetWin.closed) targetWin.close();
                 setPaymentStatusModal({
                   isOpen: true,

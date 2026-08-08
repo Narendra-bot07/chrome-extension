@@ -8,23 +8,24 @@
          HashRouter -- see docs/SEO_NOTES.md) with a single crawlable
          document, so everything here on the one real URL (https://tailr4u.com/)
          matters far more than it would in a multi-page app. -->
-    <title>Tailr4U – AI Resume Builder, ATS Optimizer & Job Application Tracker</title>
+    <title>Tailr4U – Land your dream job with AI</title>
     <meta name="description" content="Tailor your resume to any job description with AI, check your real ATS match score, generate matching cover letters, and track every application and follow-up in one workspace." />
     <meta name="robots" content="index, follow" />
     <link rel="canonical" href="https://tailr4u.com/" />
 
-    <!-- Google Search Console verification. Set VITE_GOOGLE_SITE_VERIFICATION
-         in the frontend build environment; Vite substitutes percent-wrapped
-         VITE_ env var names in index.html at build time. Renders as an
-         empty, inert meta tag when unset. -->
-    <meta name="google-site-verification" content="%VITE_GOOGLE_SITE_VERIFICATION%" />
+    <!-- Google Search Console verification (additional HTML-tag method,
+         alongside whatever method originally verified this property). Not
+         a secret -- it's meant to sit in public page source -- so it's
+         hardcoded directly rather than routed through a build-time env var
+         that would need separate Vercel configuration. -->
+    <meta name="google-site-verification" content="dUytnpoKQ4MrGDr3CtP7vtALt5GIqz-c0dlcfUeTUqQ" />
 
     <!-- Open Graph (Facebook, LinkedIn, Slack, Discord, WhatsApp) -->
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://tailr4u.com/" />
     <meta property="og:site_name" content="Tailr4U" />
     <meta property="og:locale" content="en_US" />
-    <meta property="og:title" content="Tailr4U – AI Resume Builder, ATS Optimizer & Job Application Tracker" />
+    <meta property="og:title" content="Tailr4U – Land your dream job with AI" />
     <meta property="og:description" content="Tailor your resume to any job description with AI, check your real ATS match score, generate matching cover letters, and track every application and follow-up in one workspace." />
     <!-- Using the existing square logo as an interim social-preview image.
          It exists (frontend/public/application-logo.png) so this renders
@@ -40,13 +41,22 @@
 
     <!-- Twitter / X Card -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Tailr4U – AI Resume Builder, ATS Optimizer & Job Application Tracker" />
+    <meta name="twitter:title" content="Tailr4U – Land your dream job with AI" />
     <meta name="twitter:description" content="Tailor your resume to any job description with AI, check your real ATS match score, generate matching cover letters, and track every application and follow-up in one workspace." />
     <meta name="twitter:image" content="https://tailr4u.com/application-logo.png" />
 
     <meta name="theme-color" content="#0b0f17" />
-    <link rel="icon" type="image/png" href="%BASE_URL%application-logo.png" />
-    <link rel="apple-touch-icon" href="%BASE_URL%application-logo.png" />
+    <!-- A proper favicon.ico/48x48/180x180 set already existed in public/
+         (generated 2026-08-05) but was never referenced here -- every icon
+         tag pointed at application-logo.png (500x500) instead, including
+         apple-touch-icon, which iOS expects at exactly 180x180. Google's own
+         favicon discovery checks /favicon.ico at the site root FIRST; that
+         file existed and was being served (Vite copies public/ verbatim) but
+         had no <link> pointing to it either. -->
+    <link rel="icon" href="%BASE_URL%favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="48x48" href="%BASE_URL%favicon-48x48.png" />
+    <link rel="apple-touch-icon" href="%BASE_URL%apple-touch-icon.png" />
+    <link rel="manifest" href="%BASE_URL%site.webmanifest" />
 
     <!-- Inter / Plus Jakarta Sans are now self-hosted (see src/styles.css)
          instead of loaded from fonts.googleapis.com/fonts.gstatic.com --

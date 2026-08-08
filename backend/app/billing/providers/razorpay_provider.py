@@ -16,7 +16,7 @@ class RazorpayProvider(BaseProvider):
         else:
             self.client = None
 
-    def create_checkout(self, user: Dict[str, Any], plan: Dict[str, Any]) -> Dict[str, Any]:
+    def create_checkout(self, user: Dict[str, Any], plan: Dict[str, Any], currency: str = "INR") -> Dict[str, Any]:
         if not self.client:
             frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
             return {
@@ -27,16 +27,37 @@ class RazorpayProvider(BaseProvider):
             }
 
         plan_key = str(plan.get("id") or "").lower()
-        plan_id = plan.get("razorpay_plan_id")
+        # A Razorpay Plan object is created in ONE fixed currency on the
+        # Razorpay dashboard -- there is no per-request currency override on
+        # the Subscription API, so a genuinely different-currency checkout
+        # needs its own, separately-configured Plan id. Existing
+        # RAZORPAY_PLAN_*_MONTHLY vars are INR (the original India-only
+        # design); non-INR requests look for a currency-suffixed sibling var
+        # instead of silently reusing the INR plan (which would either charge
+        # an international card the wrong amount or be rejected outright by
+        # an account without cross-border payments enabled).
+        currency_upper = (currency or "INR").upper()
+        suffix = "" if currency_upper == "INR" else f"_{currency_upper}"
+        plan_id = plan.get("razorpay_plan_id") if not suffix else None
         if not plan_id:
             if "basic" in plan_key or "free" in plan_key:
-                plan_id = os.getenv("RAZORPAY_PLAN_BASIC_MONTHLY")
+                plan_id = os.getenv(f"RAZORPAY_PLAN_BASIC_MONTHLY{suffix}")
             elif "elite" in plan_key or "premium" in plan_key:
-                plan_id = os.getenv("RAZORPAY_PLAN_ELITE_MONTHLY")
+                plan_id = os.getenv(f"RAZORPAY_PLAN_ELITE_MONTHLY{suffix}")
             else:
-                plan_id = os.getenv("RAZORPAY_PLAN_PRO_MONTHLY")
+                plan_id = os.getenv(f"RAZORPAY_PLAN_PRO_MONTHLY{suffix}")
         if not plan_id:
-            plan_id = os.getenv("RAZORPAY_DEFAULT_PLAN_ID") or "plan_TKvwof7YNDV9kh"
+            plan_id = os.getenv(f"RAZORPAY_DEFAULT_PLAN_ID{suffix}")
+        if not plan_id:
+            if suffix:
+                # No Razorpay plan has been configured for this currency yet
+                # (a real Razorpay-dashboard setup step, not something this
+                # code can create on its own) -- signal it explicitly so the
+                # caller can fall back to a provider that DOES support this
+                # currency instead of silently defaulting to the INR plan_id
+                # below and mischarging/rejecting an international payment.
+                return {"unsupported_currency": True, "provider": "razorpay"}
+            plan_id = "plan_TKvwof7YNDV9kh"
 
         try:
             subscription = self.client.subscription.create({

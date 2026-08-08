@@ -35,3 +35,18 @@ export function formatInrPrice(inrAmount) {
     maximumFractionDigits: 0
   }).format(inrAmount);
 }
+
+// Best-effort, client-only signal for defaulting the checkout provider --
+// there's no backend geo-IP lookup wired up for this yet, so the browser's
+// own IANA timezone is the only signal available without a network round
+// trip. Deliberately just a DEFAULT: callers must still let the user
+// override it (a traveling or VPN'd user would otherwise get stuck on the
+// wrong payment method with no way out).
+export function isLikelyIndianUser() {
+  try {
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    return timeZone === 'Asia/Kolkata' || timeZone === 'Asia/Calcutta';
+  } catch {
+    return false;
+  }
+}

@@ -87,6 +87,28 @@ class StripeProvider(BaseProvider):
             "subscription_id": sub_id
         }
 
+    def fetch_checkout_session(self, session_id: str) -> Dict[str, Any]:
+        """Live fallback for /verify-session, mirroring razorpay_provider's
+        fetch_subscription -- Stripe's webhook is the authoritative source of
+        truth, but if it's delayed (or never configured for this deployment)
+        the frontend's poll would otherwise sit on "pending" until its
+        timeout even for a payment that already genuinely completed. Stripe
+        redirects back with `session_id` on both the success AND cancel URLs
+        (see create_checkout above), so this is always resolvable."""
+        if not self.api_key or not session_id or session_id.startswith("sub_mock") or "{CHECKOUT_SESSION_ID}" in session_id:
+            return {}
+        try:
+            session = stripe.checkout.Session.retrieve(session_id)
+            return {
+                "status": session.get("status"),
+                "payment_status": session.get("payment_status"),
+                "subscription": session.get("subscription"),
+                "client_reference_id": session.get("client_reference_id"),
+                "metadata": dict(session.get("metadata") or {}),
+            }
+        except Exception:
+            return {}
+
     def verify_webhook(self, payload: bytes, signature: str) -> Dict[str, Any]:
         endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
         if not endpoint_secret or endpoint_secret == "dummy":
