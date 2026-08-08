@@ -77,9 +77,10 @@ def _job_extraction_cache_key(url: str, browser_evidence: Dict[str, Any] | None 
         str(evidence.get("job_title_hint") or "").strip().casefold(),
     )))
     identity = f"{normalized}|{rendered_identity}" if rendered_identity else normalized
-    # v4 invalidates fallback results that could contain provider placeholders
-    # such as occupationalCategory="UNAVAILABLE" as an explicit skill.
-    return f"jd_extraction:v4:{hashlib.sha256(identity.encode('utf-8')).hexdigest()}"
+    # v5 invalidates every result produced by the former deterministic
+    # extraction fallback. Otherwise a corrected deployment can continue
+    # serving yesterday's wrong Disney/JPMC/LinkedIn record for 24 hours.
+    return f"jd_extraction:v5-llm-only:{hashlib.sha256(identity.encode('utf-8')).hexdigest()}"
 
 
 def _is_disallowed_extraction_target(url: str) -> bool:
@@ -103,10 +104,17 @@ async def extract_job_from_provided_url(
     request_started = time.perf_counter()
     logger.info(
         "[JD-EXTRACTION][BACKEND] Request received request_id=%s url=%s "
-        "extension_evidence=%s",
+        "extension_evidence=%s html_length=%s visible_text_length=%s "
+        "selected_panel_length=%s jsonld_count=%s title_hint=%r company_hint=%r",
         request_id,
         request.url,
         bool(request.browser_evidence),
+        len(str((request.browser_evidence or {}).get("html") or "")),
+        len(str((request.browser_evidence or {}).get("visible_text") or "")),
+        len(str((request.browser_evidence or {}).get("selected_panel_text") or "")),
+        len((request.browser_evidence or {}).get("jsonld") or []),
+        (request.browser_evidence or {}).get("job_title_hint"),
+        (request.browser_evidence or {}).get("company_hint"),
     )
     if _is_disallowed_extraction_target(request.url):
         raise HTTPException(

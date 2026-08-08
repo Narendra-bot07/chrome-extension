@@ -192,6 +192,13 @@ class DeepSeekProvider:
                         temperature=temperature,
                         timeout_seconds=timeout_seconds,
                         max_tokens=max_tokens,
+                        # Some DeepSeek-compatible gateways intermittently
+                        # return an empty message specifically in json_object
+                        # mode. The schema is already embedded in the system
+                        # prompt, so retry that exact request once without the
+                        # transport hint instead of treating an empty body as
+                        # permission to manufacture fields locally.
+                        json_mode=flash_attempt == 0,
                     )
                     return self._parse_json_schema(raw_json, schema_cls)
                 except Exception as attempt_err:
@@ -208,7 +215,7 @@ class DeepSeekProvider:
                     if flash_attempt == 0 and "empty content" in str(attempt_err).casefold():
                         logger.warning(
                             f"[DEEPSEEK_EMPTY_CONTENT_RETRY] {self.flash_model} "
-                            "returned empty content; retrying once"
+                            "returned empty content; retrying once with prompt-enforced JSON"
                         )
                         continue
                     break
@@ -231,6 +238,24 @@ class DeepSeekProvider:
                 parsed_obj = self._parse_json_schema(raw_json_pro, schema_cls)
                 return parsed_obj
             except Exception as pro_err:
+                if "empty content" in str(pro_err).casefold():
+                    logger.warning(
+                        "[DEEPSEEK_ESCALATION_EMPTY_RETRY] %s returned empty content; "
+                        "retrying with prompt-enforced JSON",
+                        self.pro_model,
+                    )
+                    try:
+                        raw_json_pro = self._chat_completion(
+                            model=self.pro_model,
+                            messages=messages,
+                            temperature=temperature,
+                            timeout_seconds=timeout_seconds,
+                            max_tokens=max_tokens,
+                            json_mode=False,
+                        )
+                        return self._parse_json_schema(raw_json_pro, schema_cls)
+                    except Exception as final_err:
+                        pro_err = final_err
                 logger.error(f"[DEEPSEEK_ESCALATION_FAILED] Both flash and pro models failed: {pro_err}")
                 raise pro_err
 
@@ -241,6 +266,7 @@ class DeepSeekProvider:
         temperature: float,
         timeout_seconds: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        json_mode: bool = True,
     ) -> str:
         """Execute chat completion call via OpenAI-compatible SDK or HTTP fallback."""
         if self.client:
@@ -248,9 +274,10 @@ class DeepSeekProvider:
                 "model": model,
                 "messages": messages,
                 "temperature": temperature,
-                "response_format": {"type": "json_object"},
                 "timeout": timeout_seconds or self.timeout,
             }
+            if json_mode:
+                request_kwargs["response_format"] = {"type": "json_object"}
             if max_tokens:
                 request_kwargs["max_tokens"] = max_tokens
             response = self.client.chat.completions.create(
@@ -258,7 +285,8 @@ class DeepSeekProvider:
             )
             content = response.choices[0].message.content
             if not content:
-                raise ValueError("DeepSeek returned empty content in response_format json_object mode.")
+                mode = "response_format json_object" if json_mode else "prompt-enforced JSON"
+                raise ValueError(f"DeepSeek returned empty content in {mode} mode.")
             return content
         else:
             # Fallback requests implementation if openai client fails
@@ -271,8 +299,9 @@ class DeepSeekProvider:
                 "model": model,
                 "messages": messages,
                 "temperature": temperature,
-                "response_format": {"type": "json_object"}
             }
+            if json_mode:
+                payload["response_format"] = {"type": "json_object"}
             if max_tokens:
                 payload["max_tokens"] = max_tokens
             res = requests.post(

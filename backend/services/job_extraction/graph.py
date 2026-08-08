@@ -74,13 +74,6 @@ def route_after_discovery(state: JDState) -> Literal["browser", "evidence_evalua
     usable job panel or structured JobPosting JSON-LD."""
     evidence = state.extension_evidence or {}
     client_assessment = evidence.get("client_assessment") or {}
-    if (
-        client_assessment.get("readiness") == "NOT_READY"
-        and not bool(client_assessment.get("requiresRecoveryEvaluation"))
-    ):
-        # The user's rendered page is authoritative here. A clearly non-job
-        # browser page must not trigger an unrelated backend navigation.
-        return "evidence_evaluation"
     panel_text = str(evidence.get("selected_panel_text") or "").strip()
     visible_text = str(evidence.get("visible_text") or "").strip()
     strong_panel = bool(panel_text) and len(panel_text) >= 200 and (
@@ -94,7 +87,12 @@ def route_after_discovery(state: JDState) -> Literal["browser", "evidence_evalua
         and not bool(client_assessment.get("requiresRecoveryEvaluation"))
         and len(panel_text or visible_text) >= 200
     )
-    if client_ready or strong_panel or has_job_jsonld or _has_usable_extension_evidence(state):
+    captured_length = max(
+        len(str(evidence.get("selected_panel_text") or "").strip()),
+        len(str(evidence.get("visible_text") or "").strip()),
+        len(str(evidence.get("html") or "").strip()),
+    )
+    if captured_length >= 200 or client_ready or strong_panel or has_job_jsonld or _has_usable_extension_evidence(state):
         return "evidence_evaluation"
     return "browser"
 
@@ -188,9 +186,11 @@ def build_job_intelligence_graph():
     graph.add_edge("markdown", "metadata")
     graph.add_edge("metadata", "block_detection")
     graph.add_conditional_edges("block_detection", route_after_block_detection)
-    graph.add_edge("planner", "classifier")
-    graph.add_conditional_edges("classifier", route_after_classifier)
-    graph.add_conditional_edges("classification_review", route_after_classification_review)
+    # Once evidence evaluation has selected a coherent rendered job source,
+    # send the complete cleansed Markdown to the extraction LLM. The former
+    # regex classifier could contradict that decision and route real Disney,
+    # LinkedIn, or JPMC postings into browser/manual-review detours.
+    graph.add_edge("planner", "evidence_planner")
     graph.add_edge("evidence_planner", "source_builder")
     graph.add_edge("source_builder", "extraction")
     graph.add_edge("extraction", "reviewer")

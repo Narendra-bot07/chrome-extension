@@ -2073,31 +2073,10 @@ export function AppProvider({ children }) {
         requestId,
         ...browserAssessment
       });
-      if (
-        browserEvidence
-        && browserAssessment.readiness === 'NOT_READY'
-        && !browserAssessment.requiresRecoveryEvaluation
-      ) {
-        extractionVersionRef.current += 1;
-        activeExtractionIdentityRef.current = expectedIdentity;
-        setCurrentJobIdentity(expectedIdentity);
-        resetExtractedJobState('browser evidence is clearly non-job', {
-          url: activeUrl,
-          assessment: browserAssessment
-        });
-        chrome.storage.session?.remove('jobExtractionSession');
-        setJobDetectionStatus('non-job');
-        setJobDetectionMeta({
-          classification: 'non_job',
-          confidence: 1,
-          reason: 'No coherent job identity, application action, job sections, or JobPosting data were found.',
-          extractionMethod: 'browser_evidence_gate',
-          readiness: browserAssessment.readiness,
-          signals: browserAssessment.signals
-        });
-        setApiError(null);
-        return;
-      }
+      // The assessment is diagnostics/recovery metadata only. Do not make a
+      // final content-classification decision in the extension: portal DOMs
+      // vary too much, and this previously rejected real Disney/JPMC pages
+      // before their complete captured evidence ever reached the LLM.
       setLoadingMessage("Backend planning evidence sources...");
       setLoadingProgress(24);
       extractionProgressInterval = window.setInterval(() => {

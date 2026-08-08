@@ -1124,7 +1124,12 @@ def dom_cleaner_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     for node in list(soup.find_all(attrs={"class": noise})) + list(soup.find_all(attrs={"id": noise})):
         node.decompose()
     cleaned = str(soup)
-    logger.info("%s DOM cleaned request_id=%s length=%s", LOG_PREFIX, state.request_id, len(cleaned))
+    logger.info(
+        "%s DOM cleanser completed request_id=%s input_length=%s output_length=%s "
+        "removed_length=%s selected_source=%s",
+        LOG_PREFIX, state.request_id, len(state.raw_html), len(cleaned),
+        max(0, len(state.raw_html) - len(cleaned)), state.selected_evidence_source,
+    )
     return {"cleaned_html": cleaned, "execution_log": _event(state, "dom_cleaner", length=len(cleaned))}
 
 
@@ -1139,7 +1144,11 @@ def markdown_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             lines.append(normalized)
             seen.add(key)
     markdown = "\n".join(lines)[:60000]
-    logger.info("%s Markdown completed request_id=%s length=%s", LOG_PREFIX, state.request_id, len(markdown))
+    logger.info(
+        "%s Markdown conversion completed request_id=%s html_length=%s "
+        "markdown_length=%s line_count=%s",
+        LOG_PREFIX, state.request_id, len(state.cleaned_html), len(markdown), len(lines),
+    )
     return {"markdown": markdown, "execution_log": _event(state, "markdown", length=len(markdown))}
 
 
@@ -1518,7 +1527,10 @@ def source_builder_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         # the optional JSON-LD prefix (see above) plus the same 12k of
         # actual page text as before, so combining the two never starves
         # the page text of the room it previously had on its own.
-        "source_text": source[:14000],
+        # The LLM is the organizer of record. Do not starve it of later JD
+        # sections (JPMC commonly places responsibilities after a long About
+        # Us block). markdown_agent already enforces the 60k safety ceiling.
+        "source_text": source[:62000],
         "source_urls": list(dict.fromkeys(filter(None, [state.original_url, state.final_url, state.metadata.get("canonical_url")]))),
         "source_scores": state.source_scores,
         "field_source_hints": state.evidence.get("field_source_hints", {}),
@@ -2206,9 +2218,10 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
                 0.5,
                 float(os.getenv("JD_EXTRACTION_AI_QUEUE_TIMEOUT_SECONDS", "3")),
             ),
-            # A second 60-second model attempt caused the observed ~2m misses.
-            # Existing evidence is a safer fallback for this latency-sensitive path.
-            escalate_on_error=False,
+            # Correct extraction is preferable to silently returning a
+            # dictionary/regex approximation. The provider first performs a
+            # cheap same-model JSON retry, then escalates only if needed.
+            escalate_on_error=True,
         )
         return structured.invoke([
             SystemMessage(content=EXTRACTION_PROMPT),
@@ -2225,17 +2238,17 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             payload_to_fingerprint=state.evidence,
             llm_callable=_call_llm,
             expected_schema=ExtractedJob,
-            prompt_version="jd-agent-v2-fast"
+            prompt_version="jd-agent-v3-llm-only"
         )
     except Exception as exc:
-        logger.warning(
-            "%s LLM extraction failed; using deterministic evidence fallback "
+        logger.exception(
+            "%s LLM extraction failed; no synthetic fallback will be returned "
             "request_id=%s error=%s",
-            LOG_PREFIX,
-            state.request_id,
-            type(exc).__name__,
+            LOG_PREFIX, state.request_id, type(exc).__name__,
         )
-        job = _deterministic_job_from_evidence(state)
+        raise RuntimeError(
+            "The AI job-description organizer did not return valid JSON. Please retry."
+        ) from exc
     job_dict = ExtractedJob.model_validate(job).model_dump(mode="json")
     # _clean_evidence_items/_clean_evidence_text (BeautifulSoup-based) were
     # previously only wired into the deterministic JSON-LD path
@@ -2305,6 +2318,9 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     )
     return {
         "extracted_job": job_dict,
+        "page_type": "job_detail",
+        "classification_confidence": 0.99,
+        "classification_reasons": ["LLM produced a schema-valid complete job record."],
         "execution_log": _event(
             state,
             "extraction",
@@ -2615,32 +2631,9 @@ def reviewer_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         flags=re.I,
     )
     if skill_evidence_markers and not job.skills:
-        recovered_skills = _deterministic_explicit_skills(
-            job.description,
-            job.responsibilities,
-            job.requirements,
-            job.preferred_qualifications,
-            (state.evidence or {}).get("source_text"),
-            state.markdown,
+        field_issues.setdefault("skills", []).append(
+            "The source contains skill signals but the LLM returned no explicit skills."
         )
-        if recovered_skills:
-            job.skills = recovered_skills
-            if isinstance(state.extracted_job, dict):
-                state.extracted_job["skills"] = recovered_skills
-            logger.info(
-                "%s Reviewer recovered explicit skills deterministically request_id=%s skills=%s",
-                LOG_PREFIX, state.request_id, recovered_skills,
-            )
-        else:
-            # A complete single-job page can legitimately describe general
-            # capabilities without naming an atomic tool/language. This is an
-            # enrichment gap, not conflicting evidence, and must not stop the
-            # user's extraction flow.
-            logger.info(
-                "%s Reviewer found generic skill signals without atomic labels; "
-                "continuing request_id=%s",
-                LOG_PREFIX, state.request_id,
-            )
     if len(job.suggested_skills) < 4:
         field_issues.setdefault("suggested_skills", []).append(
             "Provide 4-10 atomic, high-confidence skill recommendations inferred from "
@@ -2652,20 +2645,8 @@ def reviewer_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     # posting whose evidence clearly states a figure but whose LLM
     # extraction left salary null passed review untouched -- same class of
     # gap the skills-recovery block above exists to close, mirrored here.
-    if not job.salary:
-        combined_text = " ".join(filter(None, [
-            job.description, " ".join(job.benefits or []),
-            (state.evidence or {}).get("source_text"), state.markdown,
-        ]))
-        recovered_salary = parse_salary_from_text(combined_text[:20000])
-        if recovered_salary:
-            job.salary = recovered_salary
-            if isinstance(state.extracted_job, dict):
-                state.extracted_job["salary"] = recovered_salary.model_dump(mode="json")
-            logger.info(
-                "%s Reviewer recovered salary deterministically request_id=%s salary=%s",
-                LOG_PREFIX, state.request_id, recovered_salary.model_dump(mode="json"),
-            )
+    # Missing salary is valid when the source does not state one. Extraction
+    # and repair remain LLM-owned; the reviewer never invents/re-parses it.
 
     repair_fields = list(field_issues)
     needs_repair = bool(repair_fields)
@@ -2675,7 +2656,7 @@ def reviewer_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         for issue in issues
     ]
     logger.info(
-        "%s Deterministic reviewer completed request_id=%s valid=%s "
+        "%s Schema/evidence reviewer completed request_id=%s valid=%s "
         "needs_repair=%s repair_fields=%s extracted_skills_count=%s issues=%s "
         "llm_calls_so_far=1",
         LOG_PREFIX,
@@ -2704,19 +2685,47 @@ def reviewer_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
 def repair_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     state = _state(value)
     attempt = state.repair_attempts + 1
-    # Do not start a second long LLM request after extraction. Missing fields
-    # can be repaired from the same trusted evidence deterministically, keeping
-    # the uncached pipeline to at most one bounded model call.
     current = ExtractedJob.model_validate(state.extracted_job or {}).model_dump(mode="json")
-    fallback = _deterministic_job_from_evidence(state).model_dump(mode="json")
-    for field in state.repair_fields:
-        if field == "suggested_skills" or not current.get(field):
-            current[field] = fallback.get(field)
-    job = ExtractedJob.model_validate(current).model_dump(mode="json")
-    if not job.get("company_name"):
-        fallback = _fallback_company_name(state, job.get("company_name"))
-        if fallback:
-            job["company_name"] = fallback
+    repair_prompt = (
+        EXTRACTION_PROMPT
+        + "\n\nThis is a schema repair pass. Re-read the complete evidence and return the "
+          "entire corrected ExtractedJob JSON object. Correct only unsupported, missing, or "
+          "misclassified fields; preserve already supported facts.\nREPAIR_FIELDS:\n"
+        + json.dumps(state.repair_fields, ensure_ascii=False)
+        + "\nVALIDATION_ISSUES:\n"
+        + json.dumps(state.field_issues, ensure_ascii=False)
+    )
+
+    def _call_repair_llm():
+        structured = get_llm(temperature=0).with_structured_output(
+            ExtractedJob,
+            timeout_seconds=max(5.0, float(os.getenv("JD_EXTRACTION_LLM_TIMEOUT_SECONDS", "35"))),
+            max_tokens=4000,
+            queue_timeout_seconds=max(
+                0.5, float(os.getenv("JD_EXTRACTION_AI_QUEUE_TIMEOUT_SECONDS", "3"))
+            ),
+            escalate_on_error=True,
+        )
+        return structured.invoke([
+            SystemMessage(content=repair_prompt),
+            HumanMessage(content=json.dumps({
+                "current_extraction": current,
+                "complete_evidence": state.evidence,
+            }, ensure_ascii=False, separators=(",", ":"))),
+        ])
+
+    job = llm_cache.execute_with_cache(
+        task="jd_agent_repair",
+        payload_to_fingerprint={
+            "evidence": state.evidence,
+            "current": current,
+            "repair_fields": state.repair_fields,
+        },
+        llm_callable=_call_repair_llm,
+        expected_schema=ExtractedJob,
+        prompt_version="jd-agent-repair-v1-llm-only",
+    )
+    job = ExtractedJob.model_validate(job).model_dump(mode="json")
     job["skills"] = _atomize_skill_labels(job.get("skills", []))
     explicit_keys = {skill.casefold() for skill in job["skills"]}
     job["suggested_skills"] = [
@@ -2724,7 +2733,7 @@ def repair_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         if skill.casefold() not in explicit_keys
     ]
     logger.info(
-        "%s Deterministic repair completed request_id=%s attempt=%s fields=%s "
+        "%s LLM repair completed request_id=%s attempt=%s fields=%s "
         "skills_before=%s skills_after=%s suggested_skills_after=%s "
         "repaired_skills=%s repaired_suggested_skills=%s",
         LOG_PREFIX,
