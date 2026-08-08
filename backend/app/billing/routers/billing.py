@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request
 from typing import Dict, Any, List
 from core.config import settings
 from core.database import get_db_connection
@@ -9,6 +9,12 @@ from ..services.billing_service import BillingService
 from ..services.subscription_service import SubscriptionService
 from ..services.credit_service import CreditService
 from app.analytics.events.tracking.analytics_service import AnalyticsService
+from app.services.email_service import EmailService
+
+# founder@tailr4u.com always gets a heads-up on a real purchase, regardless
+# of which payment provider processed it -- not user-configurable, this is
+# the one address that should always know about revenue events.
+OWNER_NOTIFICATION_EMAIL = "founder@tailr4u.com"
 
 _MOCK_SUBSCRIPTION_IDS = {"sub_mock_stripe_123", "sub_mock_razorpay_123"}
 
@@ -203,6 +209,7 @@ async def cancel_subscription(
 @router.post("/webhook/stripe")
 async def stripe_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     billing_svc: BillingService = Depends(get_billing_service),
     sub_svc: SubscriptionService = Depends(get_subscription_service),
     credit_svc: CreditService = Depends(get_credit_service),
@@ -231,7 +238,11 @@ async def stripe_webhook(
         # back instead of hardcoding "pro" for every successful checkout
         # regardless of what was actually bought (see KNOWN_ISSUES.md ISSUE-015).
         plan_id = (session.get('metadata') or {}).get('plan_id') or "pro"
-        
+        # Set at checkout creation time (see stripe_provider.create_checkout's
+        # customer_email= and metadata.email) -- the webhook payload is the
+        # only place this handler ever sees the buyer's address from.
+        buyer_email = session.get('customer_email') or (session.get('metadata') or {}).get('email') or ''
+
         # Log payment idempotently
         payment = sub_svc.create_payment(
             user_id=user_id,
@@ -241,23 +252,35 @@ async def stripe_webhook(
             currency=currency,
             status="success"
         )
-        
+
         plan = sub_svc.get_plan(plan_id)
         if plan:
             sub_id = session.get('subscription', f'sub_mock_{payment_intent}')
             sub_svc.activate_subscription(user_id, plan_id, "stripe", sub_id)
             credit_svc.add_credits(user_id, payment["id"], plan["credits"], "Stripe Subscription")
-            
+
             # Emit Analytics Events
             analytics = AnalyticsService(conn)
             analytics.emit_event(user_id, "PAYMENT_SUCCESS", metadata={"provider": "stripe", "amount": amount, "currency": currency})
             analytics.emit_event(user_id, "SUBSCRIPTION_CREATED", metadata={"provider": "stripe", "plan": plan_id})
-            
+
+            # Emails are best-effort and must never hold up Stripe's webhook
+            # response (Stripe retries a webhook that doesn't answer quickly).
+            if buyer_email:
+                background_tasks.add_task(
+                    EmailService().send_payment_success, buyer_email, plan["name"], amount, currency,
+                )
+            background_tasks.add_task(
+                EmailService().send_purchase_notification_to_owner,
+                OWNER_NOTIFICATION_EMAIL, buyer_email, plan["name"], amount, currency, "stripe",
+            )
+
     return {"status": "success"}
 
 @router.post("/webhook/razorpay")
 async def razorpay_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     billing_svc: BillingService = Depends(get_billing_service),
 ):
     payload = await request.body()
@@ -286,13 +309,16 @@ async def razorpay_webhook(
                 provider_sub = billing_svc.fetch_razorpay_subscription(provider_subscription_id)
             except Exception:
                 provider_sub = {}
-            user_id = str((provider_sub.get('notes') or {}).get('user_id') or '')
+            notes = provider_sub.get('notes') or {}
+            user_id = str(notes.get('user_id') or '')
             # Both Razorpay lookups above are now fully resolved -- open the
             # DB connection only for the write, not while those two outbound
             # HTTPS calls were in flight.
             if user_id:
+                failure_reason = payment_entity.get('error_reason') or payment_entity.get('error_code')
                 with _db_context() as conn:
-                    SubscriptionService(conn).create_payment(
+                    sub_svc = SubscriptionService(conn)
+                    sub_svc.create_payment(
                         user_id=user_id,
                         provider="razorpay",
                         payment_id=payment_entity.get('id') or f"failed_{provider_subscription_id}",
@@ -304,8 +330,14 @@ async def razorpay_webhook(
                     analytics = AnalyticsService(conn)
                     analytics.emit_event(user_id, "PAYMENT_FAILED", metadata={
                         "provider": "razorpay",
-                        "reason": payment_entity.get('error_reason') or payment_entity.get('error_code')
+                        "reason": failure_reason,
                     })
+                    plan = sub_svc.get_plan(notes.get('plan_id') or "pro")
+                buyer_email = notes.get('email') or ''
+                if buyer_email and plan:
+                    background_tasks.add_task(
+                        EmailService().send_payment_failed, buyer_email, plan["name"], failure_reason,
+                    )
 
     # Successful subscription charge activates access and grants credits.
     # No outbound HTTP calls in this branch -- one connection for the whole
@@ -348,5 +380,17 @@ async def razorpay_webhook(
                 analytics = AnalyticsService(conn)
                 analytics.emit_event(user_id, "PAYMENT_SUCCESS", metadata={"provider": "razorpay", "amount": amount, "currency": currency})
                 analytics.emit_event(user_id, "SUBSCRIPTION_CREATED", metadata={"provider": "razorpay", "plan": plan_id})
+
+                # Emails are best-effort and must never hold up Razorpay's
+                # webhook response.
+                buyer_email = sub_entity.get('notes', {}).get('email') or ''
+                if buyer_email:
+                    background_tasks.add_task(
+                        EmailService().send_payment_success, buyer_email, plan["name"], amount, currency,
+                    )
+                background_tasks.add_task(
+                    EmailService().send_purchase_notification_to_owner,
+                    OWNER_NOTIFICATION_EMAIL, buyer_email, plan["name"], amount, currency, "razorpay",
+                )
 
     return {"status": "success"}

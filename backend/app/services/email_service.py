@@ -170,6 +170,49 @@ class EmailService:
             self._shell(title, content),
         )
 
+    def send_payment_success(self, recipient: str, plan_name: str, amount: float | None, currency: str | None) -> bool:
+        formatted_amount = f"{(currency or '').upper()} {amount:,.2f}".strip() if amount else ""
+        amount_line = f" ({html.escape(formatted_amount)})" if formatted_amount else ""
+        content = f"""<p style="line-height:1.6">Thanks for upgrading! Your payment for the <strong>{html.escape(plan_name)}</strong> plan was successful{amount_line}.</p>
+        <p style="line-height:1.6">Your new plan limits are active immediately -- no further action needed.</p>"""
+        return self.send(
+            recipient,
+            f"Payment confirmed -- {plan_name} plan is now active",
+            f"Your payment for the {plan_name} plan was successful{amount_line}. Your new plan is active immediately.",
+            self._shell("Payment successful", content),
+        )
+
+    def send_payment_failed(self, recipient: str, plan_name: str, reason: str | None = None) -> bool:
+        reason_line = f'<p style="font-size:13px;color:#687386">Reason: {html.escape(reason)}</p>' if reason else ""
+        content = f"""<p style="line-height:1.6">We weren't able to process your payment for the <strong>{html.escape(plan_name)}</strong> plan. No charge was made to your account.</p>
+        {reason_line}
+        <p style="line-height:1.6">You can retry anytime from your Tailr4U subscription page.</p>"""
+        return self.send(
+            recipient,
+            f"Payment failed for the {plan_name} plan",
+            f"We weren't able to process your payment for the {plan_name} plan. No charge was made. You can retry anytime.",
+            self._shell("Payment failed", content),
+        )
+
+    def send_purchase_notification_to_owner(
+        self, owner_email: str, buyer_email: str, plan_name: str,
+        amount: float | None, currency: str | None, provider: str,
+    ) -> bool:
+        formatted_amount = f"{(currency or '').upper()} {amount:,.2f}".strip() if amount else "unknown amount"
+        content = f"""<p style="line-height:1.6">New subscription purchase on Tailr4U.</p>
+        <table role="presentation" style="width:100%;font-size:13px;color:#334155;margin-top:8px">
+          <tr><td style="padding:4px 0;color:#94a3b8">Customer</td><td style="padding:4px 0;font-weight:600">{html.escape(buyer_email or "unknown")}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8">Plan</td><td style="padding:4px 0;font-weight:600">{html.escape(plan_name)}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8">Amount</td><td style="padding:4px 0;font-weight:600">{html.escape(formatted_amount)}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8">Provider</td><td style="padding:4px 0;font-weight:600">{html.escape(provider.title())}</td></tr>
+        </table>"""
+        return self.send(
+            owner_email,
+            f"New purchase: {plan_name} ({formatted_amount}) via {provider.title()}",
+            f"New subscription purchase.\nCustomer: {buyer_email}\nPlan: {plan_name}\nAmount: {formatted_amount}\nProvider: {provider}",
+            self._shell("New purchase", content),
+        )
+
     def send_account_deletion_otp(self, recipient: str, otp_code: str) -> bool:
         content = f"""<p style="line-height:1.6">We received a request to permanently delete your Tailr4U account.</p>
         <p style="font-size:14px;font-weight:600">Your verification OTP code for account deletion is:</p>
