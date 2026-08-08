@@ -316,3 +316,53 @@ JR2020447
     assert "Build GPU networking systems." in focused
     assert "Similar jobs" not in focused
     assert "Fabric Networking" not in focused
+
+
+def test_linkedin_split_view_panel_with_no_title_hint_keeps_full_body():
+    """Regression test: a real LinkedIn split-view search-results job panel
+    (jobs/search-results/?currentJobId=...) with no job_title_hint at all
+    (production case, 2026-08-08) truncated to a 363-char header, discarding
+    the entire "About the job"/"About the role"/requirements body. Two
+    compounding bugs: (1) _infer_rendered_job_title's longest-candidate pick
+    let a full body sentence beat the real ~44-char title purely by length,
+    so the title-anchor jumped past all the real leading content; (2)
+    PLATFORM_UPSELL_BOILERPLATE's "how you match" phrase matches LinkedIn's
+    standard, always-shown qualifications-match feature (not a Premium
+    upsell), truncating everything after it even when the title anchor was
+    otherwise correct."""
+    evidence = {
+        "job_title_hint": "",
+        "selected_panel_text": """Software Engineering & AI Technology Intern
+Zexovo
+Software Engineering & AI Technology Intern
+DATAMAZE . AI
+Tirumalgiri
+
+How you match
+You have 3 of 5 preferred qualifications
+
+About the job
+Location: Remote (India)
+Experience: 1+ Year
+Employment Type: Paid Internship
+
+About the role
+We are building a next-generation AI product where the frontend and backend foundations are already in place.
+We are now looking for an Agentic AI Engineer Intern to focus specifically on building the intelligence layer of the product.
+
+What you will build
+- Autonomous AI agents with tool calling capabilities
+- Multistep reasoning workflows
+
+Requirements
+- 1+ years of experience with Python
+""",
+    }
+
+    assert _infer_rendered_job_title(evidence) == "Software Engineering & AI Technology Intern"
+    focused = _focused_extension_panel(evidence)
+    assert "Location: Remote (India)" in focused
+    assert "Experience: 1+ Year" in focused
+    assert "We are building a next-generation AI product" in focused
+    assert "Autonomous AI agents with tool calling capabilities" in focused
+    assert "1+ years of experience with Python" in focused

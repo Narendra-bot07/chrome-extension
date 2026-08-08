@@ -113,7 +113,15 @@ PLATFORM_UPSELL_BOILERPLATE = re.compile(
     # ABOVE the real job title in DOM order, was longer than the actual
     # title and won _infer_rendered_job_title's longest-candidate pick.
     r"see the full list of jobs|top applicant|see how you (?:compare|rank)|"
-    r"how you match|salary insights|see similar (?:jobs|companies))",
+    # "how you match" was here too, but confirmed real-world case
+    # (2026-08-08): LinkedIn's standard "How you match" qualifications
+    # comparison is a free, always-shown feature (not a Premium upsell),
+    # and routinely sits ABOVE the real "About the job" body on split-view
+    # search-results job panels -- matching it truncated the entire actual
+    # job description away, keeping only the header. "see how you
+    # (?:compare|rank)" above is specific enough to the genuine upsell
+    # phrasing to not need this broader, false-positive-prone variant.
+    r"salary insights|see similar (?:jobs|companies))",
     re.I,
 )
 
@@ -154,7 +162,23 @@ def _infer_rendered_job_title(evidence: dict[str, Any]) -> str:
     )
     candidates = [
         line for line in candidates
-        if 4 <= len(line) <= 180
+        # Confirmed real-world case (2026-08-08, a LinkedIn split-view
+        # search-results job panel with no job_title_hint at all): a
+        # 100-char cap and a check against trailing sentence punctuation
+        # replace the old 180-char cap, which let a genuine body sentence
+        # ("We are now looking for an Agentic AI Engineer Intern to focus
+        # specifically on building...") win the longest-candidate pick below
+        # purely by being longer than the real ~44-char title. Real job
+        # titles are short and never end in '.'/'!'/'?' the way a sentence
+        # does; this filters candidates BEFORE the length comparison so a
+        # sentence can never masquerade as the title regardless of length.
+        if 4 <= len(line) <= 100
+        and not line.endswith((".", "!", "?"))
+        # A bullet/list-item line is never a job title -- without this,
+        # excluding sentence-ending punctuation above just shifted the
+        # longest-candidate win to the first punctuation-free bullet point
+        # instead (confirmed while fixing the case above).
+        and not line.lstrip().startswith(("-", "•", "*", "▪", "◦"))
         and not noise.fullmatch(line)
         and not GENERIC_JOB_TITLE.fullmatch(line)
         # Confirmed real-world case: a LinkedIn Premium promo line ("See the

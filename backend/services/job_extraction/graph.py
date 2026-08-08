@@ -23,6 +23,40 @@ LOG_PREFIX = "[JD-EXTRACTION][GRAPH]"
 _compiled_graph = None
 _compiled_graph_lock = threading.Lock()
 
+# Request supersession: a single Uvicorn worker (see Dockerfile -- no
+# --workers flag) handles every request, each running this graph on its own
+# thread via asyncio.to_thread. Without this, rapidly re-triggering
+# extraction (e.g. clicking through several LinkedIn job cards in a row)
+# left every earlier, now-useless request running all the way to
+# completion -- each still burning an LLM call that can take 30-160s+ (see
+# extraction_agent/repair_agent) and, worse, still competing with the
+# CURRENT request for the same scarce shared resources (the
+# _MAX_CONCURRENT_AI_REQUESTS semaphore, browser_pool's single worker). Only
+# the single latest request_id per user is kept; registering a new one
+# implicitly supersedes whatever this user's previous request_id was.
+_active_requests: dict[str, str] = {}
+_active_requests_lock = threading.Lock()
+
+
+class ExtractionSuperseded(Exception):
+    """Raised between graph nodes once a newer request from the same user
+    has started -- unwinds immediately instead of running the remaining
+    (often the slowest, LLM-calling) nodes for a result nobody will read."""
+
+
+def register_active_request(user_id: str | None, request_id: str) -> None:
+    if not user_id:
+        return
+    with _active_requests_lock:
+        _active_requests[user_id] = request_id
+
+
+def _is_superseded(user_id: str | None, request_id: str) -> bool:
+    if not user_id:
+        return False
+    with _active_requests_lock:
+        return _active_requests.get(user_id) not in (None, request_id)
+
 
 def _timed(name: str, node: Callable) -> Callable:
     """Wrap a graph node with duration logging. Temporary-but-cheap
@@ -32,10 +66,17 @@ def _timed(name: str, node: Callable) -> Callable:
     before this, nothing in between (planner/classifier/extraction/reviewer
     LLM calls included)."""
     def wrapped(value):
+        request_id = getattr(value, "request_id", None) or (value.get("request_id") if isinstance(value, dict) else None)
+        user_id = getattr(value, "user_id", None) or (value.get("user_id") if isinstance(value, dict) else None)
+        if _is_superseded(user_id, request_id):
+            logger.info(
+                "%s node=%s request_id=%s skipped: superseded by a newer request from the same user",
+                LOG_PREFIX, name, request_id,
+            )
+            raise ExtractionSuperseded(request_id)
         started = time.perf_counter()
         result = node(value)
         duration_ms = round((time.perf_counter() - started) * 1000)
-        request_id = getattr(value, "request_id", None) or (value.get("request_id") if isinstance(value, dict) else None)
         logger.info(
             "%s node=%s duration_ms=%s request_id=%s",
             LOG_PREFIX, name, duration_ms, request_id,
@@ -233,7 +274,8 @@ def get_job_intelligence_graph():
 
 
 def run_job_intelligence(
-    url: str, request_id: str, browser_evidence: dict[str, Any] | None = None
+    url: str, request_id: str, browser_evidence: dict[str, Any] | None = None,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     validate_public_url(url)
     initial = JDState(
@@ -241,7 +283,26 @@ def run_job_intelligence(
         url=url,
         original_url=url,
         extension_evidence=browser_evidence or {},
+        user_id=user_id,
     )
-    result = get_job_intelligence_graph().invoke(initial)
+    try:
+        result = get_job_intelligence_graph().invoke(initial)
+    except ExtractionSuperseded:
+        # Not a failure -- caught here (rather than left to propagate to
+        # api/v1/jobs.py's generic exception handler) so it comes back as an
+        # ordinary, quiet response instead of a 500 with a scary stack trace
+        # for something that was always expected to happen.
+        logger.info(
+            "%s request_id=%s superseded by a newer request from the same user; stopped early",
+            LOG_PREFIX, request_id,
+        )
+        return {
+            "success": False, "status": "superseded", "request_id": request_id,
+            "page_type": None, "extracted_job": None,
+            "error": {
+                "code": "SUPERSEDED_BY_NEWER_REQUEST",
+                "message": "A newer extraction request from the same session took priority.",
+            },
+        }
     validated = JDState.model_validate(result)
     return validated.final_response

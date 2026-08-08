@@ -16,6 +16,7 @@ from core.database import get_db_connection
 from schemas.jobs import JobUrlExtractRequest
 from services.cache.redis_cache import redis_cache
 from services.job_extraction.backend_extractor import extract_job_from_url
+from services.job_extraction.graph import register_active_request
 from services.subscriptions.usage_service import UsageService
 from app.services.rate_limiter_service import RateLimiterService
 
@@ -185,11 +186,17 @@ async def extract_job_from_provided_url(
             )
             return {**cached_result, "request_id": request_id}
 
+        # Marks this as the latest extraction request for this user -- any
+        # earlier one from the same user still running stops itself between
+        # its next graph node (see graph.py's ExtractionSuperseded) instead
+        # of running all the way to a result nobody will read.
+        register_active_request(user["id"], request_id)
         result = await asyncio.to_thread(
             extract_job_from_url,
             request.url,
             request_id,
             request.browser_evidence,
+            user["id"],
         )
         with _db_context() as conn:
             UsageService(conn).consume_usage(

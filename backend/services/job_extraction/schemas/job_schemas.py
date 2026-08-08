@@ -383,6 +383,11 @@ class JDState(BaseModel):
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
     request_id: str
+    # Not persisted anywhere -- only used in-memory by graph.py's
+    # request-supersession check (a newer extraction request from the same
+    # user aborts this one between node executions). None for callers that
+    # don't have an authenticated user (tests, scripts).
+    user_id: Optional[str] = None
     url: str
     original_url: str
     final_url: Optional[str] = None

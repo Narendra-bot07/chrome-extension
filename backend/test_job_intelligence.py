@@ -1,5 +1,5 @@
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -15,11 +15,15 @@ from services.job_extraction.agents import (
     metadata_agent,
 )
 from services.job_extraction.graph import (
+    _is_superseded,
+    _timed,
+    register_active_request,
     route_after_classification_review,
     route_after_classifier,
     route_after_discovery,
     route_after_reviewer,
     route_after_evidence,
+    run_job_intelligence,
     validate_public_url,
 )
 from services.job_extraction.schemas import ExtractedJob, JDState
@@ -596,4 +600,81 @@ def test_missing_company_name_falls_back_to_page_title_and_succeeds():
     result = reviewer_agent(s)
     assert result["is_valid"] is True
     assert result["extracted_job"]["company_name"] == "Crossing Hurdles"
+
+
+# Request-supersession regression tests: rapidly re-triggering extraction
+# (e.g. clicking through several LinkedIn job cards) previously left every
+# earlier, now-useless request running all the way to completion, each still
+# burning a 30-160s+ LLM call for a result nobody would read, and competing
+# with the CURRENT request for the same scarce shared resources.
+
+def test_registering_a_newer_request_supersedes_the_older_one_for_the_same_user():
+    user_id = "user-1"
+    register_active_request(user_id, "req-old")
+    assert _is_superseded(user_id, "req-old") is False
+
+    register_active_request(user_id, "req-new")
+    assert _is_superseded(user_id, "req-old") is True
+    assert _is_superseded(user_id, "req-new") is False
+
+
+def test_supersession_is_scoped_per_user():
+    register_active_request("user-a", "req-a1")
+    register_active_request("user-b", "req-b1")
+    assert _is_superseded("user-a", "req-a1") is False
+    assert _is_superseded("user-b", "req-b1") is False
+
+
+def test_anonymous_requests_are_never_superseded():
+    # user_id=None (tests, scripts without an authenticated caller) must
+    # never be treated as supersede-able -- there's no user identity to key
+    # the registry on, so this has to be a permanent no-op, not a crash.
+    assert _is_superseded(None, "req-x") is False
+    register_active_request(None, "req-y")
+    assert _is_superseded(None, "req-x") is False
+
+
+def test_timed_wrapper_raises_without_calling_the_node_when_superseded():
+    user_id = "user-node-guard"
+    register_active_request(user_id, "req-current")
+    mock_node = MagicMock()
+
+    wrapped = _timed("discovery", mock_node)
+    with pytest.raises(Exception):
+        wrapped(state(request_id="req-now-stale", user_id=user_id))
+
+    mock_node.assert_not_called()
+
+
+def test_timed_wrapper_calls_the_node_normally_when_not_superseded():
+    user_id = "user-node-runs"
+    register_active_request(user_id, "req-current")
+
+    calls = []
+    def fake_node(value):
+        calls.append(value)
+        return {}
+
+    wrapped = _timed("discovery", fake_node)
+    wrapped(state(request_id="req-current", user_id=user_id))
+
+    assert len(calls) == 1
+
+
+def test_superseded_request_stops_before_the_first_node_runs():
+    """End-to-end: run_job_intelligence itself must never touch the network
+    or an LLM for an already-superseded request_id -- it should unwind
+    between graph.invoke()'s very first node."""
+    user_id = "user-stop-early"
+    register_active_request(user_id, "req-real-current")
+
+    with patch("services.job_extraction.agents.discovery_agent") as mock_discovery:
+        result = run_job_intelligence(
+            "https://example.com/jobs/123", request_id="req-now-stale", user_id=user_id,
+        )
+
+    mock_discovery.assert_not_called()
+    assert result["success"] is False
+    assert result["status"] == "superseded"
+    assert result["error"]["code"] == "SUPERSEDED_BY_NEWER_REQUEST"
 
