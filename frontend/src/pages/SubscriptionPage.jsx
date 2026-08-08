@@ -248,10 +248,13 @@ export default function SubscriptionPage() {
     // webhook) left this polling forever with the modal stuck on "Payment in
     // Progress" -- handleVerifyAndActivate's catch swallows errors silently,
     // so there was previously no way for the user to ever see anything other
-    // than an infinite spinner. Stop after ~2 minutes and surface an honest
-    // "couldn't confirm yet" state instead.
+    // than an infinite spinner. The tab-closed watcher below handles the
+    // common case near-instantly; this is only the worst-case backstop for
+    // when that somehow never fires (checkoutTabRef never got a tab
+    // reference, e.g. a popup-blocked flow) -- 2 minutes was a genuinely bad
+    // experience on its own even as a backstop, so this is now 20s.
     const startedAt = Date.now();
-    const TIMEOUT_MS = 120000;
+    const TIMEOUT_MS = 20000;
     const interval = setInterval(() => {
       if (Date.now() - startedAt >= TIMEOUT_MS) {
         clearInterval(interval);
@@ -394,8 +397,20 @@ export default function SubscriptionPage() {
         || res.subscription_id === 'sub_mock_stripe_123'
         || String(res.checkout_url || '').includes('mock_');
       if (isMockCheckout) {
+        checkoutTabRef.current = null;
         if (checkoutTab && !checkoutTab.closed) checkoutTab.close();
-        await handleVerifyAndActivate(planId);
+        const confirmed = await handleVerifyAndActivate(planId);
+        // There is no real checkout tab for the user to close and no
+        // webhook that will ever land for this path -- the 20s/2-minute
+        // timeouts existing elsewhere would otherwise be the ONLY thing
+        // that ever gets this modal out of "pending" here. If
+        // handleVerifyAndActivate didn't already resolve it to a definite
+        // outcome, do so immediately instead of leaving it to time out.
+        if (!confirmed) {
+          setPaymentStatusModal(prev => (
+            prev.status === 'pending' ? { ...prev, status: 'unknown' } : prev
+          ));
+        }
         return;
       }
 
