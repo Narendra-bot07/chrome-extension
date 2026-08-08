@@ -3155,6 +3155,36 @@ export function AppProvider({ children }) {
       if (!tailoredResult) throw new Error('FINAL_RESUME_VALIDATION_FAILED: Final resume is unavailable.');
       await persistTailoredWorkflowResume(tailoredResult);
 
+      // The Job Tracker's Documents tab reads applicationDetails.resume_snapshot,
+      // not this workflow state or the resume_versions table below -- so
+      // without this, a job tracked BEFORE tailoring completed (or before this
+      // specific tailoring run) kept showing whatever was captured at track
+      // time, which falls back to the raw untailored resume when no tailored
+      // one existed yet. The cover letter already re-persists its own
+      // snapshot on every generation (see handleGenerateCoverLetter above);
+      // the resume never did. Best-effort only -- a sync failure here must
+      // not block the user from finishing tailoring and getting their PDF.
+      if (activeApplicationId) {
+        try {
+          const trackerToken = session?.access_token || localStorage.getItem('access_token');
+          if (trackerToken) {
+            await fetch(`${apiUrl}/api/v1/applications/${activeApplicationId}`, {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${trackerToken}`
+              },
+              body: JSON.stringify({
+                resume_version: "v1 (Tailored)",
+                resume_snapshot: tailoredResult
+              })
+            });
+          }
+        } catch (snapshotError) {
+          console.warn("Tailored resume finalized but Job Tracker snapshot sync failed:", snapshotError);
+        }
+      }
+
       // A completed generation must have a durable database event. Previously
       // this workflow only updated React/storage state, leaving Analytics with
       // nothing to group by date.

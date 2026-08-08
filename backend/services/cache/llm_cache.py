@@ -1,5 +1,6 @@
 import os
 import time
+import threading
 import uuid
 import logging
 from datetime import datetime, timezone
@@ -350,8 +351,22 @@ class LLMCacheService:
         # 3. Call DeepSeek LLM Function
         try:
             result_obj = llm_callable()
+        except Exception:
+            if lock_acquired:
+                self.release_lock(lock_key, owner_id)
+            raise
 
-            # 4. Write Envelope to Cache after successful validation
+        # 4. Write envelope to cache + release the lock. Both only benefit
+        # OTHER requests (a future cache hit, another waiter unblocking) --
+        # this caller already has their result. Doing them synchronously
+        # here used to make the current user's response wait on ~3 more
+        # Redis round trips (1 SETEX for the cache write, plus
+        # release_lock's own GET-then-DELETE) that don't change what's
+        # returned to them. Backgrounding them shaves that off the
+        # perceived latency of the request that actually did the work,
+        # while still completing (just slightly later, invisibly) for
+        # everyone else's benefit.
+        def _finalize():
             if result_obj is not None:
                 self.set(
                     task=task,
@@ -363,11 +378,11 @@ class LLMCacheService:
                     model=model,
                     ttl_seconds=ttl_seconds
                 )
-            return result_obj
-
-        finally:
             if lock_acquired:
                 self.release_lock(lock_key, owner_id)
+
+        threading.Thread(target=_finalize, daemon=True).start()
+        return result_obj
 
 
 llm_cache = LLMCacheService()

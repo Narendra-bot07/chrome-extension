@@ -86,6 +86,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Ignore if no listeners exist
       }
       sendResponse({ status: "success" });
+    } else if (message.type === "OPEN_SIDE_PANEL") {
+      // Sent by the floating launcher (floating-icon.js) injected on every
+      // page. A content script cannot reliably call chrome.sidePanel.open()
+      // itself, so it asks the background worker, which has the tab/window
+      // context from `sender` and already holds the sidePanel permission.
+      const tabId = sender.tab?.id;
+      const windowId = sender.tab?.windowId;
+      if (chrome.sidePanel && tabId != null) {
+        chrome.sidePanel
+          .open(windowId != null ? { tabId, windowId } : { tabId })
+          .then(() => sendResponse({ status: "success" }))
+          .catch((e) => {
+            reportErrorToSentry(e, "open_side_panel_from_floating_icon");
+            sendResponse({ status: "error", error: e.message });
+          });
+        return true;
+      }
+      sendResponse({ status: "error", error: "No side panel context available." });
     }
   } catch (e) {
     reportErrorToSentry(e, "message_listener");

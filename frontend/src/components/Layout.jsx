@@ -231,14 +231,20 @@ function Layout() {
       try {
         const token = session?.access_token;
         if (!token) return;
-        const res = await fetch(`${apiUrl}/api/v1/profile/`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const data = await res.json();
+        // This effect re-fires on every in-panel route change (it depends
+        // on currentPath), so these two independent requests used to
+        // double the round-trip latency of essentially every click through
+        // the app by awaiting them one after another instead of together.
+        const [profileResult] = await Promise.allSettled([
+          fetch(`${apiUrl}/api/v1/profile/`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }),
+          fetchSubscriptionRef.current(),
+        ]);
+        if (profileResult.status === 'fulfilled' && profileResult.value.ok) {
+          const data = await profileResult.value.json();
           setProfile(data);
         }
-        await fetchSubscriptionRef.current();
       } catch (err) {
         console.error("Failed to load layout profile:", err);
       }

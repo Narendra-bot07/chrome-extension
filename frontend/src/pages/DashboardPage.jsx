@@ -422,6 +422,12 @@ function DashboardContent() {
     let active = true;
 
     const refreshLiveDashboardData = async () => {
+      // The side panel can sit open but unfocused for long stretches (user
+      // working in the job-site tab). Unlike NotificationCenter's poll,
+      // this one had no visibility check, so it fired 3 parallel requests
+      // (applications, reminders, performance-signature) every 12s even
+      // while the panel was backgrounded and nothing was watching for it.
+      if (document.hidden) return;
       if (liveRefreshInFlightRef.current) return;
       liveRefreshInFlightRef.current = true;
       try {
