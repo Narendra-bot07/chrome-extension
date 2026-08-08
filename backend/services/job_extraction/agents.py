@@ -295,7 +295,20 @@ def discovery_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         # short, generic-marketing-copy-safe 500ms budget unchanged.
         "browser_strategy": {
             "wait_until": "domcontentloaded",
-            "timeout_ms": 5000,
+            # Confirmed live (2026-08-08) against disneycareers.com and a
+            # JPMC Oracle Cloud HCM posting: BOTH failed at this very first
+            # page.goto() with "Timeout 5000ms exceeded" before any content
+            # was ever fetched -- 5s is not a realistic navigation budget for
+            # real enterprise career sites (CDN/bot-check redirects, heavy
+            # corporate JS bundles, Oracle Cloud's own slow cold starts).
+            # _scrape_job_page's own _SCRAPE_OVERALL_BUDGET_SECONDS=22s
+            # shared deadline (see there) already caps every stage's actual
+            # wait via _remaining_ms(), so raising this ceiling doesn't
+            # reopen the run_on_browser_pool 30s-timeout incident that
+            # budget was built to prevent -- it just stops an artificially
+            # tight sub-ceiling from cutting navigation short while 15+
+            # unused seconds of that budget sit idle.
+            "timeout_ms": 15000,
             "networkidle_wait_ms": 4000 if (has_job_path_in_url or job_in_query) else 500,
         },
         "execution_log": _event(state, "discovery", portal=portal),
@@ -479,8 +492,14 @@ def browser_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
                 LOG_PREFIX, state.request_id, state.url, fetch_url,
             )
 
-    base_timeout_ms = state.browser_strategy.get("timeout_ms", 5000)
-    timeout_ms = min(base_timeout_ms, 5000)
+    # This upper clamp used to equal discovery_agent's own default (5000),
+    # making it a silent no-op that quietly re-imposed a 5s navigation
+    # ceiling no matter what discovery_agent asked for. The real safety
+    # ceiling is _scrape_job_page's own 22s shared deadline (_remaining_ms);
+    # this is just a sanity bound on a single request, raised to actually
+    # sit above discovery_agent's real budget.
+    base_timeout_ms = state.browser_strategy.get("timeout_ms", 15000)
+    timeout_ms = min(base_timeout_ms, 18000)
 
     logger.info(
         "%s Browser launch request_id=%s attempt=%s timeout_ms=%s",
@@ -1100,9 +1119,11 @@ def jsonld_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     selected_source = state.selected_evidence_source
     logger.info(
         "%s JSON-LD completed request_id=%s blocks=%s jobs=%s malformed=%s "
-        "backend_jobs=%s extension_jobs=%s selected_source=%s",
+        "backend_jobs=%s extension_jobs=%s selected_source=%s titles=%s companies=%s",
         LOG_PREFIX, state.request_id, len(all_items), len(jobs), malformed,
         backend_job_count, extension_job_count, selected_source,
+        [job.get("title") for job in jobs][:5],
+        [((job.get("hiringOrganization") or {}).get("name") if isinstance(job.get("hiringOrganization"), dict) else job.get("hiringOrganization")) for job in jobs][:5],
     )
     return {
         "jsonld": all_items, "jobposting_jsonld": jobs,
@@ -1124,11 +1145,13 @@ def dom_cleaner_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     for node in list(soup.find_all(attrs={"class": noise})) + list(soup.find_all(attrs={"id": noise})):
         node.decompose()
     cleaned = str(soup)
+    text_preview = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))[:300]
     logger.info(
         "%s DOM cleanser completed request_id=%s input_length=%s output_length=%s "
-        "removed_length=%s selected_source=%s",
+        "removed_length=%s selected_source=%s text_preview=%r",
         LOG_PREFIX, state.request_id, len(state.raw_html), len(cleaned),
         max(0, len(state.raw_html) - len(cleaned)), state.selected_evidence_source,
+        text_preview,
     )
     return {"cleaned_html": cleaned, "execution_log": _event(state, "dom_cleaner", length=len(cleaned))}
 
@@ -1146,8 +1169,9 @@ def markdown_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     markdown = "\n".join(lines)[:60000]
     logger.info(
         "%s Markdown conversion completed request_id=%s html_length=%s "
-        "markdown_length=%s line_count=%s",
+        "markdown_length=%s line_count=%s preview=%r",
         LOG_PREFIX, state.request_id, len(state.cleaned_html), len(markdown), len(lines),
+        markdown[:500],
     )
     return {"markdown": markdown, "execution_log": _event(state, "markdown", length=len(markdown))}
 
@@ -1168,6 +1192,13 @@ def metadata_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         "headings": [tag.get_text(" ", strip=True) for tag in soup.select("h1,h2,h3")][:40],
         "apply_links": [urljoin(state.final_url or state.url, a.get("href")) for a in soup.find_all("a", href=True) if re.search(r"\bapply\b", a.get_text(" ", strip=True), re.I)][:10],
     })
+    logger.info(
+        "%s Metadata completed request_id=%s title=%r description_length=%s "
+        "headings=%s apply_links_count=%s portal=%s",
+        LOG_PREFIX, state.request_id, metadata.get("title"),
+        len(metadata.get("description") or ""), metadata["headings"][:8],
+        len(metadata["apply_links"]), state.detected_portal,
+    )
     return {"metadata": metadata, "execution_log": _event(state, "metadata", headings=len(metadata["headings"]))}
 
 
@@ -2174,7 +2205,14 @@ def _deterministic_job_from_evidence(state: JDState) -> ExtractedJob:
 
 def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     state = _state(value)
-    logger.info("%s Extraction started request_id=%s", LOG_PREFIX, state.request_id)
+    evidence_payload_size = len(json.dumps(state.evidence, ensure_ascii=False, separators=(",", ":")))
+    logger.info(
+        "%s Extraction started request_id=%s evidence_bytes=%s "
+        "evidence_source_text_length=%s jsonld_count=%s",
+        LOG_PREFIX, state.request_id, evidence_payload_size,
+        len((state.evidence or {}).get("source_text") or ""),
+        len(state.jobposting_jsonld),
+    )
 
     # The LLM is the primary organizer for every job page, including ones
     # with JobPosting JSON-LD -- JSON-LD's own `description` field is very
@@ -2197,23 +2235,26 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     # ~2.6k-token structured response, so the old default was silently
     # discarding good-but-slower completions into the lower-quality
     # deterministic fallback far more often than intended. escalate_on_error
-    # stays False below -- this still won't retry against the slower "pro"
-    # model -- so raising the ceiling here doesn't reopen the ~2m-miss
-    # problem that setting was added to prevent.
-    jd_timeout = max(5.0, float(os.getenv("JD_EXTRACTION_LLM_TIMEOUT_SECONDS", "35")))
+    # is True below, so a slow-but-real flash response still gets a pro
+    # attempt rather than being abandoned -- raising the ceiling here is
+    # extra headroom for the common case, not the only safety net.
+    jd_timeout = max(5.0, float(os.getenv("JD_EXTRACTION_LLM_TIMEOUT_SECONDS", "45")))
 
     def _call_llm():
         structured = get_llm(temperature=0).with_structured_output(
             ExtractedJob,
             timeout_seconds=jd_timeout,
-            # 2600 measured too tight against a real, content-rich posting
-            # (10 requirements + 4 preferred qualifications + description +
-            # responsibilities + skills, now that the LLM also sees the full
-            # page text, not just a short JSON-LD summary): observed
-            # "DeepSeek returned empty content" failures consistent with the
-            # completion being cut off mid-JSON before it could close out a
-            # valid object.
-            max_tokens=4000,
+            # Confirmed still too tight at 4000 against real, very
+            # content-rich postings (2026-08-08: a Disney VFX Sr Effects
+            # Technical Director posting and a JPMC Oracle HCM posting, both
+            # with long qualifications/responsibilities lists) -- production
+            # logs showed "DeepSeek returned empty content" on BOTH the
+            # json_object attempt and the prompt-enforced retry for the same
+            # request, which is the signature of the model running out of
+            # output budget before ever emitting a closing token, not a
+            # transport glitch. Raised again with real headroom; DeepSeek's
+            # context window comfortably supports this.
+            max_tokens=8000,
             queue_timeout_seconds=max(
                 0.5,
                 float(os.getenv("JD_EXTRACTION_AI_QUEUE_TIMEOUT_SECONDS", "3")),
@@ -2232,23 +2273,35 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             )),
         ])
 
+    used_deterministic_extraction = False
     try:
         job = llm_cache.execute_with_cache(
             task="jd_agent_extraction",
             payload_to_fingerprint=state.evidence,
             llm_callable=_call_llm,
             expected_schema=ExtractedJob,
-            prompt_version="jd-agent-v3-llm-only"
+            prompt_version="jd-agent-v4-llm-primary"
         )
     except Exception as exc:
-        logger.exception(
-            "%s LLM extraction failed; no synthetic fallback will be returned "
+        # A prior version of this handler raised straight out of
+        # extraction_agent on ANY LLM failure -- meaning a single transient
+        # DeepSeek hiccup (confirmed real-world: "empty content" on both the
+        # json_object attempt and the prompt-enforced retry for the exact
+        # same request, 2026-08-08) turned into a hard failure for the whole
+        # /jobs/extract-url request instead of a degraded-but-usable result.
+        # The LLM is still tried first, with real retries and pro escalation
+        # (see _call_llm above) -- this is a last-resort circuit breaker for
+        # when it's genuinely unreachable, not a shortcut around it. Marking
+        # used_deterministic_extraction lets reviewer_agent force one more
+        # real LLM attempt via repair_agent before this is accepted as final
+        # (see reviewer_agent below), so this path is rarely the end state.
+        logger.warning(
+            "%s LLM extraction failed; using deterministic evidence fallback "
             "request_id=%s error=%s",
             LOG_PREFIX, state.request_id, type(exc).__name__,
         )
-        raise RuntimeError(
-            "The AI job-description organizer did not return valid JSON. Please retry."
-        ) from exc
+        job = _deterministic_job_from_evidence(state)
+        used_deterministic_extraction = True
     job_dict = ExtractedJob.model_validate(job).model_dump(mode="json")
     # _clean_evidence_items/_clean_evidence_text (BeautifulSoup-based) were
     # previously only wired into the deterministic JSON-LD path
@@ -2319,12 +2372,18 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     return {
         "extracted_job": job_dict,
         "page_type": "job_detail",
-        "classification_confidence": 0.99,
-        "classification_reasons": ["LLM produced a schema-valid complete job record."],
+        "classification_confidence": 0.99 if not used_deterministic_extraction else 0.6,
+        "classification_reasons": (
+            ["LLM produced a schema-valid complete job record."]
+            if not used_deterministic_extraction
+            else ["LLM extraction failed; used deterministic evidence fallback."]
+        ),
+        "used_deterministic_extraction": used_deterministic_extraction,
         "execution_log": _event(
             state,
             "extraction",
             completed=True,
+            via="deterministic" if used_deterministic_extraction else "llm",
             skills_count=len(job_dict.get("skills", [])),
             responsibilities_count=len(job_dict.get("responsibilities", [])),
             requirements_count=len(job_dict.get("requirements", [])),
@@ -2565,6 +2624,20 @@ def reviewer_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     evidence_text = json.dumps(state.evidence, ensure_ascii=False).casefold()
     field_issues: dict[str, list[str]] = {}
 
+    # extraction_agent never got a real LLM read on this page at all (see its
+    # except branch) -- the deterministic evidence fallback can look
+    # deceptively "complete" (it always fills company_name, skills,
+    # suggested_skills from JSON-LD/keyword heuristics even for a role those
+    # heuristics know nothing about, e.g. a VFX "Effects Technical Director"
+    # falling into a generic 4-skill bucket) and would otherwise sail through
+    # every check below untouched. Force exactly one real repair pass -- now
+    # LLM-first, see repair_agent -- before this is ever accepted as final.
+    if state.used_deterministic_extraction and state.repair_attempts < 1:
+        field_issues["_extraction_source"] = [
+            "Primary extraction never reached the LLM successfully; retry "
+            "the full extraction via LLM before accepting this result."
+        ]
+
     if not job.job_title:
         field_issues["job_title"] = ["Missing job title."]
     if not job.company_name:
@@ -2586,9 +2659,9 @@ def reviewer_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     # deterministic JSON-LD path) had no check forcing it to actually populate
     # these lists, so a page that clearly has a "What You Will Be Doing" /
     # "Requirements" section could still come back with both empty and pass
-    # review untouched. Trigger repair (which retries from the same evidence
-    # deterministically, see repair_agent) whenever there's real description
-    # text to work with but nothing was extracted from it -- but only on the
+    # review untouched. Trigger repair (a real LLM re-read of the same
+    # evidence, see repair_agent) whenever there's real description text to
+    # work with but nothing was extracted from it -- but only on the
     # FIRST pass (mirrors the repair_attempts-aware exception right above
     # for company_name). Confirmed real-world case (an Oracle Cloud HCM
     # posting): some JDs are written as one continuous paragraph with no
@@ -2699,12 +2772,22 @@ def repair_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     def _call_repair_llm():
         structured = get_llm(temperature=0).with_structured_output(
             ExtractedJob,
-            timeout_seconds=max(5.0, float(os.getenv("JD_EXTRACTION_LLM_TIMEOUT_SECONDS", "35"))),
-            max_tokens=4000,
+            timeout_seconds=max(5.0, float(os.getenv("JD_EXTRACTION_LLM_TIMEOUT_SECONDS", "45"))),
+            max_tokens=8000,
             queue_timeout_seconds=max(
                 0.5, float(os.getenv("JD_EXTRACTION_AI_QUEUE_TIMEOUT_SECONDS", "3"))
             ),
-            escalate_on_error=True,
+            # When extraction_agent already fell back to the deterministic
+            # path (see used_deterministic_extraction), its own _call_llm
+            # already exhausted BOTH flash and pro against this exact
+            # evidence before giving up. Confirmed live (2026-08-08, Disney
+            # posting): a genuine payload/latency-driven timeout (not the
+            # transient "empty content" glitch) repeats almost identically
+            # on retry, so escalating to pro here too just pays a second
+            # ~40s+40s round trip for very low odds of a different outcome.
+            # One fresh flash-only attempt is still worth taking (transient
+            # network blips do happen) without doubling the wait.
+            escalate_on_error=not state.used_deterministic_extraction,
         )
         return structured.invoke([
             SystemMessage(content=repair_prompt),
@@ -2714,18 +2797,46 @@ def repair_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             }, ensure_ascii=False, separators=(",", ":"))),
         ])
 
-    job = llm_cache.execute_with_cache(
-        task="jd_agent_repair",
-        payload_to_fingerprint={
-            "evidence": state.evidence,
-            "current": current,
-            "repair_fields": state.repair_fields,
-        },
-        llm_callable=_call_repair_llm,
-        expected_schema=ExtractedJob,
-        prompt_version="jd-agent-repair-v1-llm-only",
-    )
-    job = ExtractedJob.model_validate(job).model_dump(mode="json")
+    try:
+        job = llm_cache.execute_with_cache(
+            task="jd_agent_repair",
+            payload_to_fingerprint={
+                "evidence": state.evidence,
+                "current": current,
+                "repair_fields": state.repair_fields,
+            },
+            llm_callable=_call_repair_llm,
+            expected_schema=ExtractedJob,
+            prompt_version="jd-agent-repair-v2-llm-first",
+        )
+        job = ExtractedJob.model_validate(job).model_dump(mode="json")
+        repair_via = "llm"
+    except Exception as exc:
+        # This call previously had no fallback at all -- a repair-stage LLM
+        # failure (both flash attempts AND the pro escalation exhausted, or a
+        # hard timeout) propagated straight out of repair_agent as an
+        # unhandled exception, turning what used to be a graceful
+        # deterministic degradation into a full 500 for the whole
+        # /jobs/extract-url request. The LLM is still the primary repair
+        # path (see _call_repair_llm above); this is strictly a last-resort
+        # safety net for when it's genuinely unreachable, not a shortcut.
+        logger.warning(
+            "%s LLM repair failed; using deterministic evidence fallback "
+            "request_id=%s attempt=%s error=%s",
+            LOG_PREFIX, state.request_id, attempt, type(exc).__name__,
+        )
+        evidence_fallback = _deterministic_job_from_evidence(state).model_dump(mode="json")
+        job = dict(current)
+        for field in state.repair_fields:
+            if field == "suggested_skills" or not job.get(field):
+                job[field] = evidence_fallback.get(field)
+        job = ExtractedJob.model_validate(job).model_dump(mode="json")
+        repair_via = "deterministic"
+
+    if not job.get("company_name"):
+        fallback_company = _fallback_company_name(state, job.get("company_name"))
+        if fallback_company:
+            job["company_name"] = fallback_company
     job["skills"] = _atomize_skill_labels(job.get("skills", []))
     explicit_keys = {skill.casefold() for skill in job["skills"]}
     job["suggested_skills"] = [
@@ -2733,13 +2844,14 @@ def repair_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         if skill.casefold() not in explicit_keys
     ]
     logger.info(
-        "%s LLM repair completed request_id=%s attempt=%s fields=%s "
+        "%s Repair completed request_id=%s attempt=%s fields=%s via=%s "
         "skills_before=%s skills_after=%s suggested_skills_after=%s "
         "repaired_skills=%s repaired_suggested_skills=%s",
         LOG_PREFIX,
         state.request_id,
         attempt,
         state.repair_fields,
+        repair_via,
         len((state.extracted_job or {}).get("skills", [])),
         len(job.get("skills", [])),
         len(job.get("suggested_skills", [])),
@@ -2748,7 +2860,7 @@ def repair_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     )
     return {
         "extracted_job": job, "repair_attempts": attempt, "needs_repair": False,
-        "execution_log": _event(state, "repair", attempt=attempt, fields=state.repair_fields),
+        "execution_log": _event(state, "repair", attempt=attempt, fields=state.repair_fields, via=repair_via),
     }
 
 

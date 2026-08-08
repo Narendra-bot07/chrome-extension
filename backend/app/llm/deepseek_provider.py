@@ -221,7 +221,20 @@ class DeepSeekProvider:
                     break
 
             logger.warning(f"[DEEPSEEK_FAILOVER] Primary model ({self.flash_model}) failed: {flash_err}")
-            if not escalate_on_error:
+            # escalate_on_error=False exists to stop a slow TIMEOUT from
+            # doubling worst-case latency (a second 60s-budget call on top of
+            # an already-exhausted one). "Empty content" is a different
+            # failure shape entirely -- the API answered fast with a
+            # response, just with nothing in it -- so retrying it against a
+            # different, stronger model costs about a second, not another
+            # full timeout window. Confirmed via production logs (2026-08-08,
+            # Disney Careers / JPMC postings): both flash attempts (json_object
+            # mode and prompt-enforced retry) returned empty content back to
+            # back, and with escalate_on_error=False this used to give up on
+            # the LLM entirely rather than ever trying deepseek-v4-pro, even
+            # though pro was never actually slow to respond in any of these
+            # cases -- it just never got asked.
+            if not escalate_on_error and "empty content" not in str(flash_err).casefold():
                 raise flash_err
 
             # Attempt 2: Escalation Model (deepseek-v4-pro)

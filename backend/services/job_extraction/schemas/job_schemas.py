@@ -419,6 +419,7 @@ class JDState(BaseModel):
     evidence: dict[str, Any] = Field(default_factory=dict)
     source_scores: dict[str, float] = Field(default_factory=dict)
     extracted_job: Optional[dict[str, Any]] = None
+    used_deterministic_extraction: bool = False
     review_issues: list[str] = Field(default_factory=list)
     field_issues: dict[str, list[str]] = Field(default_factory=dict)
     repair_fields: list[str] = Field(default_factory=list)

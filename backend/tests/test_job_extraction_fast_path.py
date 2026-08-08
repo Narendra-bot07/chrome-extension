@@ -127,7 +127,19 @@ def test_github_unavailable_taxonomy_never_becomes_a_skill(mock_get_llm):
 
 
 @patch("services.job_extraction.agents.get_llm")
-def test_repair_is_deterministic_and_never_starts_second_llm_call(mock_get_llm):
+def test_repair_calls_llm_first_and_uses_its_result(mock_get_llm):
+    """repair_agent's primary path is a real LLM re-read of the evidence
+    (matching how extraction_agent itself works) -- not a deterministic
+    keyword-matched patch. See test_repair_falls_back_to_deterministic_
+    evidence_only_when_llm_repair_fails below for the safety-net path."""
+    mock_structured = mock_get_llm.return_value.with_structured_output.return_value
+    mock_structured.invoke.return_value = ExtractedJob(
+        job_title="Data Engineer",
+        company_name="Example Corp",
+        description="Build data pipelines.",
+        skills=["Python"],
+        suggested_skills=["Data Modeling", "ETL Design", "Monitoring", "Cost Optimization"],
+    )
     state = job_state(
         extracted_job={
             "job_title": "Data Engineer",
@@ -141,7 +153,35 @@ def test_repair_is_deterministic_and_never_starts_second_llm_call(mock_get_llm):
 
     result = repair_agent(state)
 
-    mock_get_llm.assert_not_called()
+    mock_get_llm.assert_called()
+    assert result["extracted_job"]["suggested_skills"] == [
+        "Data Modeling", "ETL Design", "Monitoring", "Cost Optimization",
+    ]
+    assert result["repair_attempts"] == 1
+
+
+@patch("services.job_extraction.agents.get_llm")
+def test_repair_falls_back_to_deterministic_evidence_only_when_llm_repair_fails(mock_get_llm):
+    """repair_agent used to have NO fallback at all -- an LLM failure at the
+    repair stage (both flash attempts and the pro escalation exhausted, or a
+    timeout) propagated straight out as an unhandled exception, turning a
+    single DeepSeek hiccup into a full 500 for the whole /jobs/extract-url
+    request instead of a degraded-but-usable result. This must still resolve
+    to a usable job, not raise."""
+    mock_get_llm.return_value.with_structured_output.return_value.invoke.side_effect = RuntimeError("boom")
+    state = job_state(
+        extracted_job={
+            "job_title": "Data Engineer",
+            "company_name": "Example Corp",
+            "description": "Build data pipelines.",
+            "skills": ["Python"],
+            "suggested_skills": [],
+        },
+        repair_fields=["suggested_skills"],
+    )
+
+    result = repair_agent(state)
+
     assert len(result["extracted_job"]["suggested_skills"]) == 4
     assert result["repair_attempts"] == 1
 
@@ -186,7 +226,11 @@ Ways To Stand Out
     ]
 
 
-def test_research_job_missing_llm_skills_is_recovered_without_manual_review():
+def test_research_job_missing_llm_skills_triggers_repair():
+    """reviewer_agent no longer silently patches a missing-but-evidenced
+    skills list in place with a deterministic keyword match -- it flags
+    "skills" for repair (see field_issues below) and lets repair_agent's
+    real LLM re-read fill it in, same as any other incomplete field."""
     extracted = {
         "job_title": "Research Scientist, Gemini Data",
         "company_name": "DeepMind",
@@ -203,8 +247,43 @@ def test_research_job_missing_llm_skills_is_recovered_without_manual_review():
         evidence={"source_text": extracted["description"]},
     ))
 
-    assert result["is_valid"] is True
-    assert result["needs_repair"] is False
+    assert result["is_valid"] is False
+    assert result["needs_repair"] is True
+    assert "skills" in result["repair_fields"]
+
+
+@patch("services.job_extraction.agents.get_llm")
+def test_research_job_missing_llm_skills_is_recovered_by_repair(mock_get_llm):
+    extracted = {
+        "job_title": "Research Scientist, Gemini Data",
+        "company_name": "DeepMind",
+        "description": "Research machine learning methods for large language models.",
+        "responsibilities": ["Develop JAX and Python experiments for distributed training."],
+        "requirements": ["PhD and experience with deep learning and statistics."],
+        "skills": [],
+        "suggested_skills": ["Communication", "Collaboration", "Problem Solving", "Prioritization"],
+    }
+    mock_structured = mock_get_llm.return_value.with_structured_output.return_value
+    mock_structured.invoke.return_value = ExtractedJob(
+        job_title=extracted["job_title"],
+        company_name=extracted["company_name"],
+        description=extracted["description"],
+        responsibilities=extracted["responsibilities"],
+        requirements=extracted["requirements"],
+        skills=["Python", "JAX", "Machine Learning", "Deep Learning", "Statistics"],
+        suggested_skills=extracted["suggested_skills"],
+    )
+    state = job_state(
+        extracted_job=extracted,
+        jobposting_jsonld=[],
+        markdown="Minimum qualifications: Python, JAX, deep learning, and statistics.",
+        evidence={"source_text": extracted["description"]},
+        repair_fields=["skills"],
+        field_issues={"skills": ["The source contains skill signals but the LLM returned no explicit skills."]},
+    )
+
+    result = repair_agent(state)
+
     assert set(result["extracted_job"]["skills"]) >= {
         "Python", "JAX", "Machine Learning", "Deep Learning", "Statistics",
     }
