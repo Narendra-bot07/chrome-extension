@@ -15,18 +15,25 @@ export function PaymentStatusModal({ isOpen, status, planName, onClose, onRetry,
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-zinc-950/70 backdrop-blur-md p-4 overflow-y-auto animate-in fade-in duration-200">
       <div className="relative w-full max-w-md my-auto max-h-[90vh] flex flex-col rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 p-6 sm:p-7 shadow-2xl overflow-y-auto space-y-5">
         
-        {/* Header with Close */}
+        {/* Header -- no manual close while the outcome is still unresolved
+            (pending/unknown). Everything about this modal must be driven by
+            the actual payment status, not a user escape hatch that lets
+            them walk away from an unconfirmed checkout without realizing
+            it. Once the status is genuinely known (success/failed/
+            cancelled), closing is safe and the X returns. */}
         <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800/80 pb-3">
           <div className="flex items-center gap-2">
             <ShieldCheck className="text-indigo-600 dark:text-indigo-400" size={20} />
             <span className="text-xs font-black uppercase tracking-wider text-zinc-400">Payment Status</span>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-xl text-zinc-400 hover:text-zinc-600 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-          >
-            <X size={18} />
-          </button>
+          {!isPending && !isUnknown && (
+            <button
+              onClick={onClose}
+              className="p-2 rounded-xl text-zinc-400 hover:text-zinc-600 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            >
+              <X size={18} />
+            </button>
+          )}
         </div>
 
         {/* Status Content */}
@@ -40,6 +47,10 @@ export function PaymentStatusModal({ isOpen, status, planName, onClose, onRetry,
               <h3 className="text-xl font-black text-zinc-950 dark:text-white tracking-tight">Payment in Progress</h3>
               <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
                 Please complete your checkout in the payment window for <strong className="text-zinc-800 dark:text-zinc-200">{planName}</strong>.
+              </p>
+              <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-3">
+                This updates automatically the moment your payment resolves --
+                closing this window early isn't necessary and isn't available.
               </p>
             </div>
           </div>
@@ -93,17 +104,12 @@ export function PaymentStatusModal({ isOpen, status, planName, onClose, onRetry,
           </div>
         )}
 
-        {/* Action Controls */}
+        {/* Action Controls -- no dismiss action while isPending: the modal
+            must only ever leave this state because the actual payment
+            status resolved (tab-close detection, webhook confirmation, or
+            the bounded automatic timeout below), never because the user
+            clicked away from it. */}
         <div className="pt-2">
-          {isPending && (
-            <button
-              onClick={onClose}
-              className="w-full rounded-xl py-3 px-4 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 font-bold text-xs transition-colors cursor-pointer"
-            >
-              Cancel / Close
-            </button>
-          )}
-
           {isSuccess && (
             <button
               onClick={onClose}
@@ -133,23 +139,16 @@ export function PaymentStatusModal({ isOpen, status, planName, onClose, onRetry,
             </div>
           )}
 
-          {isUnknown && (
-            <div className="space-y-2">
-              {onCheckStatus && (
-                <button
-                  onClick={onCheckStatus}
-                  className="w-full rounded-xl py-3 px-4 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-black text-sm shadow-md shadow-indigo-500/20 cursor-pointer transition-all"
-                >
-                  Check Again
-                </button>
-              )}
-              <button
-                onClick={onClose}
-                className="w-full rounded-xl py-2 text-xs font-bold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors"
-              >
-                Close
-              </button>
-            </div>
+          {isUnknown && onCheckStatus && (
+            // No Close here either -- "unknown" means the payment's real
+            // outcome genuinely isn't known yet, not that it's over. The
+            // only way out is resolving it, same as isPending.
+            <button
+              onClick={onCheckStatus}
+              className="w-full rounded-xl py-3 px-4 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-black text-sm shadow-md shadow-indigo-500/20 cursor-pointer transition-all"
+            >
+              Check Again
+            </button>
           )}
         </div>
 
