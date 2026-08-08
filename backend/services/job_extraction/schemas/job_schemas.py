@@ -31,9 +31,21 @@ def _is_missing_value_token(text: str) -> bool:
 def _strip_missing_value_tokens(text: str) -> str:
     """Drop placeholder-only segments from a comma/slash-joined composite
     string (e.g. a "City, State, Country" location) while preserving real
-    parts, and collapse to "" when every part was a placeholder."""
+    parts, and collapse to "" when every part was a placeholder.
+
+    A multi-office posting lists several DISTINCT locations pipe-separated
+    (e.g. "San Francisco, CA | New York City, NY | Seattle, WA") -- each one
+    is itself its own "City, State" comma composite, so "|" is handled as a
+    higher-level split first (each office cleaned independently, then
+    rejoined with " | ") rather than flattening everything into one
+    comma list, which would lose which city pairs with which state.
+    """
     if _is_missing_value_token(text):
         return ""
+    if "|" in text:
+        groups = [_strip_missing_value_tokens(group.strip()) for group in text.split("|")]
+        kept_groups = [g for g in groups if g]
+        return " | ".join(kept_groups) if kept_groups else ""
     if "," not in text and "/" not in text:
         return text
     parts = [p.strip() for p in re.split(r"[,/]", text)]
@@ -98,7 +110,16 @@ class ExtractedJob(BaseModel):
         ),
     )
     location: Optional[str] = Field(
-        None, description="Evidence-supported job location, without unrelated locations."
+        None,
+        description=(
+            "Evidence-supported job location(s) for THIS posting. Many postings list "
+            "several valid offices for the SAME role (e.g. 'San Francisco, CA | New York "
+            "City, NY | Seattle, WA') -- include all of them, comma-separated, rather than "
+            "picking one or leaving this null just because there is more than one. "
+            "'Unrelated locations' means a location belonging to a DIFFERENT job posting "
+            "elsewhere on the page (e.g. a 'similar jobs' sidebar), not a second office for "
+            "this same role."
+        ),
     )
     workplace_type: Optional[str] = "unknown"
     employment_type: Optional[str] = "unknown"

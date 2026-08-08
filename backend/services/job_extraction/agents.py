@@ -2247,9 +2247,11 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
             # json_object attempt and the prompt-enforced retry for the same
             # request, which is the signature of the model running out of
             # output budget before ever emitting a closing token, not a
-            # transport glitch. Raised again with real headroom; DeepSeek's
-            # context window comfortably supports this.
-            max_tokens=8000,
+            # transport glitch. Raised again with real headroom (now that
+            # timeout_seconds=None removes the other reason to keep this
+            # conservative); DeepSeek's context window comfortably supports
+            # this for even the densest real postings seen so far.
+            max_tokens=16000,
             queue_timeout_seconds=max(
                 0.5,
                 float(os.getenv("JD_EXTRACTION_AI_QUEUE_TIMEOUT_SECONDS", "3")),
@@ -2768,7 +2770,7 @@ def repair_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         structured = get_llm(temperature=0).with_structured_output(
             ExtractedJob,
             timeout_seconds=None,
-            max_tokens=8000,
+            max_tokens=16000,
             queue_timeout_seconds=max(
                 0.5, float(os.getenv("JD_EXTRACTION_AI_QUEUE_TIMEOUT_SECONDS", "3"))
             ),

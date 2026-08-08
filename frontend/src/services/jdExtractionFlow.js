@@ -393,6 +393,17 @@ export function isMissingValueToken(value) {
 export function cleanLocationValue(value) {
   if (typeof value !== 'string') return value;
   if (isMissingValueToken(value)) return null;
+  // A multi-office posting pipe-separates distinct locations (e.g.
+  // "San Francisco, CA | New York City, NY | Seattle, WA") -- each one is
+  // its own "City, State" comma composite, so "|" is a higher-level split
+  // handled first (each office cleaned independently, then rejoined with
+  // " | "), matching job_schemas.py's _strip_missing_value_tokens on the
+  // backend. Flattening straight to one comma list would lose which city
+  // pairs with which state.
+  if (value.includes('|')) {
+    const groups = value.split('|').map((group) => cleanLocationValue(group.trim())).filter(Boolean);
+    return groups.length ? groups.join(' | ') : null;
+  }
   if (!value.includes(',') && !value.includes('/')) return value.trim();
   const parts = value.split(/[,/]/).map((part) => part.trim()).filter((part) => part && !isMissingValueToken(part));
   return parts.length ? parts.join(', ') : null;

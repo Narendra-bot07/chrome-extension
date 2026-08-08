@@ -45,6 +45,22 @@ def test_null_benefits_are_accepted_at_tool_boundary_and_normalized():
     assert ExtractedJob(benefits=None).benefits == []
 
 
+def test_multi_office_pipe_separated_location_is_preserved():
+    """Regression test: a real Anthropic posting listed "San Francisco, CA |
+    New York City, NY | Seattle, WA" and location came back empty in the UI.
+    "|" separates distinct offices for the SAME posting, each itself a
+    "City, State" comma composite -- it must not be flattened into one
+    comma list (which would lose which city pairs with which state) or
+    dropped entirely."""
+    job = ExtractedJob(location="San Francisco, CA | New York City, NY | Seattle, WA")
+    assert job.location == "San Francisco, CA | New York City, NY | Seattle, WA"
+
+
+def test_multi_office_location_drops_only_placeholder_offices():
+    job = ExtractedJob(location="San Francisco, CA | Unavailable | Seattle, WA")
+    assert job.location == "San Francisco, CA | Seattle, WA"
+
+
 def test_backend_login_wall_recovers_with_extension_selected_panel():
     panel = (
         "Senior Engineer\nJob description\nResponsibilities\nBuild reliable systems.\n"
