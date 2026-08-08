@@ -47,7 +47,8 @@ export function classifyBrowserPageUrl(value) {
 export async function captureActiveTabJobEvidence(tabId) {
   if (!tabId || !chrome?.scripting?.executeScript) return null;
   let lastError = null;
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  const maxAttempts = 4;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       const [{ result } = {}] = await chrome.scripting.executeScript({
         target: { tabId },
@@ -251,6 +252,7 @@ export async function captureActiveTabJobEvidence(tabId) {
           candidate_count: candidates.length,
           selected_score: selected?.score || 0,
           portal_optimized_panel: Boolean(selected?.portalOptimized),
+          has_portal_selectors: portalPanelSelectors.length > 0,
           captured_at: new Date().toISOString(),
           viewport: { width: innerWidth, height: innerHeight },
           portal_hint: location.hostname,
@@ -261,17 +263,38 @@ export async function captureActiveTabJobEvidence(tabId) {
       };
         }
       });
-      if (hasCapturedJobEvidence(result)) {
+      // A portal with known job-detail selectors (LinkedIn's
+      // .jobs-description__content etc.) that came up empty means those
+      // selectors most likely just hadn't rendered yet for the job the user
+      // has open -- the generic fallback (`main`/`aside`/`section`) still
+      // "succeeds" in the sense of returning non-empty text, but on a
+      // split-view search-results page that generic match is prone to
+      // grabbing the job LIST container instead of the single selected
+      // job's detail pane, mixing several unrelated postings' title/company
+      // snippets together. Confirmed real-world case (2026-08-08): a
+      // Charles Schwab posting open in the detail pane extracted as an
+      // unrelated "Fulcrum GT" / "DATAMAZE.AI" internship instead. Treat
+      // that combination as worth retrying, same as an empty capture,
+      // rather than accepting a plausible-looking but wrong result on the
+      // first attempt.
+      const gotWrongPanelOnKnownPortal = Boolean(
+        result?.capture?.has_portal_selectors && !result.capture.portal_optimized_panel
+      );
+      if (hasCapturedJobEvidence(result) && !(gotWrongPanelOnKnownPortal && attempt < maxAttempts)) {
         result.active_tab_id = tabId;
         result.capture = { ...(result.capture || {}), capture_attempt: attempt };
         return result;
       }
-      lastError = new Error(`Active-tab capture returned no page evidence (attempt ${attempt}).`);
+      lastError = new Error(
+        gotWrongPanelOnKnownPortal
+          ? `Active-tab capture fell back to a generic panel on a known portal (attempt ${attempt}).`
+          : `Active-tab capture returned no page evidence (attempt ${attempt}).`
+      );
     } catch (error) {
       lastError = error;
     }
-    if (attempt < 3) {
-      await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+    if (attempt < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
     }
   }
   throw lastError || new Error('Active-tab capture returned no page evidence.');

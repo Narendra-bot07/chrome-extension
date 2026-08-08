@@ -79,6 +79,19 @@ def _serialized_inline_schema(schema_cls: Type[BaseModel]) -> str:
     )
 
 
+class _TimeoutNotSpecified:
+    """Sentinel distinguishing "caller didn't pass timeout_seconds at all"
+    (use this provider's own class-level default, self.timeout) from an
+    explicit `timeout_seconds=None` (no timeout at all -- wait indefinitely
+    for this specific call). Plain `None` can't do both jobs at once."""
+
+    def __repr__(self) -> str:
+        return "<timeout not specified>"
+
+
+_TIMEOUT_NOT_SPECIFIED = _TimeoutNotSpecified()
+
+
 class DeepSeekProvider:
     """
     Provider-neutral DeepSeek LLM client adapter using the OpenAI-compatible API protocol.
@@ -123,7 +136,7 @@ class DeepSeekProvider:
         system_instruction: Optional[str] = None,
         temperature: float = 0.0,
         escalate_on_error: bool = True,
-        timeout_seconds: Optional[float] = None,
+        timeout_seconds: Any = _TIMEOUT_NOT_SPECIFIED,
         max_tokens: Optional[int] = None,
         queue_timeout_seconds: Optional[float] = None,
     ) -> BaseModel:
@@ -280,17 +293,25 @@ class DeepSeekProvider:
         model: str,
         messages: List[Dict[str, str]],
         temperature: float,
-        timeout_seconds: Optional[float] = None,
+        timeout_seconds: Any = _TIMEOUT_NOT_SPECIFIED,
         max_tokens: Optional[int] = None,
         json_mode: bool = True,
     ) -> str:
         """Execute chat completion call via OpenAI-compatible SDK or HTTP fallback."""
+        # timeout_seconds not specified -> this provider's own default
+        # (self.timeout). timeout_seconds=None explicitly -> no timeout at
+        # all for this call (both httpx and requests treat timeout=None as
+        # "wait indefinitely"); a number -> that many seconds. `timeout_seconds
+        # or self.timeout` used to collapse an explicit None into
+        # self.timeout too, silently reintroducing a 60s cap for a caller
+        # that asked for none.
+        resolved_timeout = self.timeout if timeout_seconds is _TIMEOUT_NOT_SPECIFIED else timeout_seconds
         if self.client:
             request_kwargs = {
                 "model": model,
                 "messages": messages,
                 "temperature": temperature,
-                "timeout": timeout_seconds or self.timeout,
+                "timeout": resolved_timeout,
             }
             if json_mode:
                 request_kwargs["response_format"] = {"type": "json_object"}
@@ -324,7 +345,7 @@ class DeepSeekProvider:
                 f"{self.base_url}/chat/completions",
                 headers=headers,
                 json=payload,
-                timeout=timeout_seconds or self.timeout
+                timeout=resolved_timeout
             )
             if res.status_code != 200:
                 raise ValueError(f"DeepSeek API HTTP error {res.status_code}: {res.text}")

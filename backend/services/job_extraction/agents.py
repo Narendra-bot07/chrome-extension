@@ -2227,22 +2227,18 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     # original purpose: a bounded-latency fallback for when the LLM call
     # itself actually fails or times out, not a shortcut applied just because
     # structured data happens to exist.
-    # A longer per-attempt budget (tried at 35s, then 45s) does NOT reduce
-    # end-user latency -- it increases it. Confirmed live and in production
-    # (2026-08-08): when DeepSeek is genuinely slow, the request waits out
-    # the FULL budget before failing regardless of how long that budget is,
-    # then (see deepseek_provider.py) does NOT escalate to pro on a genuine
-    # timeout, so it falls to the deterministic fallback almost immediately
-    # after. A shorter budget makes that fallback trigger sooner without
-    # losing anything -- a completion that was going to time out at 45s was
-    # never going to finish at 25s either, and one that finishes in 8s is
-    # unaffected by the ceiling either way.
-    jd_timeout = max(5.0, float(os.getenv("JD_EXTRACTION_LLM_TIMEOUT_SECONDS", "25")))
-
+    # Explicit product decision: a real, complete extraction is worth more
+    # than a fast one, and no fixed budget was the right number -- 25s cut
+    # off completions that were genuinely on their way; even 90s was still a
+    # ceiling. Removed entirely: timeout_seconds=None below is passed through
+    # deepseek_provider.py to the underlying HTTP client as an explicit "wait
+    # indefinitely," not a big-but-finite number. deepseek_provider.py
+    # already avoids the OTHER latency trap on its own (never re-pays this
+    # same wait escalating to pro on a genuine timeout).
     def _call_llm():
         structured = get_llm(temperature=0).with_structured_output(
             ExtractedJob,
-            timeout_seconds=jd_timeout,
+            timeout_seconds=None,
             # Confirmed still too tight at 4000 against real, very
             # content-rich postings (2026-08-08: a Disney VFX Sr Effects
             # Technical Director posting and a JPMC Oracle HCM posting, both
@@ -2771,7 +2767,7 @@ def repair_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     def _call_repair_llm():
         structured = get_llm(temperature=0).with_structured_output(
             ExtractedJob,
-            timeout_seconds=max(5.0, float(os.getenv("JD_EXTRACTION_LLM_TIMEOUT_SECONDS", "25"))),
+            timeout_seconds=None,
             max_tokens=8000,
             queue_timeout_seconds=max(
                 0.5, float(os.getenv("JD_EXTRACTION_AI_QUEUE_TIMEOUT_SECONDS", "3"))
