@@ -52,13 +52,50 @@ export async function captureActiveTabJobEvidence(tabId) {
     try {
       const [{ result } = {}] = await chrome.scripting.executeScript({
         target: { tabId },
-        func: () => {
+        func: async () => {
       const cleanText = (value, limit) => String(value || '')
         .replace(/\u00a0/g, ' ')
         .replace(/[ \t]+/g, ' ')
         .replace(/\n{3,}/g, '\n\n')
         .trim()
         .slice(0, limit);
+      // LinkedIn (and several other portals) collapse a long job description
+      // behind a "...see more" toggle -- the full text simply isn't in the
+      // DOM until that's clicked. Confirmed real-world case (2026-08-08, a
+      // Charles Schwab posting on LinkedIn): only a small trailing fragment
+      // of an otherwise very rich JD (full Key Responsibilities / Required
+      // Qualifications / Preferred Qualifications sections were entirely
+      // absent) got captured, because the description was still collapsed
+      // when the tab was scanned. Click every matching toggle and give the
+      // DOM a moment to expand before any text is read below, so scoring
+      // and capture both see the fully expanded content.
+      const expandTruncatedContent = () => {
+        const toggleTextPattern = /^(see more|show more|read more|\u2026\s*more)$/i;
+        const clickable = Array.from(document.querySelectorAll('button, a, span[role="button"], [role="button"]'));
+        let clicked = 0;
+        for (const el of clickable) {
+          const text = (el.innerText || el.textContent || '').trim();
+          if (toggleTextPattern.test(text)) {
+            try {
+              el.click();
+              clicked += 1;
+            } catch {
+              // Best-effort only -- a toggle that can't be clicked just
+              // leaves that section collapsed, same as before this fix.
+            }
+          }
+        }
+        return clicked;
+      };
+      if (expandTruncatedContent() > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        // A second pass: expanding one toggle (e.g. the job description)
+        // can reveal or reflow further content with its own separate
+        // toggle (e.g. a company "About us" blurb) that didn't exist in
+        // the DOM at all until the first click ran.
+        expandTruncatedContent();
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
       const jobSignals = /\b(job description|responsibilities|qualifications|requirements|what you.ll do|what to expect|apply now|easy apply|full.time|part.time|experience)\b/gi;
       const roots = [document];
       const shadowRoots = [];
