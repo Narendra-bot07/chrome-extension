@@ -1891,6 +1891,61 @@ export function AppProvider({ children }) {
     return matchResult;
   };
 
+  // Explicit final fallback for when auto-detection genuinely can't read a
+  // page (see ManualJobEntryPage) -- the user has already typed in
+  // structured fields themselves, so this skips the extraction pipeline
+  // entirely and builds the job record directly, mirroring exactly what
+  // handleScanPage's own success path sets (see `job_detail` branch above)
+  // so every downstream consumer (JobReviewView, tailoring, ATS scoring)
+  // sees the same shape regardless of which path produced it.
+  const submitManualJobEntry = async ({
+    url, role, company, description, location, employmentType, experience, salary
+  }) => {
+    const job = {
+      job_title: role,
+      title: role,
+      company_name: company,
+      company: company,
+      description,
+      location: location || null,
+      workplace_type: 'unknown',
+      employment_type: employmentType || 'unknown',
+      job_type: employmentType || 'unknown',
+      seniority: experience || null,
+      responsibilities: [],
+      requirements: [],
+      preferred_qualifications: [],
+      skills: [],
+      suggested_skills: [],
+      benefits: [],
+      salary: salary || null,
+      source_url: url,
+      application_url: url
+    };
+    try {
+      await scoreJobBeforeReveal(job);
+      setLastAnalyzedUrl(url);
+      setJobText(description || '');
+      setJobTitle(role || '');
+      setCompanyName(company || '');
+      setJobAnalysis(job);
+      setJobDetectionStatus('ready');
+      setJobDetectionMeta({
+        classification: 'job_detail',
+        confidence: 1,
+        reason: 'Manually entered by the user.',
+        extractionMethod: 'manual_input'
+      });
+      setApiError(null);
+      logExtraction('Manual job entry submitted', { url, titlePresent: Boolean(role), companyPresent: Boolean(company) });
+      return true;
+    } catch (err) {
+      console.error('Manual job entry failed:', err);
+      setApiError(err?.message || 'Could not save the manually entered job. Please try again.');
+      return false;
+    }
+  };
+
   // Scan Active Page content
   const handleScanPage = async (forceRescan = false) => {
     if (!ensureExtractionProfileReady()) return;
@@ -4161,6 +4216,7 @@ export function AppProvider({ children }) {
       deleteResumeVersion,
       compareResumeVersions,
       handleScanPage,
+      submitManualJobEntry,
       handleExtractJob,
       handleCompareActiveResumeToJob,
       handleParseResume,

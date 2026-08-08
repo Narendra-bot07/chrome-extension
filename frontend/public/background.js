@@ -75,10 +75,54 @@ try {
   reportErrorToSentry(e, "initial_load");
 }
 
+// Tracks which browser windows currently have the side panel open, so the
+// floating launcher (floating-icon.js) can hide itself while the user is
+// already using the extension instead of sitting there redundantly. The
+// side panel's own React app (App.jsx) opens a long-lived port on mount and
+// tells us its windowId; the port disconnecting (panel closed, or the tab/
+// window it belonged to closed) is Chrome's own reliable "it's gone" signal
+// -- far more robust than trying to catch an unload event from the panel
+// itself, which is not guaranteed to fire in time.
+const openPanelWindows = new Set();
+
+function broadcastPanelState(windowId, isOpen) {
+  if (windowId == null) return;
+  chrome.tabs.query({ windowId }, (tabs) => {
+    for (const tab of tabs || []) {
+      if (tab.id == null) continue;
+      chrome.tabs.sendMessage(tab.id, { type: "TAILR4U_PANEL_STATE", open: isOpen }, () => {
+        // No content script on this tab (chrome:// page, etc.) -- expected, ignore.
+        void chrome.runtime.lastError;
+      });
+    }
+  });
+}
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "tailr4u-side-panel") return;
+  let boundWindowId = null;
+  port.onMessage.addListener((msg) => {
+    if (msg?.type === "INIT" && typeof msg.windowId === "number") {
+      boundWindowId = msg.windowId;
+      openPanelWindows.add(boundWindowId);
+      broadcastPanelState(boundWindowId, true);
+    }
+  });
+  port.onDisconnect.addListener(() => {
+    if (boundWindowId != null) {
+      openPanelWindows.delete(boundWindowId);
+      broadcastPanelState(boundWindowId, false);
+    }
+  });
+});
+
 // Listener for background messages (non-extraction events)
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   try {
-    if (message.type === "APPLICATION_SUBMITTED") {
+    if (message.type === "TAILR4U_QUERY_PANEL_STATE") {
+      const windowId = sender.tab?.windowId;
+      sendResponse({ open: windowId != null && openPanelWindows.has(windowId) });
+    } else if (message.type === "APPLICATION_SUBMITTED") {
       console.log("[Background] Application submission event intercepted:", message.data);
       try {
         chrome.runtime.sendMessage(message);

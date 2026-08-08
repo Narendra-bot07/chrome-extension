@@ -243,7 +243,38 @@ function AppRoutes() {
   );
 }
 
+function useTellBackgroundPanelIsOpen() {
+  // Lets the floating launcher (public/floating-icon.js) hide itself while
+  // the user already has the side panel open, instead of sitting there
+  // redundantly. A long-lived port is used rather than one-off "opened"/
+  // "closed" messages: the port disconnecting is Chrome's own signal that
+  // this document is gone (panel closed, or its window closed), which
+  // fires reliably -- an unload-time message from the panel itself is not
+  // guaranteed to complete before the document is torn down.
+  useEffect(() => {
+    if (window.location.protocol !== 'chrome-extension:' || !chrome?.runtime?.connect) return undefined;
+    let port;
+    try {
+      port = chrome.runtime.connect({ name: 'tailr4u-side-panel' });
+      chrome.windows?.getCurrent?.((win) => {
+        try {
+          port.postMessage({ type: 'INIT', windowId: win?.id });
+        } catch {
+          // Port may already be gone if the panel closed instantly.
+        }
+      });
+    } catch {
+      // Extension context can be invalidated (e.g. right after an update
+      // reload) -- the floating icon just won't know to hide itself.
+    }
+    return () => {
+      try { port?.disconnect(); } catch {}
+    };
+  }, []);
+}
+
 function App() {
+  useTellBackgroundPanelIsOpen();
   return (
     <HashRouter>
       <AppProvider>

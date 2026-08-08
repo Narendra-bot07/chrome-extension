@@ -73,16 +73,24 @@ function ManualJobEntryPage() {
     if (!validate()) return;
 
     setSubmitting(true);
-    await submitManualJobEntry({
-      url: url.trim(),
-      role: role.trim(),
-      company: company.trim(),
-      description: description.trim(),
-      location: location.trim(),
-      employmentType: employmentType.trim(),
-      experience: experience.trim(),
-      salary: salary.trim()
-    });
+    try {
+      const success = await submitManualJobEntry({
+        url: url.trim(),
+        role: role.trim(),
+        company: company.trim(),
+        description: description.trim(),
+        location: location.trim(),
+        employmentType: employmentType.trim(),
+        experience: experience.trim(),
+        salary: salary.trim()
+      });
+      if (success) {
+        navigate('/tailor');
+        return;
+      }
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
