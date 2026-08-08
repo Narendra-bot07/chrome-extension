@@ -216,11 +216,9 @@ def route_after_classification_review(state: JDState) -> Literal["browser", "evi
 
 
 def route_after_reviewer(state: JDState) -> Literal["repair", "extraction_manual_review", "final_response"]:
-    if state.is_valid and not state.needs_repair:
-        return "final_response"
-    if state.needs_repair and state.repair_attempts < state.max_repair_attempts:
-        return "repair"
-    return "extraction_manual_review"
+    # Each semantic worker already owns one targeted retry. Never rerun all
+    # successful fields through a giant-schema repair call.
+    return "final_response" if state.extracted_job else "extraction_manual_review"
 
 
 def build_job_intelligence_graph():

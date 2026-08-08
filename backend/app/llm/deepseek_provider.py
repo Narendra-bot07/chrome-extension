@@ -139,6 +139,8 @@ class DeepSeekProvider:
         timeout_seconds: Any = _TIMEOUT_NOT_SPECIFIED,
         max_tokens: Optional[int] = None,
         queue_timeout_seconds: Optional[float] = None,
+        race_head_start_seconds: Optional[float] = None,
+        model_override: Optional[str] = None,
     ) -> BaseModel:
         """
         Invokes DeepSeek model with structured JSON response_format and validates output against Pydantic schema_cls.
@@ -195,98 +197,217 @@ class DeepSeekProvider:
                 {"role": "user", "content": prompt}
             ]
 
-            # Attempt 1: Primary Model (deepseek-v4-flash)
-            flash_err: Exception = ValueError("unreachable")
-            for flash_attempt in range(2):
-                try:
-                    raw_json = self._chat_completion(
-                        model=self.flash_model,
-                        messages=messages,
-                        temperature=temperature,
-                        timeout_seconds=timeout_seconds,
-                        max_tokens=max_tokens,
-                        # Some DeepSeek-compatible gateways intermittently
-                        # return an empty message specifically in json_object
-                        # mode. The schema is already embedded in the system
-                        # prompt, so retry that exact request once without the
-                        # transport hint instead of treating an empty body as
-                        # permission to manufacture fields locally.
-                        json_mode=flash_attempt == 0,
-                    )
-                    return self._parse_json_schema(raw_json, schema_cls)
-                except Exception as attempt_err:
-                    flash_err = attempt_err
-                    # "DeepSeek returned empty content" is an anomalous,
-                    # non-deterministic response shape confirmed via direct
-                    # repro: the SAME request, retried moments later,
-                    # sometimes succeeds -- worth exactly one quick
-                    # same-model retry. Any other error (timeout, network,
-                    # genuine API failure) is NOT retried here; it falls
-                    # straight through to the escalate-or-raise handling
-                    # below unchanged, since retrying those would just
-                    # repeat the same failure at the cost of extra latency.
-                    if flash_attempt == 0 and "empty content" in str(attempt_err).casefold():
-                        logger.warning(
-                            f"[DEEPSEEK_EMPTY_CONTENT_RETRY] {self.flash_model} "
-                            "returned empty content; retrying once with prompt-enforced JSON"
-                        )
-                        continue
-                    break
-
-            logger.warning(f"[DEEPSEEK_FAILOVER] Primary model ({self.flash_model}) failed: {flash_err}")
-            # Escalation is only worth its cost for a FAST failure. "Empty
-            # content" means the API answered quickly with nothing in it --
-            # retrying that against a different model costs about a second.
-            # A genuine TIMEOUT means the API never answered within the full
-            # budget at all -- escalating to deepseek-v4-pro (typically
-            # slower, not faster) just pays that same full timeout a second
-            # time for very low odds of a different outcome. Confirmed live
-            # and in production (2026-08-08, Disney/JPMC postings): flash
-            # timed out, escalated anyway, and pro ALSO timed out on the
-            # exact same request every time -- turning one ~20-45s failure
-            # into a ~80-90s one for no benefit. Never escalate on a timeout;
-            # fall straight back to the deterministic evidence path instead,
-            # which is what actually reduces latency here.
-            failure_text = str(flash_err).casefold()
-            is_timeout = isinstance(flash_err, TimeoutError) or "timed out" in failure_text
-            is_empty_content = "empty content" in failure_text
-            if is_timeout or (not escalate_on_error and not is_empty_content):
-                raise flash_err
-
-            # Attempt 2: Escalation Model (deepseek-v4-pro)
-            logger.info(f"[DEEPSEEK_ESCALATION] Attempting escalation to ({self.pro_model})...")
-            time.sleep(1.0)
-            try:
-                raw_json_pro = self._chat_completion(
-                    model=self.pro_model,
+            if model_override:
+                # Explicit single-model path used by JD extraction. It has no
+                # Flash call, escalation, race, head start, or second model.
+                # A malformed/empty response is surfaced to the task-level
+                # orchestrator, which may retry only that semantic worker.
+                raw_json = self._chat_completion(
+                    model=model_override,
                     messages=messages,
                     temperature=temperature,
                     timeout_seconds=timeout_seconds,
                     max_tokens=max_tokens,
+                    json_mode=True,
                 )
-                parsed_obj = self._parse_json_schema(raw_json_pro, schema_cls)
-                return parsed_obj
-            except Exception as pro_err:
-                if "empty content" in str(pro_err).casefold():
+                return self._parse_json_schema(raw_json, schema_cls)
+
+            if not escalate_on_error:
+                # No fallback wanted at all -- single flash attempt (still
+                # with the quick empty-content retry, since that one's cheap
+                # and not really an "escalation").
+                return self._invoke_flash_only(
+                    messages, temperature, timeout_seconds, max_tokens, schema_cls,
+                )
+
+            # Escalation used to be strictly sequential: wait for flash to
+            # fully finish (including its own empty-content retry), THEN
+            # only start pro from a standing start. A schema-validation
+            # failure or a slow flash response paid flash's FULL duration
+            # and then pro's FULL duration on top -- confirmed in production
+            # (2026-08-08): a 47s extraction call immediately followed by an
+            # 18-57s repair call, each internally paying this same
+            # sequential-escalation tax, compounding into 90-150s+ total for
+            # a single JD extraction. Racing the two models concurrently
+            # instead bounds the wait to roughly whichever model is SLOWER,
+            # not both added together -- and since pro only ever starts
+            # after a short head start (during which flash resolving
+            # successfully cancels the need for pro entirely), the common
+            # case where flash alone succeeds quickly still only ever pays
+            # for one model's call, same cost as before.
+            return self._invoke_with_race(
+                messages, temperature, timeout_seconds, max_tokens, schema_cls,
+                head_start=(
+                    self._RACE_HEAD_START_SECONDS
+                    if race_head_start_seconds is None
+                    else race_head_start_seconds
+                ),
+            )
+
+    # Default head start before pro joins the race. Callers with real
+    # evidence that flash rarely/never wins their specific schema (e.g. the
+    # large, fully-required JD-extraction facts/content/repair schemas --
+    # confirmed via live production-URL testing on 2026-08-08/09 where
+    # escalation fired on every single one of those calls) should pass
+    # race_head_start_seconds=0.0 explicitly rather than lowering this
+    # shared default, since other call sites (cover letters, resume
+    # tailoring, skill categorization, ...) have no such evidence and a
+    # blanket-lowered default would just double their DeepSeek spend for no
+    # measured latency benefit.
+    _RACE_HEAD_START_SECONDS = 6.0
+
+    def _invoke_flash_only(
+        self, messages, temperature, timeout_seconds, max_tokens, schema_cls,
+    ) -> BaseModel:
+        err: Exception = ValueError("unreachable")
+        for attempt in range(2):
+            try:
+                raw_json = self._chat_completion(
+                    model=self.flash_model,
+                    messages=messages,
+                    temperature=temperature,
+                    timeout_seconds=timeout_seconds,
+                    max_tokens=max_tokens,
+                    json_mode=attempt == 0,
+                )
+                return self._parse_json_schema(raw_json, schema_cls)
+            except Exception as attempt_err:
+                err = attempt_err
+                if attempt == 0 and "empty content" in str(attempt_err).casefold():
                     logger.warning(
-                        "[DEEPSEEK_ESCALATION_EMPTY_RETRY] %s returned empty content; "
-                        "retrying with prompt-enforced JSON",
-                        self.pro_model,
+                        f"[DEEPSEEK_EMPTY_CONTENT_RETRY] {self.flash_model} "
+                        "returned empty content; retrying once with prompt-enforced JSON"
+                    )
+                    continue
+                break
+        raise err
+
+    def _invoke_with_race(
+        self, messages, temperature, timeout_seconds, max_tokens, schema_cls,
+        head_start: float,
+    ) -> BaseModel:
+        results: Dict[str, BaseModel] = {}
+        errors: Dict[str, Exception] = {}
+        lock = threading.Lock()
+        flash_resolved = threading.Event()
+        # Set the instant EITHER model produces a valid parsed result, so the
+        # main thread can return immediately instead of always waiting for
+        # both threads to fully finish (join()-ing both and then preferring
+        # flash unconditionally silently threw away the whole benefit of
+        # racing whenever flash was merely SLOW rather than failing: pro
+        # would win the race but the caller still sat through flash's full
+        # duration before ever seeing pro's already-ready result).
+        any_success = threading.Event()
+
+        def run_flash():
+            try:
+                raw_json = self._chat_completion(
+                    model=self.flash_model, messages=messages, temperature=temperature,
+                    timeout_seconds=timeout_seconds, max_tokens=max_tokens, json_mode=True,
+                )
+                parsed = self._parse_json_schema(raw_json, schema_cls)
+                with lock:
+                    results["flash"] = parsed
+                any_success.set()
+                return
+            except Exception as e:
+                # Same quick same-model retry as before for the anomalous
+                # empty-content shape -- cheap, and worth doing before ever
+                # involving pro at all.
+                if "empty content" in str(e).casefold():
+                    logger.warning(
+                        f"[DEEPSEEK_EMPTY_CONTENT_RETRY] {self.flash_model} "
+                        "returned empty content; retrying once with prompt-enforced JSON"
                     )
                     try:
-                        raw_json_pro = self._chat_completion(
-                            model=self.pro_model,
-                            messages=messages,
-                            temperature=temperature,
-                            timeout_seconds=timeout_seconds,
-                            max_tokens=max_tokens,
-                            json_mode=False,
+                        raw_json = self._chat_completion(
+                            model=self.flash_model, messages=messages, temperature=temperature,
+                            timeout_seconds=timeout_seconds, max_tokens=max_tokens, json_mode=False,
                         )
-                        return self._parse_json_schema(raw_json_pro, schema_cls)
-                    except Exception as final_err:
-                        pro_err = final_err
-                logger.error(f"[DEEPSEEK_ESCALATION_FAILED] Both flash and pro models failed: {pro_err}")
-                raise pro_err
+                        parsed = self._parse_json_schema(raw_json, schema_cls)
+                        with lock:
+                            results["flash"] = parsed
+                        any_success.set()
+                        return
+                    except Exception as e2:
+                        e = e2
+                with lock:
+                    errors["flash"] = e
+            finally:
+                flash_resolved.set()
+
+        def run_pro():
+            # Head start: the common case (flash succeeds cleanly and
+            # quickly) then never needs pro to run at all, so per-extraction
+            # LLM cost stays the same as the old sequential design. Wakes up
+            # immediately on a FAILED flash too (not just success), so a
+            # fast validation error doesn't sit idle for the rest of the
+            # head start before pro finally gets to start.
+            flash_resolved.wait(head_start)
+            with lock:
+                if "flash" in results:
+                    return
+            logger.info(f"[DEEPSEEK_ESCALATION] Racing ({self.pro_model}) alongside flash...")
+            try:
+                raw_json_pro = self._chat_completion(
+                    model=self.pro_model, messages=messages, temperature=temperature,
+                    timeout_seconds=timeout_seconds, max_tokens=max_tokens,
+                )
+                parsed = self._parse_json_schema(raw_json_pro, schema_cls)
+                with lock:
+                    results.setdefault("pro", parsed)
+                any_success.set()
+            except Exception as e:
+                if "empty content" in str(e).casefold():
+                    try:
+                        raw_json_pro = self._chat_completion(
+                            model=self.pro_model, messages=messages, temperature=temperature,
+                            timeout_seconds=timeout_seconds, max_tokens=max_tokens, json_mode=False,
+                        )
+                        parsed = self._parse_json_schema(raw_json_pro, schema_cls)
+                        with lock:
+                            results.setdefault("pro", parsed)
+                        any_success.set()
+                        return
+                    except Exception as e2:
+                        e = e2
+                with lock:
+                    errors["pro"] = e
+
+        flash_thread = threading.Thread(target=run_flash, daemon=True)
+        pro_thread = threading.Thread(target=run_pro, daemon=True)
+        flash_thread.start()
+        pro_thread.start()
+
+        # Return the instant either model succeeds -- do NOT wait for both
+        # threads to finish first. The 0.05s poll only bounds how long it
+        # takes to notice "both failed"; a real success wakes this up
+        # immediately via any_success.set() above, regardless of which
+        # model produced it or which thread happens to still be running.
+        while True:
+            if any_success.wait(timeout=0.05):
+                break
+            if not flash_thread.is_alive() and not pro_thread.is_alive():
+                break
+
+        with lock:
+            # Flash (cheaper, first-class model) wins only a genuine tie
+            # (both already resolved by the time we checked); otherwise
+            # whichever model's thread actually called any_success.set()
+            # first is what's present here to return.
+            if "flash" in results:
+                return results["flash"]
+            if "pro" in results:
+                return results["pro"]
+            flash_err = errors.get("flash")
+            pro_err = errors.get("pro")
+        logger.error(
+            f"[DEEPSEEK_ESCALATION_FAILED] Both {self.flash_model} and {self.pro_model} failed: "
+            f"flash={flash_err} pro={pro_err}"
+        )
+        raise flash_err or pro_err or ValueError(
+            "Both DeepSeek models failed to produce a valid structured response."
+        )
 
     def _chat_completion(
         self,

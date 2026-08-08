@@ -85,6 +85,75 @@ jd_extraction_total = Counter(
     registry=registry
 )
 
+jd_extraction_stage_duration_seconds = Histogram(
+    "jd_extraction_stage_duration_seconds",
+    "JD extraction stage latency in seconds",
+    ["stage", "status"],
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 8.0, 10.0, 15.0, 30.0),
+    registry=registry,
+)
+
+jd_extraction_worker_duration_seconds = Histogram(
+    "jd_worker_duration_seconds",
+    "DeepSeek Pro JD worker latency in seconds",
+    ["worker", "status", "attempt"],
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 8.0, 10.0, 15.0),
+    registry=registry,
+)
+
+jd_extraction_worker_output_tokens_total = Counter(
+    "jd_worker_output_tokens",
+    "Estimated schema output tokens returned by JD workers",
+    ["worker"],
+    registry=registry,
+)
+
+jd_extraction_worker_failures_total = Counter(
+    "jd_extraction_worker_failures_total",
+    "JD worker failures and targeted retries",
+    ["worker", "reason", "attempt"],
+    registry=registry,
+)
+
+jd_extraction_cache_total = Counter(
+    "jd_extraction_cache_total",
+    "Exact JD extraction cache lookups",
+    ["status"],
+    registry=registry,
+)
+
+jd_extraction_partial_total = Counter(
+    "jd_partial_completion_total",
+    "JD extractions completed with deterministic fields for failed Pro workers",
+    ["reason"],
+    registry=registry,
+)
+
+# Stable dashboard-facing names from the JD extraction SLO contract.
+jd_deterministic_extraction_seconds = Histogram(
+    "jd_deterministic_extraction_seconds", "Deterministic JD extraction latency",
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0), registry=registry,
+)
+jd_cache_lookup_seconds = Histogram(
+    "jd_cache_lookup_seconds", "Exact JD Redis cache lookup latency", ["status"],
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5), registry=registry,
+)
+jd_time_to_first_result_seconds = Histogram(
+    "jd_time_to_first_result_seconds", "Time until the first validated Pro worker result",
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 8.0, 10.0, 15.0), registry=registry,
+)
+jd_time_to_minimum_ready_seconds = Histogram(
+    "jd_time_to_minimum_ready_seconds", "Time until minimum viable JD fields are ready", ["status"],
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 8.0, 10.0, 15.0), registry=registry,
+)
+jd_total_extraction_seconds = Histogram(
+    "jd_total_extraction_seconds", "End-to-end JD extraction latency", ["status"],
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 8.0, 10.0, 15.0, 30.0), registry=registry,
+)
+jd_worker_timeout_total = Counter(
+    "jd_worker_timeout_total", "Timed-out JD Pro workers", ["worker", "attempt"], registry=registry,
+)
+
 pdf_render_total = Counter(
     "pdf_render_total",
     "Total PDF renders executed",

@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     DEEPSEEK_BASE_URL: str = Field(default="https://api.deepseek.com", env="DEEPSEEK_BASE_URL")
     DEEPSEEK_MODEL_FLASH: str = Field(default="deepseek-v4-flash", env="DEEPSEEK_MODEL_FLASH")
     DEEPSEEK_MODEL_PRO: str = Field(default="deepseek-v4-pro", env="DEEPSEEK_MODEL_PRO")
+    DEEPSEEK_JD_MODEL: str = Field(default="deepseek-v4-pro", env="DEEPSEEK_JD_MODEL")
     DEEPSEEK_TIMEOUT_SECONDS: float = Field(default=60.0, env="DEEPSEEK_TIMEOUT_SECONDS")
     DEEPSEEK_MAX_RETRIES: int = Field(default=2, env="DEEPSEEK_MAX_RETRIES")
     DEEPSEEK_ENABLE_THINKING: bool = Field(default=False, env="DEEPSEEK_ENABLE_THINKING")
@@ -140,6 +141,11 @@ class Settings(BaseSettings):
         disallowed_aliases = {"deepseek-chat", "deepseek-reasoner"}
         if self.DEEPSEEK_MODEL_FLASH.lower() in disallowed_aliases or self.DEEPSEEK_MODEL_PRO.lower() in disallowed_aliases:
             raise ValueError(f"Deprecated model alias detected. Flash='{self.DEEPSEEK_MODEL_FLASH}', Pro='{self.DEEPSEEK_MODEL_PRO}'. Must use 'deepseek-v4-flash' and 'deepseek-v4-pro'.")
+        if self.DEEPSEEK_JD_MODEL != "deepseek-v4-pro":
+            raise ValueError(
+                "DEEPSEEK_JD_MODEL must be exactly 'deepseek-v4-pro'; JD extraction "
+                "does not permit Flash, model routing, or model racing."
+            )
 
     class Config:
         env_file = (BASE_DIR / ".env", ".env")

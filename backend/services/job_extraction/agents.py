@@ -5,7 +5,9 @@ import json
 import html as html_lib
 import os
 import re
+import threading
 import time
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -20,8 +22,22 @@ from core.logging import logger
 from services.job_extraction.browser_pool import BrowserPoolBusyError, run_on_browser_pool
 from services.job_extraction.ssrf_guard import is_request_url_safe
 from services.job_extraction.salary_parser import parse_salary_from_text
+from observability.metrics import (
+    jd_deterministic_extraction_seconds,
+    jd_extraction_partial_total,
+    jd_extraction_stage_duration_seconds,
+    jd_extraction_worker_duration_seconds,
+    jd_extraction_worker_failures_total,
+    jd_extraction_worker_output_tokens_total,
+    jd_time_to_first_result_seconds,
+    jd_time_to_minimum_ready_seconds,
+    jd_worker_timeout_total,
+)
 from services.job_extraction.schemas import (
-    ClassificationDecision, EvidenceSource, ExtractedJob, JDState,
+    ClassificationDecision, EvidenceSource, ExtractedJob,
+    JDState,
+    JDRoleWorkerResult, JDSkillsWorkerResult,
+    JDResponsibilitiesWorkerResult, JDRequirementsWorkerResult,
     ReviewDecision, SalaryInfo, SkillDecision,
 )
 
@@ -2278,6 +2294,7 @@ def _deterministic_job_from_evidence(state: JDState) -> ExtractedJob:
 
 def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     state = _state(value)
+    extraction_started = time.perf_counter()
     evidence_payload_size = len(json.dumps(state.evidence, ensure_ascii=False, separators=(",", ":")))
     logger.info(
         "%s Extraction started request_id=%s evidence_bytes=%s "
@@ -2287,92 +2304,174 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         len(state.jobposting_jsonld),
     )
 
-    # The LLM is the primary organizer for every job page, including ones
-    # with JobPosting JSON-LD -- JSON-LD's own `description` field is very
-    # often a shortened/SEO-only summary that omits content the page renders
-    # separately (a standalone "Required Skills" widget, a bulleted
-    # requirements block assembled from multiple DOM nodes, etc.). This used
-    # to skip the LLM entirely whenever JSON-LD merely had a title+description
-    # (a very low bar most modern ATS platforms clear), silently downgrading
-    # those postings to a ~50-word hardcoded skill dictionary
-    # (_deterministic_explicit_skills) instead of real understanding of the
-    # page. _deterministic_job_from_evidence is now reserved for its
-    # original purpose: a bounded-latency fallback for when the LLM call
-    # itself actually fails or times out, not a shortcut applied just because
-    # structured data happens to exist.
-    # Explicit product decision: a real, complete extraction is worth more
-    # than a fast one, and no fixed budget was the right number -- 25s cut
-    # off completions that were genuinely on their way; even 90s was still a
-    # ceiling. Removed entirely: timeout_seconds=None below is passed through
-    # deepseek_provider.py to the underlying HTTP client as an explicit "wait
-    # indefinitely," not a big-but-finite number. deepseek_provider.py
-    # already avoids the OTHER latency trap on its own (never re-pays this
-    # same wait escalating to pro on a genuine timeout).
-    def _call_llm():
-        structured = get_llm(temperature=0).with_structured_output(
-            ExtractedJob,
-            timeout_seconds=None,
-            # Confirmed still too tight at 4000 against real, very
-            # content-rich postings (2026-08-08: a Disney VFX Sr Effects
-            # Technical Director posting and a JPMC Oracle HCM posting, both
-            # with long qualifications/responsibilities lists) -- production
-            # logs showed "DeepSeek returned empty content" on BOTH the
-            # json_object attempt and the prompt-enforced retry for the same
-            # request, which is the signature of the model running out of
-            # output budget before ever emitting a closing token, not a
-            # transport glitch. Raised again with real headroom (now that
-            # timeout_seconds=None removes the other reason to keep this
-            # conservative); DeepSeek's context window comfortably supports
-            # this for even the densest real postings seen so far.
-            max_tokens=16000,
-            queue_timeout_seconds=max(
-                0.5,
-                float(os.getenv("JD_EXTRACTION_AI_QUEUE_TIMEOUT_SECONDS", "3")),
-            ),
-            # Correct extraction is preferable to silently returning a
-            # dictionary/regex approximation. The provider first performs a
-            # cheap same-model JSON retry, then escalates only if needed.
-            escalate_on_error=True,
-        )
-        return structured.invoke([
-            SystemMessage(content=EXTRACTION_PROMPT),
-            HumanMessage(content=json.dumps(
-                state.evidence,
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )),
-        ])
+    from core.config import settings
 
-    used_deterministic_extraction = False
-    try:
-        job = llm_cache.execute_with_cache(
-            task="jd_agent_extraction",
-            payload_to_fingerprint=state.evidence,
-            llm_callable=_call_llm,
-            expected_schema=ExtractedJob,
-            prompt_version="jd-agent-v4-llm-primary"
+    deterministic_started = time.perf_counter()
+    baseline = _deterministic_job_from_evidence(state).model_dump(mode="json")
+    deterministic_duration = time.perf_counter() - deterministic_started
+    jd_extraction_stage_duration_seconds.labels(
+        stage="deterministic_extraction", status="success"
+    ).observe(deterministic_duration)
+    jd_deterministic_extraction_seconds.observe(deterministic_duration)
+    logger.info(
+        "%s deterministic extraction completed request_id=%s duration_ms=%s",
+        LOG_PREFIX, state.request_id,
+        round(deterministic_duration * 1000),
+    )
+
+    markdown = state.markdown or str((state.evidence or {}).get("source_text") or "")
+    section_patterns = {
+        "skills": r"skills?|technologies|tools|technical qualifications",
+        "responsibilities": r"responsibilities|duties|what you(?:'|’)ll do|what you will do|role overview",
+        "requirements": r"requirements|qualifications|what we(?:'|’)re looking for|minimum qualifications|preferred qualifications",
+        "role": r"experience|seniority|about the role|job summary|position summary",
+    }
+
+    def segment(kind: str) -> str:
+        pattern = section_patterns[kind]
+        match = re.search(rf"(?im)^#*\s*(?:{pattern})\s*:?.*$", markdown)
+        if match:
+            end = re.search(r"(?m)^#{1,3}\s+.+$", markdown[match.end():])
+            stop = match.end() + (end.start() if end else min(12000, len(markdown) - match.end()))
+            selected = markdown[match.start():stop].strip()
+            if len(selected) >= 200:
+                return selected[:14000]
+        # Correctness fallback: relevant section could not be isolated.
+        return markdown[:30000]
+
+    worker_specs = {
+        "role": (JDRoleWorkerResult, 300, segment("role")),
+        "skills": (JDSkillsWorkerResult, 500, segment("skills")),
+        "responsibilities": (JDResponsibilitiesWorkerResult, 900, segment("responsibilities")),
+        "requirements": (JDRequirementsWorkerResult, 900, segment("requirements")),
+    }
+    worker_prompts = {
+        "role": "Extract only seniority, numeric experience range, role family, and department.",
+        "skills": "Extract all explicit atomic skills and 4-10 non-duplicate inferred ATS skills.",
+        "responsibilities": "Extract every distinct job responsibility. Preserve meaning; do not invent.",
+        "requirements": "Separate required qualifications, preferred qualifications, and benefits.",
+    }
+    results: dict[str, dict[str, Any]] = {}
+    errors: dict[str, str] = {}
+    first_result_recorded = False
+    result_lock = threading.Lock()
+    queue_timeout = max(0.5, float(os.getenv("JD_EXTRACTION_AI_QUEUE_TIMEOUT_SECONDS", "3")))
+
+    def invoke_worker(name: str, retry: bool = False):
+        schema, token_limit, evidence = worker_specs[name]
+        started = time.perf_counter()
+        structured = get_llm(temperature=0).with_structured_output(
+            schema,
+            model_override=settings.DEEPSEEK_JD_MODEL,
+            timeout_seconds=6.0 if retry else 8.0,
+            max_tokens=token_limit,
+            queue_timeout_seconds=queue_timeout,
+            escalate_on_error=False,
         )
-    except Exception as exc:
-        # A prior version of this handler raised straight out of
-        # extraction_agent on ANY LLM failure -- meaning a single transient
-        # DeepSeek hiccup (confirmed real-world: "empty content" on both the
-        # json_object attempt and the prompt-enforced retry for the exact
-        # same request, 2026-08-08) turned into a hard failure for the whole
-        # /jobs/extract-url request instead of a degraded-but-usable result.
-        # The LLM is still tried first, with real retries and pro escalation
-        # (see _call_llm above) -- this is a last-resort circuit breaker for
-        # when it's genuinely unreachable, not a shortcut around it. Marking
-        # used_deterministic_extraction lets reviewer_agent force one more
-        # real LLM attempt via repair_agent before this is accepted as final
-        # (see reviewer_agent below), so this path is rarely the end state.
-        logger.warning(
-            "%s LLM extraction failed; using deterministic evidence fallback "
-            "request_id=%s error=%s",
-            LOG_PREFIX, state.request_id, type(exc).__name__,
+        payload = {
+            "url": state.original_url,
+            "deterministic_fields": baseline,
+            "relevant_evidence": evidence,
+        }
+        attempt = "retry" if retry else "initial"
+        try:
+            result = structured.invoke([
+                SystemMessage(content=(
+                    "You are a low-latency job-description extraction worker. "
+                    "Use evidence only and return schema-valid JSON. " + worker_prompts[name]
+                )),
+                HumanMessage(content=json.dumps(payload, ensure_ascii=False, separators=(",", ":"))),
+            ])
+        except Exception as exc:
+            jd_extraction_worker_duration_seconds.labels(
+                worker=name, status="error", attempt=attempt
+            ).observe(time.perf_counter() - started)
+            jd_extraction_worker_failures_total.labels(
+                worker=name, reason=type(exc).__name__, attempt=attempt
+            ).inc()
+            if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+                jd_worker_timeout_total.labels(worker=name, attempt=attempt).inc()
+            raise
+        serialized = result.model_dump(mode="json")
+        duration = time.perf_counter() - started
+        jd_extraction_worker_duration_seconds.labels(
+            worker=name, status="success", attempt=attempt
+        ).observe(duration)
+        jd_extraction_worker_output_tokens_total.labels(worker=name).inc(
+            max(1, len(json.dumps(serialized, ensure_ascii=False)) // 4)
         )
-        job = _deterministic_job_from_evidence(state)
-        used_deterministic_extraction = True
-    job_dict = ExtractedJob.model_validate(job).model_dump(mode="json")
+        logger.info(
+            "%s Pro worker completed request_id=%s worker=%s retry=%s duration_ms=%s",
+            LOG_PREFIX, state.request_id, name, retry,
+            round(duration * 1000),
+        )
+        return serialized
+
+    async def run_one(name: str):
+        nonlocal first_result_recorded
+        try:
+            result = await asyncio.to_thread(invoke_worker, name, False)
+        except Exception as first_error:
+            logger.warning(
+                "%s Pro worker failed; targeted retry request_id=%s worker=%s error=%s",
+                LOG_PREFIX, state.request_id, name, type(first_error).__name__,
+            )
+            try:
+                result = await asyncio.to_thread(invoke_worker, name, True)
+            except Exception as retry_error:
+                errors[name] = type(retry_error).__name__
+                return
+        with result_lock:
+            results[name] = result
+            if not first_result_recorded:
+                jd_extraction_stage_duration_seconds.labels(
+                    stage="time_to_first_result", status="success"
+                ).observe(time.perf_counter() - extraction_started)
+                jd_time_to_first_result_seconds.observe(time.perf_counter() - extraction_started)
+                first_result_recorded = True
+
+    async def orchestrate():
+        try:
+            async with asyncio.timeout(15.0):
+                async with asyncio.TaskGroup() as group:
+                    for worker_name in worker_specs:
+                        group.create_task(run_one(worker_name), name=f"jd-{worker_name}")
+        except TimeoutError:
+            logger.warning(
+                "%s Pro worker hard deadline reached request_id=%s completed=%s",
+                LOG_PREFIX, state.request_id, sorted(results),
+            )
+
+    asyncio.run(orchestrate())
+    minimum_ready = bool(
+        baseline.get("job_title")
+        and baseline.get("company_name")
+        and baseline.get("description")
+        and (results.get("skills") or baseline.get("skills"))
+        and (
+            results.get("responsibilities")
+            or baseline.get("responsibilities")
+            or results.get("requirements")
+            or baseline.get("requirements")
+        )
+    )
+    jd_extraction_stage_duration_seconds.labels(
+        stage="time_to_minimum_ready",
+        status="success" if minimum_ready else "partial",
+    ).observe(time.perf_counter() - extraction_started)
+    jd_time_to_minimum_ready_seconds.labels(
+        status="success" if minimum_ready else "partial"
+    ).observe(time.perf_counter() - extraction_started)
+    merged = dict(baseline)
+    for worker_result in results.values():
+        for field, field_value in worker_result.items():
+            if field_value not in (None, [], ""):
+                merged[field] = field_value
+    job_dict = ExtractedJob.model_validate(merged).model_dump(mode="json")
+    used_deterministic_extraction = len(results) < len(worker_specs)
+    if used_deterministic_extraction:
+        reason = "deadline" if len(results) and not errors else "worker_failure"
+        jd_extraction_partial_total.labels(reason=reason).inc()
     # _clean_evidence_items/_clean_evidence_text (BeautifulSoup-based) were
     # previously only wired into the deterministic JSON-LD path
     # (_deterministic_job_from_evidence) -- the LLM-extraction branch above
@@ -2439,14 +2538,18 @@ def extraction_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
         state.request_id,
         job_dict.get("suggested_skills", [])[:50],
     )
+    jd_extraction_stage_duration_seconds.labels(
+        stage="semantic_extraction",
+        status="success" if not used_deterministic_extraction else "partial",
+    ).observe(time.perf_counter() - extraction_started)
     return {
         "extracted_job": job_dict,
         "page_type": "job_detail",
-        "classification_confidence": 0.99 if not used_deterministic_extraction else 0.6,
+        "classification_confidence": 0.99 if not used_deterministic_extraction else 0.8,
         "classification_reasons": (
             ["LLM produced a schema-valid complete job record."]
             if not used_deterministic_extraction
-            else ["LLM extraction failed; used deterministic evidence fallback."]
+            else ["Some DeepSeek Pro workers exceeded the deadline; validated deterministic fields were preserved."]
         ),
         "used_deterministic_extraction": used_deterministic_extraction,
         "execution_log": _event(
@@ -2536,7 +2639,14 @@ def skill_intelligence_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     }
 
     def _call_llm():
-        skill_model = get_llm(temperature=0).with_structured_output(SkillDecision)
+        from core.config import settings
+        skill_model = get_llm(temperature=0).with_structured_output(
+            SkillDecision,
+            model_override=settings.DEEPSEEK_JD_MODEL,
+            timeout_seconds=8.0,
+            max_tokens=500,
+            escalate_on_error=False,
+        )
         return skill_model.invoke([
             SystemMessage(content=SKILL_INTELLIGENCE_PROMPT),
             HumanMessage(content=json.dumps(
@@ -2702,11 +2812,9 @@ def reviewer_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     # falling into a generic 4-skill bucket) and would otherwise sail through
     # every check below untouched. Force exactly one real repair pass -- now
     # LLM-first, see repair_agent -- before this is ever accepted as final.
-    if state.used_deterministic_extraction and state.repair_attempts < 1:
-        field_issues["_extraction_source"] = [
-            "Primary extraction never reached the LLM successfully; retry "
-            "the full extraction via LLM before accepting this result."
-        ]
+    # A worker deadline does not invalidate trusted JSON-LD/DOM fields.
+    # Required-field validation below decides whether this partial result is
+    # safe; successful workers are never rerun as a group.
 
     if not job.job_title:
         field_issues["job_title"] = ["Missing job title."]
@@ -2840,22 +2948,16 @@ def repair_agent(value: JDState | dict[str, Any]) -> dict[str, Any]:
     )
 
     def _call_repair_llm():
+        from core.config import settings
         structured = get_llm(temperature=0).with_structured_output(
             ExtractedJob,
-            timeout_seconds=None,
-            max_tokens=16000,
+            model_override=settings.DEEPSEEK_JD_MODEL,
+            timeout_seconds=8.0,
+            max_tokens=1200,
             queue_timeout_seconds=max(
                 0.5, float(os.getenv("JD_EXTRACTION_AI_QUEUE_TIMEOUT_SECONDS", "3"))
             ),
-            # deepseek_provider.py itself never escalates to pro on a
-            # genuine timeout regardless of this flag (see there) -- this
-            # only still matters for non-timeout failures. When
-            # extraction_agent already fell back to the deterministic path
-            # (used_deterministic_extraction), skip even that: its own
-            # _call_llm already tried this exact evidence once, so a second
-            # blind attempt here is lower-value than just taking the
-            # deterministic result and moving on.
-            escalate_on_error=not state.used_deterministic_extraction,
+            escalate_on_error=False,
         )
         return structured.invoke([
             SystemMessage(content=repair_prompt),

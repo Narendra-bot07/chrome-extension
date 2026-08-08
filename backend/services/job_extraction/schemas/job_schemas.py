@@ -125,6 +125,9 @@ class ExtractedJob(BaseModel):
     employment_type: Optional[str] = "unknown"
     seniority: Optional[str] = None
     department: Optional[str] = None
+    experience_min: Optional[float] = None
+    experience_max: Optional[float] = None
+    role_family: Optional[str] = None
     description: Optional[str] = Field(
         None, description="Clean role overview and job description supported by the selected evidence."
     )
@@ -303,6 +306,35 @@ class ExtractedJob(BaseModel):
         if text in {"other", "unknown", "", "not specified", "n/a"}:
             return "unknown"
         return "other"
+
+
+class JDRoleWorkerResult(BaseModel):
+    """Small Pro-only role classification result."""
+    model_config = ConfigDict(extra="ignore")
+    seniority: Optional[str] = None
+    experience_min: Optional[float] = None
+    experience_max: Optional[float] = None
+    role_family: Optional[str] = None
+    department: Optional[str] = None
+
+
+class JDSkillsWorkerResult(BaseModel):
+    """Explicit and inferred ATS skill labels."""
+    model_config = ConfigDict(extra="ignore")
+    skills: list[str] = Field(default_factory=list)
+    suggested_skills: list[str] = Field(default_factory=list)
+
+
+class JDResponsibilitiesWorkerResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    responsibilities: list[str] = Field(default_factory=list)
+
+
+class JDRequirementsWorkerResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    requirements: list[str] = Field(default_factory=list)
+    preferred_qualifications: list[str] = Field(default_factory=list)
+    benefits: list[str] = Field(default_factory=list)
 
 
 class ClassificationDecision(BaseModel):

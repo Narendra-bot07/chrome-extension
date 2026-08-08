@@ -19,6 +19,12 @@ from services.job_extraction.backend_extractor import extract_job_from_url
 from services.job_extraction.graph import register_active_request
 from services.subscriptions.usage_service import UsageService
 from app.services.rate_limiter_service import RateLimiterService
+from observability.metrics import (
+    jd_cache_lookup_seconds,
+    jd_extraction_cache_total,
+    jd_extraction_stage_duration_seconds,
+    jd_total_extraction_seconds,
+)
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 _db_context = contextmanager(get_db_connection)
@@ -78,10 +84,10 @@ def _job_extraction_cache_key(url: str, browser_evidence: Dict[str, Any] | None 
         str(evidence.get("job_title_hint") or "").strip().casefold(),
     )))
     identity = f"{normalized}|{rendered_identity}" if rendered_identity else normalized
-    # v5 invalidates every result produced by the former deterministic
-    # extraction fallback. Otherwise a corrected deployment can continue
-    # serving yesterday's wrong Disney/JPMC/LinkedIn record for 24 hours.
-    return f"jd_extraction:v5-llm-only:{hashlib.sha256(identity.encode('utf-8')).hexdigest()}"
+    # The namespace is part of the extraction contract: model, worker prompt,
+    # and response schema changes must never reuse an older cached record.
+    contract = "v6:deepseek-v4-pro:workers-v1:prompt-v1:schema-v2"
+    return f"jd_extraction:{contract}:{hashlib.sha256(identity.encode('utf-8')).hexdigest()}"
 
 
 def _is_disallowed_extraction_target(url: str) -> bool:
@@ -169,7 +175,14 @@ async def extract_job_from_provided_url(
         with _db_context() as conn:
             UsageService(conn).require_available(user["id"], "jd_extraction")
 
+        cache_started = time.perf_counter()
         cached_result = redis_cache.get(cache_key)
+        cache_status = "hit" if cached_result else "miss"
+        jd_extraction_cache_total.labels(status=cache_status).inc()
+        jd_extraction_stage_duration_seconds.labels(stage="cache_lookup", status=cache_status).observe(
+            time.perf_counter() - cache_started
+        )
+        jd_cache_lookup_seconds.labels(status=cache_status).observe(time.perf_counter() - cache_started)
         if cached_result:
             with _db_context() as conn:
                 UsageService(conn).consume_usage(
@@ -183,6 +196,12 @@ async def extract_job_from_provided_url(
                 request_id,
                 request.url,
                 round((time.perf_counter() - request_started) * 1000),
+            )
+            jd_extraction_stage_duration_seconds.labels(
+                stage="total_extraction", status="cache_hit"
+            ).observe(time.perf_counter() - request_started)
+            jd_total_extraction_seconds.labels(status="cache_hit").observe(
+                time.perf_counter() - request_started
             )
             return {**cached_result, "request_id": request_id}
 
@@ -227,6 +246,12 @@ async def extract_job_from_provided_url(
             (result.get("execution_summary") or {}).get("browser_attempts"),
             result.get("selected_source"),
         )
+        jd_extraction_stage_duration_seconds.labels(
+            stage="total_extraction", status=str(result.get("status") or "unknown")
+        ).observe(time.perf_counter() - request_started)
+        jd_total_extraction_seconds.labels(
+            status=str(result.get("status") or "unknown")
+        ).observe(time.perf_counter() - request_started)
         return result
     except HTTPException:
         raise

@@ -233,13 +233,26 @@ export async function captureActiveTabJobEvidence(tabId) {
         || a.index - b.index
       ));
       const selectedHeading = visibleHeadingCandidates[0]?.text || '';
+      // Confirmed real-world case (2026-08-08): on LinkedIn's split-view
+      // search-results layout (jobs/search-results/?currentJobId=...), none
+      // of these named classes match -- LinkedIn's current DOM for that
+      // specific layout evidently uses different ones -- and the unscoped
+      // global `h1` fallback matches the WRONG heading (or none) on a page
+      // that also has a job-list column with its own headings. That left
+      // job_title_hint permanently empty on this layout, which cascades
+      // into the backend picking generic page/list content over the real
+      // job panel. `selectedHeading` above is strictly more robust (scoped
+      // to the already-selected panel, visibility-filtered, multiple
+      // selector patterns) -- it was already being computed but only ever
+      // used for non-LinkedIn portals. Try LinkedIn's known classes first
+      // (still the most direct match when they DO apply), then fall back to
+      // it instead of giving up empty.
       const jobTitleHint = location.hostname.includes('linkedin.com')
-        ? firstText([
+        ? (firstText([
             '.job-details-jobs-unified-top-card__job-title',
             '.jobs-unified-top-card__job-title',
             '.job-details-jobs-unified-top-card__job-title h1',
-            'h1'
-          ])
+          ]) || selectedHeading)
         : selectedHeading;
       if (jobTitleHint && panelText) {
         const titleIndex = panelText.toLocaleLowerCase().indexOf(jobTitleHint.toLocaleLowerCase());

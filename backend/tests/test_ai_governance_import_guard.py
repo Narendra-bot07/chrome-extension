@@ -43,6 +43,11 @@ _ALLOWED_DIRECT_IMPORT_FILES = {
     "services/cover_letter/generation.py",
     "services/cover_letter/intelligence.py",
     "services/ai_governance/gateway.py",  # the gateway's own controlled call site
+    # Direct-instantiates DeepSeekProvider on purpose to unit-test its
+    # flash/pro racing logic (_invoke_with_race) in isolation -- there's no
+    # gateway-level way to assert "pro was never called" or "pro's result
+    # won because it resolved first" without the concrete provider class.
+    "tests/test_deepseek_race.py",
 }
 
 _SKIP_DIRS = {"__pycache__", ".git", "node_modules", "venv", ".venv"}

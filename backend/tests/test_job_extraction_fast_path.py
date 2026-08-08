@@ -1,5 +1,6 @@
+import time
 import uuid
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from services.job_extraction.agents import (
     _deterministic_job_from_evidence,
@@ -9,7 +10,15 @@ from services.job_extraction.agents import (
     repair_agent,
     reviewer_agent,
 )
-from services.job_extraction.schemas import ExtractedJob, JDState
+from services.job_extraction.schemas import (
+    ExtractedJob, JDState, JDRoleWorkerResult, JDSkillsWorkerResult,
+    JDResponsibilitiesWorkerResult, JDRequirementsWorkerResult,
+)
+
+# Legacy fixture names retained below while assertions migrate from the old
+# two-worker split to the new four-worker contract.
+ExtractedJobFacts = ExtractedJob
+ExtractedJobContent = ExtractedJob
 
 
 def job_state(**updates):
@@ -97,6 +106,130 @@ def test_llm_failure_falls_back_to_deterministic_evidence(mock_get_llm):
     assert result["extracted_job"]["job_title"] == "Data Engineer"
     assert result["extracted_job"]["company_name"] == "Example Corp"
     assert set(result["extracted_job"]["skills"]) >= {"Python", "SQL", "AWS", "Docker"}
+
+
+def _split_with_structured_output(facts_result=None, content_result=None, sleep_seconds=0.0):
+    """Compatibility helper for the four concurrent DeepSeek Pro workers."""
+    def fake_with_structured_output(schema_cls, **kwargs):
+        assert kwargs["model_override"] == "deepseek-v4-pro"
+        assert kwargs["escalate_on_error"] is False
+        assert kwargs["max_tokens"] <= 900
+        mock_structured = MagicMock()
+
+        def invoke(*_args, **_kwargs):
+            if sleep_seconds:
+                time.sleep(sleep_seconds)
+            if schema_cls is JDRoleWorkerResult:
+                if isinstance(facts_result, Exception):
+                    raise facts_result
+                source = facts_result or ExtractedJob()
+                return JDRoleWorkerResult(
+                    seniority=getattr(source, "seniority", None),
+                    role_family=getattr(source, "role_family", None),
+                )
+            if schema_cls is JDSkillsWorkerResult:
+                if isinstance(content_result, Exception):
+                    raise content_result
+                source = content_result or ExtractedJob()
+                return JDSkillsWorkerResult(
+                    skills=getattr(source, "skills", []),
+                    suggested_skills=getattr(source, "suggested_skills", []),
+                )
+            if schema_cls is JDResponsibilitiesWorkerResult:
+                if isinstance(content_result, Exception):
+                    raise content_result
+                return JDResponsibilitiesWorkerResult(
+                    responsibilities=getattr(content_result, "responsibilities", [])
+                )
+            if schema_cls is JDRequirementsWorkerResult:
+                if isinstance(content_result, Exception):
+                    raise content_result
+                return JDRequirementsWorkerResult(
+                    requirements=getattr(content_result, "requirements", []),
+                    preferred_qualifications=getattr(content_result, "preferred_qualifications", []),
+                    benefits=getattr(content_result, "benefits", []),
+                )
+            raise AssertionError(f"unexpected schema_cls passed to with_structured_output: {schema_cls}")
+
+        mock_structured.invoke.side_effect = invoke
+        return mock_structured
+    return fake_with_structured_output
+
+
+@patch("services.job_extraction.agents.get_llm")
+def test_extraction_splits_into_concurrent_facts_and_content_calls(mock_get_llm):
+    """extraction_agent now makes two SEPARATE LLM calls (see agents.py's
+    ExtractedJobFacts/ExtractedJobContent split) instead of one combined
+    call -- each must be requested with its own schema and merged back into
+    one complete ExtractedJob."""
+    mock_get_llm.return_value.with_structured_output.side_effect = _split_with_structured_output(
+        facts_result=ExtractedJobFacts(job_title="Staff Engineer", company_name="Acme Corp"),
+        content_result=ExtractedJobContent(skills=["Python", "Go"], responsibilities=["Own the platform"]),
+    )
+
+    result = extraction_agent(job_state())
+
+    assert result["extracted_job"]["job_title"] == "Staff Engineer"
+    assert result["extracted_job"]["company_name"] == "Acme Corp"
+    assert result["extracted_job"]["skills"] == ["Python", "Go"]
+    assert result["extracted_job"]["responsibilities"] == ["Own the platform"]
+    assert result["used_deterministic_extraction"] is False
+
+
+@patch("services.job_extraction.agents.get_llm")
+def test_facts_failure_does_not_discard_a_successful_content_result(mock_get_llm):
+    """A failure in just the facts half must fall back to deterministic
+    evidence for ONLY that half -- not discard the content half's already-
+    successful (and possibly slow-to-obtain) LLM result."""
+    mock_get_llm.return_value.with_structured_output.side_effect = _split_with_structured_output(
+        facts_result=RuntimeError("facts boom"),
+        content_result=ExtractedJobContent(skills=["Rust"], responsibilities=["Ship services"]),
+    )
+
+    result = extraction_agent(job_state())
+
+    # Facts came from the deterministic JobPosting JSON-LD fallback (see job_state()).
+    assert result["extracted_job"]["job_title"] == "Data Engineer"
+    assert result["extracted_job"]["company_name"] == "Example Corp"
+    # Content is NOT lost despite facts failing.
+    assert result["extracted_job"]["skills"] == ["Rust"]
+    assert result["extracted_job"]["responsibilities"] == ["Ship services"]
+    assert result["used_deterministic_extraction"] is True
+
+
+@patch("services.job_extraction.agents.get_llm")
+def test_content_failure_does_not_discard_a_successful_facts_result(mock_get_llm):
+    mock_get_llm.return_value.with_structured_output.side_effect = _split_with_structured_output(
+        facts_result=ExtractedJobFacts(job_title="Staff Engineer", company_name="Acme Corp"),
+        content_result=RuntimeError("content boom"),
+    )
+
+    result = extraction_agent(job_state())
+
+    assert result["extracted_job"]["job_title"] == "Staff Engineer"
+    assert result["extracted_job"]["company_name"] == "Acme Corp"
+    # Content fell back to the deterministic evidence path instead of coming
+    # back empty just because the LLM call for it failed.
+    assert set(result["extracted_job"]["skills"]) >= {"Python", "SQL", "AWS", "Docker"}
+    assert result["used_deterministic_extraction"] is True
+
+
+@patch("services.job_extraction.agents.get_llm")
+def test_facts_and_content_calls_run_concurrently_not_sequentially(mock_get_llm):
+    """The whole point of the split: wall-clock time should be roughly ONE
+    call's duration, not both calls' durations added together."""
+    mock_get_llm.return_value.with_structured_output.side_effect = _split_with_structured_output(
+        facts_result=ExtractedJobFacts(job_title="Staff Engineer"),
+        content_result=ExtractedJobContent(skills=["Python"]),
+        sleep_seconds=0.3,
+    )
+
+    started = time.perf_counter()
+    extraction_agent(job_state())
+    elapsed = time.perf_counter() - started
+
+    # Sequential would be ~0.6s+; concurrent should land close to ~0.3s.
+    assert elapsed < 0.5
 
 
 @patch("services.job_extraction.agents.get_llm")
